@@ -3,6 +3,10 @@ import bpy
 
 from . import handlers
 
+from . import props
+from . import operators
+from . import panels
+
 bl_info = {
     "name": "Protein Blender",
     "author": "Dillon Lee",
@@ -17,6 +21,9 @@ def register():
 
 def unregister():
     handlers.unregister()
+    props.unregister()
+    operators.unregister()
+    panels.unregister()
 
 if __name__ == "__main__":
     register()

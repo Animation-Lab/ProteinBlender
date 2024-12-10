@@ -3,13 +3,14 @@ from ..layout import workspace_setup
 
 max_retries = 10
 current_retries = 0
+manager = None
 
 def load_handler():
     global current_retries
-
     # Check if workspaces have been initialized
     if bpy.data.workspaces:
-        workspace_setup.create_custom_workspace()
+        manager.create_custom_workspace()
+        manager.add_panels_to_workspace()
         return None  # Stop the timer
 
     # Retry if workspaces are not ready
@@ -20,6 +21,9 @@ def load_handler():
         return None  # Stop the timer after max retries
 
 def register():
+    global manager
+    manager = workspace_setup.ProteinWorkspaceManager("Protein Blender")
+    
     global current_retries
     current_retries = 0
     # Start the load handler timer

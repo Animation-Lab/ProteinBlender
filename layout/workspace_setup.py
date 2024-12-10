@@ -1,116 +1,103 @@
 import bpy
 
-def create_custom_workspace(name="Protein Blender"):
-    # Check if workspace already exists
-    if name in bpy.data.workspaces:
-        return None
+class ProteinWorkspaceManager:
+    def __init__(self, name="Protein Blender"):
+        self.name = name
+        self.workspace = None
+        self.screen = None
+        self.window = None
+        self.main_area = None
+        self.left_area = None
+        self.right_area = None
+        self.bottom_area = None
 
-    original_workspace_names = [ws.name for ws in bpy.data.workspaces]
-    original_workspace_names.append(name)
-    original_workspace_name = bpy.context.workspace.name
+    def create_custom_workspace(self):
+        # Check if workspace already exists
+        if self.name in bpy.data.workspaces:
+            self.workspace = bpy.data.workspaces[self.name]
+            return self.workspace
 
-    # Duplicate the current workspace
-    bpy.ops.workspace.duplicate()
+        original_workspace_names = [ws.name for ws in bpy.data.workspaces]
+        original_workspace_names.append(self.name)
+        original_workspace_name = bpy.context.workspace.name
 
-    new_workspace = bpy.context.workspace
-    new_workspace.name = name
+        # Duplicate the current workspace
+        bpy.ops.workspace.duplicate()
+        self.workspace = bpy.context.workspace
+        self.workspace.name = self.name
 
-    window = None
-    for window_obj in bpy.context.window_manager.windows:
-        window = window_obj
+        # Store references to window and screen
+        ctx = bpy.context
+        self.window = ctx.window_manager.windows[0]
+        self.screen = ctx.screen
 
-    ctx = bpy.context
-    screen = ctx.screen  # store once
-    
-    # Gather all areas that are not the 3D viewport
-    p_areas = {area for area in screen.areas if area.type != 'VIEW_3D'}
+        # Remove all areas except the 3D View
+        p_areas = {area for area in self.screen.areas if area.type != 'VIEW_3D'}
+        for area in p_areas:
+            override = {
+                'screen': self.screen,
+                'window': self.window,
+                'area': area
+            }
+            with bpy.context.temp_override(**override):
+                if bpy.ops.screen.area_close.poll():
+                    bpy.ops.screen.area_close()
 
-    for area in p_areas:
-        override = {}
-        override['screen'] = screen
-        override['window'] = ctx.window_manager.windows[0]
-        override['area'] = area
+        # Restore original workspace names if needed
+        for workspace in bpy.data.workspaces:
+            if workspace.name not in original_workspace_names:
+                workspace.name = original_workspace_name
 
-        # Use temp_override context manager
+        # Move workspace to the back with proper context
+        override = bpy.context.copy()
+        override["window"] = self.window
         with bpy.context.temp_override(**override):
-            if bpy.ops.screen.area_close.poll():
-                bpy.ops.screen.area_close()
+            bpy.ops.workspace.reorder_to_back()
 
-    # Restore original workspace names
-    for workspace in bpy.data.workspaces:
-        if workspace.name not in original_workspace_names:
-            workspace.name = original_workspace_name
+        # Identify the main 3D view area
+        self.main_area = next((area for area in self.screen.areas if area.type == 'VIEW_3D'), None)
 
-    # Move workspace to the back with proper context
-    override = bpy.context.copy()
-    override["window"] = window
-    with bpy.context.temp_override(**override):
-        bpy.ops.workspace.reorder_to_back()
-    
-    add_panels_to_workspace(screen, new_workspace)
-    return new_workspace
+        return self.workspace
 
-def add_panels_to_workspace(screen, workspace):
-    ctx = bpy.context
-    window = ctx.window_manager.windows[0]
-    main_area = next((area for area in screen.areas if area.type == 'VIEW_3D'), None)
+    def add_panels_to_workspace(self):
+        # Ensure we have a main area before proceeding
+        if not self.main_area:
+            return
 
-    if not main_area:
-        return
+        # Add the left area
+        self.left_area = self._split_area(self.main_area, 'VERTICAL', 0.25, 'EMPTY')
 
-    # Split the main area vertically for the left area
-    areas_before = set(screen.areas)
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': main_area
-    }
-    with bpy.context.temp_override(**override):
-        bpy.ops.screen.area_split(direction='VERTICAL', factor=0.25)
-    areas_after = set(screen.areas)
-    left_area = (areas_after - areas_before).pop()
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': left_area
-    }
-    with bpy.context.temp_override(**override):
-        left_area.type = 'EMPTY'
+        # Add the right area
+        self.right_area = self._split_area(self.main_area, 'VERTICAL', 0.66, 'OUTLINER')
 
-    # Split the main area vertically for the right area
-    areas_before = set(screen.areas)
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': main_area
-    }
-    with bpy.context.temp_override(**override):
-        bpy.ops.screen.area_split(direction='VERTICAL', factor=0.66)
-    areas_after = set(screen.areas)
-    right_area = (areas_after - areas_before).pop()
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': right_area
-    }
-    with bpy.context.temp_override(**override):
-        right_area.type = 'OUTLINER'
+        # Add the bottom area
+        self.bottom_area = self._split_area(self.main_area, 'HORIZONTAL', 0.25, 'DOPESHEET_EDITOR')
+
+    def _split_area(self, area, direction, factor, new_type):
+        # Helper function to split an area and set the new area type
+        areas_before = set(self.screen.areas)
+        override = {
+            'window': self.window,
+            'screen': self.screen,
+            'area': area
+        }
+        with bpy.context.temp_override(**override):
+            bpy.ops.screen.area_split(direction=direction, factor=factor)
+        areas_after = set(self.screen.areas)
+        new_area = (areas_after - areas_before).pop()
+
+        # Set the new area's type
+        override['area'] = new_area
+        with bpy.context.temp_override(**override):
+            new_area.type = new_type
+
+        return new_area
 
 
-    areas_before = set(screen.areas)
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': main_area
-    }
-    with bpy.context.temp_override(**override):
-        bpy.ops.screen.area_split(direction='HORIZONTAL', factor=0.25)
-    areas_after = set(screen.areas)
-    bottom_area = (areas_after - areas_before).pop()
-    override = {
-        'window': window,
-        'screen': screen,
-        'area': bottom_area
-    }
-    with bpy.context.temp_override(**override):
-        bottom_area.type = 'DOPESHEET_EDITOR'
+# Example usage (Run in Blender's Python console or as part of your addon registration process):
+# manager = ProteinWorkspaceManager("Protein Blender")
+# manager.create_custom_workspace()
+# manager.add_panels_to_workspace()
+#
+# After this, you have `manager.workspace`, `manager.screen`, `manager.main_area`,
+# `manager.left_area`, `manager.right_area`, and `manager.bottom_area` all stored.
