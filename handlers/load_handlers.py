@@ -9,18 +9,14 @@ def load_handler():
 
     # Check if workspaces have been initialized
     if bpy.data.workspaces:
-        print('blender version: ', bpy.app.version)
-        print("Workspaces have been initialized!")
         workspace_setup.create_custom_workspace()
         return None  # Stop the timer
 
     # Retry if workspaces are not ready
     if current_retries < max_retries:
         current_retries += 1
-        print(f"Workspaces not ready, retrying... ({current_retries}/{max_retries})")
         return 1.0  # Retry after 1 second
     else:
-        print("Failed to initialize workspaces after maximum retries.")
         return None  # Stop the timer after max retries
 
 def register():
