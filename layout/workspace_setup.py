@@ -65,10 +65,10 @@ class ProteinWorkspaceManager:
             return
 
         # Add the left area
-        self.left_area = self._split_area(self.main_area, 'VERTICAL', 0.25, 'EMPTY')
+        self.left_area = self._split_area(self.main_area, 'VERTICAL', 0.25, 'INFO')
 
         # Add the right area
-        self.right_area = self._split_area(self.main_area, 'VERTICAL', 0.66, 'OUTLINER')
+        self.right_area = self._split_area(self.main_area, 'VERTICAL', 0.66, 'PROPERTIES')
 
         # Add the bottom area
         self.bottom_area = self._split_area(self.main_area, 'HORIZONTAL', 0.25, 'DOPESHEET_EDITOR')
@@ -93,6 +93,19 @@ class ProteinWorkspaceManager:
 
         return new_area
 
+    def set_properties_context(self):
+        if self.right_area and self.right_area.type == 'PROPERTIES':
+            # Create an override context
+            override = {
+                'window': self.window,
+                'screen': self.screen,
+                'area': self.right_area,
+                'space_data': self.right_area.spaces[0]  # The first space in the properties area
+            }
+            
+            # Set the context to 'scene' (or whichever context your PDB panel is in)
+            with bpy.context.temp_override(**override):
+                self.right_area.spaces[0].context = 'SCENE'
 
 # Example usage (Run in Blender's Python console or as part of your addon registration process):
 # manager = ProteinWorkspaceManager("Protein Blender")

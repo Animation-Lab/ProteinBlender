@@ -1,8 +1,9 @@
 # protein_workspace/props/__init__.py
-from .properties_protein import register, unregister
-
+from .protein_properties import register_protein_properties, unregister_protein_properties
 def register():
-    register()
+    print('registering props')
+    register_protein_properties()
 
 def unregister():
-    unregister()
+    print('unregistering props')
+    unregister_protein_properties()

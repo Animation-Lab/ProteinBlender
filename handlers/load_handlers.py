@@ -11,6 +11,7 @@ def load_handler():
     if bpy.data.workspaces:
         manager.create_custom_workspace()
         manager.add_panels_to_workspace()
+        manager.set_properties_context()
         return None  # Stop the timer
 
     # Retry if workspaces are not ready
@@ -20,7 +21,7 @@ def load_handler():
     else:
         return None  # Stop the timer after max retries
 
-def register():
+def register_load_handlers():
     global manager
     manager = workspace_setup.ProteinWorkspaceManager("Protein Blender")
     
@@ -29,7 +30,8 @@ def register():
     # Start the load handler timer
     bpy.app.timers.register(load_handler, first_interval=1.0)
 
-def unregister():
+def unregister_load_handlers():
     # Remove the handlers
-    bpy.app.timers.unregister(load_handler)
+    if bpy.app.timers.is_registered(load_handler):
+        bpy.app.timers.unregister(load_handler)
 

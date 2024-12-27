@@ -8,10 +8,12 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default=""
     )
 
-def register():
+def register_protein_properties():
+    print('registering protein properties')
     bpy.utils.register_class(ProteinProperties)
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
 
-def unregister():
+def unregister_protein_properties():
+    print('unregistering protein properties')
     del bpy.types.Scene.protein_props
     bpy.utils.unregister_class(ProteinProperties)

@@ -24,8 +24,8 @@ class OPERATOR_OT_ImportPDB(Operator):
 
         return {'FINISHED'}
 
-def register():
+def register_operator_import_pdb():
     bpy.utils.register_class(OPERATOR_OT_ImportPDB)
 
-def unregister():
+def unregister_operator_import_pdb():
     bpy.utils.unregister_class(OPERATOR_OT_ImportPDB)
