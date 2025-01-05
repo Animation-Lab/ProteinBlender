@@ -212,11 +212,17 @@ class Protein:
 
 class ProteinModel:
     def __init__(self):
-        self.objects = []  # List of Blender object references
+        self.objects = []  # List of all Blender object references
         self.scale = Vector((1.0, 1.0, 1.0))
         self.center_of_mass = Vector((0.0, 0.0, 0.0))
         self.rotation = Vector((0.0, 0.0, 0.0))
         self.style = RenderStyle.BALL_AND_STICK
+        
+        # Internal organization structure
+        self.structure = {
+            'chains': {},  # Dictionary of chain_id: {'residues': {(name, num): [objects]}}
+            'all_objects': []  # List of all objects
+        }
         
         # Ensure materials exist
         if not ATOM_MATERIALS:
@@ -224,27 +230,24 @@ class ProteinModel:
             create_bond_materials()
 
     def create_model(self, protein, style=None, position=None, scale=None, rotation=None):
-        """Create or recreate the 3D model with given parameters.
-        
-        Args:
-            protein (Protein): The protein instance containing atom data
-            style (RenderStyle, optional): Style to render the protein in
-            position (Vector, optional): Position for the center of mass
-            scale (Vector, optional): Scale factors for x, y, z
-            rotation (Vector, optional): Rotation angles in radians
-        """
+        """Create or recreate the 3D model with given parameters."""
         # Remove existing model if any
         self.remove_model()
         
+        # Initialize structure for this protein
+        for chain_id in protein.chains:
+            self.structure['chains'][chain_id] = {
+                'residues': {}
+            }
+            chain_residues = [r for r in protein.residues if r[0] == chain_id]
+            for _, residue_name, residue_num in chain_residues:
+                self.structure['chains'][chain_id]['residues'][(residue_name, residue_num)] = []
+
         # Update parameters if provided
         if style: self.style = style
         if position: self.center_of_mass = position
         if scale: self.scale = scale
         if rotation: self.rotation = rotation
-        
-        # Find suitable position if none provided
-        if not position:
-            self.center_of_mass = self.find_available_position()
         
         # Create model based on style
         if self.style == RenderStyle.BALL_AND_STICK:
@@ -298,15 +301,16 @@ class ProteinModel:
         atom_positions = {}  # Store atom positions for bond creation
         counter = 0
         
-        # Create atoms (existing code...)
+        # Create atoms
         for atom in protein.atoms:
             atom_symbol = atom['symbol'].strip().upper()
             # Create a copy of the base mesh for each atom
             atom_mesh = base_sphere_mesh.copy()
             obj = bpy.data.objects.new(
                 name=f"atom_{protein.identifier}_{atom_symbol}_{counter}",
-                object_data=atom_mesh  # Use the copied mesh instead of the base mesh
+                object_data=atom_mesh
             )
+            
             # Get atom size
             relative_size = ATOM_RELATIVE_SIZES.get(atom_symbol, 1.0)
 
@@ -318,9 +322,20 @@ class ProteinModel:
             base_size = GLOBAL_SCALE * relative_size
             obj.scale = Vector((base_size, base_size, base_size))
             
-            # Assign material (reuse materials to optimize performance)
+            # Assign material
             obj.data.materials.clear()
             obj.data.materials.append(ATOM_MATERIALS.get(atom_symbol, ATOM_MATERIALS['C']))
+            
+            # Add to scene collection
+            bpy.context.scene.collection.objects.link(obj)
+            
+            # Add to internal structure
+            self.add_object_to_structure(
+                obj,
+                atom['chain'],
+                atom['residue'],
+                atom['residue_num']
+            )
             
             atom_objects.append(obj)
             pos = Vector(atom['position']) - com
@@ -329,52 +344,80 @@ class ProteinModel:
 
         # Create bonds
         bond_objects = []
-        processed_pairs = set()  # Keep track of processed bonds
+        processed_pairs = set()
+        
         for i, atom1 in enumerate(protein.atoms):
             pos1 = atom_positions[i]
+            
             for j, atom2 in enumerate(protein.atoms):
                 if i >= j or (i, j) in processed_pairs:
                     continue
+                    
                 pos2 = atom_positions[j]
                 distance = (pos2 - pos1).length
+                
                 if distance < 2.0:
                     bond_mesh = base_cylinder_mesh.copy()
                     bond_obj = bpy.data.objects.new(
                         name=f"bond_{protein.identifier}_{i}_{j}",
                         object_data=bond_mesh
                     )
+                    
                     mid_point = (pos1 + pos2) / 2
                     bond_obj.location = mid_point * GLOBAL_SCALE
+                    
                     direction = pos2 - pos1
-                    if direction.length == 0:
-                        print(f"Skipping bond between {i} and {j}: zero-length direction vector.")
-                        continue
-                    rot_quat = direction.to_track_quat('-Z', 'Y')
-                    bond_obj.rotation_mode = 'QUATERNION'
-                    bond_obj.rotation_quaternion = rot_quat
-                    bond_length = direction.length
-                    bond_obj.scale = Vector((0.9, 0.9, bond_length / 2)) * GLOBAL_SCALE
-                    bond_obj.data.materials.clear()
-                    bond_type = determine_bond_type(atom1, atom2, distance)
-                    bond_obj.data.materials.append(BOND_MATERIALS.get(bond_type, BOND_MATERIALS['single']))
-                    bond_objects.append(bond_obj)
-                    processed_pairs.add((i, j))
-                    processed_pairs.add((j, i))  # Add both directions
+                    if direction.length > 0:
+                        rot_quat = direction.to_track_quat('-Z', 'Y')
+                        bond_obj.rotation_mode = 'QUATERNION'
+                        bond_obj.rotation_quaternion = rot_quat
+                        
+                        bond_length = direction.length
+                        bond_obj.scale = Vector((0.9, 0.9, bond_length / 2)) * GLOBAL_SCALE
+                        
+                        bond_obj.data.materials.clear()
+                        bond_type = determine_bond_type(atom1, atom2, distance)
+                        bond_obj.data.materials.append(BOND_MATERIALS.get(bond_type, BOND_MATERIALS['single']))
+                        
+                        # Store connection information
+                        bond_obj['chain1'] = atom1['chain']
+                        bond_obj['residue1_name'] = atom1['residue']
+                        bond_obj['residue1_num'] = atom1['residue_num']
+                        bond_obj['chain2'] = atom2['chain']
+                        bond_obj['residue2_name'] = atom2['residue']
+                        bond_obj['residue2_num'] = atom2['residue_num']
+                        
+                        # Add to scene collection
+                        bpy.context.scene.collection.objects.link(bond_obj)
+                        
+                        # Add to internal structure for both residues
+                        self.add_object_to_structure(
+                            bond_obj,
+                            atom1['chain'],
+                            atom1['residue'],
+                            atom1['residue_num']
+                        )
+                        
+                        if (atom2['chain'] != atom1['chain'] or 
+                            atom2['residue'] != atom1['residue'] or 
+                            atom2['residue_num'] != atom1['residue_num']):
+                            self.add_object_to_structure(
+                                bond_obj,
+                                atom2['chain'],
+                                atom2['residue'],
+                                atom2['residue_num']
+                            )
+                        
+                        bond_objects.append(bond_obj)
+                        processed_pairs.add((i, j))
+                        processed_pairs.add((j, i))
 
-        scene_collection = bpy.context.scene.collection
-        '''
-        # Batch link objects to scene
-        for obj in atom_objects + bond_objects:
-            scene_collection.objects.link(obj)
-        '''
         # Offset all objects by available position
         available_pos = self.find_available_position()
         for obj in atom_objects + bond_objects:
             obj.location += available_pos
             self.add_object_to_model(obj)
-            scene_collection.objects.link(obj)
 
-   
     def _create_ribbon(self, protein):
         """Create ribbon representation efficiently."""
         # Calculate center of mass first
@@ -447,11 +490,17 @@ class ProteinModel:
    
     def remove_model(self):
         """Remove all 3D objects associated with this model."""
-        for obj in self.objects:
+        # Remove all objects
+        for obj in self.structure['all_objects']:
             if obj and obj.name in bpy.data.objects:
                 bpy.data.objects.remove(obj, do_unlink=True)
-        self.objects.clear()
-    
+        
+        # Clear internal structure
+        self.structure = {
+            'chains': {},
+            'all_objects': []
+        }
+
     def select_model(self):
         """Select all objects associated with this model."""
         # Deselect all objects first
@@ -512,4 +561,43 @@ class ProteinModel:
     def add_object_to_model(self, obj):
         """Add a Blender object to this model and set appropriate properties."""
         obj['is_protein_part'] = True  # Custom property to identify protein objects
-        self.objects.append(obj) 
+        if obj not in self.objects:
+            self.objects.append(obj)
+
+    def select_chain(self, chain_id):
+        """Select all objects in a specific chain."""
+        bpy.ops.object.select_all(action='DESELECT')
+        if chain_id in self.structure['chains']:
+            for residue_objects in self.structure['chains'][chain_id]['residues'].values():
+                for obj in residue_objects:
+                    if obj and obj.name in bpy.data.objects:
+                        obj.select_set(True)
+
+    def select_residue(self, chain_id, residue_name, residue_num):
+        """Select all objects in a specific residue."""
+        bpy.ops.object.select_all(action='DESELECT')
+        residue_key = (residue_name, residue_num)
+        if (chain_id in self.structure['chains'] and 
+            residue_key in self.structure['chains'][chain_id]['residues']):
+            for obj in self.structure['chains'][chain_id]['residues'][residue_key]:
+                if obj and obj.name in bpy.data.objects:
+                    obj.select_set(True) 
+
+    def add_object_to_structure(self, obj, chain_id, residue_name, residue_num):
+        """Add an object to the internal structure."""
+        # Initialize chain if it doesn't exist
+        if chain_id not in self.structure['chains']:
+            self.structure['chains'][chain_id] = {'residues': {}}
+        
+        # Initialize residue if it doesn't exist
+        residue_key = (residue_name, residue_num)
+        if residue_key not in self.structure['chains'][chain_id]['residues']:
+            self.structure['chains'][chain_id]['residues'][residue_key] = []
+        
+        # Add object to residue list
+        self.structure['chains'][chain_id]['residues'][residue_key].append(obj)
+        
+        # Add to all_objects list if not already there
+        if obj not in self.structure['all_objects']:
+            self.structure['all_objects'].append(obj)
+            self.objects.append(obj)  # Also add to legacy objects list 

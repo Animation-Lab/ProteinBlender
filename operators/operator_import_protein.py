@@ -35,9 +35,9 @@ class PROTEIN_OT_import_protein(Operator):
                 self.layout.label(text=f"Successfully imported protein {protein_id}")
             bpy.context.window_manager.popup_menu(show_success, title="Success", icon='CHECKMARK')
             
-            # Force UI refresh
-            for area in context.screen.areas:
-                if area.type in ['PROPERTIES', 'VIEW_3D']:
+            # Force UI refresh for all areas
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
                     area.tag_redraw()
                     
             return {'FINISHED'}

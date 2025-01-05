@@ -1,6 +1,7 @@
 from .file_io import get_protein_file
 from .protein import Protein
 import json
+import bpy
 
 class ProteinBlenderScene:
     _instance = None
@@ -74,8 +75,14 @@ class ProteinBlenderScene:
             protein.create_model()
             
             # Add to scene and set as active using the unique ID
-            self.proteins[protein.get_id()] = protein
-            self.active_protein = protein.get_id()
+            unique_id = protein.get_id()
+            self.proteins[unique_id] = protein
+            self.active_protein = unique_id
+            
+            # Force a redraw of all UI areas
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    area.tag_redraw()
             
             return True
             
