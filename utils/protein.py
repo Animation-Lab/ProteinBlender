@@ -211,23 +211,73 @@ class Protein:
         return protein 
 
 class ProteinModel:
+    # Class-level dictionaries to store base meshes
+    BASE_ATOM_MESHES = {}
+    BASE_BOND_MESHES = {}
+    
+    @classmethod
+    def initialize_base_meshes(cls):
+        """Create and store base meshes for atoms and bonds."""
+        # Clear existing base meshes
+        cls.BASE_ATOM_MESHES.clear()
+        cls.BASE_BOND_MESHES.clear()
+        
+        # Create base sphere for atoms
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=12, ring_count=6)
+        base_sphere = bpy.context.active_object
+        base_sphere_mesh = base_sphere.data
+        
+        # Set smooth shading
+        for polygon in base_sphere_mesh.polygons:
+            polygon.use_smooth = True
+            
+        # Create atom meshes for each element
+        for atom_symbol in ATOM_RELATIVE_SIZES.keys():
+            atom_mesh = base_sphere_mesh.copy()
+            atom_mesh.materials.clear()
+            atom_mesh.materials.append(ATOM_MATERIALS.get(atom_symbol, ATOM_MATERIALS['C']))
+            cls.BASE_ATOM_MESHES[atom_symbol] = atom_mesh
+            
+        # Remove the base sphere
+        bpy.data.objects.remove(base_sphere, do_unlink=True)
+        
+        # Create base cylinder for bonds
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=1.0, vertices=6)
+        base_cylinder = bpy.context.active_object
+        base_cylinder_mesh = base_cylinder.data
+        
+        # Set smooth shading
+        for polygon in base_cylinder_mesh.polygons:
+            polygon.use_smooth = True
+            
+        # Create bond meshes for each type
+        for bond_type in BOND_MATERIALS.keys():
+            bond_mesh = base_cylinder_mesh.copy()
+            bond_mesh.materials.clear()
+            bond_mesh.materials.append(BOND_MATERIALS[bond_type])
+            cls.BASE_BOND_MESHES[bond_type] = bond_mesh
+            
+        # Remove the base cylinder
+        bpy.data.objects.remove(base_cylinder, do_unlink=True)
+
     def __init__(self):
-        self.objects = []  # List of all Blender object references
+        self.objects = []
         self.scale = Vector((1.0, 1.0, 1.0))
         self.center_of_mass = Vector((0.0, 0.0, 0.0))
         self.rotation = Vector((0.0, 0.0, 0.0))
         self.style = RenderStyle.BALL_AND_STICK
         
-        # Internal organization structure
         self.structure = {
-            'chains': {},  # Dictionary of chain_id: {'residues': {(name, num): [objects]}}
-            'all_objects': []  # List of all objects
+            'chains': {},
+            'all_objects': []
         }
         
-        # Ensure materials exist
+        # Ensure materials and base meshes exist
         if not ATOM_MATERIALS:
             create_atom_materials()
             create_bond_materials()
+        if not self.BASE_ATOM_MESHES:
+            self.initialize_base_meshes()
 
     def create_model(self, protein, style=None, position=None, scale=None, rotation=None):
         """Create or recreate the 3D model with given parameters."""
@@ -280,51 +330,27 @@ class ProteinModel:
         """Create ball and stick representation efficiently."""
         com = self.calculate_center_of_mass(protein)
         
-        # Create a low-resolution base sphere mesh
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=12, ring_count=6)
-        base_sphere = bpy.context.active_object
-        base_sphere_mesh = base_sphere.data
-        bpy.data.objects.remove(base_sphere, do_unlink=True)
-        
-        # Create base cylinder for bonds
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=1.0, vertices=6)
-        base_cylinder = bpy.context.active_object
-        base_cylinder_mesh = base_cylinder.data
-        bpy.data.objects.remove(base_cylinder, do_unlink=True)
-        
-        # Set smooth shading for both base meshes
-        for mesh in [base_sphere_mesh, base_cylinder_mesh]:
-            for polygon in mesh.polygons:
-                polygon.use_smooth = True
-
         atom_objects = []
-        atom_positions = {}  # Store atom positions for bond creation
+        atom_positions = {}
         counter = 0
         
-        # Create atoms
+        # Create atoms using pre-made meshes
         for atom in protein.atoms:
             atom_symbol = atom['symbol'].strip().upper()
-            # Create a copy of the base mesh for each atom
-            atom_mesh = base_sphere_mesh.copy()
+            # Use existing mesh with material
             obj = bpy.data.objects.new(
                 name=f"atom_{protein.identifier}_{atom_symbol}_{counter}",
-                object_data=atom_mesh
+                object_data=self.BASE_ATOM_MESHES[atom_symbol]
             )
             
-            # Get atom size
-            relative_size = ATOM_RELATIVE_SIZES.get(atom_symbol, 1.0)
-
             # Calculate position relative to center of mass
             pos = Vector(atom['position']) - com
             obj.location = pos * GLOBAL_SCALE
-
+            
             # Apply relative size
+            relative_size = ATOM_RELATIVE_SIZES.get(atom_symbol, 1.0)
             base_size = GLOBAL_SCALE * relative_size
             obj.scale = Vector((base_size, base_size, base_size))
-            
-            # Assign material
-            obj.data.materials.clear()
-            obj.data.materials.append(ATOM_MATERIALS.get(atom_symbol, ATOM_MATERIALS['C']))
             
             # Add to scene collection
             bpy.context.scene.collection.objects.link(obj)
@@ -338,11 +364,10 @@ class ProteinModel:
             )
             
             atom_objects.append(obj)
-            pos = Vector(atom['position']) - com
             atom_positions[counter] = pos
             counter += 1
 
-        # Create bonds
+        # Create bonds using pre-made meshes
         bond_objects = []
         processed_pairs = set()
         
@@ -357,10 +382,11 @@ class ProteinModel:
                 distance = (pos2 - pos1).length
                 
                 if distance < 2.0:
-                    bond_mesh = base_cylinder_mesh.copy()
+                    # Determine bond type and use corresponding mesh
+                    bond_type = determine_bond_type(atom1, atom2, distance)
                     bond_obj = bpy.data.objects.new(
                         name=f"bond_{protein.identifier}_{i}_{j}",
-                        object_data=bond_mesh
+                        object_data=self.BASE_BOND_MESHES[bond_type]
                     )
                     
                     mid_point = (pos1 + pos2) / 2
@@ -371,46 +397,41 @@ class ProteinModel:
                         rot_quat = direction.to_track_quat('-Z', 'Y')
                         bond_obj.rotation_mode = 'QUATERNION'
                         bond_obj.rotation_quaternion = rot_quat
-                        
                         bond_length = direction.length
                         bond_obj.scale = Vector((0.9, 0.9, bond_length / 2)) * GLOBAL_SCALE
-                        
-                        bond_obj.data.materials.clear()
-                        bond_type = determine_bond_type(atom1, atom2, distance)
-                        bond_obj.data.materials.append(BOND_MATERIALS.get(bond_type, BOND_MATERIALS['single']))
-                        
-                        # Store connection information
-                        bond_obj['chain1'] = atom1['chain']
-                        bond_obj['residue1_name'] = atom1['residue']
-                        bond_obj['residue1_num'] = atom1['residue_num']
-                        bond_obj['chain2'] = atom2['chain']
-                        bond_obj['residue2_name'] = atom2['residue']
-                        bond_obj['residue2_num'] = atom2['residue_num']
-                        
-                        # Add to scene collection
-                        bpy.context.scene.collection.objects.link(bond_obj)
-                        
-                        # Add to internal structure for both residues
+                    
+                    # Store connection information
+                    bond_obj['chain1'] = atom1['chain']
+                    bond_obj['residue1_name'] = atom1['residue']
+                    bond_obj['residue1_num'] = atom1['residue_num']
+                    bond_obj['chain2'] = atom2['chain']
+                    bond_obj['residue2_name'] = atom2['residue']
+                    bond_obj['residue2_num'] = atom2['residue_num']
+                    
+                    # Add to scene collection
+                    bpy.context.scene.collection.objects.link(bond_obj)
+                    
+                    # Add to internal structure
+                    self.add_object_to_structure(
+                        bond_obj,
+                        atom1['chain'],
+                        atom1['residue'],
+                        atom1['residue_num']
+                    )
+                    
+                    if (atom2['chain'] != atom1['chain'] or 
+                        atom2['residue'] != atom1['residue'] or 
+                        atom2['residue_num'] != atom1['residue_num']):
                         self.add_object_to_structure(
                             bond_obj,
-                            atom1['chain'],
-                            atom1['residue'],
-                            atom1['residue_num']
+                            atom2['chain'],
+                            atom2['residue'],
+                            atom2['residue_num']
                         )
-                        
-                        if (atom2['chain'] != atom1['chain'] or 
-                            atom2['residue'] != atom1['residue'] or 
-                            atom2['residue_num'] != atom1['residue_num']):
-                            self.add_object_to_structure(
-                                bond_obj,
-                                atom2['chain'],
-                                atom2['residue'],
-                                atom2['residue_num']
-                            )
-                        
-                        bond_objects.append(bond_obj)
-                        processed_pairs.add((i, j))
-                        processed_pairs.add((j, i))
+                    
+                    bond_objects.append(bond_obj)
+                    processed_pairs.add((i, j))
+                    processed_pairs.add((j, i))
 
         # Offset all objects by available position
         available_pos = self.find_available_position()
