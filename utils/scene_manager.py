@@ -1,15 +1,33 @@
-import json
+from .file_io import get_protein_file
 from .protein import Protein
+import json
 
 class ProteinBlenderScene:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            # Initialize the singleton instance
+            cls._instance.proteins = {}  # Dictionary of protein_id: Protein instances
+            cls._instance.active_protein = None
+            cls._instance.display_settings = {}
+        return cls._instance
+
+    @classmethod
+    def get_instance(cls):
+        """Get or create the singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
     def __init__(self):
-        self.proteins = {}  # Dictionary of protein_id: Protein instances
-        self.active_protein = None
-        self.display_settings = {
-            'representation': 'ball_stick',  # or 'ribbon', 'surface', etc.
-            'show_hydrogens': False,
-            'show_sidechains': True
-        }
+        # Skip initialization if instance already exists
+        pass
+
+    def set_active_protein(self, protein_id):
+        """Set the active protein."""
+        self.active_protein = protein_id
 
     def add_protein(self, protein):
         """Add a protein to the scene."""
@@ -30,6 +48,40 @@ class ProteinBlenderScene:
             'active_protein': self.active_protein,
             'display_settings': self.display_settings
         })
+
+    def create_protein_from_id(self, identifier, import_method='PDB'):
+        """Create a new protein from an identifier and add it to the scene.
+        
+        Args:
+            identifier (str): PDB ID or UniProt ID
+            import_method (str): Either 'PDB' or 'ALPHAFOLD'
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            print("Creating protein", identifier, import_method)
+            # Get protein file contents
+            pdb_contents = get_protein_file(identifier, import_method)
+            
+            if not pdb_contents:
+                print(f"Failed to retrieve protein data for {identifier}")
+                return False
+
+            # Create new protein instance
+            protein = Protein(identifier, method=import_method)
+            protein.parse_pdb_string(pdb_contents)
+            protein.create_model()
+            
+            # Add to scene and set as active using the unique ID
+            self.proteins[protein.get_id()] = protein
+            self.active_protein = protein.get_id()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error creating protein: {str(e)}")
+            return False
 
     @classmethod
     def from_json(cls, json_str):

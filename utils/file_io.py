@@ -6,6 +6,7 @@ import requests
 def fetch_pdb_from_rcsb(pdb_id):
     """Fetch a PDB file from the RCSB PDB database and store it locally."""
     url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    print(f"fetching PDB file from {url}")
     try:
         r = requests.get(url)
         r.raise_for_status()
@@ -22,26 +23,39 @@ def fetch_pdb_from_rcsb(pdb_id):
     return True, filepath
 
 def get_protein_file(identifier, method='PDB'):
-    """Get the protein file, either from cache or by downloading."""
+    """Get the protein file contents, either from cache or by downloading."""
+    print(f"getting protein file for {identifier} with method {method}")
     # Define file paths
     tmp_dir = tempfile.gettempdir()
     cache_path = os.path.join(tmp_dir, f"{identifier}.pdb")
     
-    # Check if file exists in cache
-    if os.path.exists(cache_path):
-        return True, cache_path
+    try:
+        # Check if file exists in cache
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r') as f:
+                return f.read()
+            
+        # If not in cache, download based on method
+        success, filepath = None, None
+        if method == 'PDB':
+            success, filepath = fetch_pdb_from_rcsb(identifier)
+        elif method == 'ALPHAFOLD':
+            success, filepath = fetch_from_alphafold(identifier)
         
-    # If not in cache, download based on method
-    if method == 'PDB':
-        return fetch_pdb_from_rcsb(identifier)
-    elif method == 'ALPHAFOLD':
-        return fetch_from_alphafold(identifier)
-    
-    return False, None
+        if success and filepath:
+            with open(filepath, 'r') as f:
+                return f.read()
+                
+        return None
+        
+    except Exception as e:
+        print(f"Error reading protein file for {identifier}: {e}")
+        return None
 
 def fetch_from_alphafold(uniprot_id):
     """Fetch a structure from AlphaFold database."""
     url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb"
+    print(f"fetching AlphaFold structure from {url}")
     try:
         r = requests.get(url)
         r.raise_for_status()

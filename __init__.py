@@ -1,7 +1,6 @@
 # protein_workspace/__init__.py
 import bpy
 
-from . import props
 from . import operators
 from . import handlers
 from . import panels

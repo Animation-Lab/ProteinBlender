@@ -1,10 +1,11 @@
 # protein_workspace/panels/__init__.py
-from .panel_import_pdb import register_panel_import_pdb, unregister_panel_import_pdb
+from .panel_import_protein import register_panel_import_protein, unregister_panel_import_protein
+from .protein_list_panel import register_protein_list_panel, unregister_protein_list_panel
 
 def register():
-    print('registering panels')
-    register_panel_import_pdb()
+    register_panel_import_protein()
+    register_protein_list_panel()
 
 def unregister():
-    print('unregistering panels')
-    unregister_panel_import_pdb()
+    unregister_panel_import_protein()
+    unregister_protein_list_panel()
