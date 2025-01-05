@@ -64,13 +64,25 @@ class PROTEIN_OT_select_protein(bpy.types.Operator):
         scene_manager = ProteinBlenderScene.get_instance()
         scene_manager.set_active_protein(self.protein_id)
         
-        # Update the list
-        # self.update_list_items(context)
+        # Deselect all objects first
+        bpy.ops.object.select_all(action='DESELECT')
         
-        # Show toast notification
+        # Get the protein instance
+        protein = scene_manager.proteins.get(self.protein_id)
+        if protein and protein.model:
+            # Select all objects associated with this protein
+            for obj in protein.model.objects:
+                if obj and obj.name in bpy.data.objects:
+                    obj.select_set(True)
+                    # Make the last object active
+                    context.view_layer.objects.active = obj
+        
+        # Show toast notification with valid icon
+        protein_id = self.protein_id  # Store in local variable for closure
         def draw_message(self, context):
-            self.layout.label(text=f"Selected protein: {self.protein_id}")
-        bpy.context.window_manager.popup_menu(draw_message, title="Protein Selected", icon='PROTEIN')
+            self.layout.label(text=f"Selected protein: {protein_id}")
+        
+        bpy.context.window_manager.popup_menu(draw_message, title="Protein Selected", icon='MESH_UVSPHERE')
         
         # Force UI refresh
         for area in context.screen.areas:

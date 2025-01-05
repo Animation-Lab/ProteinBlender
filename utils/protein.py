@@ -8,6 +8,7 @@ from mathutils import Vector
 
 # Global materials dictionary
 ATOM_MATERIALS = {}
+BOND_MATERIALS = {}
 GLOBAL_SCALE = 0.1
 
 class RenderStyle(Enum):
@@ -68,6 +69,77 @@ def create_atom_materials():
             mat.diffuse_color = color
         ATOM_MATERIALS[atom_symbol] = mat
 
+
+
+def create_bond_materials():
+    BOND_COLORS = {
+        'single': (0.8, 0.8, 0.8, 1.0),  # Gray
+        'double': (0.4, 0.4, 0.4, 1.0),  # Dark gray
+        'triple': (0.2, 0.2, 0.2, 1.0),  # Black
+        'polar': (0.3, 0.7, 1.0, 1.0),   # Light blue
+        'nonpolar': (0.4, 1.0, 0.4, 1.0),  # Pale green
+        'hydrogen': (1.0, 1.0, 0.0, 1.0)  # Yellow
+    }
+    """Create or retrieve a material for the given bond type."""
+    for bond_type in BOND_COLORS:
+        mat = bpy.data.materials.new(name=f"bond_{bond_type}")
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = BOND_COLORS[bond_type]
+        else:
+            mat.diffuse_color = BOND_COLORS[bond_type]
+        BOND_MATERIALS[bond_type] = mat
+
+def determine_bond_type(atom1, atom2, distance):
+    """
+    Determine the bond type between two atoms based on their symbols and distance.
+    
+    Parameters:
+    - atom1 (dict): First atom, with keys 'symbol' and 'position'.
+    - atom2 (dict): Second atom, with keys 'symbol' and 'position'.
+    - distance (float): Distance between the two atoms.
+
+    Returns:
+    - str: Bond type ('single', 'double', 'triple', 'hydrogen', 'polar', 'nonpolar').
+    """
+    # Define bond distance thresholds (in angstroms)
+    bond_thresholds = {
+        'single': 1.6,
+        'double': 1.3,
+        'triple': 1.2,
+        'hydrogen': 2.0  # Longer threshold for hydrogen bonds
+    }
+
+    # Get atomic symbols
+    symbol1 = atom1['symbol']
+    symbol2 = atom2['symbol']
+
+    # Identify hydrogen bonds
+    if 'H' in (symbol1, symbol2) and distance <= bond_thresholds['hydrogen']:
+        return 'hydrogen'
+
+    # Classify by bond distance
+    if distance <= bond_thresholds['triple']:
+        return 'triple'
+    elif distance <= bond_thresholds['double']:
+        return 'double'
+    elif distance <= bond_thresholds['single']:
+        return 'single'
+
+    # Classify as polar or nonpolar based on electronegativity difference
+    electronegativity = {
+        'H': 2.20, 'C': 2.55, 'N': 3.04, 'O': 3.44, 'S': 2.58, 'P': 2.19, 'Cl': 3.16, 'Fe': 1.83
+    }
+    if symbol1 in electronegativity and symbol2 in electronegativity:
+        delta_en = abs(electronegativity[symbol1] - electronegativity[symbol2])
+        if delta_en > 0.4:  # Polar bond threshold
+            return 'polar'
+        else:
+            return 'nonpolar'
+
+    # Default to single bond if no other criteria are met
+    return 'single'
 
 class Protein:
     def __init__(self, identifier, method='PDB'):
@@ -149,6 +221,7 @@ class ProteinModel:
         # Ensure materials exist
         if not ATOM_MATERIALS:
             create_atom_materials()
+            create_bond_materials()
 
     def create_model(self, protein, style=None, position=None, scale=None, rotation=None):
         """Create or recreate the 3D model with given parameters.
@@ -205,13 +278,13 @@ class ProteinModel:
         com = self.calculate_center_of_mass(protein)
         
         # Create a low-resolution base sphere mesh
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=16, ring_count=8)
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=12, ring_count=6)
         base_sphere = bpy.context.active_object
         base_sphere_mesh = base_sphere.data
         bpy.data.objects.remove(base_sphere, do_unlink=True)
         
         # Create base cylinder for bonds
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=1.0, vertices=8)
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=1.0, vertices=6)
         base_cylinder = bpy.context.active_object
         base_cylinder_mesh = base_cylinder.data
         bpy.data.objects.remove(base_cylinder, do_unlink=True)
@@ -220,17 +293,6 @@ class ProteinModel:
         for mesh in [base_sphere_mesh, base_cylinder_mesh]:
             for polygon in mesh.polygons:
                 polygon.use_smooth = True
-
-        # Create bond material if it doesn't exist
-        if 'bond_material' not in bpy.data.materials:
-            bond_mat = bpy.data.materials.new(name='bond_material')
-            bond_mat.use_nodes = True
-            nodes = bond_mat.node_tree.nodes
-            bsdf = nodes.get("Principled BSDF")
-            if bsdf:
-                bsdf.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1.0)
-                bsdf.inputs["Metallic"].default_value = 0.2
-                bsdf.inputs["Roughness"].default_value = 0.7
 
         atom_objects = []
         atom_positions = {}  # Store atom positions for bond creation
@@ -268,58 +330,49 @@ class ProteinModel:
         # Create bonds
         bond_objects = []
         processed_pairs = set()  # Keep track of processed bonds
-        '''
         for i, atom1 in enumerate(protein.atoms):
             pos1 = atom_positions[i]
-            
-            # Check nearby atoms for bonds
             for j, atom2 in enumerate(protein.atoms):
                 if i >= j or (i, j) in processed_pairs:
                     continue
-                    
                 pos2 = atom_positions[j]
                 distance = (pos2 - pos1).length
-                
-                # Bond distance threshold (adjust as needed)
-                if distance < 2.0:  # Typical bond length is ~1.5 Å
-                    # Create bond (cylinder)
+                if distance < 2.0:
                     bond_mesh = base_cylinder_mesh.copy()
                     bond_obj = bpy.data.objects.new(
                         name=f"bond_{protein.identifier}_{i}_{j}",
                         object_data=bond_mesh
                     )
-                    
-                    # Position and orient bond
                     mid_point = (pos1 + pos2) / 2
                     bond_obj.location = mid_point * GLOBAL_SCALE
-                    
-                    # Calculate rotation to point cylinder between atoms
                     direction = pos2 - pos1
+                    if direction.length == 0:
+                        print(f"Skipping bond between {i} and {j}: zero-length direction vector.")
+                        continue
                     rot_quat = direction.to_track_quat('-Z', 'Y')
                     bond_obj.rotation_mode = 'QUATERNION'
                     bond_obj.rotation_quaternion = rot_quat
-                    
-                    # Scale cylinder to match bond length
                     bond_length = direction.length
-                    bond_obj.scale = Vector((0.1, 0.1, bond_length / 2)) * GLOBAL_SCALE
-                    
-                    # Assign material
+                    bond_obj.scale = Vector((0.9, 0.9, bond_length / 2)) * GLOBAL_SCALE
                     bond_obj.data.materials.clear()
-                    bond_obj.data.materials.append(bpy.data.materials['bond_material'])
-                    
+                    bond_type = determine_bond_type(atom1, atom2, distance)
+                    bond_obj.data.materials.append(BOND_MATERIALS.get(bond_type, BOND_MATERIALS['single']))
                     bond_objects.append(bond_obj)
                     processed_pairs.add((i, j))
+                    processed_pairs.add((j, i))  # Add both directions
+
+        scene_collection = bpy.context.scene.collection
         '''
         # Batch link objects to scene
-        scene_collection = bpy.context.scene.collection
         for obj in atom_objects + bond_objects:
             scene_collection.objects.link(obj)
-
+        '''
         # Offset all objects by available position
         available_pos = self.find_available_position()
         for obj in atom_objects + bond_objects:
             obj.location += available_pos
             self.add_object_to_model(obj)
+            scene_collection.objects.link(obj)
 
    
     def _create_ribbon(self, protein):
