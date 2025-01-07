@@ -32,23 +32,53 @@ ATOM_RELATIVE_SIZES = {
     'MG': 1.8,   # Magnesium
     'ZN': 1.5,   # Zinc
     'CL': 1.6,   # Chlorine
+    'NA': 1.9,   # Sodium
+    'K': 2.0,    # Potassium
+    'CU': 1.6,   # Copper
+    'NI': 1.6,   # Nickel
+    'CO': 1.6,   # Cobalt
+    'MN': 1.6,   # Manganese
+    'CD': 1.7,   # Cadmium
+    'HG': 1.7,   # Mercury
+    'I': 1.8,    # Iodine
+    'BR': 1.7,   # Bromine
+    'F': 1.0,    # Fluorine
+    'BA': 2.2,   # Barium
+    'SR': 2.1,   # Strontium
+    'CS': 2.2,   # Cesium
+    'RB': 2.2,   # Rubidium
 }
 
 def create_atom_materials():
     """Create global materials for all atom types and functional groups."""
     colors = {
         # Base atomic elements
-        'C': (0.2, 0.2, 0.2, 1.0),    # Grey
-        'H': (1.0, 1.0, 1.0, 1.0),    # White
-        'O': (1.0, 0.0, 0.0, 1.0),    # Red
-        'N': (0.0, 0.0, 1.0, 1.0),    # Blue
-        'S': (1.0, 0.8, 0.0, 1.0),    # Yellow
-        'P': (1.0, 0.5, 0.0, 1.0),    # Orange
-        'FE': (0.7, 0.3, 0.0, 1.0),   # Brown
-        'CA': (0.5, 0.5, 0.5, 1.0),   # Light grey
-        'MG': (0.0, 1.0, 0.0, 1.0),   # Green
-        'ZN': (0.6, 0.6, 0.8, 1.0),   # Blue-grey
-        'CL': (0.0, 0.8, 0.0, 1.0),   # Green
+        'C': (0.2, 0.2, 0.2, 1.0),     # Grey
+        'H': (1.0, 1.0, 1.0, 1.0),     # White
+        'O': (1.0, 0.0, 0.0, 1.0),     # Red
+        'N': (0.0, 0.0, 1.0, 1.0),     # Blue
+        'S': (1.0, 0.8, 0.0, 1.0),     # Yellow
+        'P': (1.0, 0.5, 0.0, 1.0),     # Orange
+        'FE': (0.7, 0.3, 0.0, 1.0),    # Brown
+        'CA': (0.5, 0.5, 0.5, 1.0),    # Light grey
+        'MG': (0.0, 1.0, 0.0, 1.0),    # Green
+        'ZN': (0.6, 0.6, 0.8, 1.0),    # Blue-grey
+        'CL': (0.0, 0.8, 0.0, 1.0),    # Green
+        'NA': (0.6, 0.6, 1.0, 1.0),    # Light blue
+        'K': (0.6, 0.0, 0.6, 1.0),     # Purple
+        'CU': (0.8, 0.4, 0.0, 1.0),    # Copper brown
+        'NI': (0.5, 0.5, 0.0, 1.0),    # Olive
+        'CO': (0.6, 0.4, 0.6, 1.0),    # Purple-grey
+        'MN': (0.6, 0.0, 0.2, 1.0),    # Dark red
+        'CD': (0.4, 0.4, 0.6, 1.0),    # Blue-grey
+        'HG': (0.7, 0.7, 0.7, 1.0),    # Silver
+        'I': (0.5, 0.0, 0.5, 1.0),     # Dark purple
+        'BR': (0.6, 0.2, 0.0, 1.0),    # Dark orange
+        'F': (0.7, 1.0, 0.7, 1.0),     # Light green
+        'BA': (0.0, 0.8, 0.4, 1.0),    # Sea green
+        'SR': (0.0, 0.8, 0.6, 1.0),    # Turquoise
+        'CS': (0.3, 0.6, 0.8, 1.0),    # Sky blue
+        'RB': (0.4, 0.0, 0.4, 1.0),    # Dark purple
     }
 
     for atom_symbol, color in colors.items():
