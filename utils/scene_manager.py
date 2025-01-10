@@ -70,7 +70,7 @@ class ProteinBlenderScene:
                 return False
 
             # Create new protein instance
-            protein = Protein(identifier, method=import_method)
+            protein = Protein(identifier)
             protein.parse_pdb_string(pdb_contents)
             protein.create_model()
             
