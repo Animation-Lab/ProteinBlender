@@ -24,7 +24,7 @@ class PROTEIN_OT_import_protein(Operator):
         
         # Get the singleton instance
         scene_manager = ProteinBlenderScene.get_instance()
-        success = scene_manager.create_protein_from_id(protein_id, import_method=import_method)
+        success = scene_manager.create_molecule_from_id(protein_id, import_method=import_method)
         
         if success:
             # Show success message in info area
