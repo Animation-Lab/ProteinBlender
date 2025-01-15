@@ -72,12 +72,6 @@ class ProteinBlenderScene:
             molecule = Molecule(identifier)
             molecule.parse_pdb_string(pdb_contents)
             molecule.create_visualization()
-            '''
-            # Create new protein instance
-            molecule = Molecule(identifier)
-            molecule.parse_pdb_string(pdb_contents)
-            molecule.create_visualization()
-            '''
             
             # Add to scene and set as active using the unique ID
             unique_id = molecule.unique_id

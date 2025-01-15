@@ -119,9 +119,9 @@ class Molecule:
         This is a placeholder - we'll implement this when we create
         the visualization handler.
         """
-        from . import visualization
+        from ..visualizer.molecule_visualization import MoleculeVisualization
         if self._visualization is None:
-            self._visualization = visualization.MoleculeVisualization(self)
+            self._visualization = MoleculeVisualization(self)
         self._visualization.create_visualization(style)
 
     def remove_visualization(self) -> None:

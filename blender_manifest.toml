@@ -1,0 +1,29 @@
+schema_version = "1.0.0"
+
+id = "ProteinBlender"
+version = "0.1.0"
+name = "ProteinBlender"
+tagline = "Visualize proteins in Blender"
+maintainer = "Dillon Lee <dlee123@gmail.com>"
+type = "add-on"
+
+website = "https://github.com/dillonlee/ProteinBlender"
+tags = [
+	"Protein",
+	"Visualization",
+	"Blender",
+]
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2025",
+]
+wheels = ["./libs/MDAnalysis-2.7.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", "./libs/biotite-0.40.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", "./libs/databpy-0.0.8-py3-none-any.whl", "./libs/numpy-2.2.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"]
+platforms = ["windows-x64"]
+
+[permissions]
+network = "Update functionality for older Blender versions"
+files = "Install asset packs, load assets, store logs and state"

@@ -20,7 +20,7 @@ from databpy.nodes import (
 from .mn_color import *
 from .mn_material import *
 from .mn_mesh import *
-from .mn_utils import MN_DATA_FILE
+from .mn_utils import MN_DATA_FILE, MN_STARTUP_FILE
 
 NODE_WIDTH = 180
 
@@ -218,10 +218,54 @@ def swap(node: bpy.types.GeometryNode, tree: str | bpy.types.GeometryNodeTree) -
     swap_tree(node=node, tree=tree)
 
 
-def append(name: str, link: bool = False) -> bpy.types.GeometryNodeTree:
+def append(name: str) -> bpy.types.GeometryNodeTree:
     "Append a GN node from the MN data file"
-    GN_TREES_PATH = os.path.join(MN_DATA_FILE, "NodeTree")
-    return append_from_blend(name, filepath=GN_TREES_PATH, link=link)
+    # First check if it already exists
+    if name in bpy.data.node_groups:
+        print(f"\nNode group {name} already exists in bpy.data.node_groups")
+        return bpy.data.node_groups[name]
+    
+    try:
+        # Try main data file first
+        if not os.path.exists(MN_DATA_FILE):
+            raise FileNotFoundError(f"Data file not found: {MN_DATA_FILE}")
+            
+        print(f"\nTrying to load {name} from main data file: {MN_DATA_FILE}")
+        with bpy.data.libraries.load(str(MN_DATA_FILE)) as (data_from, data_to):
+            print(f"Available node groups in data file: {sorted(data_from.node_groups)}")
+            if name in data_from.node_groups:
+                data_to.node_groups = [name]
+                print(f"Found {name} in data file")
+            else:
+                raise KeyError(f"Node group {name} not found in data file")
+                
+        if name in bpy.data.node_groups:
+            return bpy.data.node_groups[name]
+        raise RuntimeError(f"Failed to load node group {name}")
+            
+    except Exception as e1:
+        print(f"Error loading from data file: {str(e1)}")
+        try:
+            # Try startup blend as fallback
+            if not os.path.exists(MN_STARTUP_FILE):
+                raise FileNotFoundError(f"Startup file not found: {MN_STARTUP_FILE}")
+                
+            print(f"\nTrying to load {name} from startup file: {MN_STARTUP_FILE}")
+            with bpy.data.libraries.load(str(MN_STARTUP_FILE)) as (data_from, data_to):
+                print(f"Available node groups in startup file: {sorted(data_from.node_groups)}")
+                if name in data_from.node_groups:
+                    data_to.node_groups = [name]
+                    print(f"Found {name} in startup file")
+                else:
+                    raise KeyError(f"Node group {name} not found in startup file")
+                    
+            if name in bpy.data.node_groups:
+                return bpy.data.node_groups[name]
+            raise RuntimeError(f"Failed to load node group {name}")
+                
+        except Exception as e2:
+            print(f"Error loading from startup file: {str(e2)}")
+            raise e2
 
 
 def MN_micrograph_material():
@@ -265,6 +309,7 @@ def new_tree(
 
 
 def assign_material(node, new_material="default") -> None:
+    from . import mn_material as material
     material.add_all_materials()
     material_socket = node.inputs.get("Material")
     if material_socket is None:
@@ -288,10 +333,9 @@ def add_custom(
     width=NODE_WIDTH,
     material="default",
     show_options=False,
-    link=False,
 ):
     node = group.nodes.new("GeometryNodeGroup")
-    node.node_tree = append(name, link=link)
+    node.node_tree = append(name)
 
     # if there is an input socket called 'Material', assign it to the base MN material
     # if another material is supplied, use that instead.

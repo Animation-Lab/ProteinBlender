@@ -4,8 +4,8 @@ from typing import Optional, Dict, List
 from enum import Enum
 from pathlib import Path
 
-from . import nodes
-from .nodes import styles_mapping
+from ..utils.molecular_nodes.mn_nodes import styles_mapping
+from ..utils.molecular_nodes import mn_nodes as nodes
 
 class VisualizationStyle(Enum):
     SURFACE = "surface"
@@ -35,11 +35,8 @@ class MoleculeVisualization:
     def create_visualization(self, style: str = "surface") -> None:
         """Create the initial visualization of the molecule"""
         try:
-            # Convert array data to vertices for Blender
-            vertices = self.molecule.array.coord * 0.01  # Scale to Blender units
-            
-            # Create the base object
-            self.object = self._create_base_object(vertices)
+            # Create the base object directly without pre-processing vertices
+            self.object = self._create_base_object(None)
             
             # Set up geometry nodes modifier
             self._setup_geometry_nodes(style)
@@ -51,15 +48,15 @@ class MoleculeVisualization:
             print(f"Error creating visualization: {str(e)}")
             raise
 
-    def _create_base_object(self, vertices) -> bpy.types.Object:
+    def _create_base_object(self, vertices=None) -> bpy.types.Object:
         """Create the base Blender object with vertex data"""
-        from .mesh import create_data_object
+        from ..utils.molecular_nodes.mn_mesh import create_data_object
         
-        # Create mesh object from vertices
+        # Let create_data_object handle the array directly
         obj = create_data_object(
             array=self.molecule.array,
             name=self.molecule.identifier,
-            world_scale=0.01,  # Scale factor to Blender units
+            world_scale=0.01,
         )
         
         return obj
@@ -91,28 +88,57 @@ class MoleculeVisualization:
 
     def _setup_basic_nodes(self, style: str) -> None:
         """Set up the basic node structure"""
-        tree = self._node_tree
-        
-        # Get input and output nodes
-        node_input = nodes.get_input(tree)
-        node_output = nodes.get_output(tree)
-        
-        # Position nodes
-        node_input.location = (0, 0)
-        node_output.location = (700, 0)
-        
-        # Add style node
-        style_name = styles_mapping.get(style, styles_mapping["surface"])
-        node_style = nodes.add_custom(
-            tree,
-            style_name,
-            location=(450, 0),
-            material="MN Default"
-        )
-        
-        # Link nodes
-        tree.links.new(node_style.outputs[0], node_output.inputs[0])
-        tree.links.new(node_input.outputs[0], node_style.inputs[0])
+        try:
+            tree = self._node_tree
+            
+            # Get input and output nodes
+            node_input = nodes.get_input(tree)
+            node_output = nodes.get_output(tree)
+            
+            # Position nodes
+            node_input.location = (0, 0)
+            node_output.location = (700, 0)
+            
+            # Add style node
+            style_name = styles_mapping.get(style, styles_mapping["surface"])
+            print(f"\nSetting up style: {style} -> {style_name}")
+            
+            node_style = nodes.add_custom(
+                tree,
+                style_name,
+                location=(450, 0),
+                material="MN Default"
+            )
+            print(f"Created style node: {node_style.name}")
+            print(f"Style node inputs: {[input.name for input in node_style.inputs]}")
+            print(f"Style node outputs: {[output.name for output in node_style.outputs]}")
+            
+            # Set default values for surface style
+            if style == "surface":
+                # Print input types for debugging
+                for input in node_style.inputs:
+                    print(f"Input '{input.name}' type: {input.type}")
+                
+                # Set values based on input types
+                node_style.inputs["Quality"].default_value = 2  # Medium quality (INT)
+                node_style.inputs["Scale Radii"].default_value = 1.0  # Normal scale (VALUE/float)
+                node_style.inputs["Probe Size"].default_value = 1.4  # Standard probe size (VALUE/float)
+                node_style.inputs["Triangulate"].default_value = True  # Enable triangulation (BOOLEAN)
+                node_style.inputs["Relaxation Steps"].default_value = 5  # Medium relaxation (INT)
+                node_style.inputs["Color by CA"].default_value = False  # Color by all atoms (BOOLEAN)
+                node_style.inputs["Color Blur"].default_value = 2  # Medium blur (INT)
+                node_style.inputs["Shade Smooth"].default_value = True  # Enable smooth shading (BOOLEAN)
+            
+            # Link nodes
+            tree.links.new(node_style.outputs[0], node_output.inputs[0])
+            tree.links.new(node_input.outputs[0], node_style.inputs[0])
+            print("Node connections established")
+            
+        except Exception as e:
+            print(f"Error in _setup_basic_nodes: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def change_style(self, style: str) -> None:
         """Change the visualization style"""

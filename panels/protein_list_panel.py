@@ -25,62 +25,62 @@ class PROTEIN_PT_list(Panel):
         # Create box for protein list
         box = layout.box()
         
-        if not scene_manager.proteins:
-            box.label(text="No proteins in scene", icon='INFO')
+        if not scene_manager.molecules:
+            box.label(text="No molecules in scene", icon='INFO')
             return
             
         # Create column for protein entries
         col = box.column()
         
         # Draw each protein entry
-        for protein_id, protein in scene_manager.proteins.items():
+        for molecule_id, molecule in scene_manager.molecules.items():
             row = col.row(align=True)
             
             # Highlight active protein
-            is_active = (protein_id == scene_manager.active_protein)
+            is_active = (molecule_id == scene_manager.active_molecule)
             
             # Create clickable operator for selection
             op = row.operator(
                 "protein.select_protein",
-                text=f"{protein.identifier}",
+                text=f"{molecule.identifier}",
                 depress=is_active,
                 icon='RADIOBUT_ON' if is_active else 'RADIOBUT_OFF'
             )
-            op.protein_id = protein_id
+            op.molecule_id = molecule_id
             
             # Show additional protein info
             sub_row = row.row()
             sub_row.alignment = 'RIGHT'
-            sub_row.label(text=f"({protein.method})")
+            sub_row.label(text=f"({molecule.method})")
 
 class PROTEIN_OT_select_protein(bpy.types.Operator):
     bl_idname = "protein.select_protein"
     bl_label = "Select Protein"
     bl_description = "Set the active protein"
     
-    protein_id: bpy.props.StringProperty()
+    molecule_id: bpy.props.StringProperty()
     
     def execute(self, context):
         scene_manager = ProteinBlenderScene.get_instance()
-        scene_manager.set_active_protein(self.protein_id)
+        scene_manager.set_active_molecule(self.molecule_id)
         
         # Deselect all objects first
         bpy.ops.object.select_all(action='DESELECT')
         
         # Get the protein instance
-        protein = scene_manager.proteins.get(self.protein_id)
-        if protein and protein.model:
+        molecule = scene_manager.molecules.get(self.molecule_id)
+        if molecule and molecule.model:
             # Select all objects associated with this protein
-            for obj in protein.model.objects:
+            for obj in molecule.model.objects:
                 if obj and obj.name in bpy.data.objects:
                     obj.select_set(True)
                     # Make the last object active
-                    context.view_layer.objects.active = obj
+
         
         # Show toast notification with valid icon
-        protein_id = self.protein_id  # Store in local variable for closure
+        molecule_id = self.molecule_id  # Store in local variable for closure
         def draw_message(self, context):
-            self.layout.label(text=f"Selected protein: {protein_id}")
+            self.layout.label(text=f"Selected molecule: {molecule_id}")
         
         bpy.context.window_manager.popup_menu(draw_message, title="Protein Selected", icon='MESH_UVSPHERE')
         

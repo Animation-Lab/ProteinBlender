@@ -12,8 +12,9 @@ from pathlib import Path
 from math import floor
 from mathutils import Matrix
 
-ADDON_DIR = Path(__file__).resolve()
-MN_DATA_FILE = os.path.join("assets", "MN_data_file_4.2.blend")
+ADDON_DIR = Path(__file__).resolve().parent
+MN_DATA_FILE = os.path.join(ADDON_DIR, "assets", "MN_data_file_4.2.blend")
+MN_STARTUP_FILE = os.path.join(ADDON_DIR, "assets", "template", "startup.blend")
 
 
 def add_current_module_to_path():

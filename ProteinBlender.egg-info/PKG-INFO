@@ -1,0 +1,26 @@
+Metadata-Version: 2.1
+Name: ProteinBlender
+Version: 0.1.0
+Summary: A Blender addon for protein visualization
+Maintainer-email: Your Name <your.email@example.com>
+Project-URL: Homepage, https://github.com/yourusername/ProteinBlender
+Project-URL: Repository, https://github.com/yourusername/ProteinBlender
+Project-URL: Documentation, https://github.com/yourusername/ProteinBlender
+Description-Content-Type: text/markdown
+Requires-Dist: databpy
+Requires-Dist: MDAnalysis>=2.7.0
+Requires-Dist: biotite~=0.40
+Requires-Dist: numpy
+Provides-Extra: bpy
+Requires-Dist: bpy>=4.2; extra == "bpy"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: fake-bpy-module; extra == "dev"
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
+Requires-Dist: pytest-cov; extra == "test"
+
+# ProteinBlender
+
+

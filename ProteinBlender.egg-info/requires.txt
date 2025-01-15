@@ -1,0 +1,16 @@
+databpy
+MDAnalysis>=2.7.0
+biotite~=0.40
+numpy
+
+[bpy]
+bpy>=4.2
+
+[dev]
+pytest
+pytest-cov
+fake-bpy-module
+
+[test]
+pytest
+pytest-cov
