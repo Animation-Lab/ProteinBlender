@@ -1,46 +1,29 @@
+[project]
+name = "proteinblender"
+version = "0.1.0"
+description = "Visualize and animate proteins in Blender"
+readme = "README.md"
+dependencies = ["databpy", "MDAnalysis>=2.7.0", "biotite~=0.40", "mrcfile", "starfile"]
+maintainers = [{name = "Dillon Lee", email = "dlee123@gmail.com"}]
+
+[project.urls]
+Homepage = "https://github.com/dillonl/ProteinBlender"
+Repository = "https://github.com/dillonl/ProteinBlender"
+Documentation = "https://github.com/dillonl/ProteinBlender"
+
+[project.optional-dependencies]
+bpy =  ["bpy>=4.2"]
+dev = ["pytest", "pytest-cov", "syrupy", "scipy", "fake-bpy-module"]
+test = ["pytest", "pytest-cov", "syrupy", "scipy"]
+docs = ["quartodoc", "tomlkit", "nodepad"]
+
 [build-system]
 build-backend = "setuptools.build_meta"
 requires = ["setuptools>=61.0"]
 
-[project]
-name = "ProteinBlender"
-version = "0.1.0"
-description = "A Blender addon for protein visualization"
-readme = "README.md"
-dependencies = [
-    "databpy",
-    "MDAnalysis>=2.7.0",
-    "biotite~=0.40",
-    "numpy"
-]
-maintainers = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/ProteinBlender"
-Repository = "https://github.com/yourusername/ProteinBlender"
-Documentation = "https://github.com/yourusername/ProteinBlender"
-
-[project.optional-dependencies]
-bpy = ["bpy>=4.2"]
-dev = ["pytest", "pytest-cov", "fake-bpy-module"]
-test = ["pytest", "pytest-cov"]
-
 [tool.setuptools]
 include-package-data = true
-packages = [
-    "data",
-    "handlers",
-    "layout",
-    "operators",
-    "panels",
-    "properties",
-    "resources",
-    "utils",
-    "visualizer"
-]
+packages = ["proteinblender"]
 
 [tool.setuptools.package-data]
-"*" = ["*"]  # Include all files in all packages
-utils = ["molecular_nodes/assets/*", "molecular_nodes/assets/template/*"]
+proteinblender = ["utils/molecular_nodes/assets/*", "utils/molecular_nodes/assets/template/*", "**/*.py"]

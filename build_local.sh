@@ -6,10 +6,10 @@ myrand=$RANDOM
 rm -rf /mnt/c/Users/dlee1/Documents/PublishedBlenderAddons/ProteinBlender*
 rm -rf libs/
 
+mkdir -p tmp
 # Run setup.py with sdist command
 python setup.py sdist
 
-mkdir -p tmp
 tar -xvzf dist/proteinblender-0.1.0.tar.gz -C tmp/
 cp -r blender_manifest.toml tmp/proteinblender-0.1.0/
 cp -r libs tmp/proteinblender-0.1.0/

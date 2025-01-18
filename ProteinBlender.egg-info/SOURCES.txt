@@ -1,6 +1,7 @@
 MANIFEST.in
 README.md
 __init__.py
+build.py
 pyproject.toml
 setup.py
 ProteinBlender.egg-info/PKG-INFO

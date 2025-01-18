@@ -1,1 +1,0 @@
-# empty file to make the package a valid Blender addon
