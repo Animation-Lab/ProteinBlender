@@ -184,8 +184,6 @@ def build(platform) -> None:
 
 
 def main():
-    # for platform in build_platforms:
-    #     build(platform)
     build(build_platforms)
 
 
