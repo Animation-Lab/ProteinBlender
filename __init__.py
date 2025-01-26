@@ -1,3 +1,9 @@
+import bpy
+import importlib
+import sys
+from pathlib import Path
+import os
+
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
@@ -8,17 +14,13 @@ bl_info = {
     "category": "3D View"
 }
 
-import bpy
-import importlib
-import sys
-from pathlib import Path
-
 # Get the folder containing this file
 ADDON_DIR = Path(__file__).parent.resolve()
 
-# Add the addon directory to Python path if it's not already there
-if str(ADDON_DIR) not in sys.path:
-    sys.path.append(str(ADDON_DIR))
+# Add the wheels directory to Python path
+WHEELS_DIR = ADDON_DIR / "wheels"
+if str(WHEELS_DIR) not in sys.path:
+    sys.path.append(str(WHEELS_DIR))
 
 # Import local modules
 import proteinblender

@@ -1,27 +1,18 @@
-import os
-import sys
-
-# Add libs directory to Python path
-libs_path = os.path.join(os.path.dirname(__file__), "libs")
-if libs_path not in sys.path:
-    sys.path.append(libs_path)
+bl_info = {
+    "name": "ProteinBlender",
+    "author": "Dillon Lee",
+    "version": (1, 0, 0),
+    "blender": (4, 0, 0),
+    "location": "View3D > Sidebar > ProteinBlender",
+    "description": "A Blender addon for protein visualization and animation",
+    "category": "3D View"
+}
 
 import bpy
-
-from . import operators
-from . import handlers
 from . import panels
 from . import properties
-
-bl_info = {
-    "name": "Protein Blender",
-    "author": "Dillon Lee",
-    "version": (0, 1, 0),
-    "blender": (4, 0, 0),
-    "location": "Automatic",
-    "description": "Creates a specialized Protein Blender workspace on startup",
-    "category": "Interface",
-}
+from . import operators
+from . import handlers
 
 def register():
     properties.register()
@@ -30,10 +21,10 @@ def register():
     handlers.register()
 
 def unregister():
-    properties.unregister()
-    operators.unregister()
-    panels.unregister()
     handlers.unregister()
+    panels.unregister()
+    operators.unregister()
+    properties.unregister()
 
 
 if __name__ == "__main__":

@@ -29,8 +29,8 @@ except ModuleNotFoundError:
     run_python("-m pip install tomlkit")
     import tomlkit
 
-TOML_PATH = "proteinblender/blender_manifest.toml"
-WHL_PATH = "./proteinblender/wheels"
+TOML_PATH = "./blender_manifest.toml"
+WHL_PATH = "./wheels"
 PYPROJ_PATH = "./pyproject.toml"
 
 
@@ -145,36 +145,20 @@ def clean_files(suffix: str = ".blend1") -> None:
         os.remove(blend1_file)
 
 
-def is_wsl() -> bool:
-    """Check if running under Windows Subsystem for Linux"""
-    try:
-        with open('/proc/version', 'r') as f:
-            return 'microsoft' in f.read().lower()
-    except:
-        return False
-
-
 def build_extension(split: bool = True) -> None:
     for suffix in [".blend1", ".MNSession"]:
         clean_files(suffix=suffix)
 
-    # Base command components
-    blender_path = f"{bpy.app.binary_path}"
-    if sys.platform == "win32" or is_wsl():
-        blender_path = os.environ.get(
-            "BLENDER_EXE_PATH",
-            "/mnt/c/Program Files/Blender Foundation/Blender 4.3/blender.exe"
-        )
-    blender_cmd = [blender_path]
-    
-    # Add extension build arguments
-    build_args = ["--command", "extension", "build"]
     if split:
-        build_args.append("--split-platforms")
-    build_args.extend(["--source-dir", "proteinblender", "--output-dir", "."])
-
-    full_cmd = blender_cmd + build_args
-    subprocess.run(full_cmd)
+        subprocess.run(
+            f"{bpy.app.binary_path} --command extension build"
+            " --split-platforms --source-dir proteinblender --output-dir .".split(" ")
+        )
+    else:
+        subprocess.run(
+            f"{bpy.app.binary_path} --command extension build "
+            "--source-dir proteinblender --output-dir .".split(" ")
+        )
 
 
 def build(platform) -> None:
@@ -184,6 +168,8 @@ def build(platform) -> None:
 
 
 def main():
+    # for platform in build_platforms:
+    #     build(platform)
     build(build_platforms)
 
 
