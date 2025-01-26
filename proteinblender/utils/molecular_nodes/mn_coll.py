@@ -24,12 +24,12 @@ def data() -> Collection:
 
         bpy.context.view_layer.layer_collection.children["MolecularNodes"].children[
             collection.name
-        ].exclude = True
+        ].exclude = False
         return collection
 
 
 def frames(name: str = "") -> Collection:
-    "Return a collection for storing the objects that are the frames of a trajectory"
+    "Return a collection for storing the objects that are the frames of a trajectory" 
     return create_collection(f".data_{name}_frames", parent=data())
 
 

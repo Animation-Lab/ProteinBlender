@@ -6,6 +6,8 @@ from pathlib import Path
 
 from ..utils.molecular_nodes.mn_nodes import styles_mapping
 from ..utils.molecular_nodes import mn_nodes as nodes
+from ..utils.molecular_nodes.mn_material import add_all_materials, append, default
+from ..utils.molecular_nodes.mn_utils import MN_DATA_FILE
 
 class VisualizationStyle(Enum):
     SURFACE = "surface"
@@ -43,6 +45,8 @@ class MoleculeVisualization:
             
             # Store reference back in molecule
             self.molecule.object = self.object
+
+
             
         except Exception as e:
             print(f"Error creating visualization: {str(e)}")
@@ -66,79 +70,57 @@ class MoleculeVisualization:
         if not self.object:
             raise ValueError("No object created yet")
             
-        # Get or create the geometry nodes modifier
-        mod = nodes.get_mod(self.object)
+        from ..utils.molecular_nodes.mn_nodes import (
+            create_starting_node_tree,
+            styles_mapping
+        )
+        from ..utils.molecular_nodes.mn_material import add_all_materials, append, default
+        import bpy
         
-        # Create node tree name
-        tree_name = f"MN_{self.object.name}"
+        # First ensure all MolecularNodes materials are available
+        add_all_materials()
         
-        # Create the node tree
-        self._node_tree = nodes.new_tree(
-            name=tree_name,
-            geometry=True,
-            input_name="Atoms",
-            output_name="Geometry"
+        # Create the node tree with proper settings
+        # we use BP_ to avoid conflicts with MolecularNodes
+        self._node_tree = create_starting_node_tree(
+            object=self.object,
+            style=style,
+            name=f"BP_{self.object.name}",
+            color="common",
+            is_modifier=False
         )
         
-        # Assign node tree to modifier
-        mod.node_group = self._node_tree
-        
-        # Add basic nodes
-        self._setup_basic_nodes(style)
-
+        # Ensure material is properly set up
+        if self.object:
+            # Remove any existing materials
+            self.object.data.materials.clear()
+            
+            '''
+            # Get or create the MN Default material
+            mat = bpy.data.materials.get("MN Default")
+            if not mat:
+                mat = default()  # This will append the default material from the data file
+            
+            # Add the material to the object
+            self.object.data.materials.append(mat)
+            
+            # Ensure material uses nodes
+            mat.use_nodes = True
+            
+            # Set material properties for better visualization
+            mat.blend_method = 'OPAQUE'  # or 'BLEND' if you want transparency
+            mat.shadow_method = 'OPAQUE'  # or 'NONE' if you don't want shadows
+            
+            print(f"Material setup complete. Active material: {mat.name}")
+            print(f"Material nodes enabled: {mat.use_nodes}")
+            print(f"Material blend method: {mat.blend_method}")
+            '''
     def _setup_basic_nodes(self, style: str) -> None:
-        """Set up the basic node structure"""
-        try:
-            tree = self._node_tree
-            
-            # Get input and output nodes
-            node_input = nodes.get_input(tree)
-            node_output = nodes.get_output(tree)
-            
-            # Position nodes
-            node_input.location = (0, 0)
-            node_output.location = (700, 0)
-            
-            # Add style node
-            style_name = styles_mapping.get(style, styles_mapping["surface"])
-            print(f"\nSetting up style: {style} -> {style_name}")
-            
-            node_style = nodes.add_custom(
-                tree,
-                style_name,
-                location=(450, 0),
-                material="MN Default"
-            )
-            print(f"Created style node: {node_style.name}")
-            print(f"Style node inputs: {[input.name for input in node_style.inputs]}")
-            print(f"Style node outputs: {[output.name for output in node_style.outputs]}")
-            
-            # Set default values for surface style
-            if style == "surface":
-                # Print input types for debugging
-                for input in node_style.inputs:
-                    print(f"Input '{input.name}' type: {input.type}")
-                
-                # Set values based on input types
-                node_style.inputs["Quality"].default_value = 2  # Medium quality (INT)
-                node_style.inputs["Scale Radii"].default_value = 1.0  # Normal scale (VALUE/float)
-                node_style.inputs["Probe Size"].default_value = 1.4  # Standard probe size (VALUE/float)
-                node_style.inputs["Triangulate"].default_value = True  # Enable triangulation (BOOLEAN)
-                node_style.inputs["Relaxation Steps"].default_value = 5  # Medium relaxation (INT)
-                node_style.inputs["Color by CA"].default_value = False  # Color by all atoms (BOOLEAN)
-                node_style.inputs["Color Blur"].default_value = 2  # Medium blur (INT)
-                node_style.inputs["Shade Smooth"].default_value = True  # Enable smooth shading (BOOLEAN)
-            
-            # Link nodes
-            tree.links.new(node_style.outputs[0], node_output.inputs[0])
-            tree.links.new(node_input.outputs[0], node_style.inputs[0])
-            print("Node connections established")
-            
-        except Exception as e:
-            print(f"Error in _setup_basic_nodes: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            raise
+        """
+        This method is now handled by create_starting_node_tree
+        We keep it for compatibility but it's essentially a no-op
+        """
+        pass
 
     def change_style(self, style: str) -> None:
         """Change the visualization style"""

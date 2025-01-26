@@ -77,6 +77,21 @@ class ProteinBlenderScene:
             unique_id = molecule.unique_id
             self.molecules[unique_id] = molecule
             self.active_molecule = unique_id
+
+            print("molecule.object", molecule.object)
+            # Ensure the object is visible in the viewport
+            if molecule.object:
+                # Get the view layer collection that contains this object
+                for layer_collection in bpy.context.view_layer.layer_collection.children:
+                    print("layer_collection", layer_collection)
+                    if molecule.object.name in layer_collection.collection.objects:
+                        layer_collection.exclude = False
+                        print("layer_collection exclude", layer_collection.exclude)
+                        # break
+                
+                # Also ensure the object itself is visible
+                molecule.object.hide_viewport = False
+                molecule.object.hide_render = False
             
             # Force a redraw of all UI areas
             for window in bpy.context.window_manager.windows:

@@ -358,7 +358,7 @@ def create_starting_nodes_starfile(object):
     # ensure there is a geometry nodes modifier called 'MolecularNodes' that is created and applied to the object
     node_mod = get_mod(object)
 
-    node_name = f"MN_starfile_{object.name}"
+    node_name = f"BP_starfile_{object.name}"
 
     # create a new GN node group, specific to this particular molecule
     group = new_tree(node_name)
@@ -378,7 +378,7 @@ def create_starting_nodes_starfile(object):
 def create_starting_nodes_density(object, threshold=0.8, style="density_surface"):
     # ensure there is a geometry nodes modifier called 'MolecularNodes' that is created and applied to the object
     mod = get_mod(object)
-    node_name = f"MN_density_{object.name}"
+    node_name = f"BP_density_{object.name}"
 
     try:
         tree = bpy.data.node_groups[node_name]
@@ -438,7 +438,7 @@ def create_starting_node_tree(
     mod = get_mod(object)
 
     if not name:
-        name = f"MN_{object.name}"
+        name = f"BP_{object.name}"
 
     # check if the node tree already exists and use that instead
     try:
