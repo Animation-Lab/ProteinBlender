@@ -8,24 +8,5 @@ bl_info = {
     "category": "3D View"
 }
 
-import bpy
-from . import panels
-from . import properties
-from . import operators
-from . import handlers
+from .addon import register, unregister, _test_register
 
-def register():
-    properties.register()
-    operators.register()
-    panels.register()
-    handlers.register()
-
-def unregister():
-    handlers.unregister()
-    panels.unregister()
-    operators.unregister()
-    properties.unregister()
-
-
-if __name__ == "__main__":
-    register()

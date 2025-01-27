@@ -3,7 +3,7 @@ from bpy.types import Panel, Operator
 from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
-class MOLECULE_OT_select(Operator):
+class MOLECULE_PB_OT_select(Operator):
     bl_idname = "molecule.select"
     bl_label = "Select Molecule"
     bl_description = "Select this molecule"
@@ -25,7 +25,7 @@ class MOLECULE_OT_select(Operator):
             
         return {'FINISHED'}
 
-class MOLECULE_OT_edit(Operator):
+class MOLECULE_PB_OT_edit(Operator):
     bl_idname = "molecule.edit"
     bl_label = "Edit Molecule"
     bl_description = "Edit this molecule"
@@ -37,7 +37,7 @@ class MOLECULE_OT_edit(Operator):
         context.scene.selected_molecule_id = self.molecule_id
         return {'FINISHED'}
 
-class MOLECULE_OT_delete(Operator):
+class MOLECULE_PB_OT_delete(Operator):
     bl_idname = "molecule.delete"
     bl_label = "Delete Molecule"
     bl_description = "Delete this molecule"
@@ -49,9 +49,9 @@ class MOLECULE_OT_delete(Operator):
         scene_manager.delete_molecule(self.molecule_id)
         return {'FINISHED'}
 
-class MOLECULE_PT_list(Panel):
+class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
-    bl_idname = "MOLECULE_PT_list"
+    bl_idname = "MOLECULE_PB_PT_list"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "collection"
@@ -113,19 +113,3 @@ class MOLECULE_PT_list(Panel):
                 delete_op = row.operator("molecule.delete", text="", icon='X')
                 if delete_op:  # Check if operator exists before setting property
                     delete_op.molecule_id = molecule_id
-
-def register_molecule_list_panel():
-    print("Registering molecule list panel...")  # Debug print
-    bpy.utils.register_class(MOLECULE_OT_select)
-    bpy.utils.register_class(MOLECULE_OT_edit)
-    bpy.utils.register_class(MOLECULE_OT_delete)
-    bpy.utils.register_class(MOLECULE_PT_list)
-    print("Molecule list panel registered")  # Debug print
-
-def unregister_molecule_list_panel():
-    print("Unregistering molecule list panel...")  # Debug print
-    bpy.utils.unregister_class(MOLECULE_PT_list)
-    bpy.utils.unregister_class(MOLECULE_OT_delete)
-    bpy.utils.unregister_class(MOLECULE_OT_edit)
-    bpy.utils.unregister_class(MOLECULE_OT_select)
-    print("Molecule list panel unregistered")  # Debug print 

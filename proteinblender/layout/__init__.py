@@ -1,1 +1,1 @@
-# protein_workspace/layout/__init__.py
+# proteinblender/layout/__init__.py

@@ -13,7 +13,6 @@ bl_info = {
     "description": "A Blender addon for protein visualization and animation",
     "category": "3D View"
 }
-
 # Get the folder containing this file
 ADDON_DIR = Path(__file__).parent.resolve()
 
@@ -22,6 +21,8 @@ WHEELS_DIR = ADDON_DIR / "wheels"
 if str(WHEELS_DIR) not in sys.path:
     sys.path.append(str(WHEELS_DIR))
 
+
+'''
 # Import local modules
 import proteinblender
 
@@ -47,3 +48,11 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+'''
+
+def register():
+    pass
+
+def unregister():
+    pass
+

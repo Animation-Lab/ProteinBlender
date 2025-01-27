@@ -1,9 +1,9 @@
 import bpy
 from bpy.types import Panel
 
-class MOLECULE_PT_edit(Panel):
+class MOLECULE_PB_PT_edit(Panel):
     bl_label = "Molecule Settings"
-    bl_idname = "MOLECULE_PT_edit"
+    bl_idname = "MOLECULE_PB_PT_edit"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
@@ -37,9 +37,3 @@ class MOLECULE_PT_edit(Panel):
         row.prop(molecule.object, "hide_viewport", text="Visible")
         
         # Add more molecule-specific settings here 
-
-def register_molecule_edit_panel():
-    bpy.utils.register_class(MOLECULE_PT_edit)
-
-def unregister_molecule_edit_panel():
-    bpy.utils.unregister_class(MOLECULE_PT_edit) 

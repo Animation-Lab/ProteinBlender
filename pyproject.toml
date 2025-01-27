@@ -1,6 +1,6 @@
 [project]
 name = "proteinblender"
-version = "0.1.0"
+version = "4.2.10"
 description = "Visualize and animate proteins in Blender"
 readme = "README.md"
 dependencies = ["databpy", "MDAnalysis>=2.7.0", "biotite~=0.40", "mrcfile", "starfile"]

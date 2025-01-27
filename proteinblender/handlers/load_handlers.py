@@ -35,3 +35,4 @@ def unregister_load_handlers():
     if bpy.app.timers.is_registered(load_handler):
         bpy.app.timers.unregister(load_handler)
 
+LASSES = []  # No classes to register, but keeping consistent with our pattern

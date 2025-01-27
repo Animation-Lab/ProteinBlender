@@ -10,7 +10,7 @@ class MoleculeListItem(PropertyGroup):
         default=""
     )
 
-def register_properties():
+def register():
     # Register the PropertyGroup class first
     bpy.utils.register_class(MoleculeListItem)
     
@@ -20,7 +20,7 @@ def register_properties():
     bpy.types.Scene.selected_molecule_id = StringProperty()
     bpy.types.Scene.show_molecule_edit_panel = BoolProperty(default=False)
 
-def unregister_properties():
+def unregister():
     # Remove properties
     del bpy.types.Scene.show_molecule_edit_panel
     del bpy.types.Scene.selected_molecule_id

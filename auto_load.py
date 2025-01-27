@@ -1,3 +1,4 @@
+'''
 import bpy
 import typing
 import inspect
@@ -184,3 +185,4 @@ def toposort(deps_dict):
         sorted_list_sub.sort(key=lambda cls: getattr(cls, "bl_order", 0))
         sorted_list.extend(sorted_list_sub)
     return sorted_list
+'''

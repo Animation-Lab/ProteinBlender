@@ -1,12 +1,12 @@
 import bpy
 from bpy.types import Panel
 
-class PROTEIN_PT_import_protein(Panel):
+class PROTEIN_PB_PT_import_protein(Panel):
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_label = "Protein Import"
-    bl_idname = "PROTEIN_PT_import_protein"
+    bl_idname = "PROTEIN_PB_PT_import_protein"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 0
 
@@ -44,9 +44,3 @@ class PROTEIN_PT_import_protein(Panel):
         row.operator("protein.import_protein", text="Add to Scene")
         
         box.separator(factor=0.5)
-
-def register_panel_import_protein():
-    bpy.utils.register_class(PROTEIN_PT_import_protein)
-
-def unregister_panel_import_protein():
-    bpy.utils.unregister_class(PROTEIN_PT_import_protein) 

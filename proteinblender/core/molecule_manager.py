@@ -49,7 +49,7 @@ class MoleculeManager:
             register_class(MolecularNodesSceneProperties)
             bpy.types.Scene.mn = bpy.props.PointerProperty(type=MolecularNodesSceneProperties)
         
-    def import_from_pdb(self, pdb_id: str, style: str = "spheres", **kwargs) -> MoleculeWrapper:
+    def import_from_pdb(self, pdb_id: str, style: str = "surface", **kwargs) -> MoleculeWrapper:
         """Import a molecule from PDB"""
         try:
             # Use MolecularNodes fetch functionality
