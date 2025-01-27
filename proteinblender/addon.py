@@ -7,6 +7,7 @@ from .panels import CLASSES as panel_classes
 from .properties.protein_props import  register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .utils import scene_manager
+from .layout.workspace_setup import ProteinWorkspaceManager
 
 from .utils.molecularnodes import session
 
@@ -29,11 +30,16 @@ def _test_register():
         unregister()
         register()
 
+def create_workspace_callback():
+    workspace_manager = ProteinWorkspaceManager()
+    workspace_manager.create_custom_workspace()
+    workspace_manager.add_panels_to_workspace()
+    return None  # Remove the timer
+
 def register():
     for op in all_pb_classes:
         for cls in op:
             try:
-                print(f"Registering {cls}")
                 bpy.utils.register_class(cls)
             except Exception as e:
                 print(e)
@@ -41,8 +47,10 @@ def register():
     bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
     register_protein_props()
     register_molecule_props()
-    scene_manager.ProteinBlenderScene.get_instance()
+    # scene_manager.ProteinBlenderScene.get_instance()
     
+    # Schedule workspace creation after 0.5 seconds
+    bpy.app.timers.register(create_workspace_callback, first_interval=0.5)
 
 def unregister():
     for op in reversed(all_pb_classes):
