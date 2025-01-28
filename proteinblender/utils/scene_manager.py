@@ -4,6 +4,7 @@ import bpy
 from typing import Dict, Optional
 from .molecularnodes.entities import fetch, load_local
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
+from bpy.app.handlers import undo_post, undo_pre
 
 class ProteinBlenderScene:
     _instance = None
@@ -57,20 +58,33 @@ class ProteinBlenderScene:
                 from ..utils.molecularnodes.addon import register as register_mn
                 register_mn()
             
+            # Create unique identifier if this ID already exists
+            counter = 1
+            base_identifier = f"{identifier}_{counter:03d}"
+            while base_identifier in self.molecules:
+                counter += 1
+                base_identifier = f"{identifier}_{counter:03d}"
             if import_method == 'PDB':
-                molecule = self.molecule_manager.import_from_pdb(identifier)
+                molecule = self.molecule_manager.import_from_pdb(identifier, base_identifier)  # Use original ID for fetch
             else:  # AlphaFold
                 molecule = self.molecule_manager.import_from_pdb(
-                    identifier, 
+                    identifier,  # Use original ID for fetch
+                    base_identifier,
                     database="alphafold",
                     color="plddt"
                 )
             
-            print(f"Successfully created molecule: {identifier}")  # Debug print
-            print(f"Current molecules: {list(self.molecules.keys())}")  # Debug print
+            # Store with unique identifier
+            self.molecules[base_identifier] = molecule
+            molecule.identifier = base_identifier  # Update the molecule's identifier
+            
+            # Add to UI list
+            scene = bpy.context.scene
+            item = scene.molecule_list_items.add()
+            item.identifier = base_identifier
             
             # Set as active molecule
-            self.active_molecule = identifier
+            self.active_molecule = base_identifier
             
             # Force UI refresh
             self._refresh_ui()
@@ -81,15 +95,61 @@ class ProteinBlenderScene:
             print(f"Error creating molecule: {str(e)}")
             return False
 
+    def sync_molecule_list_after_undo(*args):
+        """Synchronize the molecule list UI after undo/redo operations"""
+        print("Syncing molecule list after undo/redo")
+        # THIS FUNCTION WILL BE CALLED WHENEVER AN UNDO OR REDO IS DONE
+        '''
+        scene_manager = ProteinBlenderScene.get_instance()
+        scene = bpy.context.scene
+        
+        # Clear existing list
+        scene.molecule_list_items.clear()
+        
+        # Rebuild list from current molecules
+        for identifier, molecule in scene_manager.molecules.items():
+            if molecule.object and molecule.object.name in bpy.data.objects:
+                item = scene.molecule_list_items.add()
+                item.identifier = identifier
+        
+        # Ensure active molecule is valid
+        if scene_manager.active_molecule not in scene_manager.molecules:
+            scene_manager.active_molecule = next(iter(scene_manager.molecules)) if scene_manager.molecules else None
+        
+        # Force UI refresh
+        scene_manager._refresh_ui()
+        '''
+
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
         if identifier in self.molecules:
             # Remove from scene
             molecule = self.molecules[identifier]
-            bpy.data.objects.remove(molecule.object, do_unlink=True)
+            
+            if molecule.object:
+                # Push to undo stack before making changes
+                print("Pushing to undo stack")
+                bpy.ops.ed.undo_push(message=f"Delete Molecule {identifier}")
+
+                print("Appending undo post handler")
+                bpy.app.handlers.undo_post.append(self.sync_molecule_list_after_undo)
+
+                print("Removing object")
+                # Store object data
+                obj_data = molecule.object.data
+                
+                # Remove the object
+                bpy.data.objects.remove(molecule.object, do_unlink=True)
+                
+                # Clean up object data if no other users
+                if obj_data and obj_data.users == 0:
+                    if isinstance(obj_data, bpy.types.Mesh):
+                        bpy.data.meshes.remove(obj_data, do_unlink=True)
+            
+            # Remove from our internal tracking
             del self.molecules[identifier]
             
-            # Update UI list
+            # Update UI list - this will be restored by the undo handler if needed
             scene = bpy.context.scene
             for i, item in enumerate(scene.molecule_list_items):
                 if item.identifier == identifier:

@@ -1,9 +1,10 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty
+from bpy.props import StringProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.molecularnodes.style import STYLE_ITEMS
 
-class MOLECULE_OT_select(Operator):
+class MOLECULE_PB_OT_select(Operator):
     bl_idname = "molecule.select"
     bl_label = "Select Molecule"
     bl_description = "Select this molecule"
@@ -17,6 +18,9 @@ class MOLECULE_OT_select(Operator):
         molecule = scene_manager.molecules.get(self.molecule_id)
         
         if molecule:
+            # Set the edit identifier when selecting
+            context.scene.edit_molecule_identifier = molecule.identifier
+            
             # Deselect all objects first
             bpy.ops.object.select_all(action='DESELECT')
             # Select the molecule's object
@@ -25,7 +29,7 @@ class MOLECULE_OT_select(Operator):
             
         return {'FINISHED'}
 
-class MOLECULE_OT_edit(Operator):
+class MOLECULE_PB_OT_edit(Operator):
     bl_idname = "molecule.edit"
     bl_label = "Edit Molecule"
     bl_description = "Edit this molecule"
@@ -37,10 +41,11 @@ class MOLECULE_OT_edit(Operator):
         context.scene.selected_molecule_id = self.molecule_id
         return {'FINISHED'}
 
-class MOLECULE_OT_delete(Operator):
+class MOLECULE_PB_OT_delete(Operator):
     bl_idname = "molecule.delete"
     bl_label = "Delete Molecule"
     bl_description = "Delete this molecule"
+    bl_options = {'REGISTER', 'UNDO'}
     
     molecule_id: StringProperty()
     
@@ -48,4 +53,53 @@ class MOLECULE_OT_delete(Operator):
         scene_manager = ProteinBlenderScene.get_instance()
         scene_manager.delete_molecule(self.molecule_id)
         return {'FINISHED'}
+
+class MOLECULE_PB_OT_update_identifier(Operator):
+    bl_idname = "molecule.update_identifier"
+    bl_label = "Update Identifier"
+    bl_description = "Update the molecule's identifier"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        old_id = scene.selected_molecule_id
+        new_id = scene.edit_molecule_identifier
+        
+        if old_id == new_id or not new_id:
+            return {'CANCELLED'}
+            
+        # Update molecule identifier
+        molecule = scene_manager.molecules[old_id]
+        molecule.identifier = new_id
+        scene_manager.molecules[new_id] = scene_manager.molecules.pop(old_id)
+        
+        # Update UI list
+        for item in scene.molecule_list_items:
+            if item.identifier == old_id:
+                item.identifier = new_id
+                break
+                
+        # Update selected molecule id
+        scene.selected_molecule_id = new_id
+        
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_change_style(Operator):
+    bl_idname = "molecule.change_style"
+    bl_label = "Change Style"
+    bl_description = "Change the molecule's visualization style"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        
+        if molecule and molecule.object:
+            from ..utils.molecularnodes.blender.nodes import change_style_node
+            change_style_node(molecule.object, context.scene.molecule_style)
+            
+        return {'FINISHED'}
+
+
 

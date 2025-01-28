@@ -58,7 +58,7 @@ class ProteinWorkspaceManager:
         self.main_area = next((area for area in self.screen.areas if area.type == 'VIEW_3D'), None)
 
         # Remove default objects before returning
-        self.remove_default_objects()
+        self._remove_default_objects()
         return self.workspace
 
     def add_panels_to_workspace(self):
@@ -118,7 +118,7 @@ class ProteinWorkspaceManager:
                 self.right_area.type = 'PROPERTIES'
                 self.right_area.spaces[0].context = 'SCENE'
 
-    def remove_default_objects(self):
+    def _remove_default_objects(self):
         # Only proceed if there are exactly 3 objects
         if len(bpy.data.objects) != 3:
             return

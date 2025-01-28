@@ -28,6 +28,15 @@ class MOLECULE_PB_PT_edit(Panel):
         # Create settings UI
         box = layout.box()
         
+        # Identifier editor
+        row = box.row(align=True)
+        if scene.edit_molecule_identifier == "":
+            scene.edit_molecule_identifier = molecule.identifier
+        row.prop(scene, "edit_molecule_identifier", text="Identifier")
+        row.operator("molecule.update_identifier", text="", icon='CHECKMARK')
+        
+        box.separator()
+        
         # Style selector
         row = box.row()
         row.prop(molecule.object.mn, "import_style", text="Style")

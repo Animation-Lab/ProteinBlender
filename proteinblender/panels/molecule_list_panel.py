@@ -1,53 +1,6 @@
 import bpy
-from bpy.types import Panel, Operator
-from bpy.props import StringProperty
+from bpy.types import Panel
 from ..utils.scene_manager import ProteinBlenderScene
-
-class MOLECULE_PB_OT_select(Operator):
-    bl_idname = "molecule.select"
-    bl_label = "Select Molecule"
-    bl_description = "Select this molecule"
-    bl_order = 0
-    
-    molecule_id: StringProperty()
-    
-    def execute(self, context):
-        context.scene.selected_molecule_id = self.molecule_id
-        scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(self.molecule_id)
-        
-        if molecule:
-            # Deselect all objects first
-            bpy.ops.object.select_all(action='DESELECT')
-            # Select the molecule's object
-            molecule.object.select_set(True)
-            context.view_layer.objects.active = molecule.object
-            
-        return {'FINISHED'}
-
-class MOLECULE_PB_OT_edit(Operator):
-    bl_idname = "molecule.edit"
-    bl_label = "Edit Molecule"
-    bl_description = "Edit this molecule"
-    
-    molecule_id: StringProperty()
-    
-    def execute(self, context):
-        context.scene.show_molecule_edit_panel = True
-        context.scene.selected_molecule_id = self.molecule_id
-        return {'FINISHED'}
-
-class MOLECULE_PB_OT_delete(Operator):
-    bl_idname = "molecule.delete"
-    bl_label = "Delete Molecule"
-    bl_description = "Delete this molecule"
-    
-    molecule_id: StringProperty()
-    
-    def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
-        scene_manager.delete_molecule(self.molecule_id)
-        return {'FINISHED'}
 
 class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
@@ -59,22 +12,17 @@ class MOLECULE_PB_PT_list(Panel):
     
     @classmethod
     def poll(cls, context):
-        print("MOLECULE_PT_list poll called")
         return True
     
     def draw(self, context):
-        print("MOLECULE_PT_list draw called")
         layout = self.layout
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
-        
-        print(f"Molecules in scene_manager: {list(scene_manager.molecules.keys())}")
         
         # Create box for list
         box = layout.box()
         
         if not scene_manager.molecules:
-            print("No molecules found in scene_manager")
             box.label(text="No molecules in scene", icon='INFO')
             return
             
@@ -83,7 +31,6 @@ class MOLECULE_PB_PT_list(Panel):
         
         # Draw each molecule entry
         for molecule_id, molecule in scene_manager.molecules.items():
-            print(f"Drawing molecule: {molecule_id}")
             row = col.row(align=True)
             
             # Create clickable operator for selection
@@ -95,21 +42,29 @@ class MOLECULE_PB_PT_list(Panel):
             name_op.molecule_id = molecule_id
             
             if molecule.object:
-                # Only add style selector if mn property exists
-                if hasattr(molecule.object, "mn"):
-                    style_row = row.row()
-                    style_row.prop(molecule.object.mn, "import_style", text="")
-                
                 # Visibility toggle
                 vis_row = row.row()
                 vis_row.prop(molecule.object, "hide_viewport", text="", emboss=False)
                 
-                # Edit button
-                edit_op = row.operator("molecule.edit", text="", icon='PREFERENCES')
-                if edit_op:  # Check if operator exists before setting property
-                    edit_op.molecule_id = molecule_id
-                
                 # Delete button
                 delete_op = row.operator("molecule.delete", text="", icon='X')
-                if delete_op:  # Check if operator exists before setting property
+                if delete_op:
                     delete_op.molecule_id = molecule_id
+            
+            # If this molecule is selected, show its settings
+            if molecule_id == scene.selected_molecule_id:
+                settings_box = col.box()
+                settings_box.separator()
+                
+                # Identifier editor
+                id_row = settings_box.row(align=True)
+                id_row.prop(scene, "edit_molecule_identifier", text="Identifier")
+                id_row.operator("molecule.update_identifier", text="", icon='CHECKMARK')
+                
+                # Style selector
+                style_row = settings_box.row()
+                style_row.label(text="Style:")
+                style_op = style_row.operator("molecule.change_style", text="Change Style")
+                style_row.prop(scene, "molecule_style", text="")
+                
+                settings_box.separator()

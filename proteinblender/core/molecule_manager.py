@@ -44,12 +44,14 @@ class MoleculeManager:
         # Register all MolecularNodes classes and systems
         
         # Register properties if needed
+        '''
         if not hasattr(bpy.types.Scene, "mn"):
             from bpy.utils import register_class
             register_class(MolecularNodesSceneProperties)
             bpy.types.Scene.mn = bpy.props.PointerProperty(type=MolecularNodesSceneProperties)
+        '''
         
-    def import_from_pdb(self, pdb_id: str, style: str = "surface", **kwargs) -> MoleculeWrapper:
+    def import_from_pdb(self, pdb_id: str, molecule_id: str, style: str = "surface", **kwargs) -> MoleculeWrapper:
         """Import a molecule from PDB"""
         try:
             # Use MolecularNodes fetch functionality
@@ -62,8 +64,8 @@ class MoleculeManager:
             )
             
             # Create our wrapper object
-            wrapper = MoleculeWrapper(mol, pdb_id)
-            self.molecules[pdb_id] = wrapper
+            wrapper = MoleculeWrapper(mol, molecule_id)
+            self.molecules[molecule_id] = wrapper
             
             return wrapper
             
