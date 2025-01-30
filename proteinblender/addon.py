@@ -10,6 +10,7 @@ from .utils import scene_manager
 from .layout.workspace_setup import ProteinWorkspaceManager
 
 from .utils.molecularnodes import session
+from .utils.molecularnodes.props import MolecularNodesObjectProperties
 # from .utils.scene_manager import ProteinBlenderScene, sync_molecule_list_after_undo
 
 # Track registered classes
@@ -47,10 +48,13 @@ def register():
                 print(e)
                 pass
     bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
+    
+
     register_protein_props()
     register_molecule_props()
     # scene_manager.ProteinBlenderScene.get_instance()
-    
+    bpy.utils.register_class(MolecularNodesObjectProperties)
+    bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
     # Schedule workspace creation after 0.5 seconds
     bpy.app.timers.register(create_workspace_callback, first_interval=0.25)
 
@@ -70,6 +74,9 @@ def unregister():
     unregister_molecule_props()
     if hasattr(bpy.types.Scene, "MNSession"):
         del bpy.types.Scene.MNSession
+        del bpy.types.Object.mn
+        # Unregister the property group
+        bpy.utils.unregister_class(MolecularNodesObjectProperties)
 
     # Remove undo handler
     # if sync_molecule_list_after_undo in bpy.app.handlers.undo_post:

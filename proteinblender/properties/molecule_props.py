@@ -36,7 +36,7 @@ def register():
         name="Style",
         description="Visualization style for the molecule",
         items=STYLE_ITEMS,
-        default="cartoon"
+        default="surface"
     )
 
 def unregister():

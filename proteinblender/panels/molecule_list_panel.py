@@ -64,7 +64,7 @@ class MOLECULE_PB_PT_list(Panel):
                 # Style selector
                 style_row = settings_box.row()
                 style_row.label(text="Style:")
-                style_op = style_row.operator("molecule.change_style", text="Change Style")
                 style_row.prop(scene, "molecule_style", text="")
+                style_row.operator("molecule.change_style", text="Change Style")
                 
                 settings_box.separator()
