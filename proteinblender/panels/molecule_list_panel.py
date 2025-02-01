@@ -68,3 +68,9 @@ class MOLECULE_PB_PT_list(Panel):
                 style_row.operator("molecule.change_style", text="Change Style")
                 
                 settings_box.separator()
+
+                # Chain selector
+                chain_row = settings_box.row()
+                chain_row.label(text="Chain:")
+                chain_row.prop(scene, "selected_chain", text="")
+                chain_row.operator("molecule.select_protein_chain", text="Select Chain")

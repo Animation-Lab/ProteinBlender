@@ -18,6 +18,7 @@ class MoleculeWrapper:
         self.molecule = molecule
         self.identifier = identifier  # PDB ID or filename
         self.style = "spheres"  # Default style
+        self.select_protein_chain= "NONE"
         
     @property
     def object(self) -> bpy.types.Object:

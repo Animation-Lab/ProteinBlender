@@ -27,6 +27,35 @@ class MOLECULE_PB_OT_select(Operator):
             molecule.object.select_set(True)
             context.view_layer.objects.active = molecule.object
             
+            # Get unique chain IDs from the molecule's object
+            if molecule.object:
+                # Get the geometry nodes modifier
+                gn_mod = molecule.object.modifiers.get("MolecularNodes")
+                if gn_mod and gn_mod.node_group:
+                    # Create chain enum items
+                    chain_items = []
+                    # Get chain IDs from the molecule's attributes
+                    chain_ids = set()  # Using a set to get unique chain IDs
+                    if "chain_id" in molecule.object.data.attributes:
+                        chain_attr = molecule.object.data.attributes["chain_id"]
+                        for value in chain_attr.data:
+                            chain_ids.add(value.value)
+                    
+                    # Create enum items for each chain
+                    chain_items = [("NONE", "None", "None")]
+                    chain_items.extend([(str(chain), f"Chain {chain}", f"Chain {chain}") 
+                                      for chain in sorted(chain_ids)])
+                    
+                    # Update the enum property
+                    bpy.types.Scene.selected_chain = EnumProperty(
+                        name="Chain",
+                        description="Selects the protein's chain",
+                        items=chain_items,
+                        default="NONE"
+                    )
+                    # Force a property update
+                    context.scene.selected_chain = "NONE"
+            
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_edit(Operator):
@@ -101,5 +130,24 @@ class MOLECULE_PB_OT_change_style(Operator):
             
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_select_protein_chain(Operator):
+    bl_idname = "molecule.select_protein_chain"
+    bl_label = "Select Chain"
+    bl_description = "Selects the molecule's chain"
 
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        molecule.select_protein_chain = context.scene.selected_chain
+
+        
+
+        '''
+        if molecule and molecule.object:
+            from ..utils.molecularnodes.blender.nodes import change_style_node
+            change_style_node(molecule.object, context.scene.molecule_style)
+        '''
+
+        return {'FINISHED'}
 

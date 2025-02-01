@@ -17,9 +17,17 @@ class MoleculeListItem(PropertyGroup):
         items=STYLE_ITEMS,
         default="cartoon"
     )
+    chain: EnumProperty(
+        name="Chain",
+        description="Selects the protein's chain",
+        items=(("NONE", "None", "None"),),
+        default="NONE"
+    )
+
 
 def register():
     # Register the PropertyGroup class first
+
     bpy.utils.register_class(MoleculeListItem)
     
     # Then register the properties
@@ -39,14 +47,23 @@ def register():
         default="surface"
     )
 
+    bpy.types.Scene.selected_chain = EnumProperty(
+        name="Chain",
+        description="Selects the protein's chain",
+        items=(("NONE", "None", "None"),),
+        default="NONE"
+    )
+
 def unregister():
     # Remove properties
     del bpy.types.Scene.show_molecule_edit_panel
     del bpy.types.Scene.selected_molecule_id
     del bpy.types.Scene.molecule_list_index
+
     del bpy.types.Scene.molecule_list_items
     del bpy.types.Scene.edit_molecule_identifier
     del bpy.types.Scene.molecule_style
-    
+    del bpy.types.Scene.selected_chain
+
     # Unregister the PropertyGroup class last
     bpy.utils.unregister_class(MoleculeListItem) 
