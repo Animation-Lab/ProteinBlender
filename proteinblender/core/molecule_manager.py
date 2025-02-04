@@ -71,8 +71,8 @@ class MoleculeWrapper:
             
             # Update chain selections based on button states
             for chain_id in chain_node.inputs.keys():
-                if chain_id.startswith("Chain "):
-                    chain_node.inputs[chain_id].default_value = chain_id[6:] in chain_ids
+                if chain_id.isdigit():  # Check if input is a number
+                    chain_node.inputs[chain_id].default_value = chain_id in chain_ids
 
 class MoleculeManager:
     """Manages all molecules in the scene"""
