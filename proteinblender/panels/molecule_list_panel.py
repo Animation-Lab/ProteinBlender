@@ -1,6 +1,7 @@
 import bpy
-from bpy.types import Panel
+from bpy.types import Panel, Operator
 from ..utils.scene_manager import ProteinBlenderScene
+from bpy.props import StringProperty
 
 class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
@@ -71,6 +72,56 @@ class MOLECULE_PB_PT_list(Panel):
 
                 # Chain selector
                 chain_row = settings_box.row()
-                chain_row.label(text="Chain:")
-                chain_row.prop(scene, "selected_chain", text="")
-                chain_row.operator("molecule.select_protein_chain", text="Select Chain")
+                chain_row.label(text="Chains:")
+                chain_row.separator()
+                
+                # Create flow layout for chain buttons
+                flow = settings_box.row()
+                # flow.alignment = 'LEFT'
+                flow.alignment = 'CENTER'
+                
+                # Create a grid flow that will wrap buttons
+                grid = flow.grid_flow(row_major=True, columns=10, even_columns=True, even_rows=True, align=True)
+                # grid = flow.grid_flow(row_major=True, even_columns=True, even_rows=True, align=True)
+                
+                for chain_item in scene.chain_selections:
+                    # Create sub-row for scaling
+                    btn_row = grid.row(align=True)
+                    btn_row.scale_x = 1.2
+                    btn_row.scale_y = 0.8
+                    
+                    # Create button in scaled row
+                    btn = btn_row.operator(
+                        "molecule.toggle_chain_selection",
+                        text=chain_item.chain_id,
+                        depress=chain_item.is_selected
+                    )
+                    btn.chain_id = chain_item.chain_id
+
+class MOLECULE_PB_OT_toggle_chain_selection(Operator):
+    bl_idname = "molecule.toggle_chain_selection"
+    bl_label = "Toggle Chain"
+    bl_description = "Toggle selection state of this chain"
+    
+    chain_id: StringProperty()
+    
+    def execute(self, context):
+        scene = context.scene
+        
+        # Find and toggle the selected state for this chain
+        for chain_item in scene.chain_selections:
+            if chain_item.chain_id == self.chain_id:
+                chain_item.is_selected = not chain_item.is_selected
+                break
+                
+        # Update the molecule visualization
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if molecule and molecule.object:
+            # Get all selected chain IDs
+            selected_chains = [item.chain_id for item in scene.chain_selections 
+                             if item.is_selected]
+            # Update the molecule's chain selection
+            molecule.select_chains(selected_chains)
+        
+        return {'FINISHED'}

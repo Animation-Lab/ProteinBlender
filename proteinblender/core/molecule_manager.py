@@ -34,6 +34,46 @@ class MoleculeWrapper:
             print(f"Error changing style for {self.identifier}: {str(e)}")
             raise
 
+    def select_chains(self, chain_ids):
+        """Select specific chains in the molecule"""
+        if self.object and "chain_id" in self.object.data.attributes:
+            # Get the geometry nodes modifier
+            gn_mod = self.object.modifiers.get("MolecularNodes")
+            if gn_mod is None:
+                return
+            
+            node_group = gn_mod.node_group
+            if node_group is None:
+                return
+            
+            # Find existing chain selection node or create a new one
+            chain_node = None
+            for node in node_group.nodes:
+                if node.bl_idname == "GeometryNodeGroup" and node.node_tree and "Select Chain" in node.node_tree.name:
+                    chain_node = node
+                    break
+                
+            if chain_node is None:
+                # Import needed functions
+                from ..utils.molecularnodes.blender.nodes import add_selection
+                
+                # Get all available chains from attributes
+                chain_attr = self.object.data.attributes["chain_id"]
+                all_chains = sorted({value.value for value in chain_attr.data})
+                
+                # Create chain selection node using MolecularNodes' add_selection
+                chain_node = add_selection(
+                    node_group,
+                    f"Select Chain {self.object.name}",
+                    all_chains,
+                    field="chain_id"
+                )
+            
+            # Update chain selections based on button states
+            for chain_id in chain_node.inputs.keys():
+                if chain_id.startswith("Chain "):
+                    chain_node.inputs[chain_id].default_value = chain_id[6:] in chain_ids
+
 class MoleculeManager:
     """Manages all molecules in the scene"""
     def __init__(self):

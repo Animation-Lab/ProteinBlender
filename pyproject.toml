@@ -3,7 +3,13 @@ name = "proteinblender"
 version = "4.2.10"
 description = "Visualize and animate proteins in Blender"
 readme = "README.md"
-dependencies = ["databpy", "MDAnalysis>=2.7.0", "biotite~=0.40", "mrcfile", "starfile"]
+dependencies = [
+    "databpy>=0.0.8",
+    "MDAnalysis>=2.8.0",
+    "biotite>=0.41.2",
+    "mrcfile>=1.5.3",
+    "starfile>=0.5.11"
+]
 maintainers = [{name = "Dillon Lee", email = "dlee123@gmail.com"}]
 
 [project.urls]

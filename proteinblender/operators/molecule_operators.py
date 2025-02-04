@@ -18,6 +18,20 @@ class MOLECULE_PB_OT_select(Operator):
         molecule = scene_manager.molecules.get(self.molecule_id)
         
         if molecule:
+            # Clear existing chain selections
+            context.scene.chain_selections.clear()
+            
+            # Get unique chain IDs from the molecule's object
+            if molecule.object and "chain_id" in molecule.object.data.attributes:
+                chain_attr = molecule.object.data.attributes["chain_id"]
+                chain_ids = sorted(set(value.value for value in chain_attr.data))
+                
+                # Create selection items for each chain
+                for chain_id in chain_ids:
+                    item = context.scene.chain_selections.add()
+                    item.chain_id = str(chain_id)
+                    item.is_selected = False
+            
             # Set the edit identifier when selecting
             context.scene.edit_molecule_identifier = molecule.identifier
             

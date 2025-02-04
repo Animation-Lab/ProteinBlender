@@ -4,6 +4,19 @@ from bpy.props import (BoolProperty, StringProperty, CollectionProperty,
 from bpy.types import PropertyGroup
 from ..utils.molecularnodes.style import STYLE_ITEMS
 
+class ChainSelectionItem(PropertyGroup):
+    """Represents a selectable chain"""
+    chain_id: StringProperty(
+        name="Chain ID",
+        description="ID of the protein chain",
+        default=""
+    )
+    is_selected: BoolProperty(
+        name="Selected",
+        description="Whether this chain is currently selected",
+        default=False
+    )
+
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""
     identifier: StringProperty(
@@ -17,17 +30,10 @@ class MoleculeListItem(PropertyGroup):
         items=STYLE_ITEMS,
         default="cartoon"
     )
-    chain: EnumProperty(
-        name="Chain",
-        description="Selects the protein's chain",
-        items=(("NONE", "None", "None"),),
-        default="NONE"
-    )
-
 
 def register():
-    # Register the PropertyGroup class first
-
+    # Register the PropertyGroup classes first
+    bpy.utils.register_class(ChainSelectionItem)
     bpy.utils.register_class(MoleculeListItem)
     
     # Then register the properties
@@ -46,24 +52,16 @@ def register():
         items=STYLE_ITEMS,
         default="surface"
     )
-
-    bpy.types.Scene.selected_chain = EnumProperty(
-        name="Chain",
-        description="Selects the protein's chain",
-        items=(("NONE", "None", "None"),),
-        default="NONE"
-    )
+    bpy.types.Scene.chain_selections = CollectionProperty(type=ChainSelectionItem)
 
 def unregister():
-    # Remove properties
+    del bpy.types.Scene.chain_selections
+    del bpy.types.Scene.molecule_style
+    del bpy.types.Scene.edit_molecule_identifier
     del bpy.types.Scene.show_molecule_edit_panel
     del bpy.types.Scene.selected_molecule_id
     del bpy.types.Scene.molecule_list_index
-
     del bpy.types.Scene.molecule_list_items
-    del bpy.types.Scene.edit_molecule_identifier
-    del bpy.types.Scene.molecule_style
-    del bpy.types.Scene.selected_chain
-
-    # Unregister the PropertyGroup class last
-    bpy.utils.unregister_class(MoleculeListItem) 
+    
+    bpy.utils.unregister_class(MoleculeListItem)
+    bpy.utils.unregister_class(ChainSelectionItem) 
