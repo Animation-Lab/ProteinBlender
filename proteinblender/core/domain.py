@@ -1,14 +1,15 @@
-from dataclasses import dataclass
-from typing import Optional
+from bpy.types import PropertyGroup
+from bpy.props import BoolProperty, StringProperty, IntProperty
 
-@dataclass
-class Domain:
+class Domain(PropertyGroup):
     """Represents a continuous segment of amino acids within a chain"""
-    chain_id: str
-    start: int
-    end: int
-    name: Optional[str] = None
+    is_expanded: BoolProperty(default=False)
+    chain_id: StringProperty()
+    start: IntProperty()
+    end: IntProperty()
+    name: StringProperty()
 
     def __post_init__(self):
         if self.start > self.end:
             self.start, self.end = self.end, self.start 
+

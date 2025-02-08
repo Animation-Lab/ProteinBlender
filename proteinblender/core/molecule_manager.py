@@ -19,8 +19,8 @@ class MoleculeWrapper:
         self.molecule = molecule
         self.identifier = identifier  # PDB ID or filename
         self.style = "spheres"  # Default style
-        self.select_protein_chain= "NONE"
-        self.domains: List[Domain] = []
+        self.select_protein_chain = "NONE"
+        self.domains = bpy.data.collections.new(f"{identifier}_domains")
         
     @property
     def object(self) -> bpy.types.Object:
@@ -79,8 +79,82 @@ class MoleculeWrapper:
     def add_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> None:
         """Add a new domain to the molecule"""
         print(f"Adding domain: {chain_id}, {start}, {end}, {name}")
-        domain = Domain(chain_id=chain_id, start=start, end=end, name=name)
-        self.domains.append(domain)
+        
+        # Create new domain
+        new_domain = self.domains.objects.new(name="Domain" if not name else name)
+        new_domain.chain_id = chain_id
+        new_domain.start = start
+        new_domain.end = end
+        new_domain.name = name if name else ""
+        
+        # Get the node group from the MolecularNodes modifier
+        gn_mod = self.object.modifiers.get("MolecularNodes")
+        if gn_mod and gn_mod.node_group:
+            node_group = gn_mod.node_group
+            
+            # Get existing nodes
+            group_input = nodes.get_input(node_group)
+            group_output = nodes.get_output(node_group)
+            style_node = nodes.style_node(node_group)
+            
+            # Find existing Join Geometry node
+            join_node = None
+            original_select_node = None
+            for node in node_group.nodes:
+                if node.bl_idname == "GeometryNodeJoinGeometry":
+                    join_node = node
+                elif (node.bl_idname == "GeometryNodeGroup" and 
+                      node.node_tree and "Select Res ID Range" in node.node_tree.name):
+                    original_select_node = node
+            
+            # If this is the first domain (no Join Geometry node exists)
+            if join_node is None:
+                # Create original Select Res ID Range node
+                original_select_node = nodes.add_custom(node_group, "Select Res ID Range")
+                original_select_node.inputs["Min"].default_value = 0
+                original_select_node.inputs["Max"].default_value = 9999
+                
+                # Create Join Geometry node
+                join_node = node_group.nodes.new("GeometryNodeJoinGeometry")
+                
+                # Position nodes
+                style_pos = style_node.location
+                join_node.location = (style_pos[0] + 200, style_pos[1])
+                original_select_node.location = (style_pos[0] - 200, style_pos[1] - 200)
+                
+                # Connect original nodes
+                node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
+                node_group.links.new(style_node.outputs[0], join_node.inputs[0])
+                node_group.links.new(join_node.outputs[0], group_output.inputs[0])
+            
+            # Create new domain nodes
+            color_common = nodes.add_custom(node_group, "Color Common")
+            set_color = nodes.add_custom(node_group, "Set Color")
+            select_node = nodes.add_custom(node_group, "Select Res ID Range")
+            style_surface = nodes.add_custom(node_group, "Style Surface")
+            
+            # Set Select Res ID Range values
+            select_node.inputs["Min"].default_value = start
+            select_node.inputs["Max"].default_value = end
+            
+            # Position nodes (offset each set of nodes vertically)
+            base_y_offset = -300 * (len(self.domains) + 1)
+            style_pos = style_node.location
+            color_common.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
+            set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
+            select_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
+            style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
+            
+            # Connect nodes
+            node_group.links.new(color_common.outputs["Color"], set_color.inputs["Color"])
+            node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
+            node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
+            node_group.links.new(select_node.outputs["Selection"], style_surface.inputs["Selection"])
+            node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+            
+            # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
+            if original_select_node:
+                node_group.links.new(select_node.outputs["Inverted"], original_select_node.inputs["And"])
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

@@ -4,6 +4,7 @@ from bpy.props import (BoolProperty, StringProperty, CollectionProperty,
 from bpy.types import PropertyGroup
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.scene_manager import ProteinBlenderScene
+from ..core.domain import Domain
 
 class ChainSelectionItem(PropertyGroup):
     """Represents a selectable chain"""
@@ -89,6 +90,8 @@ class MoleculeListItem(PropertyGroup):
         update=lambda self, context: self.ensure_valid_domain_range(context, "end")
     )
     
+    domains: CollectionProperty(type=Domain)
+    
     def ensure_valid_domain_range(self, context, changed_prop):
         if changed_prop == "start" and self.domain_end < self.domain_start:
             self.domain_end = self.domain_start
@@ -119,7 +122,7 @@ def ensure_valid_scene_domain_range(self, context, changed_prop):
         self.domain_start = self.domain_end
 
 def register():
-    # Register the PropertyGroup classes first
+    # Register Domain first since other classes might depend on it
     bpy.utils.register_class(ChainSelectionItem)
     bpy.utils.register_class(MoleculeListItem)
     
