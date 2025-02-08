@@ -19,8 +19,7 @@ class MoleculeWrapper:
         self.molecule = molecule
         self.identifier = identifier  # PDB ID or filename
         self.style = "spheres"  # Default style
-        self.select_protein_chain = "NONE"
-        self.domains = bpy.data.collections.new(f"{identifier}_domains")
+        self.select_protein_chain= "NONE"
         
     @property
     def object(self) -> bpy.types.Object:
@@ -79,13 +78,19 @@ class MoleculeWrapper:
     def add_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> None:
         """Add a new domain to the molecule"""
         print(f"Adding domain: {chain_id}, {start}, {end}, {name}")
+        # Create domain for node management
         
-        # Create new domain
-        new_domain = self.domains.objects.new(name="Domain" if not name else name)
-        new_domain.chain_id = chain_id
-        new_domain.start = start
-        new_domain.end = end
-        new_domain.name = name if name else ""
+        # Get the molecule list item from the scene
+        scene = bpy.context.scene
+        for item in scene.molecule_list_items:
+            if item.identifier == self.identifier:
+                # Create new domain through the collection property
+                new_domain = item.domains.add()
+                new_domain.chain_id = chain_id
+                new_domain.start = start
+                new_domain.end = end
+                new_domain.name = name if name else ""
+                break
         
         # Get the node group from the MolecularNodes modifier
         gn_mod = self.object.modifiers.get("MolecularNodes")
@@ -138,7 +143,7 @@ class MoleculeWrapper:
             select_node.inputs["Max"].default_value = end
             
             # Position nodes (offset each set of nodes vertically)
-            base_y_offset = -300 * (len(self.domains) + 1)
+            base_y_offset = -300 * (len(item.domains) + 1)
             style_pos = style_node.location
             color_common.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
             set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)

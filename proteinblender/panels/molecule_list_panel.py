@@ -119,29 +119,33 @@ class MOLECULE_PB_PT_list(Panel):
                     # Add separator after creation controls
                     domain_box.separator()
                     
-                    # Display existing domains in reverse order (newest first)
-                    for domain in reversed(molecule.domains):
-                        # Create box for each domain
-                        domain_header = domain_box.box()
-                        header_row = domain_header.row()
-                        
-                        # Add expand/collapse triangle
-                        header_row.prop(
-                            domain, "is_expanded",
-                            icon="TRIA_DOWN" if domain.is_expanded else "TRIA_RIGHT",
-                            icon_only=True,
-                            emboss=False
-                        )
-                        
-                        # Add domain label
-                        header_row.label(
-                            text=f"Chain {domain.chain_id}: {domain.start} - {domain.end}"
-                        )
-                        
-                        # If expanded, show domain settings
-                        if domain.is_expanded:
-                            domain_content = domain_header.column()
-                            # We'll add more settings here later
+                    # Get the molecule list item that corresponds to this molecule
+                    for item in scene.molecule_list_items:
+                        if item.identifier == molecule_id:
+                            # Display existing domains in reverse order (newest first)
+                            for domain in reversed(item.domains):
+                                # Create box for each domain
+                                domain_header = domain_box.box()
+                                header_row = domain_header.row()
+                                
+                                # Add expand/collapse triangle
+                                header_row.prop(
+                                    domain, "is_expanded",
+                                    icon="TRIA_DOWN" if domain.is_expanded else "TRIA_RIGHT",
+                                    icon_only=True,
+                                    emboss=False
+                                )
+                                
+                                # Add domain label
+                                header_row.label(
+                                    text=f"Chain {domain.chain_id}: {domain.start} - {domain.end}"
+                                )
+                                
+                                # If expanded, show domain settings
+                                if domain.is_expanded:
+                                    domain_content = domain_header.column()
+                                    # We'll add more settings here later
+                            break
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):
     bl_idname = "molecule.toggle_chain_selection"
