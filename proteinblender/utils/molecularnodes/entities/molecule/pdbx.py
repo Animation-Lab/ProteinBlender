@@ -68,6 +68,11 @@ class PDBX(Molecule):
         model: int | None = None,
     ):
         array = pdbx.get_structure(self.file, model=model, extra_fields=extra_fields)
+        
+        # Get chain mapping and store it
+        num_to_orig, orig_to_num = self._get_chain_mapping(array, self.file)
+        array.chain_id_mapping = num_to_orig
+        
         array = self.set_extra_annotations(array, self.file)
 
         if not array.bonds and bonds:
@@ -108,7 +113,34 @@ class PDBX(Molecule):
         return matrices
 
     @staticmethod
+    def _get_chain_mapping(array, file):
+        """Get both numeric and original chain IDs"""
+        chain_ids = file.block["entity_poly"]["pdbx_strand_id"].as_array(str)
+        
+        # Create mapping of original chain IDs to numeric IDs
+        chains = []
+        for chain_str in chain_ids:
+            chains.extend(chain_str.split(","))
+        
+        # Create sorted unique list of chain IDs
+        unique_chains = sorted(set(chains))
+        
+        # Create mapping dictionaries
+        num_to_orig = {i: chain for i, chain in enumerate(unique_chains)}
+        orig_to_num = {chain: i for i, chain in enumerate(unique_chains)}
+        
+        return num_to_orig, orig_to_num
+
+    @staticmethod
     def _get_entity_id(array, file):
+        num_to_orig, orig_to_num = PDBX._get_chain_mapping(array, file)
+        
+        # Store the mapping in a custom property that will persist
+        array.chain_id_mapping = num_to_orig  # This gets lost
+        # Store as a string property that will be transferred to the mesh
+        array.chain_mapping_str = ",".join(f"{k}:{v}" for k, v in num_to_orig.items())
+        
+        # Rest of the original _get_entity_id function...
         chain_ids = file.block["entity_poly"]["pdbx_strand_id"].as_array(str)
 
         # the chain_ids are an array of individual items np.array(['A,B', 'C', 'D,E,F'])

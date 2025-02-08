@@ -8,6 +8,7 @@ from ..utils.molecularnodes.blender import nodes
 from ..utils.molecularnodes.props import MolecularNodesSceneProperties
 from ..utils.molecularnodes.session import MNSession
 from ..utils.molecularnodes.addon import _test_register
+from .domain import Domain
 
 class MoleculeWrapper:
     """
@@ -19,6 +20,7 @@ class MoleculeWrapper:
         self.identifier = identifier  # PDB ID or filename
         self.style = "spheres"  # Default style
         self.select_protein_chain= "NONE"
+        self.domains: List[Domain] = []
         
     @property
     def object(self) -> bpy.types.Object:
@@ -73,6 +75,12 @@ class MoleculeWrapper:
             for chain_id in chain_node.inputs.keys():
                 if chain_id.isdigit():  # Check if input is a number
                     chain_node.inputs[chain_id].default_value = chain_id in chain_ids
+
+    def add_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> None:
+        """Add a new domain to the molecule"""
+        print(f"Adding domain: {chain_id}, {start}, {end}, {name}")
+        domain = Domain(chain_id=chain_id, start=start, end=end, name=name)
+        self.domains.append(domain)
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

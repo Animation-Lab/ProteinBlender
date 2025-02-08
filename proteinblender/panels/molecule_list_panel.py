@@ -72,7 +72,7 @@ class MOLECULE_PB_PT_list(Panel):
 
                 # Chain selector
                 chain_row = settings_box.row()
-                chain_row.label(text="Chains:")
+                # chain_row.label(text="Chains:")
                 chain_row.separator()
                 
                 # Create flow layout for chain buttons
@@ -97,6 +97,30 @@ class MOLECULE_PB_PT_list(Panel):
                         depress=chain_item.is_selected
                     )
                     btn.chain_id = chain_item.chain_id
+
+                # Domain Creation Section
+                settings_box.separator()
+                domain_box = settings_box.box()
+                domain_box.label(text="Domains:")
+                
+                # Domain creation row
+                domain_row = domain_box.row(align=True)
+                
+                # Chain dropdown
+                if molecule.object and "chain_id" in molecule.object.data.attributes:
+                    # Chain dropdown
+                    domain_row.prop(scene, "selected_chain_for_domain", text="")
+                    
+                    # Start and end residue inputs
+                    domain_row.prop(scene, "domain_start", text="Start")
+                    domain_row.prop(scene, "domain_end", text="End")
+                    
+                    # Create domain button
+                    create_op = domain_row.operator(
+                        "molecule.create_domain",
+                        text="Create Domain",
+                        icon='ADD'
+                    )
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):
     bl_idname = "molecule.toggle_chain_selection"

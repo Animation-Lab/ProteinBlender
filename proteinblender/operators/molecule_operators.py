@@ -165,3 +165,23 @@ class MOLECULE_PB_OT_select_protein_chain(Operator):
 
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_create_domain(Operator):
+    bl_idname = "molecule.create_domain"
+    bl_label = "Create Domain"
+    bl_description = "Create a new domain in the selected chain"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        
+        if molecule and scene.selected_chain_for_domain:
+            molecule.add_domain(
+                chain_id=scene.selected_chain_for_domain,
+                start=scene.domain_start,
+                end=scene.domain_end
+            )
+            
+        return {'FINISHED'}
+
