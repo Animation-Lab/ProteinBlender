@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Panel, Operator
 from ..utils.scene_manager import ProteinBlenderScene
 from bpy.props import StringProperty
+from ..properties.molecule_props import get_chain_mapping_from_str
 
 class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
@@ -137,8 +138,18 @@ class MOLECULE_PB_PT_list(Panel):
                                 )
                                 
                                 # Add domain label
+                                # Try to get mapping from custom property
+                                mapping_str = molecule.object.data.get("chain_mapping_str", "")
+                                mapping = get_chain_mapping_from_str(mapping_str)
+                                
+                                if mapping:
+                                    chain_label = mapping.get(int(domain.chain_id), domain.chain_id)
+                                else:
+                                    # Fallback to letter mapping (A, B, C...)
+                                    chain_label = chr(65 + int(domain.chain_id))
+                                
                                 header_row.label(
-                                    text=f"Chain {domain.chain_id}: {domain.start} - {domain.end}"
+                                    text=f"Chain {chain_label}: {domain.start} - {domain.end}"
                                 )
                                 
                                 # If expanded, show domain settings
