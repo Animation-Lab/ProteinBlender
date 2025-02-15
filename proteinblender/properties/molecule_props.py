@@ -5,6 +5,7 @@ from bpy.types import PropertyGroup
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.scene_manager import ProteinBlenderScene
 from ..core.domain import Domain
+from ..utils.molecularnodes.blender import nodes
 
 class ChainSelectionItem(PropertyGroup):
     """Represents a selectable chain"""
@@ -38,14 +39,11 @@ def get_chain_items(self, context):
         chain_attr = molecule.object.data.attributes["chain_id"]
         chain_ids = sorted({value.value for value in chain_attr.data})
         
-        # Try to get mapping from custom property
-        mapping_str = molecule.object.data.get("chain_mapping_str", "")
-        mapping = get_chain_mapping_from_str(mapping_str)
-        
-        if mapping:
+        # Use the mapping stored in the molecule wrapper
+        if molecule.chain_mapping:
             return [(str(chain_id), 
-                    f"Chain {mapping[chain_id]}", 
-                    mapping[chain_id]) 
+                    f"Chain {molecule.chain_mapping.get(chain_id, chr(65 + chain_id))}", 
+                    molecule.chain_mapping.get(chain_id, chr(65 + chain_id))) 
                    for chain_id in chain_ids]
         else:
             # Fallback to numeric IDs if mapping not available
@@ -92,13 +90,35 @@ class MoleculeListItem(PropertyGroup):
     
     domains: CollectionProperty(type=Domain)
     
+    def get_chain_range(self, context):
+        """Get the absolute range for the currently selected chain"""
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        
+        if molecule and self.selected_chain_for_domain != "NONE":
+            chain_ranges = molecule.chain_residue_ranges
+            if self.selected_chain_for_domain in chain_ranges:
+                return chain_ranges[self.selected_chain_for_domain]['absolute']
+        return (1, 999999)  # fallback range
+
     def ensure_valid_domain_range(self, context, changed_prop):
+        """Ensure domain range is valid and within chain's absolute range"""
+        # Get the valid range for the selected chain
+        min_res, max_res = self.get_chain_range(context)
+        print(f"Valid range: {min_res}, {max_res}")
+        
+        # Clamp values to valid range
+        self.domain_start = max(min(self.domain_start, max_res), min_res)
+        self.domain_end = max(min(self.domain_end, max_res), min_res)
+        
+        # Ensure start doesn't exceed end and vice versa
         if changed_prop == "start" and self.domain_end < self.domain_start:
             self.domain_end = self.domain_start
         elif changed_prop == "end" and self.domain_start > self.domain_end:
             self.domain_start = self.domain_end
 
 def get_max_residue_for_chain(molecule, chain_id):
+    print(f"Getting max residue for chain: {chain_id}")
     """Get the maximum residue number for a given chain"""
     if not (molecule and molecule.object and 
             "residue_id" in molecule.object.data.attributes and 
@@ -116,10 +136,37 @@ def get_max_residue_for_chain(molecule, chain_id):
     return max(residue_ids) if residue_ids else 1
 
 def ensure_valid_scene_domain_range(self, context, changed_prop):
-    if changed_prop == "start" and self.domain_end < self.domain_start:
-        self.domain_end = self.domain_start
-    elif changed_prop == "end" and self.domain_start > self.domain_end:
-        self.domain_start = self.domain_end
+    """Ensure domain range is valid for the selected chain and update selection"""
+    print(f"Ensuring valid scene domain range: {changed_prop}")
+    print(f"selected molecule id: {context.scene.selected_molecule_id}")
+    
+    # Get the current molecule list item
+    scene_manager = ProteinBlenderScene.get_instance()
+    molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+    
+    if molecule:
+        author_chain_id = molecule.get_author_chain_id(int(context.scene.selected_chain_for_domain))
+        min_res, max_res = molecule.chain_residue_ranges[author_chain_id]['absolute']
+        
+        if changed_prop == "chain":
+            # When chain changes, set domain to full range of new chain
+            domain_start = min_res
+            domain_end = max_res
+        else:
+            # First clamp both values to valid range
+            domain_start = max(min(self.domain_start, max_res), min_res)
+            domain_end = max(min(self.domain_end, max_res), min_res)
+            
+            # Then adjust based on which value changed
+            if changed_prop == "start":
+                if domain_start > domain_end:
+                    domain_end = domain_start
+            else:  # changed_prop == "end"
+                if domain_end < domain_start:
+                    domain_start = domain_end
+        
+        self['domain_start'] = int(domain_start)
+        self['domain_end'] = int(domain_end)
 
 def register():
     # Register Domain first since other classes might depend on it
@@ -165,7 +212,8 @@ def register():
     bpy.types.Scene.selected_chain_for_domain = EnumProperty(
         name="Chain",
         description="Select chain for domain creation",
-        items=get_chain_items
+        items=get_chain_items,
+        update=lambda self, context: ensure_valid_scene_domain_range(self, context, "chain")
     )
 
 def unregister():

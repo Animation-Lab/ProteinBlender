@@ -1,6 +1,7 @@
 from typing import Optional, Dict, List
 import bpy
 from pathlib import Path
+import numpy as np
 
 from ..utils.molecularnodes.entities import fetch, load_local
 from ..utils.molecularnodes.entities.molecule.molecule import Molecule
@@ -20,6 +21,13 @@ class MoleculeWrapper:
         self.identifier = identifier  # PDB ID or filename
         self.style = "spheres"  # Default style
         self.select_protein_chain= "NONE"
+        # Store the chain mapping if available
+        self.chain_mapping = {}
+        if hasattr(molecule.array, 'chain_mapping_str'):
+            self.chain_mapping = self._parse_chain_mapping(molecule.array.chain_mapping_str)
+        
+        # Initialize chain residue ranges
+        self.chain_residue_ranges = self._get_chain_residue_ranges()
         
     @property
     def object(self) -> bpy.types.Object:
@@ -35,6 +43,7 @@ class MoleculeWrapper:
             print(f"Error changing style for {self.identifier}: {str(e)}")
             raise
 
+    '''
     def select_chains(self, chain_ids):
         """Select specific chains in the molecule"""
         if self.object and "chain_id" in self.object.data.attributes:
@@ -47,6 +56,25 @@ class MoleculeWrapper:
             if node_group is None:
                 return
             
+            # Get chain attribute data
+            chain_attr = self.object.data.attributes["chain_id"]
+            numeric_chain_ids = sorted({value.value for value in chain_attr.data})
+            
+            # Get chain mapping if available
+            mapping_str = self.object.data.get("chain_mapping_str", "")
+            chain_mapping = {}
+            if mapping_str:
+                for pair in mapping_str.split(","):
+                    if ":" in pair:
+                        k, v = pair.split(":")
+                        chain_mapping[int(k)] = v
+            
+            # Map numeric IDs to author chain IDs
+            mapped_chains = {}
+            for chain_id in numeric_chain_ids:
+                mapped_chain_id = chain_mapping.get(chain_id, str(chain_id))
+                mapped_chains[str(mapped_chain_id)] = chain_id
+            
             # Find existing chain selection node or create a new one
             chain_node = None
             for node in node_group.nodes:
@@ -58,35 +86,69 @@ class MoleculeWrapper:
                 # Import needed functions
                 from ..utils.molecularnodes.blender.nodes import add_selection
                 
-                # Get all available chains from attributes
-                chain_attr = self.object.data.attributes["chain_id"]
-                all_chains = sorted({value.value for value in chain_attr.data})
-                
-                # Create chain selection node using MolecularNodes' add_selection
+                # Create chain selection node using mapped chain IDs
                 chain_node = add_selection(
                     node_group,
                     f"Select Chain {self.object.name}",
-                    all_chains,
+                    list(mapped_chains.keys()),
                     field="chain_id"
                 )
             
-            # Update chain selections based on button states
+            # Update chain selections based on button states using mapped IDs
             for chain_id in chain_node.inputs.keys():
-                if chain_id.isdigit():  # Check if input is a number
-                    chain_node.inputs[chain_id].default_value = chain_id in chain_ids
+                if chain_id.isdigit():
+                    numeric_id = mapped_chains.get(chain_id, int(chain_id))
+                    chain_node.inputs[chain_id].default_value = str(numeric_id) in chain_ids
+    '''
+
+    def select_chains(self, chain_ids):
+        """Select specific chains in the molecule"""
+        if self.object and "chain_id" in self.object.data.attributes:
+            # Get the geometry nodes modifier
+            gn_mod = self.object.modifiers.get("MolecularNodes")
+            if gn_mod is None:
+                return
+            
+            node_group = gn_mod.node_group
+            if node_group is None:
+                return
+            
+            # Get chain attribute data
+            chain_attr = self.object.data.attributes["chain_id"]
+            numeric_chain_ids = sorted({value.value for value in chain_attr.data})
+            print(f"Numeric chain IDs: {numeric_chain_ids}")
+            
+            # Get chain mapping if available
+            mapping_str = self.object.data.get("chain_mapping_str", "")
+            print(f"Chain mapping string: {mapping_str}")
+            chain_mapping = {}
+            if mapping_str:
+                for pair in mapping_str.split(","):
+                    if ":" in pair:
+                        k, v = pair.split(":")
+                        chain_mapping[int(k)] = v
+            print(f"Chain mapping dict: {chain_mapping}")
+            
+            # Map numeric IDs to author chain IDs
+            mapped_chains = {}
+            for chain_id in numeric_chain_ids:
+                mapped_chain_id = chain_mapping.get(chain_id, str(chain_id))
+                mapped_chains[str(mapped_chain_id)] = chain_id
+            print(f"Mapped chains: {mapped_chains}")
 
     def add_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> None:
         """Add a new domain to the molecule"""
-        print(f"Adding domain: {chain_id}, {start}, {end}, {name}")
-        # Create domain for node management
+        # Map the chain_id to author chain ID if mapping exists
+        display_chain_id = self.chain_mapping.get(int(chain_id), chain_id) if self.chain_mapping else chain_id
+        print(f"Adding domain: {display_chain_id}, {start}, {end}, {name}")
         
-        # Get the molecule list item from the scene
+        # Create domain for node management
         scene = bpy.context.scene
         for item in scene.molecule_list_items:
             if item.identifier == self.identifier:
                 # Create new domain through the collection property
                 new_domain = item.domains.add()
-                new_domain.chain_id = chain_id
+                new_domain.chain_id = display_chain_id  # Use the mapped chain ID
                 new_domain.start = start
                 new_domain.end = end
                 new_domain.name = name if name else ""
@@ -160,6 +222,90 @@ class MoleculeWrapper:
             # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
             if original_select_node:
                 node_group.links.new(select_node.outputs["Inverted"], original_select_node.inputs["And"])
+
+    def _parse_chain_mapping(self, mapping_str: str) -> dict:
+        """Parse chain mapping string into a dictionary"""
+        mapping = {}
+        if mapping_str:
+            for pair in mapping_str.split(","):
+                if ":" in pair:
+                    k, v = pair.split(":")
+                    mapping[int(k)] = v
+        return mapping
+
+    def _get_chain_residue_ranges(self) -> Dict[str, Dict[str, tuple]]:
+        """Get residue ranges for each chain, both relative and absolute
+        Returns:
+            Dict with structure:
+            {
+                'A': {
+                    'relative': (1, 300),
+                    'absolute': (1, 300)
+                },
+                'B': {
+                    'relative': (1, 210),
+                    'absolute': (301, 511)
+                },
+                ...
+            }
+        """
+        ranges = {}
+        if not self.object or "chain_id" not in self.object.data.attributes:
+            return ranges
+            
+        # Get chain and residue attributes
+        chain_attr = self.object.data.attributes["chain_id"]
+        res_attr = self.object.data.attributes["res_id"]
+        
+        # Convert to numpy arrays for easier processing
+        chain_ids = np.array([v.value for v in chain_attr.data])
+        res_ids = np.array([v.value for v in res_attr.data])
+        
+        # Get unique chain IDs
+        unique_chains = np.unique(chain_ids)
+        
+        # Calculate absolute offset
+        absolute_offset = 0
+        
+        for chain_id in unique_chains:
+            # Get mask for current chain
+            chain_mask = chain_ids == chain_id
+            
+            # Get residue IDs for this chain
+            chain_res_ids = res_ids[chain_mask]
+            
+            # Get min and max residue IDs
+            min_res = np.min(chain_res_ids)
+            max_res = np.max(chain_res_ids)
+            
+            # Use chain mapping if available
+            mapped_chain_id = str(chain_id)
+            if self.chain_mapping:
+                mapped_chain_id = self.chain_mapping.get(chain_id, str(chain_id))
+            
+            # Store both relative and absolute ranges
+            ranges[mapped_chain_id] = {
+                'relative': (min_res, max_res),
+                'absolute': (absolute_offset + 1, absolute_offset + (max_res - min_res + 1))
+            }
+            
+            # Update absolute offset for next chain
+            absolute_offset += max_res - min_res + 1
+            
+        return ranges
+
+    def get_author_chain_id(self, numeric_chain_id: int) -> str:
+        """Convert numeric chain ID to author chain ID
+        
+        Args:
+            numeric_chain_id (int): The numeric chain ID to convert
+            
+        Returns:
+            str: The author chain ID if found, otherwise the numeric chain ID as string
+        """
+        if self.chain_mapping:
+            return self.chain_mapping.get(numeric_chain_id, str(numeric_chain_id))
+        return str(numeric_chain_id)
 
 class MoleculeManager:
     """Manages all molecules in the scene"""
