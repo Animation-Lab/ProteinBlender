@@ -29,6 +29,10 @@ class MoleculeWrapper:
         # Initialize chain residue ranges
         self.chain_residue_ranges = self._get_chain_residue_ranges()
         
+        # Add after existing initialization
+        self.preview_nodes = None
+        #self._setup_preview_domain()
+        
     @property
     def object(self) -> bpy.types.Object:
         """Get the Blender object"""
@@ -42,64 +46,6 @@ class MoleculeWrapper:
         except Exception as e:
             print(f"Error changing style for {self.identifier}: {str(e)}")
             raise
-
-    '''
-    def select_chains(self, chain_ids):
-        """Select specific chains in the molecule"""
-        if self.object and "chain_id" in self.object.data.attributes:
-            # Get the geometry nodes modifier
-            gn_mod = self.object.modifiers.get("MolecularNodes")
-            if gn_mod is None:
-                return
-            
-            node_group = gn_mod.node_group
-            if node_group is None:
-                return
-            
-            # Get chain attribute data
-            chain_attr = self.object.data.attributes["chain_id"]
-            numeric_chain_ids = sorted({value.value for value in chain_attr.data})
-            
-            # Get chain mapping if available
-            mapping_str = self.object.data.get("chain_mapping_str", "")
-            chain_mapping = {}
-            if mapping_str:
-                for pair in mapping_str.split(","):
-                    if ":" in pair:
-                        k, v = pair.split(":")
-                        chain_mapping[int(k)] = v
-            
-            # Map numeric IDs to author chain IDs
-            mapped_chains = {}
-            for chain_id in numeric_chain_ids:
-                mapped_chain_id = chain_mapping.get(chain_id, str(chain_id))
-                mapped_chains[str(mapped_chain_id)] = chain_id
-            
-            # Find existing chain selection node or create a new one
-            chain_node = None
-            for node in node_group.nodes:
-                if node.bl_idname == "GeometryNodeGroup" and node.node_tree and "Select Chain" in node.node_tree.name:
-                    chain_node = node
-                    break
-                
-            if chain_node is None:
-                # Import needed functions
-                from ..utils.molecularnodes.blender.nodes import add_selection
-                
-                # Create chain selection node using mapped chain IDs
-                chain_node = add_selection(
-                    node_group,
-                    f"Select Chain {self.object.name}",
-                    list(mapped_chains.keys()),
-                    field="chain_id"
-                )
-            
-            # Update chain selections based on button states using mapped IDs
-            for chain_id in chain_node.inputs.keys():
-                if chain_id.isdigit():
-                    numeric_id = mapped_chains.get(chain_id, int(chain_id))
-                    chain_node.inputs[chain_id].default_value = str(numeric_id) in chain_ids
-    '''
 
     def select_chains(self, chain_ids):
         """Select specific chains in the molecule"""
@@ -306,6 +252,89 @@ class MoleculeWrapper:
         if self.chain_mapping:
             return self.chain_mapping.get(numeric_chain_id, str(numeric_chain_id))
         return str(numeric_chain_id)
+
+    def _setup_preview_domain(self):
+        """Create the preview domain node setup"""
+        if not self.object or not self.object.modifiers.get("MolecularNodes"):
+            return
+            
+        gn_mod = self.object.modifiers["MolecularNodes"]
+        node_group = gn_mod.node_group
+        
+        # Get existing nodes
+        group_input = nodes.get_input(node_group)
+        group_output = nodes.get_output(node_group)
+        style_node = nodes.style_node(node_group)
+        
+        # Find or create Join Geometry node
+        join_node = None
+        for node in node_group.nodes:
+            if node.bl_idname == "GeometryNodeJoinGeometry":
+                join_node = node
+                break
+        
+        if join_node is None:
+            # Create Join Geometry node
+            join_node = node_group.nodes.new("GeometryNodeJoinGeometry")
+            join_node.location = (style_node.location[0] + 200, style_node.location[1])
+            
+            # Connect style to join
+            node_group.links.new(style_node.outputs[0], join_node.inputs[0])
+            # Connect join to output
+            node_group.links.new(join_node.outputs[0], group_output.inputs[0])
+        
+        # Create preview nodes
+        color_emit = nodes.add_custom(node_group, "Color Common")
+        color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
+        
+        set_color = nodes.add_custom(node_group, "Set Color")
+        select_node = nodes.add_custom(node_group, "Select Res ID Range")
+        style_surface = nodes.add_custom(node_group, "Style Surface")
+        
+        # Position nodes
+        base_y_offset = -500
+        style_pos = style_node.location
+        color_emit.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
+        set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
+        select_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
+        style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
+        
+        # Connect nodes
+        node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
+        node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
+        node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
+        node_group.links.new(select_node.outputs["Selection"], style_surface.inputs["Selection"])
+        node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+        
+        # Store references to preview nodes
+        self.preview_nodes = {
+            "select": select_node,
+            "style": style_surface,
+            "color": color_emit,
+            "set_color": set_color
+        }
+        
+        # Initially disable preview
+        self.set_preview_visibility(False)
+    
+    def set_preview_visibility(self, visible: bool):
+        """Toggle visibility of the preview domain"""
+        if not self.preview_nodes:
+            return
+            
+        self.preview_nodes["style"].mute = not visible
+        self.preview_nodes["color"].mute = not visible
+        self.preview_nodes["set_color"].mute = not visible
+        self.preview_nodes["select"].mute = not visible
+        
+    def update_preview_range(self, chain_id: str, start: int, end: int):
+        """Update the preview domain range"""
+        if not self.preview_nodes or not self.preview_nodes["select"]:
+            return
+            
+        select_node = self.preview_nodes["select"]
+        select_node.inputs["Min"].default_value = start
+        select_node.inputs["Max"].default_value = end
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

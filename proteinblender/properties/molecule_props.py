@@ -168,6 +168,30 @@ def ensure_valid_scene_domain_range(self, context, changed_prop):
         self['domain_start'] = int(domain_start)
         self['domain_end'] = int(domain_end)
 
+    # Add after existing range validation code
+    if context.scene.show_domain_preview:
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        if molecule:
+            molecule.update_preview_range(
+                context.scene.selected_chain_for_domain,
+                self.domain_start,
+                self.domain_end
+            )
+
+def update_domain_preview(self, context):
+    scene_manager = ProteinBlenderScene.get_instance()
+    molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+    
+    if molecule:
+        molecule.set_preview_visibility(self.show_domain_preview)
+        if self.show_domain_preview:
+            molecule.update_preview_range(
+                context.scene.selected_chain_for_domain,
+                context.scene.domain_start,
+                context.scene.domain_end
+            )
+
 def register():
     # Register Domain first since other classes might depend on it
     bpy.utils.register_class(ChainSelectionItem)
@@ -214,6 +238,12 @@ def register():
         description="Select chain for domain creation",
         items=get_chain_items,
         update=lambda self, context: ensure_valid_scene_domain_range(self, context, "chain")
+    )
+    bpy.types.Scene.show_domain_preview = BoolProperty(
+        name="Show Domain Selection",
+        description="Show preview of domain selection",
+        default=False,
+        update=lambda self, context: update_domain_preview(self, context)
     )
 
 def unregister():

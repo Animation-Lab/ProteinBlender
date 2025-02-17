@@ -98,6 +98,11 @@ class MOLECULE_PB_PT_list(Panel):
                 domain_box = settings_box.box()
                 domain_box.label(text="Domains:")
                 
+                # Add before the domain creation controls
+                preview_row = domain_box.row()
+                preview_row.prop(scene, "show_domain_preview")
+                domain_box.separator()
+                
                 # Domain creation row
                 domain_row = domain_box.row(align=True)
                 
@@ -138,15 +143,7 @@ class MOLECULE_PB_PT_list(Panel):
                                 )
                                 
                                 # Add domain label
-                                # Try to get mapping from custom property
-                                mapping_str = molecule.object.data.get("chain_mapping_str", "")
-                                mapping = get_chain_mapping_from_str(mapping_str)
-                                
-                                if mapping:
-                                    chain_label = mapping.get(int(domain.chain_id), domain.chain_id)
-                                else:
-                                    # Fallback to letter mapping (A, B, C...)
-                                    chain_label = chr(65 + int(domain.chain_id))
+                                chain_label = domain.chain_id
                                 
                                 header_row.label(
                                     text=f"Chain {chain_label}: {domain.start} - {domain.end}"
