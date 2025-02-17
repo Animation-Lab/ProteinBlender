@@ -31,7 +31,7 @@ class MoleculeWrapper:
         
         # Add after existing initialization
         self.preview_nodes = None
-        #self._setup_preview_domain()
+        self._setup_preview_domain()
         
     @property
     def object(self) -> bpy.types.Object:
@@ -299,12 +299,15 @@ class MoleculeWrapper:
         select_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
         style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
         
-        # Connect nodes
+        # Connect preview nodes
         node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
         node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
         node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
         node_group.links.new(select_node.outputs["Selection"], style_surface.inputs["Selection"])
         node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+        
+        # Connect inverted selection to main style node
+        node_group.links.new(select_node.outputs["Inverted"], style_node.inputs["Selection"])
         
         # Store references to preview nodes
         self.preview_nodes = {
@@ -316,7 +319,7 @@ class MoleculeWrapper:
         
         # Initially disable preview
         self.set_preview_visibility(False)
-    
+        
     def set_preview_visibility(self, visible: bool):
         """Toggle visibility of the preview domain"""
         if not self.preview_nodes:
