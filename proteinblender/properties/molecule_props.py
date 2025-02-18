@@ -168,6 +168,7 @@ def ensure_valid_scene_domain_range(self, context, changed_prop):
         self['domain_start'] = int(domain_start)
         self['domain_end'] = int(domain_end)
 
+    print(f"Ensured valid scene domain range: {self.domain_start}, {self.domain_end}")
     # Add after existing range validation code
     if context.scene.show_domain_preview:
         scene_manager = ProteinBlenderScene.get_instance()

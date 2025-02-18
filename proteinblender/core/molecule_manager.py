@@ -352,12 +352,35 @@ class MoleculeWrapper:
         
     def update_preview_range(self, chain_id: str, start: int, end: int):
         """Update the preview domain range"""
-        if not self.preview_nodes or not self.preview_nodes["select"]:
+        print(f"Updating preview range: {chain_id}, {start}, {end}")
+        gn_mod = self.object.modifiers["MolecularNodes"]
+        node_group = gn_mod.node_group
+
+        # Get chain ranges
+        chain_ranges = self.chain_residue_ranges.get(self.chain_mapping[int(chain_id)])
+        if not chain_ranges:
             return
-            
-        select_node = self.preview_nodes["select"]
-        select_node.inputs["Min"].default_value = start
-        select_node.inputs["Max"].default_value = end
+        
+        # Convert absolute values to relative
+        absolute_range = chain_ranges['absolute']
+        relative_start = start - absolute_range[0] + 1  # Convert to relative (starting at 1)
+        relative_end = end - absolute_range[0] + 1
+
+        # Update nodes with relative values
+        select_res_id_range_node = self.preview_nodes["select"]
+        select_res_id_range_node.inputs["Min"].default_value = relative_start
+        select_res_id_range_node.inputs["Max"].default_value = relative_end
+        select_chain_node = self.preview_nodes["chain_select"]
+        
+        # Remove existing links from the Selection output
+        for link in node_group.links:
+            if (link.from_node == select_res_id_range_node and 
+                link.from_socket == select_res_id_range_node.outputs["Selection"]):
+                node_group.links.remove(link)
+        
+        # Create new link
+        node_group.links.new(select_res_id_range_node.outputs["Selection"], 
+                            select_chain_node.inputs[self.chain_mapping[int(chain_id)]])
 
     def get_main_style_node(self):
         """Get the main style node for the molecule"""
@@ -369,6 +392,50 @@ class MoleculeWrapper:
             return None
         
         return nodes.style_node(gn_mod.node_group)
+    '''
+    def update_preview_chain(self, chain_id: str):
+        """Update the preview chain selection and convert residue range"""
+        print(f"Updating preview chain: {chain_id}")
+
+        if not self.preview_nodes:
+            return
+        
+        # Get the chain's residue ranges
+        chain_ranges = self.chain_residue_ranges.get(chain_id)
+        if not chain_ranges:
+            return
+        
+        # Get relative and absolute ranges
+        relative_range = chain_ranges['relative']
+        absolute_range = chain_ranges['absolute']
+        
+        # Update the residue range node with relative values
+        select_node = self.preview_nodes["select"]
+        if select_node:
+            # Convert absolute values to relative for this chain
+            current_abs_min = select_node.inputs["Min"].default_value
+            current_abs_max = select_node.inputs["Max"].default_value
+            
+            # Convert to relative values
+            relative_min = current_abs_min - absolute_range[0] + relative_range[0]
+            relative_max = current_abs_max - absolute_range[0] + relative_range[0]
+            
+            # Update the node
+            select_node.inputs["Min"].default_value = relative_min
+            select_node.inputs["Max"].default_value = relative_max
+        
+        # Update chain selection node
+        chain_select = self.preview_nodes["chain_select"]
+        if chain_select:
+            # Reset all chain inputs to False
+            for input in chain_select.inputs:
+                if input.type == 'BOOLEAN':
+                    input.default_value = False
+            
+            # Set selected chain to True
+            if chain_id in chain_select.inputs:
+                chain_select.inputs[chain_id].default_value = True
+        '''
 
 class MoleculeManager:
     """Manages all molecules in the scene"""
