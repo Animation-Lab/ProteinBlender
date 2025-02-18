@@ -288,33 +288,53 @@ class MoleculeWrapper:
         color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
         
         set_color = nodes.add_custom(node_group, "Set Color")
-        select_node = nodes.add_custom(node_group, "Select Res ID Range")
+        select_res_id_range_node = nodes.add_custom(node_group, "Select Res ID Range")
         style_surface = nodes.add_custom(node_group, "Style Surface")
+        # Add this near the start of _setup_preview_domain
+        scene = bpy.context.scene
+        for item in scene.molecule_list_items:
+            if item.identifier == self.identifier:
+                selected_chain = item.selected_chain_for_domain
+                break
+        else:
+            selected_chain = "A"
+        # Add a Select Chain node
+        select_chain_node = nodes.add_selection(group=node_group,
+                                       sel_name="Select Chain",
+                                       input_list=self.chain_mapping.values(),
+                                       field="chain_id")
+        nodes.set_selection(node_group, style_node, select_chain_node)
         
         # Position nodes
         base_y_offset = -500
         style_pos = style_node.location
         color_emit.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
         set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
-        select_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
+        select_res_id_range_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
         style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
         
         # Connect preview nodes
         node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
         node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
         node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
-        node_group.links.new(select_node.outputs["Selection"], style_surface.inputs["Selection"])
+        node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
         node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+        node_group.links.new(select_res_id_range_node.outputs["Selection"], select_chain_node.inputs[selected_chain])
         
-        # Connect inverted selection to main style node
-        node_group.links.new(select_node.outputs["Inverted"], style_node.inputs["Selection"])
-        
+        # Get the main style node and ensure proper connections
+        style_node = nodes.style_node(node_group)
+
+        # Connect chain selection outputs
+        node_group.links.new(select_chain_node.outputs["Selection"], style_surface.inputs["Selection"])
+        node_group.links.new(select_chain_node.outputs["Inverted"], style_node.inputs["Selection"])
+
         # Store references to preview nodes
         self.preview_nodes = {
-            "select": select_node,
+            "select": select_res_id_range_node,
             "style": style_surface,
             "color": color_emit,
-            "set_color": set_color
+            "set_color": set_color,
+            "chain_select": select_chain_node
         }
         
         # Initially disable preview
@@ -338,6 +358,17 @@ class MoleculeWrapper:
         select_node = self.preview_nodes["select"]
         select_node.inputs["Min"].default_value = start
         select_node.inputs["Max"].default_value = end
+
+    def get_main_style_node(self):
+        """Get the main style node for the molecule"""
+        if not self.object:
+            return None
+        
+        gn_mod = self.object.modifiers.get("MolecularNodes")
+        if not gn_mod or not gn_mod.node_group:
+            return None
+        
+        return nodes.style_node(gn_mod.node_group)
 
 class MoleculeManager:
     """Manages all molecules in the scene"""
