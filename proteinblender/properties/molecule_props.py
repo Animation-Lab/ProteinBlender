@@ -53,6 +53,7 @@ def get_chain_items(self, context):
                    for chain_id in chain_ids]
     return []
 
+
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""
     identifier: StringProperty(
@@ -66,10 +67,12 @@ class MoleculeListItem(PropertyGroup):
         items=STYLE_ITEMS,
         default="cartoon"
     )
+    
     selected_chain_for_domain: EnumProperty(
         name="Chain",
         description="Select chain for domain creation",
-        items=get_chain_items
+        items=get_chain_items,
+        update=lambda self, context: self.ensure_valid_domain_range(context, "chain")
     )
     
     domain_start: IntProperty(
@@ -83,7 +86,7 @@ class MoleculeListItem(PropertyGroup):
     domain_end: IntProperty(
         name="End",
         description="Ending residue number for domain",
-        default=1,
+        default=9999,
         min=1,
         update=lambda self, context: self.ensure_valid_domain_range(context, "end")
     )
@@ -91,21 +94,20 @@ class MoleculeListItem(PropertyGroup):
     domains: CollectionProperty(type=Domain)
     
     def get_chain_range(self, context):
-        """Get the absolute range for the currently selected chain"""
+        """Get the range for the currently selected chain"""
         scene_manager = ProteinBlenderScene.get_instance()
         molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
         
         if molecule and self.selected_chain_for_domain != "NONE":
             chain_ranges = molecule.chain_residue_ranges
             if self.selected_chain_for_domain in chain_ranges:
-                return chain_ranges[self.selected_chain_for_domain]['absolute']
+                return chain_ranges[self.selected_chain_for_domain]
         return (1, 999999)  # fallback range
 
     def ensure_valid_domain_range(self, context, changed_prop):
-        """Ensure domain range is valid and within chain's absolute range"""
+        """Ensure domain range is valid and within chain's range"""
         # Get the valid range for the selected chain
         min_res, max_res = self.get_chain_range(context)
-        print(f"Valid range: {min_res}, {max_res}")
         
         # Clamp values to valid range
         self.domain_start = max(min(self.domain_start, max_res), min_res)
@@ -137,8 +139,6 @@ def get_max_residue_for_chain(molecule, chain_id):
 
 def ensure_valid_scene_domain_range(self, context, changed_prop):
     """Ensure domain range is valid for the selected chain and update selection"""
-    print(f"Ensuring valid scene domain range: {changed_prop}")
-    print(f"selected molecule id: {context.scene.selected_molecule_id}")
     
     # Get the current molecule list item
     scene_manager = ProteinBlenderScene.get_instance()
@@ -146,7 +146,7 @@ def ensure_valid_scene_domain_range(self, context, changed_prop):
     
     if molecule:
         author_chain_id = molecule.get_author_chain_id(int(context.scene.selected_chain_for_domain))
-        min_res, max_res = molecule.chain_residue_ranges[author_chain_id]['absolute']
+        min_res, max_res = molecule.chain_residue_ranges[author_chain_id]
         
         if changed_prop == "chain":
             # When chain changes, set domain to full range of new chain
@@ -192,6 +192,9 @@ def update_domain_preview(self, context):
                 context.scene.domain_end
             )
 
+def get_max_residue_for_chain(context):
+    return 888
+
 def register():
     # Register Domain first since other classes might depend on it
     bpy.utils.register_class(ChainSelectionItem)
@@ -217,7 +220,7 @@ def register():
     bpy.types.Scene.domain_end = IntProperty(
         name="End",
         description="Ending residue number for domain",
-        default=1,
+        default=9999,
         min=1,
         update=lambda self, context: ensure_valid_scene_domain_range(self, context, "end")
     )
@@ -245,6 +248,8 @@ def register():
         default=False,
         update=lambda self, context: update_domain_preview(self, context)
     )
+
+
 
 def unregister():
     del bpy.types.Scene.chain_selections

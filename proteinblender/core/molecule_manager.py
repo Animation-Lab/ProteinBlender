@@ -180,25 +180,19 @@ class MoleculeWrapper:
         return mapping
 
     def _get_chain_residue_ranges(self) -> Dict[str, Dict[str, tuple]]:
-        """Get residue ranges for each chain, both relative and absolute
+        """Get residue ranges for each chain
         Returns:
             Dict with structure:
             {
-                'A': {
-                    'relative': (1, 300),
-                    'absolute': (1, 300)
-                },
-                'B': {
-                    'relative': (1, 210),
-                    'absolute': (301, 511)
-                },
+                'A': (1, 300),
+                'B': (301, 511)
                 ...
             }
         """
         ranges = {}
         if not self.object or "chain_id" not in self.object.data.attributes:
             return ranges
-            
+        
         # Get chain and residue attributes
         chain_attr = self.object.data.attributes["chain_id"]
         res_attr = self.object.data.attributes["res_id"]
@@ -210,8 +204,6 @@ class MoleculeWrapper:
         # Get unique chain IDs
         unique_chains = np.unique(chain_ids)
         
-        # Calculate absolute offset
-        absolute_offset = 0
         
         for chain_id in unique_chains:
             # Get mask for current chain
@@ -219,7 +211,6 @@ class MoleculeWrapper:
             
             # Get residue IDs for this chain
             chain_res_ids = res_ids[chain_mask]
-            
             # Get min and max residue IDs
             min_res = np.min(chain_res_ids)
             max_res = np.max(chain_res_ids)
@@ -229,14 +220,8 @@ class MoleculeWrapper:
             if self.chain_mapping:
                 mapped_chain_id = self.chain_mapping.get(chain_id, str(chain_id))
             
-            # Store both relative and absolute ranges
-            ranges[mapped_chain_id] = {
-                'relative': (min_res, max_res),
-                'absolute': (absolute_offset + 1, absolute_offset + (max_res - min_res + 1))
-            }
-            
-            # Update absolute offset for next chain
-            absolute_offset += max_res - min_res + 1
+            # Store chain ranges
+            ranges[mapped_chain_id] = (min_res, max_res)
             
         return ranges
 
@@ -264,7 +249,7 @@ class MoleculeWrapper:
         # Get existing nodes
         group_input = nodes.get_input(node_group)
         group_output = nodes.get_output(node_group)
-        style_node = nodes.style_node(node_group)
+        molecule_style_node = nodes.style_node(node_group)
         
         # Find or create Join Geometry node
         join_node = None
@@ -276,10 +261,10 @@ class MoleculeWrapper:
         if join_node is None:
             # Create Join Geometry node
             join_node = node_group.nodes.new("GeometryNodeJoinGeometry")
-            join_node.location = (style_node.location[0] + 200, style_node.location[1])
+            join_node.location = (molecule_style_node.location[0] + 200, molecule_style_node.location[1])
             
             # Connect style to join
-            node_group.links.new(style_node.outputs[0], join_node.inputs[0])
+            node_group.links.new(molecule_style_node.outputs[0], join_node.inputs[0])
             # Connect join to output
             node_group.links.new(join_node.outputs[0], group_output.inputs[0])
         
@@ -289,7 +274,7 @@ class MoleculeWrapper:
         
         set_color = nodes.add_custom(node_group, "Set Color")
         select_res_id_range_node = nodes.add_custom(node_group, "Select Res ID Range")
-        style_surface = nodes.add_custom(node_group, "Style Surface")
+        default_domain_style_node = nodes.add_custom(node_group, "Style Ribbon")
         # Add this near the start of _setup_preview_domain
         scene = bpy.context.scene
         for item in scene.molecule_list_items:
@@ -303,42 +288,49 @@ class MoleculeWrapper:
                                        sel_name="Select Chain",
                                        input_list=self.chain_mapping.values(),
                                        field="chain_id")
-        nodes.set_selection(node_group, style_node, select_chain_node)
+        nodes.set_selection(node_group, molecule_style_node, select_chain_node)
         
         # Position nodes
         base_y_offset = -500
-        style_pos = style_node.location
+        style_pos = molecule_style_node.location
         color_emit.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
         set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
         select_res_id_range_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
-        style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
+        default_domain_style_node.location = (style_pos[0], style_pos[1] + base_y_offset)
         
         # Connect preview nodes
         node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
         node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
-        node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
-        node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
-        node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+        node_group.links.new(set_color.outputs["Atoms"], default_domain_style_node.inputs["Atoms"])
+        node_group.links.new(select_res_id_range_node.outputs["Selection"], default_domain_style_node.inputs["Selection"])
+        node_group.links.new(default_domain_style_node.outputs[0], join_node.inputs[0])
         node_group.links.new(select_res_id_range_node.outputs["Selection"], select_chain_node.inputs[selected_chain])
         
         # Get the main style node and ensure proper connections
-        style_node = nodes.style_node(node_group)
+        #style_node = nodes.style_node(node_group)
 
         # Connect chain selection outputs
-        node_group.links.new(select_chain_node.outputs["Selection"], style_surface.inputs["Selection"])
-        node_group.links.new(select_chain_node.outputs["Inverted"], style_node.inputs["Selection"])
+        node_group.links.new(select_chain_node.outputs["Selection"], default_domain_style_node.inputs["Selection"])
+        node_group.links.new(select_chain_node.outputs["Inverted"], molecule_style_node.inputs["Selection"])
 
         # Store references to preview nodes
         self.preview_nodes = {
             "select": select_res_id_range_node,
-            "style": style_surface,
+            "style": default_domain_style_node,
             "color": color_emit,
             "set_color": set_color,
-            "chain_select": select_chain_node
+            "chain_select": select_chain_node,
+            "node_group": node_group
         }
         
         # Initially disable preview
-        self.set_preview_visibility(False)
+        #self.set_preview_visibility(False)
+        selected_chain_id = 0
+        for key, value in self.chain_mapping.items():
+            if value == selected_chain:
+                selected_chain_id = key
+                break
+        self.update_preview_range(selected_chain_id, self.chain_residue_ranges[selected_chain][0], self.chain_residue_ranges[selected_chain][1])
         
     def set_preview_visibility(self, visible: bool):
         """Toggle visibility of the preview domain"""
@@ -350,14 +342,36 @@ class MoleculeWrapper:
         self.preview_nodes["set_color"].mute = not visible
         self.preview_nodes["select"].mute = not visible
         
-    def update_preview_range(self, chain_id: str, start: int, end: int):
-        """Update the preview domain range"""
-        if not self.preview_nodes or not self.preview_nodes["select"]:
+    def update_preview_range(self, chain_id: int, start: int, end: int):
+        """Update the preview domain range and chain selection"""
+        if not self.preview_nodes:
             return
-            
+        
+        # Update residue range
         select_node = self.preview_nodes["select"]
+        chain_select_node = self.preview_nodes["chain_select"]
+        node_group = self.preview_nodes["node_group"]
+        
         select_node.inputs["Min"].default_value = start
         select_node.inputs["Max"].default_value = end
+        # Update chain selection
+        chain_select_node = self.preview_nodes["chain_select"]
+        if chain_select_node:
+            # First, disconnect all chain inputs
+            for input_socket in chain_select_node.inputs:
+                if input_socket.is_linked:
+                    for link in input_socket.links:
+                        chain_select_node.id_data.links.remove(link)
+            
+            # Get the author chain ID if mapping exists
+            display_chain_id = self.chain_mapping.get(int(chain_id), chain_id) if self.chain_mapping else chain_id
+
+            # Connect the selected chain
+            if display_chain_id in chain_select_node.inputs:
+                for input_socket in chain_select_node.inputs:
+                    input_socket.default_value = False
+                chain_select_node.inputs[display_chain_id].default_value = True
+                node_group.links.new(select_node.outputs["Selection"], chain_select_node.inputs[display_chain_id])
 
     def get_main_style_node(self):
         """Get the main style node for the molecule"""

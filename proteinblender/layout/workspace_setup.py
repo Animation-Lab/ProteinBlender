@@ -72,8 +72,8 @@ class ProteinWorkspaceManager:
         # Add the right area
         self.right_area = self._split_area(self.main_area, 'VERTICAL', 0.66, 'PROPERTIES')
 
-        # Add the bottom area
-        self.bottom_area = self._split_area(self.main_area, 'HORIZONTAL', 0.25, 'DOPESHEET_EDITOR')
+        # Add the bottom area, geometry nodes editor
+        self.bottom_area = self._split_area(self.main_area, 'HORIZONTAL', 0.25, 'NODE_EDITOR')
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type
