@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import PointerProperty
+from bpy.props import PointerProperty, BoolProperty
 from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
 from .operators import CLASSES as operator_classes
@@ -49,10 +49,13 @@ def register():
                 pass
     bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
     
-
+    # Register properties
     register_protein_props()
     register_molecule_props()
-    # scene_manager.ProteinBlenderScene.get_instance()
+    
+    # Register domain expanded property
+    bpy.types.Object.domain_expanded = BoolProperty(default=False)
+    
     bpy.utils.register_class(MolecularNodesObjectProperties)
     bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
     # Schedule workspace creation after 0.5 seconds
@@ -63,21 +66,26 @@ def register():
         # bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
 
 def unregister():
-    for op in reversed(all_pb_classes):
-        for cls in op:
-            try:
-                print(f"Unregistering {cls}")
-                bpy.utils.unregister_class(cls)
-            except Exception as e:
-                print(e)
+    # Unregister properties
     unregister_protein_props()
     unregister_molecule_props()
+    
+    # Unregister domain expanded property
+    if hasattr(bpy.types.Object, "domain_expanded"):
+        del bpy.types.Object.domain_expanded
+    
+    # Remove session
     if hasattr(bpy.types.Scene, "MNSession"):
         del bpy.types.Scene.MNSession
         del bpy.types.Object.mn
         # Unregister the property group
         bpy.utils.unregister_class(MolecularNodesObjectProperties)
 
-    # Remove undo handler
-    # if sync_molecule_list_after_undo in bpy.app.handlers.undo_post:
-        # bpy.app.handlers.undo_post.remove(sync_molecule_list_after_undo)
+    # Unregister classes
+    for op in reversed(all_pb_classes):
+        for cls in reversed(op):
+            try:
+                bpy.utils.unregister_class(cls)
+            except Exception as e:
+                print(e)
+                pass

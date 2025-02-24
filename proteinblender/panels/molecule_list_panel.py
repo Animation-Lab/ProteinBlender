@@ -98,15 +98,9 @@ class MOLECULE_PB_PT_list(Panel):
                 domain_box = settings_box.box()
                 domain_box.label(text="Domains:")
                 
-                # Add before the domain creation controls
-                preview_row = domain_box.row()
-                preview_row.prop(scene, "show_domain_preview")
-                domain_box.separator()
-                
                 # Domain creation row
                 domain_row = domain_box.row(align=True)
                 
-                # Chain dropdown
                 if molecule.object and "chain_id" in molecule.object.data.attributes:
                     # Chain dropdown
                     domain_row.prop(scene, "selected_chain_for_domain", text="")
@@ -125,35 +119,58 @@ class MOLECULE_PB_PT_list(Panel):
                     # Add separator after creation controls
                     domain_box.separator()
                     
-                    # Get the molecule list item that corresponds to this molecule
-                    for item in scene.molecule_list_items:
-                        if item.identifier == molecule_id:
-                            # Display existing domains in reverse order (newest first)
-                            for domain in reversed(item.domains):
-                                # Create box for each domain
-                                domain_header = domain_box.box()
-                                header_row = domain_header.row()
-                                
-                                # Add expand/collapse triangle
-                                header_row.prop(
-                                    domain, "is_expanded",
-                                    icon="TRIA_DOWN" if domain.is_expanded else "TRIA_RIGHT",
-                                    icon_only=True,
-                                    emboss=False
-                                )
-                                
-                                # Add domain label
-                                chain_label = domain.chain_id
-                                
-                                header_row.label(
-                                    text=f"Chain {chain_label}: {domain.start} - {domain.end}"
-                                )
-                                
-                                # If expanded, show domain settings
-                                if domain.is_expanded:
-                                    domain_content = domain_header.column()
-                                    # We'll add more settings here later
-                            break
+                    # Display existing domains
+                    for domain_id, domain in molecule.domains.items():
+                        # Create box for each domain
+                        domain_header = domain_box.box()
+                        header_row = domain_header.row()
+                        
+                        # Add expand/collapse triangle
+                        is_expanded = getattr(domain.object, "domain_expanded", False)
+                        expand_icon = "TRIA_DOWN" if is_expanded else "TRIA_RIGHT"
+                        header_row.prop(domain.object, "domain_expanded", 
+                                     icon=expand_icon, 
+                                     icon_only=True,
+                                     emboss=False)
+                        
+                        # Add domain label and info
+                        info_row = header_row.row()
+                        info_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
+                        
+                        # Add delete button
+                        delete_op = header_row.operator(
+                            "molecule.delete_domain",
+                            text="",
+                            icon='X'
+                        )
+                        delete_op.domain_id = domain_id
+                        
+                        # If expanded, show domain controls
+                        if is_expanded:
+                            control_box = domain_header.box()
+                            
+                            # Transform controls
+                            transform_box = control_box.box()
+                            transform_box.label(text="Transform")
+                            
+                            # Location
+                            loc_row = transform_box.row(align=True)
+                            loc_row.prop(domain.object, "location", text="")
+                            
+                            # Rotation
+                            rot_row = transform_box.row(align=True)
+                            rot_row.prop(domain.object, "rotation_euler", text="")
+                            
+                            # Scale
+                            scale_row = transform_box.row(align=True)
+                            scale_row.prop(domain.object, "scale", text="")
+                            
+                            # Animation controls
+                            anim_box = control_box.box()
+                            anim_box.label(text="Animation")
+                            anim_row = anim_box.row()
+                            anim_row.operator("molecule.keyframe_domain_location", text="Keyframe Location")
+                            anim_row.operator("molecule.keyframe_domain_rotation", text="Keyframe Rotation")
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):
     bl_idname = "molecule.toggle_chain_selection"

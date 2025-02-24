@@ -176,12 +176,32 @@ class MOLECULE_PB_OT_create_domain(Operator):
         scene_manager = ProteinBlenderScene.get_instance()
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         
-        if molecule and scene.selected_chain_for_domain:
-            molecule.add_domain(
-                chain_id=scene.selected_chain_for_domain,
-                start=scene.domain_start,
-                end=scene.domain_end
-            )
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        if not scene.selected_chain_for_domain:
+            self.report({'ERROR'}, "No chain selected")
+            return {'CANCELLED'}
+            
+        # Check if the residue range is valid
+        if scene.domain_start > scene.domain_end:
+            self.report({'ERROR'}, f"Invalid residue range: {scene.domain_start} > {scene.domain_end}")
+            return {'CANCELLED'}
+            
+        # Check for overlaps before creating domain
+        if molecule._check_domain_overlap(scene.selected_chain_for_domain, scene.domain_start, scene.domain_end):
+            self.report({'ERROR'}, f"Domain overlaps with existing domain in chain {scene.selected_chain_for_domain}")
+            return {'CANCELLED'}
+            
+        domain_id = molecule.create_domain(
+            chain_id=scene.selected_chain_for_domain,
+            start=scene.domain_start,
+            end=scene.domain_end
+        )
+        
+        if domain_id is None:
+            self.report({'ERROR'}, "Failed to create domain - internal error")
+            return {'CANCELLED'}
             
         return {'FINISHED'}
-

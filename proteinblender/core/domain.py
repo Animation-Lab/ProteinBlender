@@ -1,20 +1,192 @@
-from bpy.types import PropertyGroup
-from bpy.props import BoolProperty, StringProperty, IntProperty
 from typing import Optional, Dict
 import bpy
+from bpy.types import PropertyGroup
+from bpy.props import BoolProperty, StringProperty, IntProperty, PointerProperty
 from ..utils.molecularnodes.blender import nodes
 
+class DomainDefinition:
+    """Represents the logical definition of a domain with its own geometry nodes network"""
+    def __init__(self, chain_id: str, start: int, end: int, name: Optional[str] = None):
+        self.chain_id = chain_id
+        self.start = start
+        self.end = end
+        self.name = name or f"Domain_{chain_id}_{start}_{end}"
+        self.parent_molecule_id = None  # Link to parent molecule
+        self.object = None  # Blender object reference
+        self.node_group = None  # Geometry nodes network
+        self._setup_complete = False
+
+    def create_object_from_parent(self, parent_obj: bpy.types.Object) -> bool:
+        """Create a new Blender object for the domain by copying parent"""
+        try:
+            # First verify parent has required modifier
+            parent_modifier = parent_obj.modifiers.get("MolecularNodes")
+            if not parent_modifier or not parent_modifier.node_group:
+                print("Parent object does not have a valid MolecularNodes modifier")
+                return False
+
+            # Copy parent molecule object with data
+            self.object = parent_obj.copy()
+            self.object.data = parent_obj.data.copy()
+            self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
+            
+            # Copy all modifiers except MolecularNodes
+            for mod in parent_obj.modifiers:
+                if mod.name != "MolecularNodes":
+                    new_mod = self.object.modifiers.new(name=mod.name, type=mod.type)
+                    # Copy modifier properties
+                    for prop in mod.bl_rna.properties:
+                        if not prop.is_readonly:
+                            setattr(new_mod, prop.identifier, getattr(mod, prop.identifier))
+            
+            # Link to scene
+            bpy.context.scene.collection.objects.link(self.object)
+            
+            # Set up initial node group
+            if not self._setup_node_group():
+                # Clean up if node group setup failed
+                bpy.data.objects.remove(self.object, do_unlink=True)
+                self.object = None
+                return False
+            
+            return True
+        except Exception as e:
+            print(f"Error creating domain object: {str(e)}")
+            # Clean up if object creation failed
+            if self.object:
+                bpy.data.objects.remove(self.object, do_unlink=True)
+                self.object = None
+            return False
+
+    def _setup_node_group(self):
+        """Set up the geometry nodes network for the domain by copying parent network"""
+        if not self.object:
+            return False
+
+        try:
+            # Get the parent molecule's node group
+            parent_modifier = self.object.modifiers.get("MolecularNodes")
+            if not parent_modifier or not parent_modifier.node_group:
+                print("Parent molecule has no valid node group")
+                return False
+
+            # Copy the parent node group
+            parent_node_group = parent_modifier.node_group
+            self.node_group = parent_node_group.copy()
+            self.node_group.name = f"{self.name}_nodes"
+
+            # Remove the old MolecularNodes modifier and create our new one
+            self.object.modifiers.remove(parent_modifier)
+            modifier = self.object.modifiers.new(name="DomainNodes", type='NODES')
+            modifier.node_group = self.node_group
+
+            # Find key nodes
+            input_node = nodes.get_input(self.node_group)
+            output_node = nodes.get_output(self.node_group)
+            style_ribbon_node = None
+            join_geometry_node = None
+
+            # Find Style Ribbon and Join Geometry nodes
+            for node in self.node_group.nodes:
+                if node.bl_idname == 'GeometryNodeGroup':
+                    if 'Style Ribbon' in node.node_tree.name:
+                        style_ribbon_node = node
+                elif node.bl_idname == 'GeometryNodeJoinGeometry':
+                    join_geometry_node = node
+
+            if not all([input_node, output_node, style_ribbon_node, join_geometry_node]):
+                print("Could not find all required nodes")
+                return False
+
+            # Create transform node
+            transform = self.node_group.nodes.new('GeometryNodeTransform')
+            transform.inputs["Translation"].default_value = (0, 0, 0)
+            transform.inputs["Rotation"].default_value = (0, 0, 0)
+            transform.inputs["Scale"].default_value = (1, 1, 1)
+            transform.location = (join_geometry_node.location.x + 200, join_geometry_node.location.y)
+
+            # Create chain selection node
+            chain_select = nodes.add_selection(
+                group=self.node_group,
+                sel_name="Select Chain",
+                input_list=[self.chain_id],  # Only include our chain
+                field="chain_id"
+            )
+            chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
+
+            print(f"Looking for chain ID: {self.chain_id}")
+            for input_socket in chain_select.inputs:
+                if input_socket.name == self.chain_id:
+                    print(f"Setting input socket {input_socket.name} to True")
+                    input_socket.default_value = True
+                else:
+                    print(f"Setting input socket {input_socket.name} to False")
+                    input_socket.default_value = False
+
+
+            # Create selection node for domain range
+            select_node = nodes.add_custom(self.node_group, "Select Res ID Range")
+            select_node.inputs["Min"].default_value = self.start
+            select_node.inputs["Max"].default_value = self.end
+            select_node.location = (chain_select.location.x + 200, chain_select.location.y)
+
+            # Store nodes to keep
+            nodes_to_keep = {
+                input_node, output_node, style_ribbon_node,
+                join_geometry_node, select_node, transform,
+                chain_select
+            }
+
+            # Remove all other nodes
+            for node in list(self.node_group.nodes):
+                if node not in nodes_to_keep:
+                    self.node_group.nodes.remove(node)
+
+            # Clear all links and reconnect
+            self.node_group.links.clear()
+
+            # Connect nodes
+            # Connect Group Input "Atoms" directly to Style Ribbon "Atoms"
+            self.node_group.links.new(input_node.outputs["Atoms"], style_ribbon_node.inputs["Atoms"])
+
+            # Connect chain selection output to residue selection input
+            self.node_group.links.new(chain_select.outputs["Selection"], select_node.inputs["And"])
+
+            # Connect residue selection to style ribbon
+            self.node_group.links.new(select_node.outputs["Selection"], style_ribbon_node.inputs["Selection"])
+
+            # Connect Style Ribbon to Join Geometry
+            self.node_group.links.new(style_ribbon_node.outputs["Geometry"], join_geometry_node.inputs["Geometry"])
+            # Connect Join Geometry to Transform
+            self.node_group.links.new(join_geometry_node.outputs["Geometry"], transform.inputs["Geometry"])
+            # Connect Transform to Group Output
+            self.node_group.links.new(transform.outputs["Geometry"], output_node.inputs["Geometry"])
+
+            self._setup_complete = True
+            return True
+
+        except Exception as e:
+            print(f"Error setting up node group: {str(e)}")
+            # Clean up if setup failed
+            if self.node_group:
+                bpy.data.node_groups.remove(self.node_group)
+            return False
+
+    def cleanup(self):
+        """Remove domain object and node group"""
+        if self.object:
+            bpy.data.objects.remove(self.object, do_unlink=True)
+        if self.node_group:
+            bpy.data.node_groups.remove(self.node_group)
+
 class Domain(PropertyGroup):
-    """Represents a continuous segment of amino acids within a chain"""
+    """Blender Property Group for UI integration"""
     is_expanded: BoolProperty(default=False)
     chain_id: StringProperty()
     start: IntProperty()
     end: IntProperty()
     name: StringProperty()
-
-    def __post_init__(self):
-        if self.start > self.end:
-            self.start, self.end = self.end, self.start 
+    object: PointerProperty(type=bpy.types.Object)  # Reference to the domain object
 
 class ProteinBlenderDomain:
     """Manages domain visualization and node setup in the geometry nodes"""
@@ -63,9 +235,11 @@ class ProteinBlenderDomain:
             original_select_node.location = (style_pos[0] - 200, style_pos[1] - 200)
             
             # Connect original nodes
+            '''
             self.node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
             self.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
             self.node_group.links.new(join_node.outputs[0], group_output.inputs[0])
+            '''
         
         # Create domain nodes
         color_emit = nodes.add_custom(self.node_group, "Color Common")
@@ -89,15 +263,19 @@ class ProteinBlenderDomain:
         style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
         
         # Connect nodes
+        '''
         self.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
         self.node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
         self.node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
         self.node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
         self.node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
+        '''
         
         # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
+        '''
         if original_select_node:
             self.node_group.links.new(select_res_id_range_node.outputs["Inverted"], original_select_node.inputs["And"])
+        '''
         
         # Store node references
         self.nodes = {
@@ -131,4 +309,3 @@ class ProteinBlenderDomain:
         select_node = self.nodes["select"]
         select_node.inputs["Min"].default_value = start
         select_node.inputs["Max"].default_value = end
-

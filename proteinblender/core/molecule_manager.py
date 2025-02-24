@@ -9,7 +9,7 @@ from ..utils.molecularnodes.blender import nodes
 from ..utils.molecularnodes.props import MolecularNodesSceneProperties
 from ..utils.molecularnodes.session import MNSession
 from ..utils.molecularnodes.addon import _test_register
-from .domain import Domain
+from .domain import Domain, DomainDefinition
 
 class MoleculeWrapper:
     """
@@ -18,9 +18,11 @@ class MoleculeWrapper:
     """
     def __init__(self, molecule: Molecule, identifier: str):
         self.molecule = molecule
-        self.identifier = identifier  # PDB ID or filename
+        self.identifier = identifier
         self.style = "spheres"  # Default style
-        self.select_protein_chain= "NONE"
+        self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
+        self.residue_assignments = {}  # Track which residues are assigned to domains
+        
         # Store the chain mapping if available
         self.chain_mapping = {}
         if hasattr(molecule.array, 'chain_mapping_str'):
@@ -82,92 +84,66 @@ class MoleculeWrapper:
                 mapped_chains[str(mapped_chain_id)] = chain_id
             print(f"Mapped chains: {mapped_chains}")
 
-    def add_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> None:
-        """Add a new domain to the molecule"""
-        # Map the chain_id to author chain ID if mapping exists
-        display_chain_id = self.chain_mapping.get(int(chain_id), chain_id) if self.chain_mapping else chain_id
-        print(f"Adding domain: {display_chain_id}, {start}, {end}, {name}")
+    def create_domain(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> Optional[str]:
+        """Create a new domain if the residue range doesn't overlap with existing domains"""
+        # Check for overlaps
+        if self._check_domain_overlap(chain_id, start, end):
+            print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
+            return None
+            
+        # Create domain ID
+        domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
         
-        # Create domain for node management
-        scene = bpy.context.scene
-        for item in scene.molecule_list_items:
-            if item.identifier == self.identifier:
-                # Create new domain through the collection property
-                new_domain = item.domains.add()
-                new_domain.chain_id = display_chain_id  # Use the mapped chain ID
-                new_domain.start = start
-                new_domain.end = end
-                new_domain.name = name if name else ""
-                break
+        # Convert chain_id to int for dictionary lookup since that's how we store it
+        chain_id_int = int(chain_id) if isinstance(chain_id, str) else chain_id
+        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        # Create domain definition
+        domain = DomainDefinition(mapped_chain, start, end, name)
+        domain.parent_molecule_id = self.identifier
         
-        # Get the node group from the MolecularNodes modifier
-        gn_mod = self.object.modifiers.get("MolecularNodes")
-        if gn_mod and gn_mod.node_group:
-            node_group = gn_mod.node_group
-            
-            # Get existing nodes
-            group_input = nodes.get_input(node_group)
-            group_output = nodes.get_output(node_group)
-            style_node = nodes.style_node(node_group)
-            
-            # Find existing Join Geometry node
-            join_node = None
-            original_select_node = None
-            for node in node_group.nodes:
-                if node.bl_idname == "GeometryNodeJoinGeometry":
-                    join_node = node
-                elif (node.bl_idname == "GeometryNodeGroup" and 
-                      node.node_tree and "Select Res ID Range" in node.node_tree.name):
-                    original_select_node = node
-            
-            # If this is the first domain (no Join Geometry node exists)
-            if join_node is None:
-                # Create original Select Res ID Range node
-                original_select_node = nodes.add_custom(node_group, "Select Res ID Range")
-                original_select_node.inputs["Min"].default_value = 0
-                original_select_node.inputs["Max"].default_value = 9999
-                
-                # Create Join Geometry node
-                join_node = node_group.nodes.new("GeometryNodeJoinGeometry")
-                
-                # Position nodes
-                style_pos = style_node.location
-                join_node.location = (style_pos[0] + 200, style_pos[1])
-                original_select_node.location = (style_pos[0] - 200, style_pos[1] - 200)
-                
-                # Connect original nodes
-                node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
-                node_group.links.new(style_node.outputs[0], join_node.inputs[0])
-                node_group.links.new(join_node.outputs[0], group_output.inputs[0])
-            
-            # Create new domain nodes
-            color_common = nodes.add_custom(node_group, "Color Common")
-            set_color = nodes.add_custom(node_group, "Set Color")
-            select_node = nodes.add_custom(node_group, "Select Res ID Range")
-            style_surface = nodes.add_custom(node_group, "Style Surface")
-            
-            # Set Select Res ID Range values
-            select_node.inputs["Min"].default_value = start
-            select_node.inputs["Max"].default_value = end
-            
-            # Position nodes (offset each set of nodes vertically)
-            base_y_offset = -300 * (len(item.domains) + 1)
-            style_pos = style_node.location
-            color_common.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
-            set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
-            select_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
-            style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
-            
-            # Connect nodes
-            node_group.links.new(color_common.outputs["Color"], set_color.inputs["Color"])
-            node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
-            node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
-            node_group.links.new(select_node.outputs["Selection"], style_surface.inputs["Selection"])
-            node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
-            
-            # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
-            if original_select_node:
-                node_group.links.new(select_node.outputs["Inverted"], original_select_node.inputs["And"])
+        # Create domain object (copy of parent molecule)
+        if not domain.create_object_from_parent(self.molecule.object):
+            print(f"Failed to create domain object for {domain_id}")
+            return None
+        
+        # Update residue assignments
+        self._update_residue_assignments(domain)
+        
+        self.domains[domain_id] = domain
+        return domain_id
+        
+    def _check_domain_overlap(self, chain_id: str, start: int, end: int) -> bool:
+        """Check if proposed domain overlaps with existing domains"""
+        for domain in self.domains.values():
+            if domain.chain_id == chain_id:
+                if not (end < domain.start or start > domain.end):
+                    return True
+        return False
+        
+    def _update_residue_assignments(self, domain: DomainDefinition):
+        """Track which residues are assigned to which domains"""
+        for res in range(domain.start, domain.end + 1):
+            key = (domain.chain_id, res)
+            self.residue_assignments[key] = domain.name
+
+    def delete_domain(self, domain_id: str):
+        """Delete a domain and clean up its resources"""
+        if domain_id in self.domains:
+            domain = self.domains[domain_id]
+            # Remove residue assignments
+            for res in range(domain.start, domain.end + 1):
+                key = (domain.chain_id, res)
+                if key in self.residue_assignments:
+                    del self.residue_assignments[key]
+            # Clean up domain resources
+            domain.cleanup()
+            # Remove from domains dict
+            del self.domains[domain_id]
+
+    def cleanup(self):
+        """Clean up all domains and resources"""
+        for domain_id in list(self.domains.keys()):
+            self.delete_domain(domain_id)
 
     def _parse_chain_mapping(self, mapping_str: str) -> dict:
         """Parse chain mapping string into a dictionary"""
