@@ -86,21 +86,60 @@ class MoleculeWrapper:
 
     def create_domain(self, chain_id: Optional[str] = None, start: int = 1, end: int = 9999, name: Optional[str] = None) -> Optional[str]:
         """Create a new domain with default or provided values"""
-        # If chain_id is None, select the first available chain
-        if chain_id is None:
-            # Get chain IDs from the molecule's attributes
-            if self.object and "chain_id" in self.object.data.attributes:
-                chain_attr = self.object.data.attributes["chain_id"]
-                chain_ids = sorted(set(value.value for value in chain_attr.data))
-                if chain_ids:
-                    chain_id = str(chain_ids[0])
-                else:
-                    print("No chains found in molecule")
-                    return None
-            else:
-                print("No chain_id attribute found in molecule")
-                return None
+        # If explicit parameters are provided, use them directly
+        if chain_id is not None and start != 1 and end != 9999:
+            return self._create_domain_with_params(chain_id, start, end, name)
         
+        # Otherwise, find the next available non-overlapping section
+        # Get all available chains first
+        available_chains = self._get_available_chains()
+        if not available_chains:
+            # No chains in the molecule
+            print("No chains found in molecule")
+            return None
+        
+        # If no chain_id specified, start with the first chain
+        if chain_id is None:
+            chain_id = available_chains[0]
+        
+        # Find a non-overlapping section on the current chain
+        available_section = self._find_next_available_section(chain_id)
+        
+        # If no section is available on the current chain, try other chains
+        if available_section is None:
+            found_section = False
+            # Start from the next chain after the current one
+            try:
+                current_idx = available_chains.index(chain_id)
+                chains_to_check = available_chains[current_idx+1:] + available_chains[:current_idx]
+            except ValueError:
+                # If current chain_id not in available_chains for some reason
+                chains_to_check = available_chains
+                
+            for next_chain in chains_to_check:
+                available_section = self._find_next_available_section(next_chain)
+                if available_section:
+                    chain_id = next_chain
+                    found_section = True
+                    break
+                    
+            if not found_section:
+                # No available sections on any chain
+                # Show a message to the user via Blender's interface
+                self._show_message("No available space to create new domains", "Cannot Create Domain", 'ERROR')
+                return None
+                
+        # If we have an available section, use it
+        if available_section:
+            start, end = available_section
+            return self._create_domain_with_params(chain_id, start, end, name)
+        
+        # This should not happen, but just in case
+        print("Could not find suitable section for domain creation")
+        return None
+        
+    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> Optional[str]:
+        """Internal method to create a domain with specific parameters"""
         # Adjust end value based on chain's residue range if needed
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
         mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
@@ -141,6 +180,85 @@ class MoleculeWrapper:
         self.domains[domain_id] = domain
         return domain_id
         
+    def _find_next_available_section(self, chain_id: str) -> Optional[tuple]:
+        """Find the next available non-overlapping section in a chain"""
+        # Get chain mapping
+        chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
+        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        
+        # Get chain residue range
+        if mapped_chain not in self.chain_residue_ranges:
+            print(f"Chain {mapped_chain} not found in residue ranges")
+            return None
+            
+        min_res, max_res = self.chain_residue_ranges[mapped_chain]
+        
+        # Get all domains on this chain
+        chain_domains = []
+        for domain_id, domain in self.domains.items():
+            if domain.chain_id == mapped_chain:
+                chain_domains.append((domain.start, domain.end))
+                
+        # Sort domains by start position
+        chain_domains.sort()
+        
+        # If no domains on this chain, return the full chain range
+        if not chain_domains:
+            # Default domain size (30 residues or the full chain if smaller)
+            domain_size = min(30, max_res - min_res + 1)
+            return (min_res, min_res + domain_size - 1)
+            
+        # Find gaps between domains
+        current_pos = min_res
+        for start, end in chain_domains:
+            if current_pos < start:
+                # Found a gap
+                gap_size = start - current_pos
+                # If gap is large enough for a sensible domain (at least 5 residues)
+                if gap_size >= 5:
+                    # Default domain size (30 residues or the available gap if smaller)
+                    domain_size = min(30, gap_size)
+                    return (current_pos, current_pos + domain_size - 1)
+            # Move current position to after this domain
+            current_pos = max(current_pos, end + 1)
+            
+        # Check if there's space after the last domain
+        if current_pos <= max_res:
+            remaining = max_res - current_pos + 1
+            # If remaining space is large enough for a sensible domain
+            if remaining >= 5:
+                # Default domain size (30 residues or the remaining space if smaller)
+                domain_size = min(30, remaining)
+                return (current_pos, current_pos + domain_size - 1)
+                
+        # No suitable gap found
+        return None
+        
+    def _get_available_chains(self) -> List[str]:
+        """Get list of all available chains in the molecule"""
+        available_chains = []
+        if not self.object or "chain_id" not in self.object.data.attributes:
+            return available_chains
+            
+        # Get chain attribute
+        chain_attr = self.object.data.attributes["chain_id"]
+        numeric_chain_ids = sorted({value.value for value in chain_attr.data})
+        
+        # Convert to strings and apply mapping if available
+        for chain_id in numeric_chain_ids:
+            mapped_chain = self.get_author_chain_id(chain_id)
+            # Use numeric ID as string if no mapping
+            available_chains.append(str(chain_id))
+            
+        return available_chains
+        
+    def _show_message(self, message: str, title: str = "Message", icon: str = 'INFO'):
+        """Show a message to the user via Blender's interface"""
+        def draw(self, context):
+            self.layout.label(text=message)
+            
+        bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
+
     def update_domain(self, domain_id: str, chain_id: str, start: int, end: int) -> bool:
         """Update an existing domain with new parameters"""
         # Check if domain exists
