@@ -80,87 +80,8 @@ class DomainDefinition:
             modifier = self.object.modifiers.new(name="DomainNodes", type='NODES')
             modifier.node_group = self.node_group
 
-            # Find key nodes
-            input_node = nodes.get_input(self.node_group)
-            output_node = nodes.get_output(self.node_group)
-            style_ribbon_node = None
-            join_geometry_node = None
-
-            # Find Style Ribbon and Join Geometry nodes
-            for node in self.node_group.nodes:
-                if node.bl_idname == 'GeometryNodeGroup':
-                    if 'Style Ribbon' in node.node_tree.name:
-                        style_ribbon_node = node
-                elif node.bl_idname == 'GeometryNodeJoinGeometry':
-                    join_geometry_node = node
-
-            if not all([input_node, output_node, style_ribbon_node, join_geometry_node]):
-                print("Could not find all required nodes")
-                return False
-
-            # Create transform node
-            transform = self.node_group.nodes.new('GeometryNodeTransform')
-            transform.inputs["Translation"].default_value = (0, 0, 0)
-            transform.inputs["Rotation"].default_value = (0, 0, 0)
-            transform.inputs["Scale"].default_value = (1, 1, 1)
-            transform.location = (join_geometry_node.location.x + 200, join_geometry_node.location.y)
-
-            # Create chain selection node
-            chain_select = nodes.add_selection(
-                group=self.node_group,
-                sel_name="Select Chain",
-                input_list=[self.chain_id],  # Only include our chain
-                field="chain_id"
-            )
-            chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
-
-            print(f"Looking for chain ID: {self.chain_id}")
-            for input_socket in chain_select.inputs:
-                if input_socket.name == self.chain_id:
-                    print(f"Setting input socket {input_socket.name} to True")
-                    input_socket.default_value = True
-                else:
-                    print(f"Setting input socket {input_socket.name} to False")
-                    input_socket.default_value = False
-
-
-            # Create selection node for domain range
-            select_node = nodes.add_custom(self.node_group, "Select Res ID Range")
-            select_node.inputs["Min"].default_value = self.start
-            select_node.inputs["Max"].default_value = self.end
-            select_node.location = (chain_select.location.x + 200, chain_select.location.y)
-
-            # Store nodes to keep
-            nodes_to_keep = {
-                input_node, output_node, style_ribbon_node,
-                join_geometry_node, select_node, transform,
-                chain_select
-            }
-
-            # Remove all other nodes
-            for node in list(self.node_group.nodes):
-                if node not in nodes_to_keep:
-                    self.node_group.nodes.remove(node)
-
-            # Clear all links and reconnect
-            self.node_group.links.clear()
-
-            # Connect nodes
-            # Connect Group Input "Atoms" directly to Style Ribbon "Atoms"
-            self.node_group.links.new(input_node.outputs["Atoms"], style_ribbon_node.inputs["Atoms"])
-
-            # Connect chain selection output to residue selection input
-            self.node_group.links.new(chain_select.outputs["Selection"], select_node.inputs["And"])
-
-            # Connect residue selection to style ribbon
-            self.node_group.links.new(select_node.outputs["Selection"], style_ribbon_node.inputs["Selection"])
-
-            # Connect Style Ribbon to Join Geometry
-            self.node_group.links.new(style_ribbon_node.outputs["Geometry"], join_geometry_node.inputs["Geometry"])
-            # Connect Join Geometry to Transform
-            self.node_group.links.new(join_geometry_node.outputs["Geometry"], transform.inputs["Geometry"])
-            # Connect Transform to Group Output
-            self.node_group.links.new(transform.outputs["Geometry"], output_node.inputs["Geometry"])
+            # The detailed node setup will be handled by MoleculeWrapper._setup_domain_network
+            # We just need to ensure we have a valid node group at this point
 
             self._setup_complete = True
             return True
