@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, IntProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
 class MOLECULE_PB_OT_create_domain(Operator):
@@ -29,6 +29,26 @@ class MOLECULE_PB_OT_create_domain(Operator):
         if domain_id is None:
             self.report({'ERROR'}, "Failed to create domain")
             return {'CANCELLED'}
+            
+        # Update UI inputs to reflect actual domain values using our new operator
+        if domain_id in molecule.domains:
+            domain = molecule.domains[domain_id]
+            
+            # Call our UI update operator
+            bpy.ops.molecule.update_domain_ui_values(domain_id=domain_id)
+            
+            # Automatically expand the new domain
+            if domain.object:
+                try:
+                    # Try to set the property directly
+                    domain.object["domain_expanded"] = True
+                except:
+                    # If that fails, ensure the property exists first
+                    if not hasattr(domain.object, "domain_expanded"):
+                        # Register the property if needed
+                        bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
+                    # Then set it
+                    domain.object.domain_expanded = True
             
         return {'FINISHED'}
 
@@ -74,12 +94,28 @@ class MOLECULE_PB_OT_update_domain(Operator):
             return {'CANCELLED'}
             
         # Update the domain
-        molecule.update_domain(
+        success = molecule.update_domain(
             domain_id=self.domain_id,
             chain_id=scene.selected_chain_for_domain,
             start=scene.domain_start,
             end=scene.domain_end
         )
+        
+        if not success:
+            self.report({'ERROR'}, "Failed to update domain")
+            return {'CANCELLED'}
+            
+        # Get the updated domain ID (it might have changed if chain/range changed)
+        updated_domain_id = None
+        for d_id, domain in molecule.domains.items():
+            if d_id.endswith(f"{scene.selected_chain_for_domain}_{scene.domain_start}_{scene.domain_end}"):
+                updated_domain_id = d_id
+                break
+                
+        # If we found the updated domain, ensure UI values match using our new operator
+        if updated_domain_id and updated_domain_id in molecule.domains:
+            # Call our UI update operator
+            bpy.ops.molecule.update_domain_ui_values(domain_id=updated_domain_id)
         
         return {'FINISHED'}
 
@@ -126,6 +162,103 @@ class MOLECULE_PB_OT_keyframe_domain_rotation(Operator):
             obj.keyframe_insert(data_path="rotation_euler")
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_toggle_domain_expanded(Operator):
+    bl_idname = "molecule.toggle_domain_expanded"
+    bl_label = "Toggle Domain Expanded"
+    bl_description = "Toggle domain expanded state and load its values"
+    
+    domain_id: StringProperty()
+    is_expanded: BoolProperty()
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain or not domain.object:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+            
+        # Toggle expanded state
+        try:
+            # Try to set the property directly
+            domain.object["domain_expanded"] = self.is_expanded
+        except:
+            # If that fails, ensure the property exists first
+            if not hasattr(domain.object, "domain_expanded"):
+                # Register the property if needed
+                bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
+            # Then set it
+            domain.object.domain_expanded = self.is_expanded
+        
+        # If expanding, update UI values using our new operator
+        if self.is_expanded:
+            bpy.ops.molecule.update_domain_ui_values(domain_id=self.domain_id)
+        
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_update_domain_ui_values(Operator):
+    bl_idname = "molecule.update_domain_ui_values"
+    bl_label = "Update Domain UI"
+    bl_description = "Update UI values to match domain values"
+    bl_options = {'INTERNAL'}
+    
+    domain_id: StringProperty()
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+            
+        # Find the numeric chain ID that corresponds to the domain's chain_id
+        numeric_chain_id = None
+        # First, check if the domain's chain_id is already numeric
+        if domain.chain_id.isdigit():
+            numeric_chain_id = domain.chain_id
+        else:
+            # If not, we need to find the numeric ID by looking at the chain mapping
+            for num_id, mapped_id in molecule.chain_mapping.items():
+                if mapped_id == domain.chain_id:
+                    numeric_chain_id = str(num_id)
+                    break
+                    
+            # If we couldn't find it in the mapping, try the first available chain
+            if numeric_chain_id is None and molecule.object and "chain_id" in molecule.object.data.attributes:
+                chain_attr = molecule.object.data.attributes["chain_id"]
+                chain_ids = sorted({value.value for value in chain_attr.data})
+                if chain_ids:
+                    numeric_chain_id = str(chain_ids[0])
+        
+        # If we found a valid numeric chain ID, update the UI
+        if numeric_chain_id is not None:
+            try:
+                # Update the UI properties to match the actual domain values
+                scene.selected_chain_for_domain = numeric_chain_id
+                scene.domain_start = domain.start
+                scene.domain_end = domain.end
+            except (TypeError, ValueError) as e:
+                self.report({'WARNING'}, f"Could not update UI: {str(e)}")
+                
+        return {'FINISHED'}
+
 # Register
 def register():
     bpy.utils.register_class(MOLECULE_PB_OT_create_domain)
@@ -133,6 +266,8 @@ def register():
     bpy.utils.register_class(MOLECULE_PB_OT_delete_domain)
     bpy.utils.register_class(MOLECULE_PB_OT_keyframe_domain_location)
     bpy.utils.register_class(MOLECULE_PB_OT_keyframe_domain_rotation)
+    bpy.utils.register_class(MOLECULE_PB_OT_toggle_domain_expanded)
+    bpy.utils.register_class(MOLECULE_PB_OT_update_domain_ui_values)
 
 def unregister():
     bpy.utils.unregister_class(MOLECULE_PB_OT_create_domain)
@@ -140,3 +275,5 @@ def unregister():
     bpy.utils.unregister_class(MOLECULE_PB_OT_delete_domain)
     bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_location)
     bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_rotation)
+    bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_domain_expanded)
+    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_ui_values)

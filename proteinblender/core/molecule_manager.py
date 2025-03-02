@@ -313,6 +313,7 @@ class MoleculeWrapper:
         
         # Update UI properties to match new domain values for next UI refresh
         new_id = f"{self.identifier}_{chain_id}_{start}_{end}"
+        
         if domain_id != new_id:
             # If the ID would change, update the dictionary key
             self.domains[new_id] = self.domains.pop(domain_id)
@@ -508,42 +509,87 @@ class MoleculeWrapper:
                 print("Could not find input/output nodes in domain node group")
                 return False
                 
-            # Create chain selection node
-            chain_select = nodes.add_selection(
-                group=domain.node_group,
-                sel_name="Select Chain",
-                input_list=self.chain_mapping.values() or [str(chain_id)],
-                field="chain_id"
-            )
-            chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
+            # Find or create nodes - reuse existing when possible
+            # First check existing nodes before creating new ones
+            
+            # Look for chain selection node
+            chain_select = None
+            for node in domain.node_group.nodes:
+                if (node.bl_idname == 'GeometryNodeGroup' and 
+                    node.node_tree and 
+                    node.node_tree.name == "Select Chain"):
+                    chain_select = node
+                    break
+                    
+            if not chain_select:
+                # Create chain selection node if not found
+                chain_select = nodes.add_selection(
+                    group=domain.node_group,
+                    sel_name="Select Chain",
+                    input_list=self.chain_mapping.values() or [str(chain_id)],
+                    field="chain_id"
+                )
+                chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
             
             # Set the selected chain
             mapped_chain = self.chain_mapping.get(int(chain_id) if chain_id.isdigit() else chain_id, str(chain_id))
             for input_socket in chain_select.inputs:
+                # Skip non-boolean inputs (like group inputs)
+                if input_socket.type != 'BOOLEAN':
+                    continue
                 if input_socket.name == mapped_chain:
-                    print(f"Setting chain selection for {input_socket.name} to True")
                     input_socket.default_value = True
                 else:
                     input_socket.default_value = False
             
-            # Create residue range selection node
-            select_res_id_range = nodes.add_custom(domain.node_group, "Select Res ID Range")
+            # Look for residue range selection node
+            select_res_id_range = None
+            for node in domain.node_group.nodes:
+                if (node.bl_idname == 'GeometryNodeGroup' and 
+                    node.node_tree and 
+                    node.node_tree.name == "Select Res ID Range"):
+                    select_res_id_range = node
+                    break
+                    
+            if not select_res_id_range:
+                # Create residue range selection node if not found
+                select_res_id_range = nodes.add_custom(domain.node_group, "Select Res ID Range")
+                select_res_id_range.location = (chain_select.location.x + 200, chain_select.location.y)
+            
+            # Update the residue range
             select_res_id_range.inputs["Min"].default_value = start
             select_res_id_range.inputs["Max"].default_value = end
-            select_res_id_range.location = (chain_select.location.x + 200, chain_select.location.y)
             
-            # Create color nodes
-            color_emit = nodes.add_custom(domain.node_group, "Color Common")
-            color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
-            color_emit.location = (select_res_id_range.location.x - 400, select_res_id_range.location.y)
+            # Look for color nodes
+            color_emit = None
+            set_color = None
             
-            set_color = nodes.add_custom(domain.node_group, "Set Color")
-            set_color.location = (color_emit.location.x + 200, color_emit.location.y)
+            for node in domain.node_group.nodes:
+                if (node.bl_idname == 'GeometryNodeGroup' and 
+                    node.node_tree and 
+                    node.node_tree.name == "Color Common"):
+                    color_emit = node
+                elif (node.bl_idname == 'GeometryNodeGroup' and 
+                      node.node_tree and 
+                      node.node_tree.name == "Set Color"):
+                    set_color = node
+            
+            # Create color nodes if not found
+            if not color_emit:
+                color_emit = nodes.add_custom(domain.node_group, "Color Common")
+                color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
+                color_emit.location = (select_res_id_range.location.x - 400, select_res_id_range.location.y)
+            
+            if not set_color:
+                set_color = nodes.add_custom(domain.node_group, "Set Color")
+                set_color.location = (color_emit.location.x + 200, color_emit.location.y)
             
             # Find or create style node
             style_node = None
             for node in domain.node_group.nodes:
-                if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Style" in node.node_tree.name:
+                if (node.bl_idname == 'GeometryNodeGroup' and 
+                    node.node_tree and 
+                    "Style" in node.node_tree.name):
                     style_node = node
                     break
                     
@@ -575,11 +621,42 @@ class MoleculeWrapper:
             domain.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
             domain.node_group.links.new(join_node.outputs[0], output_node.inputs["Geometry"])
             
+            # Remove any orphaned or duplicate nodes
+            self._clean_unused_nodes(domain.node_group)
+            
             return True
             
         except Exception as e:
             print(f"Error setting up domain network: {str(e)}")
             return False
+    
+    def _clean_unused_nodes(self, node_group):
+        """Remove any unused or orphaned nodes from the node group"""
+        # Get all linked nodes starting from the output
+        output_node = nodes.get_output(node_group)
+        if not output_node:
+            return
+        
+        linked_nodes = set()
+        nodes_to_check = [output_node]
+        
+        # Traverse the node tree backwards to find all connected nodes
+        while nodes_to_check:
+            current = nodes_to_check.pop()
+            linked_nodes.add(current)
+            
+            # Check all input sockets for connections
+            for input_socket in current.inputs:
+                for link in input_socket.links:
+                    if link.from_node not in linked_nodes:
+                        nodes_to_check.append(link.from_node)
+        
+        # Remove nodes that aren't linked to the output
+        for node in list(node_group.nodes):
+            if node not in linked_nodes:
+                # Some nodes might be special system nodes we shouldn't remove
+                if node.bl_idname != 'NodeGroupInput' and node.bl_idname != 'NodeGroupOutput':
+                    node_group.nodes.remove(node)
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

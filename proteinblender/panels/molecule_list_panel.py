@@ -119,10 +119,38 @@ class MOLECULE_PB_PT_list(Panel):
                     # Add expand/collapse triangle
                     is_expanded = getattr(domain.object, "domain_expanded", False)
                     expand_icon = "TRIA_DOWN" if is_expanded else "TRIA_RIGHT"
-                    header_row.prop(domain.object, "domain_expanded", 
-                                 icon=expand_icon, 
-                                 icon_only=True,
-                                 emboss=False)
+                    
+                    # Try to use the custom operator, but fall back to direct property if not available
+                    try:
+                        expand_op = header_row.operator(
+                            "molecule.toggle_domain_expanded",
+                            text="",
+                            icon=expand_icon,
+                            emboss=False
+                        )
+                        if expand_op:  # Check if operator was created successfully
+                            expand_op.domain_id = domain_id
+                            expand_op.is_expanded = not is_expanded
+                        else:
+                            # Fallback to direct property toggle
+                            header_row.prop(domain.object, "domain_expanded", 
+                                         icon=expand_icon, 
+                                         icon_only=True,
+                                         emboss=False)
+                    except Exception:
+                        # Fallback to direct property toggle if operator fails
+                        header_row.prop(domain.object, "domain_expanded", 
+                                     icon=expand_icon, 
+                                     icon_only=True,
+                                     emboss=False)
+                        
+                        # If expanding, update UI values to match domain
+                        if not is_expanded and domain.object.domain_expanded:
+                            # Add a hidden operator to update UI values
+                            hidden_row = header_row.row()
+                            hidden_row.scale_x = 0.01
+                            hidden_row.scale_y = 0.01
+                            hidden_row.operator("molecule.update_domain_ui_values", text="", emboss=False).domain_id = domain_id
                     
                     # Add domain label and info
                     info_row = header_row.row()
@@ -143,6 +171,13 @@ class MOLECULE_PB_PT_list(Panel):
                         # Add domain configuration UI
                         config_box = control_box.box()
                         config_box.label(text="Domain Configuration")
+                        
+                        # Ensure UI values match domain values when expanded
+                        if scene.domain_start != domain.start or scene.domain_end != domain.end or scene.selected_chain_for_domain != domain.chain_id:
+                            # Add a hidden operator to update UI values
+                            row = config_box.row()
+                            row.scale_y = 0.01
+                            row.operator("molecule.update_domain_ui_values", text="", emboss=False).domain_id = domain_id
                         
                         # Chain selection
                         chain_row = config_box.row()
