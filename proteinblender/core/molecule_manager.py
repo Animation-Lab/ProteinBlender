@@ -41,6 +41,94 @@ class MoleculeWrapper:
         # Reference to the join node for domain selections
         self.domain_join_node = None
         
+        # Setup the protein domain infrastructure
+        self._setup_protein_domain_infrastructure()
+        
+    def _setup_protein_domain_infrastructure(self):
+        """
+        Set up the Multi_Boolean_OR and NOT node infrastructure for domains.
+        This is called once during initialization of the MoleculeWrapper.
+        """
+        if not self.molecule.object:
+            return
+            
+        # Get the parent molecule's node group
+        parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
+        if not parent_modifier or not parent_modifier.node_group:
+            print("Parent molecule has no valid node group")
+            return
+            
+        parent_node_group = parent_modifier.node_group
+        
+        try:
+            # Find main style node
+            main_style_node = self.get_main_style_node()
+            if not main_style_node:
+                print("Could not find main style node in parent molecule")
+                return
+                
+            # Check and store the original selection connection to the style node
+            original_selection_node = None
+            original_selection_socket = None
+            
+            # First, check if there's any connection to the style node's Selection input
+            for link in list(main_style_node.inputs["Selection"].links):
+                original_selection_node = link.from_node
+                original_selection_socket = link.from_socket
+                # Don't remove this link yet - we'll do it after creating the infrastructure
+                break
+                
+            # Create multi-input OR node group if it doesn't exist
+            multi_or_group = nodes.create_multi_boolean_or()
+            
+            # Create the join node using our custom group
+            self.domain_join_node = parent_node_group.nodes.new("GeometryNodeGroup")
+            self.domain_join_node.node_tree = multi_or_group
+            self.domain_join_node.location = (main_style_node.location.x - 400, main_style_node.location.y)
+            self.domain_join_node.name = "Domain_Boolean_Join"
+            
+            # Create final NOT node after the join node
+            final_not = parent_node_group.nodes.new("FunctionNodeBooleanMath")
+            final_not.operation = 'NOT'
+            final_not.location = (self.domain_join_node.location.x + 200, self.domain_join_node.location.y)
+            final_not.name = "Domain_Final_Not"
+            
+            # Now that join node is created, handle the original connection
+            if original_selection_node:
+                # Connect original selection to join node input 1
+                parent_node_group.links.new(original_selection_socket, 
+                                         self.domain_join_node.inputs["Input_1"])
+            
+            # Remove ALL existing links to style node's Selection input
+            for link in list(main_style_node.inputs["Selection"].links):
+                parent_node_group.links.remove(link)
+            
+            # Connect OR output to NOT input
+            parent_node_group.links.new(self.domain_join_node.outputs["Result"], final_not.inputs[0])
+            
+            # Connect NOT output to style Selection - this should be the ONLY connection to style's Selection
+            parent_node_group.links.new(final_not.outputs["Boolean"], main_style_node.inputs["Selection"])
+            
+            # Ensure style node's Selection is only connected to the final NOT node
+            '''
+            for link in list(main_style_node.inputs["Selection"].links):
+                if link.from_node != final_not:
+                    parent_node_group.links.remove(link)
+            '''
+            
+        except Exception as e:
+            print(f"Error setting up protein domain infrastructure: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        
+        # Add this at the end of _setup_protein_domain_infrastructure
+        # Ensure style node's Selection is only connected to the final NOT node
+        '''
+        for link in list(main_style_node.inputs["Selection"].links):
+            if link.from_node != final_not:
+                parent_node_group.links.remove(link)
+        '''
+        
     @property
     def object(self) -> bpy.types.Object:
         """Get the Blender object"""
@@ -390,21 +478,8 @@ class MoleculeWrapper:
         # Remove from tracking dictionary
         del self.domain_mask_nodes[domain_id]
         
-        # Check if we need to clean up the join node
-        if not self.domain_mask_nodes:
-            # No more domains, remove join node and restore original connection
-            if self.domain_join_node:
-                # Get style node
-                main_style_node = self.get_main_style_node()
-                if main_style_node:
-                    # Remove join node links
-                    for link in list(parent_node_group.links):
-                        if link.from_node == self.domain_join_node or link.to_node == self.domain_join_node:
-                            parent_node_group.links.remove(link)
-                            
-                # Delete join node
-                parent_node_group.nodes.remove(self.domain_join_node)
-                self.domain_join_node = None
+        # Note: We're no longer removing the domain infrastructure nodes (join node and NOT node)
+        # when all domains are deleted. They will persist for future domain creations.
 
     def delete_domain(self, domain_id: str):
         """Delete a domain and its object"""
@@ -604,13 +679,20 @@ class MoleculeWrapper:
                     break
                     
             if not chain_select:
-                # Create chain selection node if not found
-                chain_select = nodes.add_selection(
-                    group=domain.node_group,
-                    sel_name="Select Chain",
-                    input_list=self.chain_mapping.values() or [str(chain_id)],
-                    field="chain_id"
+                # Create chain selection node if not found - but don't use nodes.add_selection
+                # as it automatically connects to the style node
+                chain_select_group = nodes.custom_iswitch(
+                    name="selection", 
+                    iter_list=self.chain_mapping.values() or [str(chain_id)], 
+                    field="chain_id", 
+                    dtype="BOOLEAN"
                 )
+                
+                chain_select = nodes.add_custom(
+                    domain.node_group,
+                    chain_select_group.name
+                )
+                chain_select.name = "Select Chain"
                 chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
             
             # Set the selected chain
@@ -699,12 +781,30 @@ class MoleculeWrapper:
             domain.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
             domain.node_group.links.new(set_color.outputs["Atoms"], style_node.inputs["Atoms"])
             domain.node_group.links.new(chain_select.outputs["Selection"], select_res_id_range.inputs["And"])
+            
+            # Connect the residue selection to the style node's Selection input
             domain.node_group.links.new(select_res_id_range.outputs["Selection"], style_node.inputs["Selection"])
+            
             domain.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
             domain.node_group.links.new(join_node.outputs[0], output_node.inputs["Geometry"])
             
             # Remove any orphaned or duplicate nodes
             self._clean_unused_nodes(domain.node_group)
+            
+            # Check for and remove any unwanted connections in the parent molecule's node group
+            # Get the parent molecule's node group
+            parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
+            if parent_modifier and parent_modifier.node_group:
+                parent_node_group = parent_modifier.node_group
+                main_style_node = self.get_main_style_node()
+                
+                if main_style_node:
+                    # Remove any direct connections between domain's chain selection and parent's style node
+                    for link in list(parent_node_group.links):
+                        if (link.from_node.name == chain_select.name and 
+                            link.to_node == main_style_node and 
+                            link.to_socket.name == "Selection"):
+                            parent_node_group.links.remove(link)
             
             return True
             
@@ -754,62 +854,18 @@ class MoleculeWrapper:
         parent_node_group = parent_modifier.node_group
         
         try:
-            # Get references to key nodes
-            input_node = nodes.get_input(parent_node_group)
-            
             # Find main style node
             main_style_node = self.get_main_style_node()
             if not main_style_node:
                 print("Could not find main style node in parent molecule")
                 return
             
-            # Step 1: Check and store the original selection connection to the style node
-            original_selection_node = None
-            original_selection_socket = None
-            
-            # First, check if there's any connection to the style node's Selection input
-            # that's not coming from our join node
-            for link in list(main_style_node.inputs["Selection"].links):
-                if self.domain_join_node is None or link.from_node != self.domain_join_node:
-                    original_selection_node = link.from_node
-                    original_selection_socket = link.from_socket
-                    # DON'T remove this link yet - we'll do it after creating join node
-                    break
-            
-            # Step 2: Find or create the join node (multi-input OR for all domain masks)
+            # Check if domain infrastructure is set up
             if self.domain_join_node is None:
-                # Create multi-input OR node group if it doesn't exist
-                multi_or_group = nodes.create_multi_boolean_or()
+                print("Domain infrastructure not set up. Call _setup_protein_domain_infrastructure first.")
+                return
                 
-                # Create the join node using our custom group
-                self.domain_join_node = parent_node_group.nodes.new("GeometryNodeGroup")
-                self.domain_join_node.node_tree = multi_or_group
-                self.domain_join_node.location = (main_style_node.location.x - 400, main_style_node.location.y)
-                self.domain_join_node.name = "Domain_Boolean_Join"
-                
-                # Create final NOT node after the join node
-                final_not = parent_node_group.nodes.new("FunctionNodeBooleanMath")
-                final_not.operation = 'NOT'
-                final_not.location = (self.domain_join_node.location.x + 200, self.domain_join_node.location.y)
-                final_not.name = "Domain_Final_Not"
-                
-                # Now that join node is created, handle the original connection
-                if original_selection_node:
-                    # Connect original selection to join node input 1
-                    parent_node_group.links.new(original_selection_socket, 
-                                             self.domain_join_node.inputs["Input_1"])
-                
-                # Remove ALL existing links to style node's Selection input
-                for link in list(main_style_node.inputs["Selection"].links):
-                    parent_node_group.links.remove(link)
-                
-                # Connect OR output to NOT input
-                parent_node_group.links.new(self.domain_join_node.outputs["Result"], final_not.inputs[0])
-                
-                # Connect NOT output to style Selection - this should be the ONLY connection to style's Selection
-                parent_node_group.links.new(final_not.outputs[0], main_style_node.inputs["Selection"])
-            
-            # Step 3: Create and configure chain selection node
+            # Step 1: Create and configure chain selection node
             chain_select_name = f"Domain_Chain_Select_{domain_id}"
             chain_select = None
             for node in parent_node_group.nodes:
@@ -818,19 +874,26 @@ class MoleculeWrapper:
                     break
                     
             if not chain_select:
-                # Create chain selection node
-                chain_select = nodes.add_selection(
-                    group=parent_node_group,
-                    sel_name=chain_select_name,
-                    input_list=self.chain_mapping.values() or [str(chain_id)],
-                    field="chain_id"
+                # Create chain selection node - but don't use nodes.add_selection directly
+                # as it automatically connects to the style node
+                chain_select_group = nodes.custom_iswitch(
+                    name="selection", 
+                    iter_list=self.chain_mapping.values() or [str(chain_id)], 
+                    field="chain_id", 
+                    dtype="BOOLEAN"
                 )
+                
+                chain_select = nodes.add_custom(
+                    parent_node_group,
+                    chain_select_group.name
+                )
+                
                 # Position to the left of the join node
                 chain_select.location = (self.domain_join_node.location.x - 600, 
                                       self.domain_join_node.location.y - 100 - len(self.domain_mask_nodes) * 100)
                 chain_select.name = chain_select_name
             
-            # Step 4: Configure chain selection
+            # Step 2: Configure chain selection
             mapped_chain = self.chain_mapping.get(int(chain_id) if chain_id.isdigit() else chain_id, str(chain_id))
             for input_socket in chain_select.inputs:
                 # Skip non-boolean inputs (like group inputs)
@@ -841,7 +904,7 @@ class MoleculeWrapper:
                 else:
                     input_socket.default_value = False
             
-            # Step 5: Create residue range selection node
+            # Step 3: Create residue range selection node
             res_select_name = f"Domain_Res_Select_{domain_id}"
             res_select = None
             for node in parent_node_group.nodes:
@@ -859,19 +922,15 @@ class MoleculeWrapper:
             res_select.inputs["Min"].default_value = start
             res_select.inputs["Max"].default_value = end
             
-            # Remove any existing incorrect connections to style node
-            for link in list(parent_node_group.links):
-                if link.to_node == main_style_node and link.to_socket.name == "Selection":
-                    if link.from_node != final_not:  # Only the final NOT node should connect to style
-                        parent_node_group.links.remove(link)
-            
-            # Step 6: Connect chain select to res select
+            # Step 4: Connect chain select to res select
             # First remove any existing connections to res_select's "And" input
             for link in list(res_select.inputs["And"].links):
                 parent_node_group.links.remove(link)
+                
+            # Connect chain select to res select
             parent_node_group.links.new(chain_select.outputs["Selection"], res_select.inputs["And"])
             
-            # Step 7: Find next available input on join node
+            # Step 5: Find next available input on join node
             available_input = None
             for i in range(1, 9):  # Check inputs 1-8
                 input_name = f"Input_{i}"
@@ -883,16 +942,25 @@ class MoleculeWrapper:
                 print(f"Warning: No available inputs in multi-input OR node for domain {domain_id}")
                 return
             
-            # Connect residue selection to join node
+            # Step 6: Connect residue selection to join node
             # First remove any existing connections to this input
             if self.domain_join_node.inputs[available_input].is_linked:
                 for link in list(self.domain_join_node.inputs[available_input].links):
                     parent_node_group.links.remove(link)
+                    
+            # Connect residue selection output to join node input
             parent_node_group.links.new(res_select.outputs["Selection"], 
                                      self.domain_join_node.inputs[available_input])
             
             # Store the nodes for future reference
             self.domain_mask_nodes[domain_id] = (chain_select, res_select)
+            
+            # Remove any direct connections between chain selection and style node
+            for link in list(parent_node_group.links):
+                if (link.from_node == chain_select and 
+                    link.to_node == main_style_node and 
+                    link.to_socket.name == "Selection"):
+                    parent_node_group.links.remove(link)
             
         except Exception as e:
             print(f"Error creating domain mask nodes: {str(e)}")
