@@ -935,3 +935,117 @@ def resid_multiple_selection(node_name, input_resid_string):
     group_link(prev.outputs[0], invert_bool_math.inputs[0])
     group_link(invert_bool_math.outputs[0], residue_id_group_out.inputs["Inverted"])
     return residue_id_group
+
+
+def create_multi_boolean_and(name="Multi_Boolean_AND", num_inputs=8):
+    """Create a node group that performs AND operation on multiple boolean inputs.
+    
+    Args:
+        name (str): Name of the node group
+        num_inputs (int): Number of boolean inputs to support (default: 8)
+        
+    Returns:
+        bpy.types.NodeTree: The created node group
+    """
+    # Create new node group
+    group = new_tree(name=name, geometry=False, fallback=False)
+    
+    # Get input/output nodes
+    input_node = get_input(group)
+    output_node = get_output(group)
+    
+    # Create boolean inputs
+    for i in range(num_inputs):
+        group.interface.new_socket(
+            name=f"Input_{i+1}",
+            in_out="INPUT",
+            socket_type="NodeSocketBool"
+        )
+    
+    # Create output socket
+    group.interface.new_socket(
+        name="Result",
+        in_out="OUTPUT",
+        socket_type="NodeSocketBool"
+    )
+    
+    # Create chain of AND nodes
+    prev_node = None
+    for i in range(num_inputs - 1):
+        bool_math = group.nodes.new("FunctionNodeBooleanMath")
+        bool_math.operation = 'AND'
+        bool_math.location = (200 * (i + 1), 0)
+        
+        if i == 0:
+            # First node: connect first two inputs
+            group.links.new(input_node.outputs[0], bool_math.inputs[0])
+            group.links.new(input_node.outputs[1], bool_math.inputs[1])
+        else:
+            # Connect previous node's output to first input
+            group.links.new(prev_node.outputs[0], bool_math.inputs[0])
+            # Connect next input to second input
+            group.links.new(input_node.outputs[i+1], bool_math.inputs[1])
+        
+        prev_node = bool_math
+    
+    # Connect final node to output
+    group.links.new(prev_node.outputs[0], output_node.inputs[0])
+    
+    return group
+
+
+def create_multi_boolean_or(name="Multi_Boolean_OR", num_inputs=8):
+    """Create a node group that performs OR operation on multiple boolean inputs.
+    
+    Args:
+        name (str): Name of the node group
+        num_inputs (int): Number of boolean inputs to support (default: 8)
+        
+    Returns:
+        bpy.types.NodeTree: The created node group
+    """
+    # Create new node group
+    group = new_tree(name=name, geometry=False, fallback=False)
+    
+    # Get input/output nodes
+    input_node = get_input(group)
+    output_node = get_output(group)
+    
+    # Create boolean inputs
+    for i in range(num_inputs):
+        group.interface.new_socket(
+            name=f"Input_{i+1}",
+            in_out="INPUT",
+            socket_type="NodeSocketBool"
+        )
+    
+    # Create output socket
+    group.interface.new_socket(
+        name="Result",
+        in_out="OUTPUT",
+        socket_type="NodeSocketBool"
+    )
+    
+    # Create chain of OR nodes
+    prev_node = None
+    for i in range(num_inputs - 1):
+        bool_math = group.nodes.new("FunctionNodeBooleanMath")
+        bool_math.operation = 'OR'
+        bool_math.location = (200 * (i + 1), 0)
+        
+        if i == 0:
+            # First node: connect first two inputs
+            group.links.new(input_node.outputs[0], bool_math.inputs[0])
+            group.links.new(input_node.outputs[1], bool_math.inputs[1])
+        else:
+            # Connect previous node's output to first input
+            group.links.new(prev_node.outputs[0], bool_math.inputs[0])
+            # Connect next input to second input
+            group.links.new(input_node.outputs[i+1], bool_math.inputs[1])
+        
+        prev_node = bool_math
+    
+    # Connect final node to output
+    group.links.new(prev_node.outputs[0], output_node.inputs[0])
+    
+    return group
