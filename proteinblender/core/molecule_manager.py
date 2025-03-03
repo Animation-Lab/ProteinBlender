@@ -2,6 +2,8 @@ from typing import Optional, Dict, List
 import bpy
 from pathlib import Path
 import numpy as np
+import colorsys
+import random
 
 from ..utils.molecularnodes.entities import fetch, load_local
 from ..utils.molecularnodes.entities.molecule.molecule import Molecule
@@ -740,9 +742,40 @@ class MoleculeWrapper:
             
             # Create color nodes if not found
             if not color_emit:
+                # Generate a unique color based on the domain index
+                # This helps visually distinguish domains from each other
+                
+                # Get domain index based on current number of domains
+                domain_index = len(self.domains)
+                
+                # Generate a color using HSV for better distribution
+                # Start with golden ratio for good distribution
+                golden_ratio = 0.618033988749895
+                hue = (domain_index * golden_ratio) % 1.0
+                saturation = 0.8
+                value = 0.9
+                
+                # Convert to RGB and add alpha
+                rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+                domain_color = (rgb[0], rgb[1], rgb[2], 1.0)
+                
                 color_emit = nodes.add_custom(domain.node_group, "Color Common")
-                color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
                 color_emit.location = (select_res_id_range.location.x - 400, select_res_id_range.location.y)
+                
+                # Create a unique node tree for this domain to ensure independent color control
+                original_node_tree = color_emit.node_tree
+                new_node_tree_name = f"Color Common_{domain.id}"
+                
+                # Create a copy of the node tree with a unique name
+                new_node_tree = original_node_tree.copy()
+                new_node_tree.name = new_node_tree_name
+                color_emit.node_tree = new_node_tree
+                
+                # Set the domain color using our generated color
+                if "Carbon" in color_emit.inputs:
+                    color_emit.inputs["Carbon"].default_value = domain_color
+                elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
+                    color_emit.inputs[0].default_value = domain_color
             
             if not set_color:
                 set_color = nodes.add_custom(domain.node_group, "Set Color")
@@ -984,6 +1017,81 @@ class MoleculeWrapper:
         for res in range(domain.start, domain.end + 1):
             key = (domain.chain_id, res)
             self.residue_assignments[key] = domain.name
+
+    def update_domain_color(self, domain_id: str, color: tuple) -> bool:
+        """Update the color of a domain
+        
+        Args:
+            domain_id (str): The ID of the domain to update
+            color (tuple): The new color as an RGBA tuple (r, g, b, a)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if domain_id not in self.domains:
+            print(f"Domain {domain_id} not found")
+            return False
+            
+        domain = self.domains[domain_id]
+        if not domain.node_group:
+            print(f"Domain {domain_id} has no node group")
+            return False
+            
+        try:
+            # Find the Color Common node
+            color_emit = None
+            set_color_node = None
+            
+            for node in domain.node_group.nodes:
+                if (node.bl_idname == 'GeometryNodeGroup' and 
+                    node.node_tree and 
+                    node.node_tree.name == "Color Common"):
+                    color_emit = node
+                elif (node.bl_idname == 'GeometryNodeGroup' and 
+                      node.node_tree and 
+                      node.node_tree.name == "Set Color"):
+                    set_color_node = node
+                    
+            if not color_emit:
+                print(f"Domain {domain_id} has no Color Common node")
+                return False
+            
+            # Create a unique node tree for this domain's color node if it doesn't already have one
+            # This ensures each domain has its own independent color settings
+            
+            import bpy
+            
+            # Check if this color node has a unique node tree
+            if not color_emit.node_tree.name.endswith(f"_{domain_id}"):
+                # If not, create a duplicate of the node tree specific to this domain
+                original_node_tree = color_emit.node_tree
+                new_node_tree_name = f"Color Common_{domain_id}"
+                
+                # Check if a custom tree already exists for this domain
+                if new_node_tree_name in bpy.data.node_groups:
+                    # Use existing custom node tree
+                    color_emit.node_tree = bpy.data.node_groups[new_node_tree_name]
+                else:
+                    # Create a copy of the node tree with a unique name
+                    new_node_tree = original_node_tree.copy()
+                    new_node_tree.name = new_node_tree_name
+                    color_emit.node_tree = new_node_tree
+                
+            # Now update the Carbon color input 
+            if "Carbon" in color_emit.inputs:
+                color_emit.inputs["Carbon"].default_value = color
+                return True
+            elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
+                # Fallback - update the first input if named Carbon input not found
+                color_emit.inputs[0].default_value = color
+                return True
+            else:
+                print(f"Domain {domain_id}'s Color Common node has no Carbon input")
+                return False
+            
+        except Exception as e:
+            print(f"Error updating domain color: {str(e)}")
+            return False
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

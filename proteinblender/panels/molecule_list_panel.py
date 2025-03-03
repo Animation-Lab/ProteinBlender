@@ -199,6 +199,22 @@ class MOLECULE_PB_PT_list(Panel):
                         if update_op:
                             update_op.domain_id = domain_id
                         
+                        # Domain color picker
+                        color_box = control_box.box()
+                        color_box.label(text="Domain Color")
+                        color_row = color_box.row()
+                        color_row.prop(scene, "domain_color", text="")
+                        
+                        # Update color button
+                        update_color_op = color_row.operator(
+                            "molecule.update_domain_color", 
+                            text="", 
+                            icon='CHECKMARK'
+                        )
+                        # Add null check to prevent AttributeError
+                        if update_color_op:
+                            update_color_op.domain_id = domain_id
+                        
                         # Transform controls
                         transform_box = control_box.box()
                         transform_box.label(text="Transform")

@@ -248,6 +248,15 @@ def register():
         default=False,
         update=lambda self, context: update_domain_preview(self, context)
     )
+    bpy.types.Scene.domain_color = bpy.props.FloatVectorProperty(
+        name="Domain Color",
+        description="Color of the selected domain",
+        subtype='COLOR',
+        default=(1.0, 1.0, 0.0, 1.0),
+        min=0.0,
+        max=1.0,
+        size=4
+    )
 
 
 

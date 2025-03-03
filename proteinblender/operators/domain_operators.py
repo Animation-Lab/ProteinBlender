@@ -255,8 +255,65 @@ class MOLECULE_PB_OT_update_domain_ui_values(Operator):
                 scene.domain_start = domain.start
                 scene.domain_end = domain.end
             except (TypeError, ValueError) as e:
-                self.report({'WARNING'}, f"Could not update UI: {str(e)}")
+                self.report({'WARNING'}, f"Could not update domain range UI: {str(e)}")
+            
+            # Get the current domain color
+            try:
+                if domain.node_group:
+                    # Try to find the Color Common node
+                    for node in domain.node_group.nodes:
+                        if node.name.startswith("Color Common"):
+                            # Look for Carbon input specifically 
+                            # Must be this domain's specific Color Common node
+                            if node.node_tree and node.node_tree.name.endswith(f"_{self.domain_id}"):
+                                if "Carbon" in node.inputs:
+                                    scene.domain_color = node.inputs["Carbon"].default_value
+                                    break
+                                elif hasattr(node, "inputs") and len(node.inputs) > 0 and hasattr(node.inputs[0], "default_value"):
+                                    scene.domain_color = node.inputs[0].default_value
+                                    break
+                            # Fallback to any Color Common node if no domain-specific one exists
+                            elif "Carbon" in node.inputs:
+                                scene.domain_color = node.inputs["Carbon"].default_value
+                                break
+                            elif hasattr(node, "inputs") and len(node.inputs) > 0 and hasattr(node.inputs[0], "default_value"):
+                                scene.domain_color = node.inputs[0].default_value
+                                break
+            except Exception as e:
+                self.report({'WARNING'}, f"Could not update color UI: {str(e)}")
                 
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_update_domain_color(Operator):
+    bl_idname = "molecule.update_domain_color"
+    bl_label = "Update Domain Color"
+    bl_description = "Update the color of the selected domain"
+    
+    domain_id: StringProperty()
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+        
+        # Update the domain color using the color property we added to the scene
+        success = molecule.update_domain_color(self.domain_id, scene.domain_color)
+        
+        if not success:
+            self.report({'ERROR'}, "Failed to update domain color")
+            return {'CANCELLED'}
+            
         return {'FINISHED'}
 
 # Register
@@ -268,6 +325,7 @@ def register():
     bpy.utils.register_class(MOLECULE_PB_OT_keyframe_domain_rotation)
     bpy.utils.register_class(MOLECULE_PB_OT_toggle_domain_expanded)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_ui_values)
+    bpy.utils.register_class(MOLECULE_PB_OT_update_domain_color)
 
 def unregister():
     bpy.utils.unregister_class(MOLECULE_PB_OT_create_domain)
@@ -277,3 +335,4 @@ def unregister():
     bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_rotation)
     bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_domain_expanded)
     bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_ui_values)
+    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_color)
