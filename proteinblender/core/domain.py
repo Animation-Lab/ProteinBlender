@@ -1,8 +1,43 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple, List
 import bpy
 from bpy.types import PropertyGroup
-from bpy.props import BoolProperty, StringProperty, IntProperty, PointerProperty
+from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty, 
+                      FloatVectorProperty, FloatProperty, EnumProperty)
 from ..utils.molecularnodes.blender import nodes
+
+class DomainProperties(PropertyGroup):
+    """Complete domain properties class to encapsulate all domain data"""
+    # Basic properties
+    is_expanded: BoolProperty(default=False, 
+                              description="Whether domain settings are expanded in UI")
+    
+    # Identifier and name
+    domain_id: StringProperty(name="Domain ID", 
+                            description="Unique identifier for this domain")
+    name: StringProperty(name="Name", 
+                       description="Display name for this domain")
+    
+    # Chain and residue range
+    chain_id: StringProperty(name="Chain", 
+                           description="Chain ID for this domain")
+    start: IntProperty(name="Start", 
+                      description="Starting residue number", 
+                      min=1, default=1)
+    end: IntProperty(name="End", 
+                    description="Ending residue number", 
+                    min=1, default=9999)
+    
+    # Display properties
+    color: FloatVectorProperty(name="Color", 
+                             description="Color for domain visualization",
+                             subtype='COLOR', size=4, 
+                             min=0.0, max=1.0, 
+                             default=(0.8, 0.1, 0.8, 1.0))  # Default to purple
+    
+    # Internal references
+    parent_molecule_id: StringProperty(description="ID of parent molecule")
+    object_name: StringProperty(description="Name of the Blender object for this domain")
+    node_group_name: StringProperty(description="Name of the node group for this domain")
 
 class DomainDefinition:
     """Represents the logical definition of a domain with its own geometry nodes network"""
@@ -15,6 +50,51 @@ class DomainDefinition:
         self.object = None  # Blender object reference
         self.node_group = None  # Geometry nodes network
         self._setup_complete = False
+        self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
+        self.domain_id = f"{chain_id}_{start}_{end}"
+
+    def to_properties(self) -> Dict:
+        """Convert domain definition to property dictionary for storing in PropertyGroup"""
+        props = {
+            'domain_id': self.domain_id,
+            'name': self.name,
+            'chain_id': self.chain_id,
+            'start': self.start,
+            'end': self.end,
+            'parent_molecule_id': self.parent_molecule_id,
+            'object_name': self.object.name if self.object else "",
+            'node_group_name': self.node_group.name if self.node_group else "",
+            'color': self.color,
+            'is_expanded': False
+        }
+        return props
+        
+    @classmethod
+    def from_properties(cls, props) -> 'DomainDefinition':
+        """Create a domain definition from properties"""
+        domain = cls(
+            chain_id=props.chain_id,
+            start=props.start,
+            end=props.end,
+            name=props.name
+        )
+        domain.parent_molecule_id = props.parent_molecule_id
+        domain.domain_id = props.domain_id
+        
+        # Find object and node group by name
+        if props.object_name and props.object_name in bpy.data.objects:
+            domain.object = bpy.data.objects[props.object_name]
+        
+        if props.node_group_name and props.node_group_name in bpy.data.node_groups:
+            domain.node_group = bpy.data.node_groups[props.node_group_name]
+            
+        # Set color
+        domain.color = props.color
+        
+        # Set setup state based on whether object and node group exist
+        domain._setup_complete = bool(domain.object and domain.node_group)
+        
+        return domain
 
     def create_object_from_parent(self, parent_obj: bpy.types.Object) -> bool:
         """Create a new Blender object for the domain by copying parent"""
@@ -100,8 +180,9 @@ class DomainDefinition:
         if self.node_group:
             bpy.data.node_groups.remove(self.node_group)
 
+# The old Domain class is kept for backward compatibility
 class Domain(PropertyGroup):
-    """Blender Property Group for UI integration"""
+    """Blender Property Group for UI integration - kept for compatibility"""
     is_expanded: BoolProperty(default=False)
     chain_id: StringProperty()
     start: IntProperty()
@@ -230,3 +311,17 @@ class ProteinBlenderDomain:
         select_node = self.nodes["select"]
         select_node.inputs["Min"].default_value = start
         select_node.inputs["Max"].default_value = end
+
+def register():
+    bpy.utils.register_class(Domain)
+    bpy.utils.register_class(DomainProperties)
+    
+def unregister():
+    try:
+        bpy.utils.unregister_class(DomainProperties)
+    except:
+        pass
+    try:
+        bpy.utils.unregister_class(Domain)
+    except:
+        pass

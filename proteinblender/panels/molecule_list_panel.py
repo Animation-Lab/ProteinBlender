@@ -98,8 +98,21 @@ class MOLECULE_PB_PT_list(Panel):
                 domain_box = settings_box.box()
                 domain_box.label(text="Domains:")
                 
-                # Domain creation button - simplified to just a button
-                domain_row = domain_box.row(align=True)
+                # Domain creation controls with chain and range inputs
+                creation_box = domain_box.box()
+                creation_box.label(text="Create New Domain")
+                
+                # Chain selection dropdown
+                chain_row = creation_box.row()
+                chain_row.prop(scene, "new_domain_chain", text="Chain")
+                
+                # Residue range inputs
+                range_row = creation_box.row(align=True)
+                range_row.prop(scene, "new_domain_start", text="Start")
+                range_row.prop(scene, "new_domain_end", text="End")
+                
+                # Domain creation button
+                domain_row = creation_box.row(align=True)
                 domain_row.scale_y = 1.2
                 create_op = domain_row.operator(
                     "molecule.create_domain",
@@ -167,37 +180,6 @@ class MOLECULE_PB_PT_list(Panel):
                     # If expanded, show domain controls
                     if is_expanded:
                         control_box = domain_header.box()
-                        
-                        # Add domain configuration UI
-                        config_box = control_box.box()
-                        config_box.label(text="Domain Configuration")
-                        
-                        # Ensure UI values match domain values when expanded
-                        if scene.domain_start != domain.start or scene.domain_end != domain.end or scene.selected_chain_for_domain != domain.chain_id:
-                            # Add a hidden operator to update UI values
-                            row = config_box.row()
-                            row.scale_y = 0.01
-                            row.operator("molecule.update_domain_ui_values", text="", emboss=False).domain_id = domain_id
-                        
-                        # Chain selection
-                        chain_row = config_box.row()
-                        chain_row.prop(scene, "selected_chain_for_domain", text="Chain")
-                        
-                        # Residue range
-                        range_row = config_box.row(align=True)
-                        range_row.prop(scene, "domain_start", text="Start")
-                        range_row.prop(scene, "domain_end", text="End")
-                        
-                        # Update domain button
-                        update_row = config_box.row()
-                        update_op = update_row.operator(
-                            "molecule.update_domain",
-                            text="Update Domain",
-                            icon='CHECKMARK'
-                        )
-                        # Add null check to prevent AttributeError
-                        if update_op:
-                            update_op.domain_id = domain_id
                         
                         # Domain color picker
                         color_box = control_box.box()

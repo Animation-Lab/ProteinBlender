@@ -40,24 +40,46 @@ def create_workspace_callback():
     return None  # Remove the timer
 
 def register():
+    # Try unregistering first to clean up any previous state
+    try:
+        unregister()
+    except Exception as e:
+        print(f"Unregister during startup failed: {e}")
+        pass
+    
+    # Register classes
     for op in all_pb_classes:
         for cls in op:
             try:
                 bpy.utils.register_class(cls)
+                registered_classes.add(cls)
             except Exception as e:
-                print(e)
+                print(f"Failed to register {cls.__name__}: {e}")
                 pass
-    bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
+    
+    # Register MolecularNodes session
+    if not hasattr(bpy.types.Scene, "MNSession"):
+        bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
     
     # Register properties
     register_protein_props()
     register_molecule_props()
     
-    # Register domain expanded property
-    bpy.types.Object.domain_expanded = BoolProperty(default=False)
+    # Register domain expanded property if not already registered
+    if not hasattr(bpy.types.Object, "domain_expanded"):
+        bpy.types.Object.domain_expanded = BoolProperty(default=False)
     
-    bpy.utils.register_class(MolecularNodesObjectProperties)
-    bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
+    # Register MolecularNodes object properties
+    try:
+        bpy.utils.register_class(MolecularNodesObjectProperties)
+    except Exception as e:
+        print(f"Failed to register MolecularNodesObjectProperties: {e}")
+        pass
+    
+    # Register object properties if not already registered
+    if not hasattr(bpy.types.Object, "mn"):
+        bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
+    
     # Schedule workspace creation after 0.5 seconds
     bpy.app.timers.register(create_workspace_callback, first_interval=0.25)
 
@@ -66,9 +88,22 @@ def register():
         # bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
 
 def unregister():
+    # Clear any pending timers to prevent creation of new workspace during unregistration
+    if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
+        bpy.app.timers.unregister(create_workspace_callback)
+
     # Unregister properties
-    unregister_protein_props()
-    unregister_molecule_props()
+    try:
+        unregister_protein_props()
+    except Exception as e:
+        print(f"Failed to unregister protein props: {e}")
+        pass
+    
+    try:
+        unregister_molecule_props()
+    except Exception as e:
+        print(f"Failed to unregister molecule props: {e}")
+        pass
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):
@@ -77,15 +112,25 @@ def unregister():
     # Remove session
     if hasattr(bpy.types.Scene, "MNSession"):
         del bpy.types.Scene.MNSession
+    
+    # Remove object properties
+    if hasattr(bpy.types.Object, "mn"):
         del bpy.types.Object.mn
-        # Unregister the property group
+    
+    # Unregister MolecularNodesObjectProperties
+    try:
         bpy.utils.unregister_class(MolecularNodesObjectProperties)
+    except Exception as e:
+        print(f"Failed to unregister MolecularNodesObjectProperties: {e}")
+        pass
 
     # Unregister classes
     for op in reversed(all_pb_classes):
         for cls in reversed(op):
             try:
                 bpy.utils.unregister_class(cls)
+                if cls in registered_classes:
+                    registered_classes.remove(cls)
             except Exception as e:
-                print(e)
+                print(f"Failed to unregister {cls.__name__}: {e}")
                 pass

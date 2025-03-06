@@ -25,10 +25,25 @@ class ProteinProperties(bpy.types.PropertyGroup):
 
 def register():
     from bpy.utils import register_class
+    
+    # Safe registration - unregister first if already registered
+    try:
+        unregister()
+    except Exception:
+        pass
+    
+    # Now register
     register_class(ProteinProperties)
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
 
 def unregister():
     from bpy.utils import unregister_class
-    del bpy.types.Scene.protein_props
-    unregister_class(ProteinProperties)
+    
+    # Safe unregistration with try/except blocks
+    if hasattr(bpy.types.Scene, "protein_props"):
+        del bpy.types.Scene.protein_props
+    
+    try:
+        unregister_class(ProteinProperties)
+    except Exception:
+        pass

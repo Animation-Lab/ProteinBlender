@@ -303,9 +303,8 @@ class MoleculeWrapper:
         
         # If no domains on this chain, return the full chain range
         if not chain_domains:
-            # Default domain size (30 residues or the full chain if smaller)
-            domain_size = min(30, max_res - min_res + 1)
-            return (min_res, min_res + domain_size - 1)
+            # Use the full chain range instead of limiting to 30 residues
+            return (min_res, max_res)
             
         # Find gaps between domains
         current_pos = min_res
@@ -315,9 +314,8 @@ class MoleculeWrapper:
                 gap_size = start - current_pos
                 # If gap is large enough for a sensible domain (at least 5 residues)
                 if gap_size >= 5:
-                    # Default domain size (30 residues or the available gap if smaller)
-                    domain_size = min(30, gap_size)
-                    return (current_pos, current_pos + domain_size - 1)
+                    # Use the entire gap size instead of limiting to 30
+                    return (current_pos, start - 1)
             # Move current position to after this domain
             current_pos = max(current_pos, end + 1)
             
@@ -326,9 +324,8 @@ class MoleculeWrapper:
             remaining = max_res - current_pos + 1
             # If remaining space is large enough for a sensible domain
             if remaining >= 5:
-                # Default domain size (30 residues or the remaining space if smaller)
-                domain_size = min(30, remaining)
-                return (current_pos, current_pos + domain_size - 1)
+                # Use the entire remaining space instead of limiting to 30
+                return (current_pos, max_res)
                 
         # No suitable gap found
         return None

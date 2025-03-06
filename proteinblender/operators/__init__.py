@@ -17,6 +17,7 @@ from .domain_operators import (
     MOLECULE_PB_OT_toggle_domain_expanded,
     MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
+    MOLECULE_PB_OT_edit_domain,
 )
 
 CLASSES = (
@@ -34,4 +35,5 @@ CLASSES = (
     MOLECULE_PB_OT_toggle_domain_expanded,
     MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
+    MOLECULE_PB_OT_edit_domain,
 )

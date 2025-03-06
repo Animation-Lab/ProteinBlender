@@ -35,6 +35,24 @@ class MOLECULE_PB_OT_select(Operator):
             # Set the edit identifier when selecting
             context.scene.edit_molecule_identifier = molecule.identifier
             
+            # Initialize domain creation UI properties
+            if chain_ids and len(chain_ids) > 0:
+                first_chain = str(chain_ids[0])
+                context.scene.new_domain_chain = first_chain
+                
+                # Get residue range for the first chain
+                if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
+                    # Get the mapped chain (handle numeric vs. alphabetic chains)
+                    mapped_chain = molecule.chain_mapping.get(
+                        int(first_chain) if first_chain.isdigit() else first_chain, 
+                        str(first_chain)
+                    )
+                    
+                    # Get residue range for this chain
+                    if mapped_chain in molecule.chain_residue_ranges:
+                        min_res, max_res = molecule.chain_residue_ranges[mapped_chain]
+                        context.scene.new_domain_start = min_res
+                        context.scene.new_domain_end = max_res
             
             # Deselect all objects first
             bpy.ops.object.select_all(action='DESELECT')
