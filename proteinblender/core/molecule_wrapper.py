@@ -178,41 +178,6 @@ class MoleculeWrapper:
                     return node
                     
         return None 
-
-    def create_domain(self, chain_id: Optional[str] = None, start: int = 1, end: int = 9999, name: Optional[str] = None) -> Optional[str]:
-        """Create a new domain with specified parameters or defaults
-        
-        Args:
-            chain_id: Chain identifier (will use first available if None)
-            start: Starting residue number
-            end: Ending residue number
-            name: Optional domain name (will generate one if None)
-            
-        Returns:
-            Domain ID string if successful, None if failed
-        """
-        # Basic validation of molecule and chains
-        if not self._validate_domain_prerequisites():
-            return None
-            
-        # Determine and validate chain ID
-        chain_id, mapped_chain = self._resolve_domain_chain(chain_id)
-        if not mapped_chain:
-            return None
-            
-        # Adjust range to valid values for this chain
-        start, end = self._normalize_domain_range(mapped_chain, start, end)
-        
-        # Check for conflicts with existing domains
-        if not self._handle_domain_overlaps(chain_id, start, end):
-            return None
-        
-        # Create the domain object
-        domain_id = self._create_domain_object(chain_id, mapped_chain, start, end, name)
-        if not domain_id:
-            return None
-            
-        return domain_id
     
     def _validate_domain_prerequisites(self) -> bool:
         """Validate basic requirements for domain creation"""
@@ -288,21 +253,23 @@ class MoleculeWrapper:
         min_res, max_res = self.chain_residue_ranges[mapped_chain]
         
         # If default values were provided, use the full chain range
-        if start == 1 and end == 9999:
-            start = min_res
+        if end == 9999:  # Only check if end is the default value
             end = max_res
-            print(f"Using full chain range: {start}-{end}")
-        else:
-            # Make sure start/end are within valid range for this chain
-            original_start, original_end = start, end
-            start = max(min_res, start)
-            end = min(max_res, end)
+            print(f"Using chain max range: {end}")
+        
+        # Make sure start/end are within valid range for this chain
+        original_start, original_end = start, end
+        start = max(min_res, start)
+        
+        # Only limit end to max_res if it exceeds max_res
+        if end > max_res:
+            end = max_res
             
-            if original_start != start or original_end != end:
-                print(f"Adjusting range from {original_start}-{original_end} to valid range {start}-{end}")
+        if original_start != start or original_end != end:
+            print(f"Adjusting range from {original_start}-{original_end} to valid range {start}-{end}")
         
         return start, end
-    
+    '''
     def _handle_domain_overlaps(self, chain_id: str, start: int, end: int) -> bool:
         """Handle potential overlaps with existing domains
         
@@ -362,60 +329,7 @@ class MoleculeWrapper:
         message = f"Cannot create domain with range {original_start}-{original_end} due to overlaps."
         self._show_message(message, "Cannot Create Domain", 'ERROR')
         return False
-    
-    def _create_domain_object(self, chain_id: str, mapped_chain: str, start: int, end: int, 
-                             name: Optional[str] = None) -> Optional[str]:
-        """Create the domain object with the specified parameters
-        
-        Args:
-            chain_id: Original chain ID
-            mapped_chain: Mapped chain ID
-            start: Start residue
-            end: End residue
-            name: Optional name
-            
-        Returns:
-            Domain ID if successful, None if failed
-        """
-        # Create domain ID
-        domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
-        
-        # Create domain definition
-        domain = DomainDefinition(mapped_chain, start, end, name)
-        domain.parent_molecule_id = self.identifier
-        domain.domain_id = domain_id
-        
-        # Create domain object (copy of parent molecule)
-        if not domain.create_object_from_parent(self.molecule.object):
-            print(f"Failed to create domain object for {domain_id}")
-            return None
-        
-        # Add domain expanded property to object
-        domain.object["domain_expanded"] = False
-        
-        # Ensure the property exists
-        if not hasattr(bpy.types.Object, "domain_expanded"):
-            bpy.types.Object.domain_expanded = bpy.props.BoolProperty()
-            
-        # Set domain color property for UI
-        domain.color = (0.8, 0.1, 0.8, 1.0)  # Default purple
-        
-        # Ensure the domain's node network uses the same structure as the preview domain
-        self._setup_domain_network(domain, chain_id, start, end)
-        
-        # Update residue assignments
-        self._update_residue_assignments(domain)
-        
-        # Create mask nodes in the parent molecule to hide this domain region
-        self._create_domain_mask_nodes(domain_id, chain_id, start, end)
-        
-        # Store the domain
-        self.domains[domain_id] = domain
-        
-        # Store domain properties for internal usage - this can be used to transition to the new system
-        # We'll add this when we're ready to migrate to the new property system
-        
-        return domain_id
+    '''
     
     def delete_domain(self, domain_id: str):
         """Delete a domain and its object"""
@@ -589,8 +503,8 @@ class MoleculeWrapper:
             print("Warning: No residue ranges found for any chain")
             
         return ranges
-    
-    def _check_domain_overlap(self, chain_id: str, start: int, end: int, exclude_domain_id: Optional[str] = None) -> bool:
+    '''
+    def _check_domain_overlap(self, chain_id: int, start: int, end: int, exclude_domain_id: Optional[str] = None) -> bool:
         """Check if a domain would overlap with existing domains"""
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
         mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
@@ -605,6 +519,7 @@ class MoleculeWrapper:
                     return True
                     
         return False
+    '''
     
     def _update_residue_assignments(self, domain: DomainDefinition):
         """Update the residue assignments dictionary to track which residues are in domains"""
@@ -945,7 +860,8 @@ class MoleculeWrapper:
         except Exception as e:
             print(f"Error updating domain: {str(e)}")
             return False
-    
+
+    '''
     def update_domain_color(self, domain_id: str, color: tuple) -> bool:
         """Update the color of a domain"""
         if domain_id not in self.domains:
@@ -1014,6 +930,7 @@ class MoleculeWrapper:
         except Exception as e:
             print(f"Error updating domain color: {str(e)}")
             return False
+    '''
 
     def get_author_chain_id(self, chain_id):
         """

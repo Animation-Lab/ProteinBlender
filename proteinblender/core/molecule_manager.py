@@ -182,8 +182,8 @@ class MoleculeWrapper:
 
     def create_domain(self, chain_id: Optional[str] = None, start: int = 1, end: int = 9999, name: Optional[str] = None) -> Optional[str]:
         """Create a new domain with default or provided values"""
-        # If explicit parameters are provided, use them directly
-        if chain_id is not None and start != 1 and end != 9999:
+
+        if chain_id is not None:
             return self._create_domain_with_params(chain_id, start, end, name)
         
         # Otherwise, find the next available non-overlapping section
@@ -244,11 +244,6 @@ class MoleculeWrapper:
             start = max(min_res, start)
             if end > max_res:
                 end = max_res
-        
-        # Check for overlaps - only if not first domain (initial domains can overlap until configured)
-        if self.domains and self._check_domain_overlap(chain_id, start, end):
-            print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
-            return None
             
         # Create domain ID
         domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
@@ -367,11 +362,6 @@ class MoleculeWrapper:
         old_chain_id = domain.chain_id
         old_start = domain.start
         old_end = domain.end
-        
-        # Check if the new definition overlaps with other domains
-        if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
-            print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
-            return False
             
         try:
             # Map chain ID if needed
@@ -1003,10 +993,8 @@ class MoleculeWrapper:
             # Skip the domain we're updating
             if exclude_domain_id and domain_id == exclude_domain_id:
                 continue
-                
-            if domain.chain_id == chain_id:
-                if not (end < domain.start or start > domain.end):
-                    return True
+            if domain.chain_id == chain_id and (domain.start <= end or start <= domain.end):
+                return True
         return False
         
     def _update_residue_assignments(self, domain: DomainDefinition):
@@ -1025,70 +1013,23 @@ class MoleculeWrapper:
         Returns:
             bool: True if successful, False otherwise
         """
-        if domain_id not in self.domains:
+        print(f"Updating domain color for {domain_id}")
+        if domain_id not in self.domains or not self.domains[domain_id].node_group:
             print(f"Domain {domain_id} not found")
             return False
             
         domain = self.domains[domain_id]
-        if not domain.node_group:
-            print(f"Domain {domain_id} has no node group")
-            return False
-            
         try:
-            # Find the Color Common node
-            color_emit = None
-            set_color_node = None
-            
             for node in domain.node_group.nodes:
-                if (node.bl_idname == 'GeometryNodeGroup' and 
-                    node.node_tree and 
-                    node.node_tree.name == "Color Common"):
-                    color_emit = node
-                elif (node.bl_idname == 'GeometryNodeGroup' and 
-                      node.node_tree and 
-                      node.node_tree.name == "Set Color"):
-                    set_color_node = node
-                    
-            if not color_emit:
-                print(f"Domain {domain_id} has no Color Common node")
-                return False
-            
-            # Create a unique node tree for this domain's color node if it doesn't already have one
-            # This ensures each domain has its own independent color settings
-            
-            import bpy
-            
-            # Check if this color node has a unique node tree
-            if not color_emit.node_tree.name.endswith(f"_{domain_id}"):
-                # If not, create a duplicate of the node tree specific to this domain
-                original_node_tree = color_emit.node_tree
-                new_node_tree_name = f"Color Common_{domain_id}"
-                
-                # Check if a custom tree already exists for this domain
-                if new_node_tree_name in bpy.data.node_groups:
-                    # Use existing custom node tree
-                    color_emit.node_tree = bpy.data.node_groups[new_node_tree_name]
-                else:
-                    # Create a copy of the node tree with a unique name
-                    new_node_tree = original_node_tree.copy()
-                    new_node_tree.name = new_node_tree_name
-                    color_emit.node_tree = new_node_tree
-                
-            # Now update the Carbon color input 
-            if "Carbon" in color_emit.inputs:
-                color_emit.inputs["Carbon"].default_value = color
-                return True
-            elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
-                # Fallback - update the first input if named Carbon input not found
-                color_emit.inputs[0].default_value = color
-                return True
-            else:
-                print(f"Domain {domain_id}'s Color Common node has no Carbon input")
-                return False
-            
+                if node.name == "Color Common":
+                    # Use the tuple values directly instead of trying to access attributes
+                    print(f"Setting color to {color[0]}, {color[1]}, {color[2]}, {color[3]}")
+                    # Set the default_value directly with the color tuple
+                    node.inputs["Carbon"].default_value = color
+                    return True
         except Exception as e:
             print(f"Error updating domain color: {str(e)}")
-            return False
+        return False
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

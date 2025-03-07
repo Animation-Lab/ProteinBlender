@@ -109,9 +109,14 @@ class MoleculeListItem(PropertyGroup):
         # Get the valid range for the selected chain
         min_res, max_res = self.get_chain_range(context)
         
-        # Clamp values to valid range
+        # Ensure start is within valid range
         self.domain_start = max(min(self.domain_start, max_res), min_res)
-        self.domain_end = max(min(self.domain_end, max_res), min_res)
+        
+        # For end, only clamp to max_res if it exceeds max_res
+        if self.domain_end > max_res:
+            self.domain_end = max_res
+        if self.domain_end < min_res:
+            self.domain_end = min_res
         
         # Ensure start doesn't exceed end and vice versa
         if changed_prop == "start" and self.domain_end < self.domain_start:
@@ -153,9 +158,15 @@ def ensure_valid_scene_domain_range(self, context, changed_prop):
             domain_start = min_res
             domain_end = max_res
         else:
-            # First clamp both values to valid range
+            # First ensure start is within valid range
             domain_start = max(min(self.domain_start, max_res), min_res)
-            domain_end = max(min(self.domain_end, max_res), min_res)
+            
+            # For end, only clamp to max_res if it exceeds max_res
+            domain_end = self.domain_end
+            if domain_end > max_res:
+                domain_end = max_res
+            if domain_end < min_res:
+                domain_end = min_res
             
             # Then adjust based on which value changed
             if changed_prop == "start":
@@ -205,8 +216,12 @@ def update_new_domain_range(self, context):
         author_chain_id = molecule.get_author_chain_id(int(context.scene.new_domain_chain))
         if author_chain_id in molecule.chain_residue_ranges:
             min_res, max_res = molecule.chain_residue_ranges[author_chain_id]
+            # Only set start to min_res, but don't change end unless it's the default value
             self.new_domain_start = min_res
-            self.new_domain_end = max_res
+            
+            # Only set end to max_res if it's the default value or greater than max_res
+            if self.new_domain_end == 9999 or self.new_domain_end > max_res:
+                self.new_domain_end = max_res
 
 def register():
     """Register molecule properties"""

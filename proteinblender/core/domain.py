@@ -189,7 +189,7 @@ class Domain(PropertyGroup):
     end: IntProperty()
     name: StringProperty()
     object: PointerProperty(type=bpy.types.Object)  # Reference to the domain object
-
+'''
 class ProteinBlenderDomain:
     """Manages domain visualization and node setup in the geometry nodes"""
     
@@ -205,6 +205,8 @@ class ProteinBlenderDomain:
         self._setup_domain()
     
     def _setup_domain(self):
+
+        print(f"Setting up domain for chain {self.chain_id}, range {self.start}-{self.end}")
         """Set up the domain node structure"""
         # Get existing nodes
         group_input = nodes.get_input(self.node_group)
@@ -237,11 +239,10 @@ class ProteinBlenderDomain:
             original_select_node.location = (style_pos[0] - 200, style_pos[1] - 200)
             
             # Connect original nodes
-            '''
-            self.node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
-            self.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
-            self.node_group.links.new(join_node.outputs[0], group_output.inputs[0])
-            '''
+   
+            #self.node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
+            #self.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
+            #self.node_group.links.new(join_node.outputs[0], group_output.inputs[0])
         
         # Create domain nodes
         color_emit = nodes.add_custom(self.node_group, "Color Common")
@@ -265,19 +266,17 @@ class ProteinBlenderDomain:
         style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
         
         # Connect nodes
-        '''
-        self.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
-        self.node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
-        self.node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
-        self.node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
-        self.node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
-        '''
+        
+        #self.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
+        #self.node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
+        #self.node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
+        #self.node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
+        #self.node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
         
         # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
-        '''
-        if original_select_node:
-            self.node_group.links.new(select_res_id_range_node.outputs["Inverted"], original_select_node.inputs["And"])
-        '''
+        
+        #if original_select_node:
+        #  
         
         # Store node references
         self.nodes = {
@@ -311,6 +310,7 @@ class ProteinBlenderDomain:
         select_node = self.nodes["select"]
         select_node.inputs["Min"].default_value = start
         select_node.inputs["Max"].default_value = end
+'''
 
 def register():
     bpy.utils.register_class(Domain)
