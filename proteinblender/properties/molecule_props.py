@@ -223,6 +223,22 @@ def update_new_domain_range(self, context):
             if self.new_domain_end == 9999 or self.new_domain_end > max_res:
                 self.new_domain_end = max_res
 
+# Update callback function to connect color picker to material nodes
+def update_domain_color(self, context):
+    domain_id = self["domain_id"]
+    parent_molecule_id = self["parent_molecule_id"]
+    
+    # Get scene manager and find which domain this object belongs to
+    scene_manager = ProteinBlenderScene.get_instance()
+    print(f"Updating domain color for domain: {domain_id} in molecule: {parent_molecule_id}")
+    # Find which molecule and domain this object belongs to
+    for molecule_id, molecule in scene_manager.molecules.items():
+        print(f"Checking molecule: {molecule_id}")
+        if parent_molecule_id.startswith(molecule_id):
+            print(f"Updating domain color for domain: {domain_id} in molecule: {molecule_id}")
+            molecule.update_domain_color(domain_id, self.domain_color)
+            return
+
 def register():
     """Register molecule properties"""
     # Try to unregister first if already registered
@@ -315,16 +331,6 @@ def register():
     )
     
     # Temporary property for domain color
-    bpy.types.Scene.domain_color = FloatVectorProperty(
-        name="Domain Color",
-        description="Color for domain visualization",
-        subtype='COLOR',
-        size=4,
-        min=0.0, max=1.0,
-        default=(0.8, 0.1, 0.8, 1.0)  # Default to purple
-    )
-    
-    # Additional temporary properties for domain editing dialogs
     bpy.types.Scene.temp_domain_color = FloatVectorProperty(
         name="Temp Domain Color",
         description="Temporary color for domain editing",
@@ -348,7 +354,15 @@ def register():
         update=lambda self, context: update_domain_preview(self, context)
     )
 
-
+    bpy.types.Object.domain_color = FloatVectorProperty(
+        name="Domain Color",
+        subtype='COLOR',
+        size=4,  # RGBA
+        min=0.0, max=1.0,
+        default=(0.8, 0.8, 0.8, 1.0),
+        description="Color of the domain",
+        update=lambda self, context: update_domain_color(self, context)
+    )
 
 def unregister():
     """Unregister molecule properties"""
@@ -376,12 +390,6 @@ def unregister():
     if hasattr(bpy.types.Scene, "new_domain_end"):
         del bpy.types.Scene.new_domain_end
     
-    # Unregister domain color property
-    if hasattr(bpy.types.Scene, "domain_color"):
-        del bpy.types.Scene.domain_color
-    if hasattr(bpy.types.Scene, "temp_domain_color"):
-        del bpy.types.Scene.temp_domain_color
-    
     # Unregister temporary domain editing properties
     if hasattr(bpy.types.Scene, "temp_domain_start"):
         del bpy.types.Scene.temp_domain_start
@@ -389,6 +397,8 @@ def unregister():
         del bpy.types.Scene.temp_domain_end
     if hasattr(bpy.types.Scene, "temp_domain_id"):
         del bpy.types.Scene.temp_domain_id
+    if hasattr(bpy.types.Object, "domain_color"):
+        del bpy.types.Object.domain_color
     
     # Safely unregister classes
     try:
@@ -404,4 +414,5 @@ def unregister():
     try:
         bpy.utils.unregister_class(Domain)
     except Exception:
-        pass 
+        pass
+    

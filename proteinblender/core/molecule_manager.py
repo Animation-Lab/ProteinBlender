@@ -259,6 +259,8 @@ class MoleculeWrapper:
         
         # Add domain expanded property to object
         domain.object["domain_expanded"] = False
+        domain.object["domain_id"] = domain_id
+        domain.object["parent_molecule_id"] = self.identifier
         # Register domain expanded property to be accessible through UI
         bpy.types.Object.domain_expanded = bpy.props.BoolProperty()
         
