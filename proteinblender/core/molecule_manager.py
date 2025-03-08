@@ -35,7 +35,7 @@ class MoleculeWrapper:
         
         # Add after existing initialization
         self.preview_nodes = None
-        self._setup_preview_domain()
+        #self._setup_preview_domain()
         
         # Dictionary to track domain mask nodes in the parent molecule's node group
         self.domain_mask_nodes = {}  # Maps domain_id to tuple(chain_select_node, res_select_node)
@@ -584,7 +584,7 @@ class MoleculeWrapper:
         if self.chain_mapping:
             return self.chain_mapping.get(numeric_chain_id, str(numeric_chain_id))
         return str(numeric_chain_id)
-
+    '''
     def _setup_preview_domain(self):
         """
         Create the preview domain node setup.
@@ -641,7 +641,7 @@ class MoleculeWrapper:
                     input_socket.default_value = False
                 chain_select_node.inputs[display_chain_id].default_value = True
                 node_group.links.new(select_node.outputs["Selection"], chain_select_node.inputs[display_chain_id])
-
+    '''
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
         if not domain.object or not domain.node_group:
@@ -833,7 +833,7 @@ class MoleculeWrapper:
         except Exception as e:
             print(f"Error setting up domain network: {str(e)}")
             return False
-    
+
     def _clean_unused_nodes(self, node_group):
         """Remove any unused or orphaned nodes from the node group"""
         # Get all linked nodes starting from the output
