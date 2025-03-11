@@ -43,6 +43,6 @@ class MOLECULE_PB_PT_edit(Panel):
         
         # Visibility toggle
         row = box.row()
-        row.prop(molecule.object, "hide_viewport", text="Visible")
+        row.prop(molecule.object, "hide_viewport", text="Visible", icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_OFF')
         
         # Add more molecule-specific settings here 

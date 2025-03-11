@@ -4,6 +4,7 @@ from bpy.types import PropertyGroup
 from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty, 
                       FloatVectorProperty, FloatProperty, EnumProperty)
 from ..utils.molecularnodes.blender import nodes
+from ..utils.molecularnodes.style import STYLE_ITEMS
 
 class DomainProperties(PropertyGroup):
     """Complete domain properties class to encapsulate all domain data"""
@@ -26,6 +27,12 @@ class DomainProperties(PropertyGroup):
     end: IntProperty(name="End", 
                     description="Ending residue number", 
                     min=1, default=9999)
+    
+    # Style property
+    style: EnumProperty(name="Style",
+                      description="Visualization style for this domain",
+                      items=STYLE_ITEMS,
+                      default="ribbon")
     
     # Display properties
     color: FloatVectorProperty(name="Color", 
@@ -52,6 +59,7 @@ class DomainDefinition:
         self._setup_complete = False
         self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
         self.domain_id = f"{chain_id}_{start}_{end}"
+        self.style = "ribbon"  # Default style
 
     def to_properties(self) -> Dict:
         """Convert domain definition to property dictionary for storing in PropertyGroup"""
@@ -65,6 +73,7 @@ class DomainDefinition:
             'object_name': self.object.name if self.object else "",
             'node_group_name': self.node_group.name if self.node_group else "",
             'color': self.color,
+            'style': self.style,
             'is_expanded': False
         }
         return props
@@ -90,6 +99,10 @@ class DomainDefinition:
             
         # Set color
         domain.color = props.color
+        
+        # Set style
+        if hasattr(props, 'style'):
+            domain.style = props.style
         
         # Set setup state based on whether object and node group exist
         domain._setup_complete = bool(domain.object and domain.node_group)
@@ -189,133 +202,39 @@ class Domain(PropertyGroup):
     end: IntProperty()
     name: StringProperty()
     object: PointerProperty(type=bpy.types.Object)  # Reference to the domain object
-'''
-class ProteinBlenderDomain:
-    """Manages domain visualization and node setup in the geometry nodes"""
+
+def ensure_domain_properties_registered():
+    """Make sure all domain-related properties are registered on Object class"""
+    if not hasattr(bpy.types.Object, 'domain_expanded'):
+        bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
     
-    def __init__(self, node_group: bpy.types.NodeGroup, chain_id: str, start: int, end: int, 
-                 domain_index: int = 0, name: Optional[str] = None):
-        self.chain_id = chain_id
-        self.start = start
-        self.end = end
-        self.name = name or ""
-        self.node_group = node_group
-        self.domain_index = domain_index
-        self.nodes = {}
-        self._setup_domain()
+    if not hasattr(bpy.types.Object, 'domain_color'):
+        bpy.types.Object.domain_color = bpy.props.FloatVectorProperty(
+            name="Domain Color",
+            subtype='COLOR',
+            size=4,
+            min=0.0, max=1.0,
+            default=(0.8, 0.1, 0.8, 1.0)
+        )
     
-    def _setup_domain(self):
-
-        print(f"Setting up domain for chain {self.chain_id}, range {self.start}-{self.end}")
-        """Set up the domain node structure"""
-        # Get existing nodes
-        group_input = nodes.get_input(self.node_group)
-        group_output = nodes.get_output(self.node_group)
-        style_node = nodes.style_node(self.node_group)
-        
-        # Find existing Join Geometry node and original Select node
-        join_node = None
-        original_select_node = None
-        for node in self.node_group.nodes:
-            if node.bl_idname == "GeometryNodeJoinGeometry":
-                join_node = node
-            elif (node.bl_idname == "GeometryNodeGroup" and 
-                  node.node_tree and "Select Res ID Range" in node.node_tree.name):
-                original_select_node = node
-        
-        # If this is the first domain, set up the base structure
-        if join_node is None:
-            # Create original Select Res ID Range node
-            original_select_node = nodes.add_custom(self.node_group, "Select Res ID Range")
-            original_select_node.inputs["Min"].default_value = 0
-            original_select_node.inputs["Max"].default_value = 9999
-            
-            # Create Join Geometry node
-            join_node = self.node_group.nodes.new("GeometryNodeJoinGeometry")
-            
-            # Position nodes
-            style_pos = style_node.location
-            join_node.location = (style_pos[0] + 200, style_pos[1])
-            original_select_node.location = (style_pos[0] - 200, style_pos[1] - 200)
-            
-            # Connect original nodes
-   
-            #self.node_group.links.new(original_select_node.outputs["Selection"], style_node.inputs["Selection"])
-            #self.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
-            #self.node_group.links.new(join_node.outputs[0], group_output.inputs[0])
-        
-        # Create domain nodes
-        color_emit = nodes.add_custom(self.node_group, "Color Common")
-        color_emit.outputs["Color"].default_value = (1.0, 1.0, 0.0, 1.0)  # Yellow
-        
-        set_color = nodes.add_custom(self.node_group, "Set Color")
-        select_res_id_range_node = nodes.add_custom(self.node_group, "Select Res ID Range")
-        style_surface = nodes.add_custom(self.node_group, "Style Surface")
-        
-        # Set initial range
-        select_res_id_range_node.inputs["Min"].default_value = self.start
-        select_res_id_range_node.inputs["Max"].default_value = self.end
-        
-        # Position nodes
-        style_pos = style_node.location
-        # We'll need to pass in domain index from outside for proper vertical positioning
-        base_y_offset = -300  # This should be adjusted based on domain index
-        color_emit.location = (style_pos[0] - 600, style_pos[1] + base_y_offset)
-        set_color.location = (style_pos[0] - 400, style_pos[1] + base_y_offset)
-        select_res_id_range_node.location = (style_pos[0] - 200, style_pos[1] + base_y_offset)
-        style_surface.location = (style_pos[0], style_pos[1] + base_y_offset)
-        
-        # Connect nodes
-        
-        #self.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
-        #self.node_group.links.new(group_input.outputs["Atoms"], set_color.inputs["Atoms"])
-        #self.node_group.links.new(set_color.outputs["Atoms"], style_surface.inputs["Atoms"])
-        #self.node_group.links.new(select_res_id_range_node.outputs["Selection"], style_surface.inputs["Selection"])
-        #self.node_group.links.new(style_surface.outputs[0], join_node.inputs[0])
-        
-        # Connect Select Res ID Range Inverted output to original Select Res ID Range And input
-        
-        #if original_select_node:
-        #  
-        
-        # Store node references
-        self.nodes = {
-            "select": select_res_id_range_node,
-            "style": style_surface,
-            "color": color_emit,
-            "set_color": set_color,
-            "join": join_node,
-            "original_select": original_select_node
-        }
-        
-        return self.nodes
-
-    def set_visibility(self, visible: bool):
-        """Toggle visibility of the domain"""
-        if not self.nodes:
-            return
-            
-        self.nodes["style"].mute = not visible
-        self.nodes["color"].mute = not visible
-        self.nodes["set_color"].mute = not visible
-        self.nodes["select"].mute = not visible
-
-    def update_range(self, start: int, end: int):
-        """Update the domain residue range"""
-        if not self.nodes:
-            return
-        
-        self.start = start
-        self.end = end
-        select_node = self.nodes["select"]
-        select_node.inputs["Min"].default_value = start
-        select_node.inputs["Max"].default_value = end
-'''
+    if not hasattr(bpy.types.Object, 'domain_style'):
+        bpy.types.Object.domain_style = bpy.props.EnumProperty(
+            name="Domain Style",
+            description="Visualization style for this domain",
+            items=STYLE_ITEMS,
+            default="ribbon",
+            update=lambda self, context: domain_style_update(self, context)
+        )
 
 def register():
-    bpy.utils.register_class(Domain)
-    bpy.utils.register_class(DomainProperties)
+    """Register property classes"""
+    from bpy.utils import register_class
+    register_class(DomainProperties)
+    register_class(Domain)
     
+    # Register custom object properties - these directly call the ensure function
+    ensure_domain_properties_registered()
+
 def unregister():
     try:
         bpy.utils.unregister_class(DomainProperties)
@@ -325,3 +244,103 @@ def unregister():
         bpy.utils.unregister_class(Domain)
     except:
         pass
+
+def domain_style_update(obj, context):
+    """Callback when domain style is changed"""
+    # Get domain_id and parent_molecule_id from the object's custom properties
+    try:
+        if "domain_id" not in obj or "parent_molecule_id" not in obj:
+            return
+            
+        domain_id = obj["domain_id"]
+        parent_molecule_id = obj["parent_molecule_id"]
+        
+        # Get scene manager and molecule
+        from ..utils.scene_manager import ProteinBlenderScene
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(parent_molecule_id)
+        
+        if not molecule:
+            return
+            
+        # Get the current style value (handle both property and custom property)
+        style = None
+        try:
+            style = obj.domain_style
+        except (AttributeError, TypeError):
+            # Fall back to custom property if property isn't accessible
+            if "domain_style" in obj:
+                style = obj["domain_style"]
+                
+        if not style:
+            return
+        
+        # Get the domain
+        domain = molecule.domains.get(domain_id)
+        if not domain or not domain.object:
+            return
+            
+        # Update the style directly (instead of calling the operator)
+        try:
+            print(f"Directly updating domain style for {domain_id} to {style}")
+            
+            # Update the domain's style property
+            domain.style = style
+            
+            # Find and update the style node if the domain has a node group
+            if domain.node_group:
+                # Find style node
+                style_node = None
+                for node in domain.node_group.nodes:
+                    if (node.bl_idname == 'GeometryNodeGroup' and 
+                        node.node_tree and 
+                        "Style" in node.node_tree.name):
+                        style_node = node
+                        break
+                
+                if style_node:
+                    # Get the style node name from the style value
+                    from ..utils.molecularnodes.blender.nodes import styles_mapping, append, swap
+                    if style in styles_mapping:
+                        style_node_name = styles_mapping[style]
+                        # Swap the style node
+                        swap(style_node, append(style_node_name))
+        except Exception as e:
+            print(f"Error in direct style update: {e}")
+            import traceback
+            traceback.print_exc()
+    except Exception as e:
+        print(f"Error in domain_style_update: {e}")
+        import traceback
+        traceback.print_exc()
+
+def try_deferred_style_update(domain_id, style, max_tries=3, current_try=0):
+    """Try to run the style update operator if it's available, with retry logic"""
+    import bpy
+    
+    # If we've exhausted our retries, give up
+    if current_try >= max_tries:
+        print(f"Gave up on operator-based style update after {max_tries} tries")
+        return
+        
+    try:
+        # Check if the operator exists now
+        if hasattr(bpy.ops.molecule, "update_domain_style"):
+            # Try to call it
+            bpy.ops.molecule.update_domain_style(domain_id=domain_id, style=style)
+            print(f"Successfully called style update operator on try {current_try+1}")
+        else:
+            # Schedule a retry using a timer
+            print(f"Operator not available yet, scheduling retry {current_try+1}/{max_tries}")
+            bpy.app.timers.register(
+                lambda: try_deferred_style_update(domain_id, style, max_tries, current_try+1),
+                first_interval=0.5  # Wait half a second before retry
+            )
+    except Exception as e:
+        print(f"Error in deferred style update (try {current_try+1}): {e}")
+        # Schedule a retry
+        if current_try < max_tries - 1:
+            bpy.app.timers.register(
+                lambda: try_deferred_style_update(domain_id, style, max_tries, current_try+1),
+                first_interval=0.5  # Wait half a second before retry
+            )

@@ -3,6 +3,10 @@ from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatVectorProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
+# Ensure domain properties are registered
+from ..core.domain import ensure_domain_properties_registered
+ensure_domain_properties_registered()
+
 class MOLECULE_PB_OT_create_domain(Operator):
     bl_idname = "molecule.create_domain"
     bl_label = "Create Domain"
@@ -32,6 +36,9 @@ class MOLECULE_PB_OT_create_domain(Operator):
             self.report({'ERROR'}, "Domain overlaps with existing domain")
             return {'CANCELLED'}
         
+        # Log the domain creation
+        print(f"Creating primary domain for chain {scene.new_domain_chain} ({scene.new_domain_start}-{scene.new_domain_end})")
+        
         # Create the domain with values from the UI
         domain_id = molecule.create_domain(
             chain_id=scene.new_domain_chain,  # Use the chain selected in UI
@@ -51,6 +58,11 @@ class MOLECULE_PB_OT_create_domain(Operator):
                 try:
                     # Try to set the property directly
                     domain.object["domain_expanded"] = True
+                    
+                    # Also sync the domain_color property with the actual color used
+                    if hasattr(domain, "color"):
+                        # Set the domain_color property to match the actual color used in the node tree
+                        domain.object.domain_color = domain.color
                 except:
                     # If that fails, ensure the property exists first
                     if not hasattr(domain.object, "domain_expanded"):
@@ -58,6 +70,10 @@ class MOLECULE_PB_OT_create_domain(Operator):
                         bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
                     # Then set it
                     domain.object.domain_expanded = True
+                    
+                    # And try setting the color again
+                    if hasattr(domain, "color") and hasattr(domain.object, "domain_color"):
+                        domain.object.domain_color = domain.color
             
         return {'FINISHED'}
 
@@ -284,6 +300,80 @@ class MOLECULE_PB_OT_update_domain_color(Operator):
             
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_update_domain_style(Operator):
+    bl_idname = "molecule.update_domain_style"
+    bl_label = "Update Domain Style"
+    bl_description = "Change the visualization style of the domain"
+    
+    domain_id: StringProperty()
+    style: StringProperty(default="ribbon")
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain or not domain.object:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+        
+        # Update the domain's style
+        try:
+            print(f"Operator: Changing domain style for {self.domain_id} to {self.style}")
+            
+            # Update the style in the node network
+            if domain.node_group:
+                # Find style node
+                style_node = None
+                for node in domain.node_group.nodes:
+                    if (node.bl_idname == 'GeometryNodeGroup' and 
+                        node.node_tree and 
+                        "Style" in node.node_tree.name):
+                        style_node = node
+                        break
+                
+                if style_node:
+                    # Get the style node name from the style value
+                    from ..utils.molecularnodes.blender.nodes import styles_mapping, append, swap
+                    if self.style in styles_mapping:
+                        style_node_name = styles_mapping[self.style]
+                        # Swap the style node
+                        swap(style_node, append(style_node_name))
+                        
+                        # Update the domain's style property
+                        domain.style = self.style
+                        
+                        # Try to set the domain_style property, handling possible errors
+                        try:
+                            domain.object.domain_style = self.style
+                        except (AttributeError, TypeError):
+                            # Fall back to custom property if needed
+                            domain.object["domain_style"] = self.style
+                        
+                        return {'FINISHED'}
+                    else:
+                        self.report({'ERROR'}, f"Invalid style: {self.style}")
+                        return {'CANCELLED'}
+                else:
+                    self.report({'ERROR'}, "Style node not found in domain node group")
+                    return {'CANCELLED'}
+            else:
+                self.report({'ERROR'}, "Domain node group not found")
+                return {'CANCELLED'}
+                
+        except Exception as e:
+            self.report({'ERROR'}, f"Error updating domain style: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
 # Register
 def register():
     bpy.utils.register_class(MOLECULE_PB_OT_create_domain)
@@ -294,8 +384,10 @@ def register():
     bpy.utils.register_class(MOLECULE_PB_OT_toggle_domain_expanded)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_ui_values)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_color)
+    bpy.utils.register_class(MOLECULE_PB_OT_update_domain_style)
 
 def unregister():
+    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_style)
     bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_color)
     bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_ui_values)
     bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_domain_expanded)

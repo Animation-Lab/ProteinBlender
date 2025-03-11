@@ -35,6 +35,7 @@ class MoleculeWrapper:
         
         # Add after existing initialization
         self.preview_nodes = None
+
         #self._setup_preview_domain()
         
         # Dictionary to track domain mask nodes in the parent molecule's node group
@@ -234,8 +235,18 @@ class MoleculeWrapper:
         print("Could not find suitable section for domain creation")
         return None
         
-    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None) -> Optional[str]:
-        """Internal method to create a domain with specific parameters"""
+    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, auto_fill_chain: bool = True) -> Optional[str]:
+        """Internal method to create a domain with specific parameters
+        
+        Args:
+            chain_id: The chain ID
+            start: Start residue
+            end: End residue
+            name: Optional name for the domain
+            auto_fill_chain: Whether to automatically create additional domains to fill the chain. 
+                             When true, this will trigger the creation of additional domains to span
+                             any areas of the chain not covered by this domain.
+        """
         # Adjust end value based on chain's residue range if needed
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
         mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
@@ -252,6 +263,9 @@ class MoleculeWrapper:
         domain = DomainDefinition(mapped_chain, start, end, name)
         domain.parent_molecule_id = self.identifier
         
+        # Set the domain's style to match the parent molecule
+        domain.style = self.style
+        
         # Create domain object (copy of parent molecule)
         if not domain.create_object_from_parent(self.molecule.object):
             print(f"Failed to create domain object for {domain_id}")
@@ -261,8 +275,19 @@ class MoleculeWrapper:
         domain.object["domain_expanded"] = False
         domain.object["domain_id"] = domain_id
         domain.object["parent_molecule_id"] = self.identifier
-        # Register domain expanded property to be accessible through UI
-        bpy.types.Object.domain_expanded = bpy.props.BoolProperty()
+        
+        # Ensure all domain properties are registered before using them
+        from ..core.domain import ensure_domain_properties_registered
+        ensure_domain_properties_registered()
+        
+        # Set the domain_style property - safely handle the case if it's not registered yet
+        try:
+            # Try to set using the property directly
+            domain.object.domain_style = domain.style
+        except (AttributeError, TypeError):
+            # Fallback to using custom property - this will be picked up when the property is registered
+            domain.object["domain_style"] = domain.style
+            print(f"Set domain style using custom property: {domain.style}")
         
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
@@ -274,7 +299,76 @@ class MoleculeWrapper:
         self._create_domain_mask_nodes(domain_id, chain_id, start, end)
         
         self.domains[domain_id] = domain
+        
+        # Check if we need to create additional domains to span the rest of the chain
+        # This is useful for visualizing the entire chain when users only select a portion
+        if auto_fill_chain:
+            self._create_additional_domains_to_span_chain(chain_id, start, end, mapped_chain, min_res, max_res)
+        
         return domain_id
+        
+    def _create_additional_domains_to_span_chain(self, chain_id: str, start: int, end: int, mapped_chain: str, min_res: int, max_res: int):
+        """Create additional domains to span the entire chain when a partial domain is created.
+        
+        This function is called after creating a domain that doesn't span the entire chain.
+        It automatically creates up to two additional domains to ensure the entire chain is visualized:
+        1. One domain from the chain's minimum residue to the start of the created domain (if needed)
+        2. One domain from the end of the created domain to the chain's maximum residue (if needed)
+        
+        For example, if Chain A spans residues 1-150 and the user creates a domain for residues 50-75,
+        this function will automatically create domains for residues 1-49 and 76-150.
+        
+        Args:
+            chain_id: The original chain ID
+            start: Start residue of the created domain
+            end: End residue of the created domain
+            mapped_chain: The mapped chain ID
+            min_res: Minimum residue ID in the chain
+            max_res: Maximum residue ID in the chain
+        """
+        # Check if the domain spans the entire chain
+        if start <= min_res and end >= max_res:
+            # No additional domains needed
+            return
+        
+        # Create gaps to fill
+        # Gap 1: Before the domain (if needed)
+        if start > min_res:
+            # Check if a domain already exists in this range
+            before_start = min_res
+            before_end = start - 1
+            
+            if not self._check_domain_overlap(mapped_chain, before_start, before_end):
+                # Create domain from min_res to start-1
+                print(f"Creating additional domain to span the beginning of chain {chain_id}: {before_start}-{before_end}")
+                self._create_domain_with_params(
+                    chain_id=chain_id,
+                    start=before_start,
+                    end=before_end,
+                    name=f"Domain_{chain_id}_{before_start}_{before_end}",
+                    auto_fill_chain=False  # Prevent recursion
+                )
+            else:
+                print(f"Skipping creation of beginning domain ({before_start}-{before_end}) due to overlap with existing domain")
+        
+        # Gap 2: After the domain (if needed)
+        if end < max_res:
+            # Check if a domain already exists in this range
+            after_start = end + 1
+            after_end = max_res
+            
+            if not self._check_domain_overlap(mapped_chain, after_start, after_end):
+                # Create domain from end+1 to max_res
+                print(f"Creating additional domain to span the end of chain {chain_id}: {after_start}-{after_end}")
+                self._create_domain_with_params(
+                    chain_id=chain_id,
+                    start=after_start,
+                    end=after_end,
+                    name=f"Domain_{chain_id}_{after_start}_{after_end}",
+                    auto_fill_chain=False  # Prevent recursion
+                )
+            else:
+                print(f"Skipping creation of end domain ({after_start}-{after_end}) due to overlap with existing domain")
         
     def _find_next_available_section(self, chain_id: str) -> Optional[tuple]:
         """Find the next available non-overlapping section in a chain"""
@@ -584,64 +678,7 @@ class MoleculeWrapper:
         if self.chain_mapping:
             return self.chain_mapping.get(numeric_chain_id, str(numeric_chain_id))
         return str(numeric_chain_id)
-    '''
-    def _setup_preview_domain(self):
-        """
-        Create the preview domain node setup.
-        This is now a stub for backwards compatibility.
-        The actual domain node setup is handled by _setup_domain_network.
-        """
-        # This method is intentionally left as a stub for backwards compatibility
-        self.preview_nodes = {
-            "select": None,
-            "style": None,
-            "color": None,
-            "set_color": None,
-            "chain_select": None,
-            "node_group": None
-        }
 
-    def set_preview_visibility(self, visible: bool):
-        """Toggle visibility of the preview domain"""
-        if not self.preview_nodes:
-            return
-            
-        self.preview_nodes["style"].mute = not visible
-        self.preview_nodes["color"].mute = not visible
-        self.preview_nodes["set_color"].mute = not visible
-        self.preview_nodes["select"].mute = not visible
-        
-    def update_preview_range(self, chain_id: int, start: int, end: int):
-        """Update the preview domain range and chain selection"""
-        if not self.preview_nodes:
-            return
-        
-        # Update residue range
-        select_node = self.preview_nodes["select"]
-        chain_select_node = self.preview_nodes["chain_select"]
-        node_group = self.preview_nodes["node_group"]
-        
-        select_node.inputs["Min"].default_value = start
-        select_node.inputs["Max"].default_value = end
-        # Update chain selection
-        chain_select_node = self.preview_nodes["chain_select"]
-        if chain_select_node:
-            # First, disconnect all chain inputs
-            for input_socket in chain_select_node.inputs:
-                if input_socket.is_linked:
-                    for link in input_socket.links:
-                        chain_select_node.id_data.links.remove(link)
-            
-            # Get the author chain ID if mapping exists
-            display_chain_id = self.chain_mapping.get(int(chain_id), chain_id) if self.chain_mapping else chain_id
-
-            # Connect the selected chain
-            if display_chain_id in chain_select_node.inputs:
-                for input_socket in chain_select_node.inputs:
-                    input_socket.default_value = False
-                chain_select_node.inputs[display_chain_id].default_value = True
-                node_group.links.new(select_node.outputs["Selection"], chain_select_node.inputs[display_chain_id])
-    '''
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
         if not domain.object or not domain.node_group:
@@ -748,6 +785,13 @@ class MoleculeWrapper:
                 rgb = colorsys.hsv_to_rgb(hue, saturation, value)
                 domain_color = (rgb[0], rgb[1], rgb[2], 1.0)
                 
+                # Store the generated color in the domain object for UI synchronization
+                domain.color = domain_color
+                
+                # Also set the domain_color property on the Blender object for UI
+                if domain.object:
+                    domain.object["domain_color"] = domain_color
+                
                 color_emit = nodes.add_custom(domain.node_group, "Color Common")
                 color_emit.location = (select_res_id_range.location.x - 400, select_res_id_range.location.y)
                 
@@ -780,8 +824,16 @@ class MoleculeWrapper:
                     break
                     
             if not style_node:
-                # Create style node if not found
-                style_node = nodes.add_custom(domain.node_group, "Style Ribbon")
+                # Create style node if not found, using the domain's style property
+                style_node_name = "Style Ribbon"  # Default fallback
+                
+                # Get the style node name from the domain's style property
+                from ..utils.molecularnodes.blender.nodes import styles_mapping
+                if domain.style in styles_mapping:
+                    style_node_name = styles_mapping[domain.style]
+                
+                # Create the style node
+                style_node = nodes.add_custom(domain.node_group, style_node_name)
                 style_node.location = (select_res_id_range.location.x + 200, select_res_id_range.location.y)
             
             # Find or create join geometry node
@@ -995,7 +1047,8 @@ class MoleculeWrapper:
             # Skip the domain we're updating
             if exclude_domain_id and domain_id == exclude_domain_id:
                 continue
-            if domain.chain_id == chain_id and (domain.start <= end or start <= domain.end):
+            # Check for true overlap: ranges must overlap, not just touch at endpoints
+            if domain.chain_id == chain_id and max(domain.start, start) <= min(domain.end, end):
                 return True
         return False
         
@@ -1022,6 +1075,9 @@ class MoleculeWrapper:
             
         domain = self.domains[domain_id]
         try:
+            # Update the stored color in the domain object for consistency
+            domain.color = color
+            
             for node in domain.node_group.nodes:
                 if node.name == "Color Common":
                     # Use the tuple values directly instead of trying to access attributes

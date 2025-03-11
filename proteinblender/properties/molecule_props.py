@@ -359,7 +359,7 @@ def register():
         subtype='COLOR',
         size=4,  # RGBA
         min=0.0, max=1.0,
-        default=(0.8, 0.8, 0.8, 1.0),
+        default=(0.8, 0.1, 0.8, 1.0),  # Default purple to match DomainDefinition
         description="Color of the domain",
         update=lambda self, context: update_domain_color(self, context)
     )

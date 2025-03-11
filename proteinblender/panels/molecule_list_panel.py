@@ -1,8 +1,11 @@
 import bpy
 from bpy.types import Panel, Operator
-from ..utils.scene_manager import ProteinBlenderScene
 from bpy.props import StringProperty
-from ..properties.molecule_props import get_chain_mapping_from_str
+from ..utils.scene_manager import ProteinBlenderScene
+
+# Ensure domain properties are registered
+from ..core.domain import ensure_domain_properties_registered
+ensure_domain_properties_registered()
 
 class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
@@ -46,7 +49,7 @@ class MOLECULE_PB_PT_list(Panel):
             if molecule.object:
                 # Visibility toggle
                 vis_row = row.row()
-                vis_row.prop(molecule.object, "hide_viewport", text="", emboss=False)
+                vis_row.prop(molecule.object, "hide_viewport", text="", emboss=False, icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_OFF')
                 
                 # Delete button
                 delete_op = row.operator("molecule.delete", text="", icon='X')
@@ -169,6 +172,12 @@ class MOLECULE_PB_PT_list(Panel):
                     info_row = header_row.row()
                     info_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
                     
+                    # Add visibility toggle
+                    if domain.object:
+                        vis_row = header_row.row()
+                        vis_row.prop(domain.object, "hide_viewport", text="", emboss=False, 
+                                 icon='HIDE_OFF' if not domain.object.hide_viewport else 'HIDE_OFF')
+                    
                     # Add delete button
                     delete_op = header_row.operator(
                         "molecule.delete_domain",
@@ -186,6 +195,34 @@ class MOLECULE_PB_PT_list(Panel):
                         color_box.label(text="Domain Color")
                         color_row = color_box.row()
                         color_row.prop(domain.object, "domain_color", text="")
+                        
+                        # Domain style dropdown
+                        style_box = control_box.box()
+                        style_box.label(text="Domain Style")
+                        style_row = style_box.row()
+                        
+                        # Get style name for display
+                        try:
+                            # Try to get style from domain definition first
+                            style_display = domain.style.capitalize()
+                        except (AttributeError, TypeError):
+                            # Try to get from object property
+                            try:
+                                style_display = domain.object.domain_style.capitalize()
+                            except (AttributeError, TypeError):
+                                # Fall back to custom property
+                                if hasattr(domain.object, "__getitem__") and "domain_style" in domain.object:
+                                    style_display = str(domain.object["domain_style"]).capitalize()
+                                else:
+                                    style_display = "Style"
+                                    
+                        # Display the dropdown
+                        style_row.prop_menu_enum(
+                            domain.object, 
+                            "domain_style", 
+                            text=style_display,
+                            icon='MATERIAL'
+                        )
                         
                         # Transform controls
                         transform_box = control_box.box()
