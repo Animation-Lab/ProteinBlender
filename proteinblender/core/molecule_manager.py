@@ -446,78 +446,53 @@ class MoleculeWrapper:
             
         bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
 
-    def update_domain(self, domain_id: str, chain_id: str, start: int, end: int) -> bool:
-        """Update an existing domain with new parameters"""
-        # Check if domain exists
-        if domain_id not in self.domains:
-            print(f"Domain {domain_id} not found")
-            return False
+    def update_domain(self, domain_id: str, chain_id: str, start: int, end: int) -> str:
+        """Update an existing domain with new parameters
+        
+        Args:
+            domain_id: Current domain ID
+            chain_id: New chain ID
+            start: New start residue
+            end: New end residue
             
-        # Get the domain
-        domain = self.domains[domain_id]
-        old_chain_id = domain.chain_id
-        old_start = domain.start
-        old_end = domain.end
+        Returns:
+            str: The new domain ID (which may be different if range changed)
+        """
+        if domain_id not in self.domains:
+            return domain_id
             
         try:
-            # Map chain ID if needed
-            chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-            mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+            domain = self.domains[domain_id]
             
-            # Check if we're actually changing anything
-            if domain.chain_id == mapped_chain and domain.start == start and domain.end == end:
-                # No changes needed
-                return True
+            # Check for overlaps with other domains
+            if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
+                print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
+                return domain_id
                 
-            # Create new domain ID based on new parameters
-            new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
-            
-            # Delete the old mask nodes
-            self._delete_domain_mask_nodes(domain_id)
-            
-            # Update domain fields
-            domain.chain_id = mapped_chain
+            # Update domain definition
+            domain.chain_id = chain_id
             domain.start = start
             domain.end = end
             
-            # Update node network
-            if domain.object and domain.node_group:
-                # Find chain selection node and update it
-                chain_select = None
-                for node in domain.node_group.nodes:
-                    if (node.bl_idname == 'GeometryNodeGroup' and 
-                        node.node_tree and 
-                        node.node_tree.name == "Select Chain"):
-                        chain_select = node
-                        break
-                        
-                if chain_select:
-                    # Update chain selection
-                    for input_socket in chain_select.inputs:
-                        # Skip non-boolean inputs
-                        if input_socket.type != 'BOOLEAN':
-                            continue
-                        if input_socket.name == mapped_chain:
-                            input_socket.default_value = True
-                        else:
-                            input_socket.default_value = False
-                            
-                # Find residue range node and update it
-                res_select = None
-                for node in domain.node_group.nodes:
-                    if (node.bl_idname == 'GeometryNodeGroup' and 
-                        node.node_tree and 
-                        node.node_tree.name == "Select Res ID Range"):
-                        res_select = node
-                        break
-                        
-                if res_select:
-                    # Update residue range
-                    res_select.inputs["Min"].default_value = start
-                    res_select.inputs["Max"].default_value = end
+            # Generate new domain ID
+            new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
+            
+            # Update domain object name
+            if domain.object:
+                domain.object.name = f"{domain.name}_{chain_id}_{start}_{end}"
                 
-            # Create new mask nodes in parent with updated parameters
+                # Update object custom properties to ensure UI stays connected
+                domain.object["domain_id"] = new_domain_id
+            
+            # Update domain node network
+            self._setup_domain_network(domain, chain_id, start, end)
+            
+            # Update domain mask nodes
+            self._delete_domain_mask_nodes(domain_id)
             self._create_domain_mask_nodes(new_domain_id, chain_id, start, end)
+            
+            # Update residue assignments
+            self._update_residue_assignments(domain)
             
             # If the domain ID has changed, update the dictionary
             if domain_id != new_domain_id:
@@ -526,13 +501,15 @@ class MoleculeWrapper:
                 # Remove old ID entry
                 del self.domains[domain_id]
                 # Return the new domain ID
-                return True
+                return new_domain_id
             
-            return True
+            return domain_id
             
         except Exception as e:
             print(f"Error updating domain: {str(e)}")
-            return False
+            import traceback
+            traceback.print_exc()
+            return domain_id
 
     def _delete_domain_mask_nodes(self, domain_id: str):
         """Delete mask nodes for a domain in the parent molecule's node group"""
@@ -566,14 +543,17 @@ class MoleculeWrapper:
         # Note: We're no longer removing the domain infrastructure nodes (join node and NOT node)
         # when all domains are deleted. They will persist for future domain creations.
 
-    def delete_domain(self, domain_id: str):
+    def delete_domain(self, domain_id: str) -> Optional[str]:
         """Delete a domain and its object
         
         If the domain doesn't span the entire chain, this will update adjacent domains
         to ensure the chain remains fully covered.
+        
+        Returns:
+            Optional[str]: The ID of the domain that replaced the deleted domain, if any
         """
         if domain_id not in self.domains:
-            return
+            return None
         
         # Get domain info before deletion
         domain_to_delete = self.domains[domain_id]
@@ -585,14 +565,14 @@ class MoleculeWrapper:
         if chain_id not in self.chain_residue_ranges:
             # Just delete the domain without adjacent domain updating if chain not found
             self._delete_domain_direct(domain_id)
-            return
+            return None
             
         min_res, max_res = self.chain_residue_ranges[chain_id]
         
         # If domain spans the entire chain, just delete it without further updates
         if start <= min_res and end >= max_res:
             self._delete_domain_direct(domain_id)
-            return
+            return None
             
         # Find adjacent domains
         adjacent_domains = []
@@ -618,6 +598,8 @@ class MoleculeWrapper:
                     domain_after = (adj_domain_id, adj_domain)
         
         # Now update domains to cover the gap
+        new_domain_id = None
+        
         if domain_before:
             # Extend the domain before to cover the deleted domain
             domain_before_id, domain_before_obj = domain_before
@@ -627,7 +609,7 @@ class MoleculeWrapper:
                 new_end = min(end, domain_after[1].start - 1)
                 
             print(f"Updating domain {domain_before_id} to expand range from {domain_before_obj.start}-{domain_before_obj.end} to {domain_before_obj.start}-{new_end}")
-            self.update_domain(domain_before_id, chain_id, domain_before_obj.start, new_end)
+            new_domain_id = self.update_domain(domain_before_id, chain_id, domain_before_obj.start, new_end)
             
         elif domain_after:
             # Extend the domain after to cover the deleted domain
@@ -635,11 +617,14 @@ class MoleculeWrapper:
             new_start = start
             
             print(f"Updating domain {domain_after_id} to expand range from {domain_after_obj.start}-{domain_after_obj.end} to {new_start}-{domain_after_obj.end}")
-            self.update_domain(domain_after_id, chain_id, new_start, domain_after_obj.end)
+            new_domain_id = self.update_domain(domain_after_id, chain_id, new_start, domain_after_obj.end)
             
         # Now delete the domain
         self._delete_domain_direct(domain_id)
-    
+        
+        # Return the ID of the domain that replaced the deleted domain, if any
+        return new_domain_id
+
     def _delete_domain_direct(self, domain_id: str):
         """Internal method to delete a domain without adjusting adjacent domains"""
         # Delete domain mask nodes in parent molecule

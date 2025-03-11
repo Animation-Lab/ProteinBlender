@@ -185,69 +185,16 @@ class MOLECULE_PB_OT_delete_domain(Operator):
             self.report({'ERROR'}, "Domain not found")
             return {'CANCELLED'}
         
-        domain_to_delete = molecule.domains[self.domain_id]
-        chain_id = domain_to_delete.chain_id
-        start = domain_to_delete.start
-        end = domain_to_delete.end
+        # Delete the domain and get the ID of the domain that replaced it (if any)
+        new_domain_id = molecule.delete_domain(self.domain_id)
         
-        # Get the chain's residue range
-        if chain_id not in molecule.chain_residue_ranges:
-            # Just delete the domain without adjacent domain updating if chain not found
-            molecule.delete_domain(self.domain_id)
-            return {'FINISHED'}
-            
-        min_res, max_res = molecule.chain_residue_ranges[chain_id]
+        # If there's a replacement domain, select it to maintain UI continuity
+        if new_domain_id and new_domain_id in molecule.domains:
+            domain = molecule.domains.get(new_domain_id)
+            if domain and domain.object:
+                # Make the domain object the active object to help with UI continuity
+                context.view_layer.objects.active = domain.object
         
-        # If domain spans the entire chain, just delete it without further updates
-        if start <= min_res and end >= max_res:
-            molecule.delete_domain(self.domain_id)
-            return {'FINISHED'}
-            
-        # Find adjacent domains
-        adjacent_domains = []
-        for adj_domain_id, adj_domain in molecule.domains.items():
-            if adj_domain_id != self.domain_id and adj_domain.chain_id == chain_id:
-                adjacent_domains.append((adj_domain_id, adj_domain))
-        
-        # Sort domains by start position
-        adjacent_domains.sort(key=lambda d: d[1].start)
-        
-        # Find domains before and after the one being deleted
-        domain_before = None
-        domain_after = None
-        
-        for adj_domain_id, adj_domain in adjacent_domains:
-            if adj_domain.end < start:
-                # This domain ends before our deleted domain starts
-                if domain_before is None or adj_domain.end > domain_before[1].end:
-                    domain_before = (adj_domain_id, adj_domain)
-            elif adj_domain.start > end:
-                # This domain starts after our deleted domain ends
-                if domain_after is None or adj_domain.start < domain_after[1].start:
-                    domain_after = (adj_domain_id, adj_domain)
-        
-        # Now update domains to cover the gap
-        if domain_before:
-            # Extend the domain before to cover the deleted domain
-            domain_before_id, domain_before_obj = domain_before
-            new_end = end
-            # If there's a domain after, adjust the boundary
-            if domain_after:
-                new_end = min(end, domain_after[1].start - 1)
-                
-            print(f"Updating domain {domain_before_id} to expand range from {domain_before_obj.start}-{domain_before_obj.end} to {domain_before_obj.start}-{new_end}")
-            molecule.update_domain(domain_before_id, chain_id, domain_before_obj.start, new_end)
-            
-        elif domain_after:
-            # Extend the domain after to cover the deleted domain
-            domain_after_id, domain_after_obj = domain_after
-            new_start = start
-            
-            print(f"Updating domain {domain_after_id} to expand range from {domain_after_obj.start}-{domain_after_obj.end} to {new_start}-{domain_after_obj.end}")
-            molecule.update_domain(domain_after_id, chain_id, new_start, domain_after_obj.end)
-            
-        # Now delete the domain
-        molecule.delete_domain(self.domain_id)
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_keyframe_domain_location(Operator):
