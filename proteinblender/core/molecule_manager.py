@@ -755,9 +755,49 @@ class MoleculeWrapper:
 
     def cleanup(self):
         """Remove all domains and clean up resources"""
+        # First clean up all domains
         for domain_id in list(self.domains.keys()):
             self.delete_domain(domain_id)
-            
+        
+        # Clean up domain infrastructure nodes in parent molecule
+        if self.molecule and self.molecule.object:
+            parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
+            if parent_modifier and parent_modifier.node_group:
+                parent_node_group = parent_modifier.node_group
+                
+                # Clean up domain join node and its node tree
+                if self.domain_join_node:
+                    # Remove the node tree first
+                    if self.domain_join_node.node_tree:
+                        bpy.data.node_groups.remove(self.domain_join_node.node_tree, do_unlink=True)
+                    # Then remove the node itself
+                    parent_node_group.nodes.remove(self.domain_join_node)
+                    self.domain_join_node = None
+                
+                # Clean up any remaining domain-related nodes
+                nodes_to_remove = []
+                for node in parent_node_group.nodes:
+                    if (node.name.startswith("Domain_Chain_Select_") or 
+                        node.name.startswith("Domain_Res_Select_") or
+                        node.name == "Domain_Final_Not" or
+                        node.name == "Domain_Boolean_Join"):
+                        nodes_to_remove.append(node)
+                
+                # Remove all links connected to these nodes first
+                for link in list(parent_node_group.links):
+                    if (link.from_node in nodes_to_remove or 
+                        link.to_node in nodes_to_remove):
+                        parent_node_group.links.remove(link)
+                
+                # Then remove the nodes
+                for node in nodes_to_remove:
+                    parent_node_group.nodes.remove(node)
+        
+        # Clear all domain-related dictionaries
+        self.domains.clear()
+        self.domain_mask_nodes.clear()
+        self.residue_assignments.clear()
+
     def get_main_style_node(self):
         """Get the main style node of the parent molecule"""
         if not self.molecule.object:

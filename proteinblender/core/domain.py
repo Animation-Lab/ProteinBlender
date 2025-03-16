@@ -144,9 +144,15 @@ class DomainDefinition:
             else:
                 # Fallback to scene collection if parent isn't in any collection
                 bpy.context.scene.collection.objects.link(self.object)
-                
+
+            # Set the domain object's matrix to match the parent object's matrix
+            self.object.matrix_world = parent_obj.matrix_world.copy()
+
             # Set the parent in Blender's hierarchy
             self.object.parent = parent_obj
+            
+            # Set up the parent inverse matrix to handle parent's transformation
+            self.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
             
             # Set up initial node group
             if not self._setup_node_group():
@@ -201,10 +207,63 @@ class DomainDefinition:
 
     def cleanup(self):
         """Remove domain object and node group"""
-        if self.object:
-            bpy.data.objects.remove(self.object, do_unlink=True)
-        if self.node_group:
-            bpy.data.node_groups.remove(self.node_group)
+        try:
+            # Clean up object
+            if self.object:
+                # Clean up node groups first
+                if self.object.modifiers:
+                    for modifier in self.object.modifiers:
+                        if modifier.type == 'NODES' and modifier.node_group:
+                            try:
+                                node_group = modifier.node_group
+                                if node_group and node_group.name in bpy.data.node_groups:
+                                    bpy.data.node_groups.remove(node_group, do_unlink=True)
+                            except ReferenceError:
+                                # Node group already removed, skip
+                                pass
+                
+                # Store object data
+                obj_data = self.object.data
+                
+                # Remove object
+                if self.object.name in bpy.data.objects:
+                    bpy.data.objects.remove(self.object, do_unlink=True)
+                
+                # Clean up object data if no other users
+                if obj_data and obj_data.users == 0:
+                    if isinstance(obj_data, bpy.types.Mesh):
+                        bpy.data.meshes.remove(obj_data, do_unlink=True)
+                
+                # Clear reference
+                self.object = None
+            
+            # Clean up node group
+            if self.node_group:
+                try:
+                    if self.node_group.name in bpy.data.node_groups:
+                        bpy.data.node_groups.remove(self.node_group, do_unlink=True)
+                except ReferenceError:
+                    # Node group already removed, skip
+                    pass
+                self.node_group = None
+            
+            # Clean up any custom node trees
+            for node_group in list(bpy.data.node_groups):  # Create a copy of the list to avoid modification during iteration
+                try:
+                    if node_group.name.startswith(f"Color Common_{self.domain_id}"):
+                        bpy.data.node_groups.remove(node_group, do_unlink=True)
+                except ReferenceError:
+                    # Node group already removed, skip
+                    pass
+            
+            # Reset properties
+            self._setup_complete = False
+            self.color = (0.8, 0.1, 0.8, 1.0)  # Reset to default color
+            
+        except Exception as e:
+            print(f"Error during domain cleanup: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 # The old Domain class is kept for backward compatibility
 class Domain(PropertyGroup):

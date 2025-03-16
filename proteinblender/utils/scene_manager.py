@@ -142,6 +142,17 @@ class ProteinBlenderScene:
                 # Store object data
                 obj_data = molecule.object.data
                 
+                # Clean up node groups
+                if molecule.object.modifiers:
+                    for modifier in molecule.object.modifiers:
+                        if modifier.type == 'NODES' and modifier.node_group:
+                            try:
+                                node_group = modifier.node_group
+                                bpy.data.node_groups.remove(node_group, do_unlink=True)
+                            except ReferenceError:
+                                # Node group already removed, skip
+                                pass
+                
                 # Remove the object
                 bpy.data.objects.remove(molecule.object, do_unlink=True)
                 
@@ -159,7 +170,30 @@ class ProteinBlenderScene:
                 if item.identifier == identifier:
                     scene.molecule_list_items.remove(i)
                     break
-                    
+            
+            # Reset UI state
+            if scene.selected_molecule_id == identifier:
+                scene.selected_molecule_id = ""
+                scene.molecule_list_index = 0
+            
+            # Reset other UI properties - handle enums carefully
+            try:
+                # Get the first item from the enum items as default
+                enum_items = scene.bl_rna.properties["new_domain_chain"].enum_items
+                if enum_items:
+                    scene.new_domain_chain = enum_items[0].identifier
+            except (KeyError, AttributeError):
+                pass  # Property might not exist yet
+            
+            scene.new_domain_start = 1
+            scene.new_domain_end = 9999
+            scene.temp_domain_start = 1
+            scene.temp_domain_end = 9999
+            scene.temp_domain_id = ""
+            scene.show_domain_preview = False
+            scene.show_molecule_edit_panel = False
+            scene.edit_molecule_identifier = ""
+            
             return True
         return False
 
