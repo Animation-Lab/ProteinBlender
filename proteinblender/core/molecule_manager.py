@@ -21,7 +21,7 @@ class MoleculeWrapper:
     def __init__(self, molecule: Molecule, identifier: str):
         self.molecule = molecule
         self.identifier = identifier
-        self.style = "spheres"  # Default style
+        self.style = "surface"  # Default style
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
         
@@ -235,7 +235,7 @@ class MoleculeWrapper:
         print("Could not find suitable section for domain creation")
         return None
         
-    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, auto_fill_chain: bool = True) -> Optional[str]:
+    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, auto_fill_chain: bool = True, parent_domain_id: Optional[str] = None) -> Optional[str]:
         """Internal method to create a domain with specific parameters
         
         Args:
@@ -246,6 +246,7 @@ class MoleculeWrapper:
             auto_fill_chain: Whether to automatically create additional domains to fill the chain. 
                              When true, this will trigger the creation of additional domains to span
                              any areas of the chain not covered by this domain.
+            parent_domain_id: Optional ID of the parent domain
         """
         # Adjust end value based on chain's residue range if needed
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
@@ -262,6 +263,28 @@ class MoleculeWrapper:
         # Create domain definition
         domain = DomainDefinition(mapped_chain, start, end, name)
         domain.parent_molecule_id = self.identifier
+        
+        # If parent_domain_id was provided, use it
+        if parent_domain_id and parent_domain_id in self.domains:
+            domain.parent_domain_id = parent_domain_id
+        # Otherwise, try to find a suitable parent domain based on containment
+        else:
+            # Find potential parent domains (domains that contain this one)
+            potential_parents = []
+            for existing_id, existing_domain in self.domains.items():
+                if (existing_domain.chain_id == mapped_chain and
+                    existing_domain.start <= start and
+                    existing_domain.end >= end and
+                    existing_id != domain_id):  # Avoid self-parenting
+                    potential_parents.append((existing_id, existing_domain))
+            
+            # If potential parents found, choose the smallest one
+            # (the one with the range closest to this domain)
+            if potential_parents:
+                # Sort by range size (ascending)
+                potential_parents.sort(key=lambda x: x[1].end - x[1].start)
+                domain.parent_domain_id = potential_parents[0][0]
+                print(f"Auto-assigned parent domain {domain.parent_domain_id} to domain {domain_id}")
         
         # Set the domain's style to match the parent molecule
         domain.style = self.style
@@ -289,6 +312,22 @@ class MoleculeWrapper:
             domain.object["domain_style"] = domain.style
             print(f"Set domain style using custom property: {domain.style}")
         
+        # Set up Blender parenting if we have a parent domain
+        if domain.parent_domain_id and domain.parent_domain_id in self.domains:
+            parent_domain = self.domains[domain.parent_domain_id]
+            if parent_domain.object and domain.object:
+                try:
+                    # Set the parent in Blender
+                    domain.object.parent = parent_domain.object
+                    print(f"Set Blender parent for domain {domain_id} to {domain.parent_domain_id}")
+                    
+                    # Reset the location to be relative to parent
+                    domain.object.matrix_parent_inverse = parent_domain.object.matrix_world.inverted()
+                except Exception as e:
+                    print(f"Error setting parent: {str(e)}")
+        # If no parent domain is specified, keep the parent as the original protein
+        # (it's already set in create_object_from_parent)
+        
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
         
@@ -298,16 +337,17 @@ class MoleculeWrapper:
         # Create mask nodes in the parent molecule to hide this domain region
         self._create_domain_mask_nodes(domain_id, chain_id, start, end)
         
+        # Add the domain to our domain collection
         self.domains[domain_id] = domain
         
         # Check if we need to create additional domains to span the rest of the chain
         # This is useful for visualizing the entire chain when users only select a portion
         if auto_fill_chain:
-            self._create_additional_domains_to_span_chain(chain_id, start, end, mapped_chain, min_res, max_res)
+            self._create_additional_domains_to_span_chain(chain_id, start, end, mapped_chain, min_res, max_res, domain_id)
         
         return domain_id
         
-    def _create_additional_domains_to_span_chain(self, chain_id: str, start: int, end: int, mapped_chain: str, min_res: int, max_res: int):
+    def _create_additional_domains_to_span_chain(self, chain_id: str, start: int, end: int, mapped_chain: str, min_res: int, max_res: int, domain_id: str):
         """Create additional domains to span the entire chain when a partial domain is created.
         
         This function is called after creating a domain that doesn't span the entire chain.
@@ -325,6 +365,7 @@ class MoleculeWrapper:
             mapped_chain: The mapped chain ID
             min_res: Minimum residue ID in the chain
             max_res: Maximum residue ID in the chain
+            domain_id: The ID of the created domain
         """
         # Check if the domain spans the entire chain
         if start <= min_res and end >= max_res:
@@ -341,13 +382,22 @@ class MoleculeWrapper:
             if not self._check_domain_overlap(mapped_chain, before_start, before_end):
                 # Create domain from min_res to start-1
                 print(f"Creating additional domain to span the beginning of chain {chain_id}: {before_start}-{before_end}")
-                self._create_domain_with_params(
+                before_domain_id = self._create_domain_with_params(
                     chain_id=chain_id,
                     start=before_start,
                     end=before_end,
                     name=f"Domain_{chain_id}_{before_start}_{before_end}",
-                    auto_fill_chain=False  # Prevent recursion
+                    auto_fill_chain=False,  # Prevent recursion
+                    parent_domain_id=None   # Don't set parent - will default to original protein
                 )
+                
+                # Ensure color is properly synchronized for the flanking domain
+                if before_domain_id and before_domain_id in self.domains:
+                    before_domain = self.domains[before_domain_id]
+                    if before_domain.object and before_domain.node_group:
+                        # Update the color in both the node tree and UI
+                        self.update_domain_color(before_domain_id, before_domain.color)
+                        before_domain.object.domain_color = before_domain.color
             else:
                 print(f"Skipping creation of beginning domain ({before_start}-{before_end}) due to overlap with existing domain")
         
@@ -360,13 +410,22 @@ class MoleculeWrapper:
             if not self._check_domain_overlap(mapped_chain, after_start, after_end):
                 # Create domain from end+1 to max_res
                 print(f"Creating additional domain to span the end of chain {chain_id}: {after_start}-{after_end}")
-                self._create_domain_with_params(
+                after_domain_id = self._create_domain_with_params(
                     chain_id=chain_id,
                     start=after_start,
                     end=after_end,
                     name=f"Domain_{chain_id}_{after_start}_{after_end}",
-                    auto_fill_chain=False  # Prevent recursion
+                    auto_fill_chain=False,  # Prevent recursion
+                    parent_domain_id=None   # Don't set parent - will default to original protein
                 )
+                
+                # Ensure color is properly synchronized for the flanking domain
+                if after_domain_id and after_domain_id in self.domains:
+                    after_domain = self.domains[after_domain_id]
+                    if after_domain.object and after_domain.node_group:
+                        # Update the color in both the node tree and UI
+                        self.update_domain_color(after_domain_id, after_domain.color)
+                        after_domain.object.domain_color = after_domain.color
             else:
                 print(f"Skipping creation of end domain ({after_start}-{after_end}) due to overlap with existing domain")
         
@@ -561,10 +620,24 @@ class MoleculeWrapper:
         start = domain_to_delete.start
         end = domain_to_delete.end
         
+        # Find child domains that need reparenting
+        children_to_reparent = []
+        for child_id, child_domain in self.domains.items():
+            if hasattr(child_domain, 'parent_domain_id') and child_domain.parent_domain_id == domain_id:
+                children_to_reparent.append(child_id)
+                
+        # Find a new parent for any child domains (the deleted domain's parent, if any)
+        new_parent_id = None
+        if hasattr(domain_to_delete, 'parent_domain_id') and domain_to_delete.parent_domain_id:
+            new_parent_id = domain_to_delete.parent_domain_id
+            
         # Get the chain's residue range
         if chain_id not in self.chain_residue_ranges:
             # Just delete the domain without adjacent domain updating if chain not found
             self._delete_domain_direct(domain_id)
+            
+            # Reparent any child domains to the new parent
+            self._reparent_child_domains(children_to_reparent, new_parent_id)
             return None
             
         min_res, max_res = self.chain_residue_ranges[chain_id]
@@ -572,6 +645,9 @@ class MoleculeWrapper:
         # If domain spans the entire chain, just delete it without further updates
         if start <= min_res and end >= max_res:
             self._delete_domain_direct(domain_id)
+            
+            # Reparent any child domains to the new parent
+            self._reparent_child_domains(children_to_reparent, new_parent_id)
             return None
             
         # Find adjacent domains
@@ -611,6 +687,10 @@ class MoleculeWrapper:
             print(f"Updating domain {domain_before_id} to expand range from {domain_before_obj.start}-{domain_before_obj.end} to {domain_before_obj.start}-{new_end}")
             new_domain_id = self.update_domain(domain_before_id, chain_id, domain_before_obj.start, new_end)
             
+            # Use this domain as new parent for children
+            if not new_parent_id:
+                new_parent_id = domain_before_id
+                
         elif domain_after:
             # Extend the domain after to cover the deleted domain
             domain_after_id, domain_after_obj = domain_after
@@ -619,22 +699,59 @@ class MoleculeWrapper:
             print(f"Updating domain {domain_after_id} to expand range from {domain_after_obj.start}-{domain_after_obj.end} to {new_start}-{domain_after_obj.end}")
             new_domain_id = self.update_domain(domain_after_id, chain_id, new_start, domain_after_obj.end)
             
+            # Use this domain as new parent for children
+            if not new_parent_id:
+                new_parent_id = domain_after_id
+        
         # Now delete the domain
         self._delete_domain_direct(domain_id)
         
+        # Reparent any child domains to the new parent
+        self._reparent_child_domains(children_to_reparent, new_parent_id)
+        
         # Return the ID of the domain that replaced the deleted domain, if any
         return new_domain_id
-
-    def _delete_domain_direct(self, domain_id: str):
-        """Internal method to delete a domain without adjusting adjacent domains"""
-        # Delete domain mask nodes in parent molecule
-        self._delete_domain_mask_nodes(domain_id)
         
-        # Clean up domain object and node group
-        self.domains[domain_id].cleanup()
+    def _reparent_child_domains(self, child_domain_ids: List[str], new_parent_id: Optional[str]):
+        """Reparent child domains to a new parent
         
-        # Remove from domains dictionary
-        del self.domains[domain_id]
+        Args:
+            child_domain_ids: List of domain IDs to reparent
+            new_parent_id: ID of the new parent domain (or None to remove parent)
+        """
+        if not child_domain_ids:
+            return
+            
+        print(f"Reparenting {len(child_domain_ids)} domains to new parent: {new_parent_id}")
+        
+        new_parent_obj = None
+        if new_parent_id and new_parent_id in self.domains:
+            new_parent = self.domains[new_parent_id]
+            if new_parent.object:
+                new_parent_obj = new_parent.object
+        
+        for child_id in child_domain_ids:
+            if child_id not in self.domains:
+                continue
+                
+            child_domain = self.domains[child_id]
+            
+            # Update parent domain ID
+            child_domain.parent_domain_id = new_parent_id
+            
+            # Update Blender parenting
+            if child_domain.object:
+                try:
+                    # Set the parent in Blender
+                    child_domain.object.parent = new_parent_obj
+                    
+                    # If parent exists, reset the location to be relative to parent
+                    if new_parent_obj:
+                        child_domain.object.matrix_parent_inverse = new_parent_obj.matrix_world.inverted()
+                except Exception as e:
+                    print(f"Error updating parent for {child_id}: {str(e)}")
+        
+        print(f"Reparenting complete")
 
     def cleanup(self):
         """Remove all domains and clean up resources"""
@@ -1144,6 +1261,29 @@ class MoleculeWrapper:
         except Exception as e:
             print(f"Error updating domain color: {str(e)}")
         return False
+        
+    def get_sorted_domains(self) -> Dict[str, DomainDefinition]:
+        """
+        Returns domains sorted by their start residue ID.
+        This ensures consistent display order in the UI.
+        """
+        # Sort the domains by chain first, then by start residue
+        sorted_items = sorted(
+            self.domains.items(), 
+            key=lambda x: (x[1].chain_id, x[1].start)
+        )
+        return dict(sorted_items)
+
+    def _delete_domain_direct(self, domain_id: str):
+        """Internal method to delete a domain without adjusting adjacent domains"""
+        # Delete domain mask nodes in parent molecule
+        self._delete_domain_mask_nodes(domain_id)
+        
+        # Clean up domain object and node group
+        self.domains[domain_id].cleanup()
+        
+        # Remove from domains dictionary
+        del self.domains[domain_id]
 
 class MoleculeManager:
     """Manages all molecules in the scene"""

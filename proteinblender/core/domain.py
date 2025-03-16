@@ -43,6 +43,7 @@ class DomainProperties(PropertyGroup):
     
     # Internal references
     parent_molecule_id: StringProperty(description="ID of parent molecule")
+    parent_domain_id: StringProperty(description="ID of parent domain")
     object_name: StringProperty(description="Name of the Blender object for this domain")
     node_group_name: StringProperty(description="Name of the node group for this domain")
 
@@ -54,6 +55,7 @@ class DomainDefinition:
         self.end = end
         self.name = name or f"Domain_{chain_id}_{start}_{end}"
         self.parent_molecule_id = None  # Link to parent molecule
+        self.parent_domain_id = None  # Link to parent domain
         self.object = None  # Blender object reference
         self.node_group = None  # Geometry nodes network
         self._setup_complete = False
@@ -70,6 +72,7 @@ class DomainDefinition:
             'start': self.start,
             'end': self.end,
             'parent_molecule_id': self.parent_molecule_id,
+            'parent_domain_id': self.parent_domain_id,
             'object_name': self.object.name if self.object else "",
             'node_group_name': self.node_group.name if self.node_group else "",
             'color': self.color,
@@ -88,6 +91,7 @@ class DomainDefinition:
             name=props.name
         )
         domain.parent_molecule_id = props.parent_molecule_id
+        domain.parent_domain_id = props.parent_domain_id
         domain.domain_id = props.domain_id
         
         # Find object and node group by name
@@ -132,8 +136,17 @@ class DomainDefinition:
                         if not prop.is_readonly:
                             setattr(new_mod, prop.identifier, getattr(mod, prop.identifier))
             
-            # Link to scene
-            bpy.context.scene.collection.objects.link(self.object)
+            # Instead of linking directly to scene, link to the same collection as the parent
+            # and make it a child of the parent object in Blender's hierarchy
+            if parent_obj.users_collection:
+                # Link to the first collection the parent is in
+                parent_obj.users_collection[0].objects.link(self.object)
+            else:
+                # Fallback to scene collection if parent isn't in any collection
+                bpy.context.scene.collection.objects.link(self.object)
+                
+            # Set the parent in Blender's hierarchy
+            self.object.parent = parent_obj
             
             # Set up initial node group
             if not self._setup_node_group():

@@ -126,11 +126,45 @@ class MOLECULE_PB_PT_list(Panel):
                 # Add separator after creation controls
                 domain_box.separator()
                 
-                # Display existing domains
-                for domain_id, domain in molecule.domains.items():
+                # Display existing domains - safely handle sorted domains
+                try:
+                    # Try to use the get_sorted_domains method if it exists
+                    domain_items = molecule.get_sorted_domains().items()
+                except AttributeError:
+                    # Fall back to sorting domains manually if the method doesn't exist
+                    domain_items = sorted(
+                        molecule.domains.items(),
+                        key=lambda x: (x[1].chain_id, x[1].start)
+                    )
+                
+                # Create a hierarchical representation of domains
+                # First, gather the top-level domains (those without parents or with parents outside current domains)
+                top_level_domains = []
+                child_domains = {}
+                
+                for domain_id, domain in domain_items:
+                    parent_id = getattr(domain, 'parent_domain_id', None)
+                    # Check if this is a top-level domain (no parent or parent not in current domains)
+                    if not parent_id or parent_id not in molecule.domains:
+                        top_level_domains.append((domain_id, domain))
+                    else:
+                        # Add to child domains dictionary
+                        if parent_id not in child_domains:
+                            child_domains[parent_id] = []
+                        child_domains[parent_id].append((domain_id, domain))
+                
+                # Helper function to recursively draw domains with proper indentation
+                def draw_domain_hierarchy(domain_id, domain, indent_level=0):
                     # Create box for each domain
                     domain_header = domain_box.box()
                     header_row = domain_header.row()
+                    
+                    # Add indentation based on hierarchy level
+                    if indent_level > 0:
+                        for i in range(indent_level):
+                            indent = header_row.row()
+                            indent.scale_x = 0.5
+                            indent.label(text="")
                     
                     # Add expand/collapse triangle
                     is_expanded = getattr(domain.object, "domain_expanded", False)
@@ -190,16 +224,17 @@ class MOLECULE_PB_PT_list(Panel):
                     if is_expanded:
                         control_box = domain_header.box()
                         
-                        # Domain color picker
-                        color_box = control_box.box()
-                        color_box.label(text="Domain Color")
-                        color_row = color_box.row()
-                        color_row.prop(domain.object, "domain_color", text="")
+                        # Combined row for Domain Color and Style
+                        props_row = control_box.row()
                         
-                        # Domain style dropdown
-                        style_box = control_box.box()
-                        style_box.label(text="Domain Style")
-                        style_row = style_box.row()
+                        # Left side - Domain color picker
+                        color_col = props_row.column()
+                        color_col.label(text="Domain Color")
+                        color_col.prop(domain.object, "domain_color", text="")
+                        
+                        # Right side - Domain style dropdown
+                        style_col = props_row.column()
+                        style_col.label(text="Domain Style")
                         
                         # Get style name for display
                         try:
@@ -217,12 +252,23 @@ class MOLECULE_PB_PT_list(Panel):
                                     style_display = "Style"
                                     
                         # Display the dropdown
-                        style_row.prop_menu_enum(
+                        style_col.prop_menu_enum(
                             domain.object, 
                             "domain_style", 
                             text=style_display,
                             icon='MATERIAL'
                         )
+                        
+                        # Parent domain info (if applicable)
+                        if hasattr(domain, 'parent_domain_id') and domain.parent_domain_id:
+                            parent_box = control_box.box()
+                            parent_box.label(text="Parent Domain")
+                            parent_row = parent_box.row()
+                            parent_domain = molecule.domains.get(domain.parent_domain_id)
+                            if parent_domain:
+                                parent_row.label(text=f"{parent_domain.name}: Chain {parent_domain.chain_id} ({parent_domain.start}-{parent_domain.end})")
+                            else:
+                                parent_row.label(text=f"ID: {domain.parent_domain_id} (Not Found)")
                         
                         # Transform controls
                         transform_box = control_box.box()
@@ -246,6 +292,15 @@ class MOLECULE_PB_PT_list(Panel):
                         anim_row = anim_box.row()
                         anim_row.operator("molecule.keyframe_domain_location", text="Keyframe Location")
                         anim_row.operator("molecule.keyframe_domain_rotation", text="Keyframe Rotation")
+                    
+                    # Draw child domains recursively (if any)
+                    if domain_id in child_domains:
+                        for child_id, child_domain in child_domains[domain_id]:
+                            draw_domain_hierarchy(child_id, child_domain, indent_level + 1)
+                
+                # Draw the domain hierarchy starting with top-level domains
+                for domain_id, domain in top_level_domains:
+                    draw_domain_hierarchy(domain_id, domain)
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):
     bl_idname = "molecule.toggle_chain_selection"

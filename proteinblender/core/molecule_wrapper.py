@@ -1155,3 +1155,15 @@ class MoleculeWrapper:
         self._clean_unused_nodes(node_group)
         
         print("Domain network setup complete")
+
+    def get_sorted_domains(self) -> Dict[str, DomainDefinition]:
+        """
+        Returns domains sorted by their start residue ID.
+        This ensures consistent display order in the UI.
+        """
+        # Sort the domains by chain first, then by start residue
+        sorted_items = sorted(
+            self.domains.items(), 
+            key=lambda x: (x[1].chain_id, x[1].start)
+        )
+        return dict(sorted_items)

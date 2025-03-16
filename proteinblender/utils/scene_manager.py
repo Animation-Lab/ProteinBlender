@@ -126,6 +126,10 @@ class ProteinBlenderScene:
             # Remove from scene
             molecule = self.molecules[identifier]
             
+            # Clean up all associated domains first
+            print(f"Cleaning up all domains for molecule {identifier}")
+            molecule.cleanup()
+            
             if molecule.object:
                 # Push to undo stack before making changes
                 print("Pushing to undo stack")
