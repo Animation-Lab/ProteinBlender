@@ -387,6 +387,121 @@ class MOLECULE_PB_OT_update_domain_style(Operator):
             traceback.print_exc()
             return {'CANCELLED'}
 
+def create_pivot_helper(context, location):
+    # Create empty
+    bpy.ops.object.empty_add(type='ARROWS', location=location)
+    helper = context.active_object
+    helper.name = "PivotHelper"
+    
+    # Make sure it's selectable and selected
+    helper.hide_select = False
+    helper.select_set(True)
+    context.view_layer.objects.active = helper
+    
+    # Set display properties
+    helper.empty_display_size = 1.0  # Adjust size as needed
+    helper.show_in_front = True  # Make sure it's visible
+    
+    return helper
+
+class MOLECULE_PB_OT_toggle_pivot_edit(Operator):
+    bl_idname = "molecule.toggle_pivot_edit"
+    bl_label = "Move Pivot"
+    bl_description = "Move the pivot point (origin) of this domain"
+    
+    domain_id: StringProperty()
+    _pivot_edit_active = {}  # Class variable to track pivot edit state per domain
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain or not domain.object:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+        
+        # Toggle pivot edit mode for this domain
+        is_active = self._pivot_edit_active.get(self.domain_id, False)
+        
+        if not is_active:
+            # Enter pivot edit mode
+            self._pivot_edit_active[self.domain_id] = {
+                'cursor_location': list(context.scene.cursor.location),
+                'previous_tool': context.workspace.tools.from_space_view3d_mode(context.mode, create=False).idname,
+                'mesh_location': domain.object.location.copy(),
+                'mesh_rotation': domain.object.rotation_euler.copy(),
+                'transform_orientation': context.scene.transform_orientation_slots[0].type,
+                'pivot_point': context.tool_settings.transform_pivot_point
+            }
+            
+            # Deselect everything first
+            bpy.ops.object.select_all(action='DESELECT')
+            
+            # Create and set up helper empty
+            helper = create_pivot_helper(context, domain.object.location)
+            self._pivot_edit_active[self.domain_id]['helper'] = helper
+            
+            # Set up transform settings
+            context.scene.transform_orientation_slots[0].type = 'GLOBAL'
+            context.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
+            
+            # Switch to move tool to ensure gizmo is active
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for region in area.regions:
+                        if region.type == 'WINDOW':
+                            override = context.copy()
+                            override['area'] = area
+                            override['region'] = region
+                            with context.temp_override(**override):
+                                bpy.ops.wm.tool_set_by_id(name="builtin.move")
+                    
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            space.show_gizmo = True
+                            space.show_gizmo_tool = True
+                            space.show_gizmo_object_translate = True
+            
+            self.report({'INFO'}, "Use the transform gizmo to position the new pivot point. Click 'Move Pivot' again to apply.")
+            
+        else:
+            # Exit pivot edit mode
+            stored_state = self._pivot_edit_active[self.domain_id]
+            helper = stored_state['helper']
+            
+            # Use helper location as new pivot
+            context.scene.cursor.location = helper.location
+            
+            # Select the domain object and set origin
+            bpy.ops.object.select_all(action='DESELECT')
+            domain.object.select_set(True)
+            context.view_layer.objects.active = domain.object
+            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            
+            # Delete the helper object
+            bpy.ops.object.select_all(action='DESELECT')
+            helper.select_set(True)
+            context.view_layer.objects.active = helper
+            bpy.ops.object.delete()
+            
+            # Restore previous state
+            context.scene.cursor.location = stored_state['cursor_location']
+            context.scene.transform_orientation_slots[0].type = stored_state['transform_orientation']
+            context.tool_settings.transform_pivot_point = stored_state['pivot_point']
+            
+            del self._pivot_edit_active[self.domain_id]
+            self.report({'INFO'}, "Pivot point updated")
+        
+        return {'FINISHED'}
+
 # Register
 def register():
     bpy.utils.register_class(MOLECULE_PB_OT_create_domain)
@@ -398,14 +513,19 @@ def register():
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_ui_values)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_color)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_style)
+    bpy.utils.register_class(MOLECULE_PB_OT_toggle_pivot_edit)
 
 def unregister():
-    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_style)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_color)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_ui_values)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_domain_expanded)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_rotation)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_location)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_delete_domain)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain)
-    bpy.utils.unregister_class(MOLECULE_PB_OT_create_domain)
+    try:
+        bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_pivot_edit)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_style)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_color)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_ui_values)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_domain_expanded)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_rotation)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_keyframe_domain_location)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_delete_domain)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_create_domain)
+    except Exception:
+        pass

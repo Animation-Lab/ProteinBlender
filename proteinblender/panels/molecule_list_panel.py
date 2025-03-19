@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Panel, Operator
 from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from ..operators.domain_operators import MOLECULE_PB_OT_toggle_pivot_edit
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
@@ -273,6 +274,21 @@ class MOLECULE_PB_PT_list(Panel):
                         # Transform controls
                         transform_box = control_box.box()
                         transform_box.label(text="Transform")
+                        
+                        # Add pivot edit button
+                        pivot_row = transform_box.row()
+                        try:
+                            pivot_op = pivot_row.operator(
+                                "molecule.toggle_pivot_edit",
+                                text="Move Pivot",
+                                icon='PIVOT_BOUNDBOX'
+                            )
+                            if pivot_op:  # Only set domain_id if operator was created successfully
+                                pivot_op.domain_id = domain_id
+                        except Exception as e:
+                            print(f"Error creating pivot operator: {str(e)}")
+                            # Add a label instead if operator creation fails
+                            pivot_row.label(text="Move Pivot", icon='PIVOT_BOUNDBOX')
                         
                         # Location
                         loc_row = transform_box.row(align=True)
