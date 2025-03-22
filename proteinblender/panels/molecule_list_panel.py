@@ -48,6 +48,15 @@ class MOLECULE_PB_PT_list(Panel):
             name_op.molecule_id = molecule_id
             
             if molecule.object:
+                # Add select object button
+                select_op = row.operator(
+                    "molecule.select_object",
+                    text="",
+                    icon='RESTRICT_SELECT_OFF'
+                )
+                select_op.object_id = molecule_id
+                select_op.is_domain = False
+                
                 # Visibility toggle
                 vis_row = row.row()
                 vis_row.prop(molecule.object, "hide_viewport", text="", emboss=False, icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_OFF')
@@ -206,6 +215,16 @@ class MOLECULE_PB_PT_list(Panel):
                     # Add domain label and info
                     info_row = header_row.row()
                     info_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
+                    
+                    # Add select object button
+                    if domain.object:
+                        select_op = header_row.operator(
+                            "molecule.select_object",
+                            text="",
+                            icon='RESTRICT_SELECT_OFF'
+                        )
+                        select_op.object_id = domain_id
+                        select_op.is_domain = True
                     
                     # Add visibility toggle
                     if domain.object:

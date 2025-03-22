@@ -312,21 +312,8 @@ class MoleculeWrapper:
             domain.object["domain_style"] = domain.style
             print(f"Set domain style using custom property: {domain.style}")
         
-        # Set up Blender parenting if we have a parent domain
-        if domain.parent_domain_id and domain.parent_domain_id in self.domains:
-            parent_domain = self.domains[domain.parent_domain_id]
-            if parent_domain.object and domain.object:
-                try:
-                    # Set the parent in Blender
-                    domain.object.parent = parent_domain.object
-                    print(f"Set Blender parent for domain {domain_id} to {domain.parent_domain_id}")
-                    
-                    # Reset the location to be relative to parent
-                    domain.object.matrix_parent_inverse = parent_domain.object.matrix_world.inverted()
-                except Exception as e:
-                    print(f"Error setting parent: {str(e)}")
-        # If no parent domain is specified, keep the parent as the original protein
-        # (it's already set in create_object_from_parent)
+        # Set the domain's parent using the centralized method
+        self._set_domain_parent(domain, domain.parent_domain_id)
         
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
@@ -715,26 +702,17 @@ class MoleculeWrapper:
     def _reparent_child_domains(self, child_domain_ids: List[str], new_parent_id: Optional[str]):
         """Reparent child domains to a new parent
         
+        When a parent domain is deleted, its children inherit the parent's parent.
+        If no parent exists in the hierarchy, children are parented to the original protein.
+        
         Args:
             child_domain_ids: List of domain IDs to reparent
             new_parent_id: ID of the new parent domain (or None to use original protein as parent)
         """
         if not child_domain_ids:
             return
-            
+        
         print(f"Reparenting {len(child_domain_ids)} domains to new parent: {new_parent_id}")
-        
-        # Check if the new parent exists
-        new_parent_obj = None
-        if new_parent_id and new_parent_id in self.domains:
-            new_parent = self.domains[new_parent_id]
-            if new_parent.object:
-                new_parent_obj = new_parent.object
-        
-        # If no new parent specified, use the original protein as parent
-        if new_parent_obj is None:
-            new_parent_obj = self.molecule.object
-            print(f"Using original protein as parent for orphaned domains")
         
         # Find all domains that are children of the domains we're reparenting
         # This is for two-level+ hierarchies
@@ -745,47 +723,59 @@ class MoleculeWrapper:
                     grandchildren[domain.parent_domain_id] = []
                 grandchildren[domain.parent_domain_id].append(domain_id)
         
+        # Reparent each child domain
         for child_id in child_domain_ids:
             if child_id not in self.domains:
                 continue
             
             child_domain = self.domains[child_id]
             
-            # Update parent domain ID
-            child_domain.parent_domain_id = new_parent_id
+            # Set new parent
+            self._set_domain_parent(child_domain, new_parent_id)
             
-            # Update Blender parenting
-            if child_domain.object:
-                try:
-                    # Set the parent in Blender - always use some parent (either domain or original protein)
-                    child_domain.object.parent = new_parent_obj
-                    
-                    # Reset the matrix to maintain world position
-                    child_domain.object.matrix_parent_inverse = new_parent_obj.matrix_world.inverted()
-                except Exception as e:
-                    print(f"Error updating parent for {child_id}: {str(e)}")
-            
-            # Now recursively update any grandchildren of this domain to preserve hierarchy
+            # Recursively update any grandchildren of this domain to preserve hierarchy
             if child_id in grandchildren:
                 for grandchild_id in grandchildren[child_id]:
                     if grandchild_id in self.domains:
                         grandchild = self.domains[grandchild_id]
-                        
-                        # Update to point to the child (which is now properly parented itself)
-                        grandchild.parent_domain_id = child_id
-                        
-                        # Update Blender parenting
-                        if grandchild.object and child_domain.object:
-                            try:
-                                # Set the parent in Blender
-                                grandchild.object.parent = child_domain.object
-                                
-                                # Reset transform to maintain world position
-                                grandchild.object.matrix_parent_inverse = child_domain.object.matrix_world.inverted()
-                            except Exception as e:
-                                print(f"Error updating parent for grandchild {grandchild_id}: {str(e)}")
+                        self._set_domain_parent(grandchild, child_id)
         
         print(f"Reparenting complete")
+
+    def _set_domain_parent(self, domain: DomainDefinition, parent_domain_id: Optional[str]):
+        """Set a domain's parent, handling both data structure and Blender object parenting.
+        
+        This is a helper method to centralize parenting logic in one place.
+        
+        Args:
+            domain: The domain to set the parent for
+            parent_domain_id: ID of the parent domain (or None to use original protein)
+        """
+        # Check if the parent domain exists
+        parent_obj = None
+        if parent_domain_id and parent_domain_id in self.domains:
+            parent_domain = self.domains[parent_domain_id]
+            if parent_domain.object:
+                parent_obj = parent_domain.object
+        
+        # If no valid parent domain, use original protein as parent
+        if parent_obj is None:
+            parent_obj = self.molecule.object
+            print(f"Using original protein as parent for domain {domain.name}")
+        
+        # Update parent domain ID in data structure
+        domain.parent_domain_id = parent_domain_id
+        
+        # Update Blender parenting relationship
+        if domain.object:
+            try:
+                # Set the parent in Blender
+                domain.object.parent = parent_obj
+                
+                # Reset the matrix to maintain world position
+                domain.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
+            except Exception as e:
+                print(f"Error updating parent for {domain.name}: {str(e)}")
 
     def cleanup(self):
         """Remove all domains and clean up resources"""

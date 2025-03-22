@@ -8,6 +8,7 @@ from .molecule_operators import (
     MOLECULE_PB_OT_change_style,
 )
 from .operator_import_protein import PROTEIN_OT_import_protein
+from .selection_operators import MOLECULE_PB_OT_select_object
 from .domain_operators import (
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_domain_location,
@@ -42,4 +43,5 @@ CLASSES = (
     MOLECULE_PB_OT_toggle_pivot_edit,
     MOLECULE_PB_OT_set_parent_domain,
     MOLECULE_PB_OT_update_parent_domain,
+    MOLECULE_PB_OT_select_object,
 )
