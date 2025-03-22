@@ -672,6 +672,176 @@ class MOLECULE_PB_OT_toggle_pivot_edit(Operator):
         
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_set_parent_domain(Operator):
+    bl_idname = "molecule.set_parent_domain"
+    bl_label = "Set Parent Domain"
+    bl_description = "Set a parent domain for this domain"
+    
+    domain_id: StringProperty(description="The ID of the domain to set parent for")
+    
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            layout.label(text="No molecule selected")
+            return
+            
+        # Get the domain to be parented
+        if self.domain_id not in molecule.domains:
+            layout.label(text="Domain not found")
+            return
+        
+        domain = molecule.domains[self.domain_id]
+        
+        # Create a box for the domain info
+        box = layout.box()
+        box.label(text=f"Setting parent for: {domain.name}")
+        
+        # Create a list of potential parent domains (excluding self and children)
+        # First get all domains that aren't this one
+        potential_parents = [(domain_id, d) for domain_id, d in molecule.domains.items() 
+                           if domain_id != self.domain_id]
+        
+        # Add option to clear parent
+        no_parent_row = layout.row()
+        clear_op = no_parent_row.operator(
+            "molecule.update_parent_domain",
+            text="No Parent (Clear Parent)"
+        )
+        clear_op.domain_id = self.domain_id
+        clear_op.parent_domain_id = ""  # Empty string means no parent
+        
+        layout.separator()
+        layout.label(text="Select Parent Domain:")
+        
+        # List all potential parents
+        for parent_id, parent_domain in potential_parents:
+            row = layout.row()
+            # Highlight current parent
+            is_current_parent = (hasattr(domain, 'parent_domain_id') and 
+                               domain.parent_domain_id == parent_id)
+            
+            parent_op = row.operator(
+                "molecule.update_parent_domain",
+                text=f"{parent_domain.name}: Chain {parent_domain.chain_id} ({parent_domain.start}-{parent_domain.end})",
+                depress=is_current_parent
+            )
+            parent_op.domain_id = self.domain_id
+            parent_op.parent_domain_id = parent_id
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=400)
+        
+    def execute(self, context):
+        # This is just a dialog launcher, the actual work is done by MOLECULE_PB_OT_update_parent_domain
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_update_parent_domain(Operator):
+    bl_idname = "molecule.update_parent_domain"
+    bl_label = "Update Parent Domain"
+    bl_description = "Update the parent domain of this domain"
+    
+    domain_id: StringProperty(description="The ID of the domain to update parent for")
+    parent_domain_id: StringProperty(description="The ID of the new parent domain (empty for no parent)")
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain to be updated
+        if self.domain_id not in molecule.domains:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+        
+        domain = molecule.domains[self.domain_id]
+        
+        # Validate parent domain if one is specified
+        new_parent_obj = None
+        if self.parent_domain_id and self.parent_domain_id in molecule.domains:
+            parent_domain = molecule.domains[self.parent_domain_id]
+            if parent_domain.object:
+                new_parent_obj = parent_domain.object
+        
+        # Store old parent for reverting if needed
+        old_parent_id = getattr(domain, 'parent_domain_id', None)
+        
+        # Check for circular parenting
+        if self._would_create_circular_parenting(molecule, self.domain_id, self.parent_domain_id):
+            self.report({'ERROR'}, "Cannot create circular parenting")
+            return {'CANCELLED'}
+            
+        try:
+            # Update parent domain ID
+            domain.parent_domain_id = self.parent_domain_id if self.parent_domain_id else None
+            
+            # Update Blender parenting
+            if domain.object:
+                # Set the parent in Blender
+                domain.object.parent = new_parent_obj
+                
+                # If parent exists, reset the location to be relative to parent
+                if new_parent_obj:
+                    # Store world matrix before parenting
+                    world_matrix = domain.object.matrix_world.copy()
+                    
+                    # Set parent inverse matrix to maintain world position
+                    domain.object.matrix_parent_inverse = new_parent_obj.matrix_world.inverted()
+                    
+                    # Ensure world position is maintained
+                    domain.object.matrix_world = world_matrix
+            
+            # Report success
+            self.report({'INFO'}, f"Updated parent for {domain.name}")
+            return {'FINISHED'}
+            
+        except Exception as e:
+            # Revert to old parent if something went wrong
+            domain.parent_domain_id = old_parent_id
+            self.report({'ERROR'}, f"Error updating parent: {str(e)}")
+            return {'CANCELLED'}
+    
+    def _would_create_circular_parenting(self, molecule, child_id, parent_id):
+        """Check if setting parent_id as parent of child_id would create circular parenting"""
+        if not parent_id:
+            return False  # No parent can't create circular parenting
+            
+        # If child is being set as its own parent, that's circular
+        if child_id == parent_id:
+            return True
+            
+        # Check if child would be parent of any of its ancestors
+        current_id = parent_id
+        visited = set()
+        
+        while current_id:
+            # If we've seen this ID before, we have a cycle
+            if current_id in visited:
+                return True
+                
+            visited.add(current_id)
+            
+            # If the current parent is the child, we'd create a cycle
+            if current_id == child_id:
+                return True
+                
+            # Move up the parent chain
+            if current_id in molecule.domains:
+                current_id = getattr(molecule.domains[current_id], 'parent_domain_id', None)
+            else:
+                break
+                
+        return False
+
 # Register
 def register():
     bpy.utils.register_class(MOLECULE_PB_OT_create_domain)
@@ -684,9 +854,13 @@ def register():
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_color)
     bpy.utils.register_class(MOLECULE_PB_OT_update_domain_style)
     bpy.utils.register_class(MOLECULE_PB_OT_toggle_pivot_edit)
+    bpy.utils.register_class(MOLECULE_PB_OT_set_parent_domain)
+    bpy.utils.register_class(MOLECULE_PB_OT_update_parent_domain)
 
 def unregister():
     try:
+        bpy.utils.unregister_class(MOLECULE_PB_OT_update_parent_domain)
+        bpy.utils.unregister_class(MOLECULE_PB_OT_set_parent_domain)
         bpy.utils.unregister_class(MOLECULE_PB_OT_toggle_pivot_edit)
         bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_style)
         bpy.utils.unregister_class(MOLECULE_PB_OT_update_domain_color)

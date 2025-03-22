@@ -271,6 +271,19 @@ class MOLECULE_PB_PT_list(Panel):
                             else:
                                 parent_row.label(text=f"ID: {domain.parent_domain_id} (Not Found)")
                         
+                        # Parent domain selector
+                        parent_box = control_box.box()
+                        parent_box.label(text="Set Parent Domain")
+                        parent_dropdown = parent_box.row()
+                        
+                        # Create parent selection operator
+                        parent_op = parent_dropdown.operator(
+                            "molecule.set_parent_domain",
+                            text="Select Parent Domain"
+                        )
+                        if parent_op:
+                            parent_op.domain_id = domain_id
+                        
                         # Transform controls
                         transform_box = control_box.box()
                         transform_box.label(text="Transform")
