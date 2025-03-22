@@ -74,8 +74,215 @@ class MOLECULE_PB_OT_create_domain(Operator):
                     # And try setting the color again
                     if hasattr(domain, "color") and hasattr(domain.object, "domain_color"):
                         domain.object.domain_color = domain.color
+                
+                # Set the pivot point to the alpha carbon of the start residue
+                self.set_pivot_to_alpha_carbon(context, molecule, domain)
             
         return {'FINISHED'}
+    
+    def set_pivot_to_alpha_carbon(self, context, molecule, domain):
+        """Set the domain's pivot point to the alpha carbon of the start residue"""
+        try:
+            # Get the molecular object
+            mol_obj = molecule.object
+            if not mol_obj or not domain.object:
+                print("DEBUG: Missing molecule or domain object")
+                return
+            
+            # Log current position for debugging
+            print(f"DEBUG: Current domain pivot (object origin) is at {domain.object.location}")
+            
+            # Check for the necessary attributes
+            if not hasattr(mol_obj.data, "attributes"):
+                print("DEBUG: No attributes on molecule data")
+                return
+                
+            # Get attributes for finding alpha carbons
+            attrs = mol_obj.data.attributes
+            print(f"DEBUG: Available attributes: {list(attrs.keys())}")
+            
+            # Check for required attributes with correct names
+            required_attrs = ["atom_name", "chain_id"]
+            residue_attr = None
+            
+            # Determine which attribute contains residue numbers
+            if "residue_number" in attrs:
+                residue_attr = "residue_number"
+                required_attrs.append("residue_number")
+            elif "res_id" in attrs:
+                residue_attr = "res_id"
+                required_attrs.append("res_id")
+            else:
+                print(f"DEBUG: Missing residue number attribute. Available: {list(attrs.keys())}")
+                return
+            
+            # Check if we have all required attributes
+            for attr in required_attrs:
+                if attr not in attrs:
+                    print(f"DEBUG: Missing required attribute: {attr}. Available: {list(attrs.keys())}")
+                    return
+                
+            # Get the domain info
+            domain_chain_id = domain.chain_id
+            start_res = domain.start
+            print(f"DEBUG: Domain chain_id: '{domain_chain_id}', Looking for atom in residue {start_res}")
+            
+            # Get the attributes data
+            atom_names = attrs["atom_name"].data
+            chain_ids = attrs["chain_id"].data
+            res_nums = attrs[residue_attr].data
+            
+            # Print some debug info about the first few atoms
+            print(f"DEBUG: First 5 atoms - names, chains, residues:")
+            for i in range(min(5, len(atom_names))):
+                print(f"  Atom {i}: {atom_names[i].value}, Chain: {chain_ids[i].value}, Res: {res_nums[i].value}")
+            
+            # Determine if we have numeric or textual atom names by checking the first few atoms
+            numeric_atom_names = False
+            for i in range(min(10, len(atom_names))):
+                try:
+                    int(atom_names[i].value)
+                    numeric_atom_names = True
+                    break
+                except (ValueError, TypeError):
+                    pass
+            
+            print(f"DEBUG: Using {'numeric' if numeric_atom_names else 'textual'} atom naming convention")
+            
+            # Get chain ID to search for - try both numeric and string versions
+            search_chain_ids = [domain_chain_id]
+            if domain_chain_id.isalpha():
+                # If domain chain is alphabetic, also try the numeric index
+                try:
+                    # A = 0, B = 1, etc.
+                    numeric_chain = ord(domain_chain_id.upper()) - ord('A')
+                    search_chain_ids.append(str(numeric_chain))
+                    search_chain_ids.append(numeric_chain)
+                except:
+                    pass
+            else:
+                # If domain chain is numeric, also try the alphabetic version
+                try:
+                    # 0 = A, 1 = B, etc.
+                    alpha_chain = chr(int(domain_chain_id) + ord('A'))
+                    search_chain_ids.append(alpha_chain)
+                except:
+                    pass
+            
+            print(f"DEBUG: Searching for chain IDs: {search_chain_ids}")
+            
+            # If we have position attribute
+            if "position" in attrs:
+                positions = attrs["position"].data
+                print(f"DEBUG: Position attribute found with {len(positions)} entries")
+                
+                # Strategy depends on if we have numeric or textual atom names
+                alpha_carbon_pos = None
+                alpha_carbon_idx = None
+                
+                if numeric_atom_names:
+                    # For numeric atom names, we need to identify which number corresponds to the alpha carbon
+                    # This is usually atom type 2 in PDB format, but to be sure, let's try to find it by finding 
+                    # the second atom in the first peptide of the chain
+                    ca_atom_indices = []
+                    
+                    # Group atoms by residue in the requested chain
+                    residue_atoms = {}
+                    for i in range(len(atom_names)):
+                        chain_value = chain_ids[i].value
+                        chain_str = str(chain_value)
+                        
+                        # Check if this atom is in one of our search chains
+                        if chain_str in search_chain_ids or chain_value in search_chain_ids:
+                            res_value = res_nums[i].value
+                            if res_value not in residue_atoms:
+                                residue_atoms[res_value] = []
+                            residue_atoms[res_value].append(i)
+                    
+                    print(f"DEBUG: Found {len(residue_atoms)} residues in the target chain")
+                    
+                    # For each residue, identify the likely alpha carbon
+                    for res_id, atom_indices in residue_atoms.items():
+                        # In PDB format with numeric atom types, the alpha carbon is often the 2nd atom (index 1)
+                        # of each amino acid (though this depends on the format and might not be reliable)
+                        if len(atom_indices) >= 2:
+                            ca_index = atom_indices[1]  # Try the second atom of each residue
+                            ca_atom_indices.append((res_id, ca_index))
+                    
+                    # If we have the starting residue in our mapping
+                    if start_res in residue_atoms and len(residue_atoms[start_res]) >= 2:
+                        alpha_carbon_idx = residue_atoms[start_res][1]  # Use the second atom
+                        alpha_carbon_pos = positions[alpha_carbon_idx].vector
+                        print(f"DEBUG: Found likely alpha carbon at index {alpha_carbon_idx} for residue {start_res}, position: {alpha_carbon_pos}")
+                
+                else:
+                    # For textual atom names, search for "CA"
+                    for i in range(len(atom_names)):
+                        atom_value = atom_names[i].value
+                        chain_value = chain_ids[i].value
+                        chain_str = str(chain_value)
+                        res_value = res_nums[i].value
+                        
+                        # For debug, print when we find any CA atom
+                        if atom_value == "CA":
+                            print(f"DEBUG: Found CA at index {i}, Chain: {chain_value}, Res: {res_value}")
+                        
+                        # Check for CA atom in the correct chain and residue
+                        if (atom_value == "CA" and 
+                            (chain_str in search_chain_ids or chain_value in search_chain_ids) and
+                            res_value == start_res):
+                            # Found the alpha carbon at the start residue
+                            alpha_carbon_pos = positions[i].vector
+                            alpha_carbon_idx = i
+                            print(f"DEBUG: Found matching CA atom at index {i} with position {alpha_carbon_pos}")
+                            break
+                
+                # If we found the alpha carbon, set the domain's pivot point
+                if alpha_carbon_pos is not None:
+                    # Deselect all objects and select only the domain
+                    bpy.ops.object.select_all(action='DESELECT')
+                    domain.object.select_set(True)
+                    context.view_layer.objects.active = domain.object
+                    
+                    # Store the original cursor location
+                    orig_cursor_loc = context.scene.cursor.location.copy()
+                    
+                    # Set the 3D cursor to the alpha carbon position
+                    context.scene.cursor.location = alpha_carbon_pos
+                    print(f"DEBUG: Setting cursor to alpha carbon position: {alpha_carbon_pos}")
+                    
+                    # Set the object's origin to the 3D cursor position
+                    bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+                    
+                    # Report new pivot position
+                    print(f"DEBUG: New domain pivot position: {domain.object.location}")
+                    
+                    # Restore the original cursor location
+                    context.scene.cursor.location = orig_cursor_loc
+                    
+                    print(f"DEBUG: Successfully set domain pivot to alpha carbon of residue {start_res}")
+                else:
+                    print(f"DEBUG: Couldn't find alpha carbon for chain '{domain_chain_id}' at residue {start_res}")
+                    # Try to find any atoms in this chain for debugging
+                    atoms_in_chain = []
+                    for i in range(len(atom_names)):
+                        chain_value = chain_ids[i].value
+                        chain_str = str(chain_value)
+                        if chain_str in search_chain_ids or chain_value in search_chain_ids:
+                            atoms_in_chain.append((i, res_nums[i].value, atom_names[i].value))
+                            if len(atoms_in_chain) >= 10:  # Limit to first 10 found
+                                break
+                    
+                    if atoms_in_chain:
+                        print(f"DEBUG: First few atoms found in this chain:")
+                        for idx, res, atom in atoms_in_chain:
+                            print(f"  Atom {atom} in Residue {res} at position {positions[idx].vector}")
+            else:
+                print("DEBUG: No position attribute found")
+        except Exception as e:
+            print(f"DEBUG: Error setting pivot to alpha carbon: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 class MOLECULE_PB_OT_update_domain(Operator):
     bl_idname = "molecule.update_domain"
