@@ -693,11 +693,14 @@ class MoleculeWrapper:
         Returns:
             str: The new domain ID (which may be different if range changed)
         """
+        print(f"DEBUG: update_domain called for ID: {domain_id}, New Range: {chain_id} ({start}-{end})") # DEBUG
         if domain_id not in self.domains:
+            print(f"DEBUG: update_domain - Domain ID {domain_id} not found.") # DEBUG
             return domain_id
             
         try:
             domain = self.domains[domain_id]
+            print(f"DEBUG: update_domain - Found domain object: {domain.name if domain else 'None'}") # DEBUG
             
             # Check for overlaps with other domains
             if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
@@ -705,37 +708,37 @@ class MoleculeWrapper:
                 return domain_id
                 
             # Update domain definition
+            print(f"DEBUG: update_domain - Updating domain definition {domain.name} properties.") # DEBUG
             domain.chain_id = chain_id
             domain.start = start
             domain.end = end
             
             # Generate new domain ID
             new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
+            print(f"DEBUG: update_domain - New potential domain ID: {new_domain_id}") # DEBUG
             
             # Update domain object name
             if domain.object:
                 domain.object.name = f"{domain.name}_{chain_id}_{start}_{end}"
-                
-                # Update object custom properties to ensure UI stays connected
                 domain.object["domain_id"] = new_domain_id
             
             # Update domain node network
+            print(f"DEBUG: update_domain - Calling _setup_domain_network for {new_domain_id}") # DEBUG
             self._setup_domain_network(domain, chain_id, start, end)
             
             # Update domain mask nodes
-            self._delete_domain_mask_nodes(domain_id)
-            self._create_domain_mask_nodes(new_domain_id, chain_id, start, end)
+            print(f"DEBUG: update_domain - Calling _delete/_create_domain_mask_nodes for {domain_id} -> {new_domain_id}") # DEBUG
+            self._delete_domain_mask_nodes(domain_id) # Delete old mask
+            self._create_domain_mask_nodes(new_domain_id, chain_id, start, end) # Create new mask
             
             # Update residue assignments
             self._update_residue_assignments(domain)
             
             # If the domain ID has changed, update the dictionary
             if domain_id != new_domain_id:
-                # Store domain under new ID
+                print(f"DEBUG: update_domain - Domain ID changed from {domain_id} to {new_domain_id}. Updating dictionary.") # DEBUG
                 self.domains[new_domain_id] = domain
-                # Remove old ID entry
                 del self.domains[domain_id]
-                # Return the new domain ID
                 return new_domain_id
             
             return domain_id
@@ -779,13 +782,13 @@ class MoleculeWrapper:
         # when all domains are deleted. They will persist for future domain creations.
 
     def delete_domain(self, domain_id: str) -> Optional[str]:
-        """Delete a domain and its object
-        
-        If the domain doesn't span the entire chain, this will update adjacent domains
-        to ensure the chain remains fully covered.
+        """Delete a domain and its object.
+
+        If the domain is flanked by other domains on the same chain, the adjacent
+        domain (preferring the preceding one) will expand to fill the gap.
         
         Returns:
-            Optional[str]: The ID of the domain that replaced the deleted domain, if any
+            Optional[str]: The ID of the domain that filled the gap, if any.
         """
         if domain_id not in self.domains:
             return None
@@ -795,6 +798,7 @@ class MoleculeWrapper:
         chain_id = domain_to_delete.chain_id
         start = domain_to_delete.start
         end = domain_to_delete.end
+        deleted_domain_name = domain_to_delete.name # For logging
         
         # Find child domains that need reparenting
         children_to_reparent = []
@@ -802,92 +806,66 @@ class MoleculeWrapper:
             if hasattr(child_domain, 'parent_domain_id') and child_domain.parent_domain_id == domain_id:
                 children_to_reparent.append(child_id)
                 
-        # Find a new parent for any child domains (the deleted domain's parent, if any)
-        new_parent_id = None
-        if hasattr(domain_to_delete, 'parent_domain_id') and domain_to_delete.parent_domain_id:
-            new_parent_id = domain_to_delete.parent_domain_id
+        # Find the deleted domain's parent (will be inherited by children if no merge/expand occurs)
+        deleted_domain_parent_id = getattr(domain_to_delete, 'parent_domain_id', None)
             
-        # Get the chain's residue range
-        if chain_id not in self.chain_residue_ranges:
-            # Just delete the domain without adjacent domain updating if chain not found
-            self._delete_domain_direct(domain_id)
-            
-            # Reparent any child domains to the new parent
-            self._reparent_child_domains(children_to_reparent, new_parent_id)
-            return None
-            
-        min_res, max_res = self.chain_residue_ranges[chain_id]
-        
-        # If domain spans the entire chain, just delete it without further updates
-        if start <= min_res and end >= max_res:
-            self._delete_domain_direct(domain_id)
-            
-            # Reparent any child domains to the new parent
-            self._reparent_child_domains(children_to_reparent, new_parent_id)
-            return None
-            
-        # Find adjacent domains
-        adjacent_domains = []
+        # --- Find adjacent domains on the same chain --- 
+        domain_before = None # Tuple: (id, domain_obj) ending right before 'start'
+        domain_after = None  # Tuple: (id, domain_obj) starting right after 'end'
+
         for adj_domain_id, adj_domain in self.domains.items():
             if adj_domain_id != domain_id and adj_domain.chain_id == chain_id:
-                adjacent_domains.append((adj_domain_id, adj_domain))
-        
-        # Sort domains by start position
-        adjacent_domains.sort(key=lambda d: d[1].start)
-        
-        # Find domains before and after the one being deleted
-        domain_before = None
-        domain_after = None
-        
-        for adj_domain_id, adj_domain in adjacent_domains:
-            if adj_domain.end < start:
-                # This domain ends before our deleted domain starts
-                if domain_before is None or adj_domain.end > domain_before[1].end:
+                if adj_domain.end == start - 1:
                     domain_before = (adj_domain_id, adj_domain)
-            elif adj_domain.start > end:
-                # This domain starts after our deleted domain ends
-                if domain_after is None or adj_domain.start < domain_after[1].start:
+                elif adj_domain.start == end + 1:
                     domain_after = (adj_domain_id, adj_domain)
         
-        # Now update domains to cover the gap
-        new_domain_id = None
-        
+        # --- Determine update target and range BEFORE deletion --- 
+        update_target_id = None
+        update_new_start = -1
+        update_new_end = -1
+        final_reparent_target_id = deleted_domain_parent_id # Default if no update happens
+
         if domain_before:
-            # Extend the domain before to cover the deleted domain
-            domain_before_id, domain_before_obj = domain_before
-            new_end = end
-            # If there's a domain after, adjust the boundary
-            if domain_after:
-                new_end = min(end, domain_after[1].start - 1)
-                
-            print(f"Updating domain {domain_before_id} to expand range from {domain_before_obj.start}-{domain_before_obj.end} to {domain_before_obj.start}-{new_end}")
-            new_domain_id = self.update_domain(domain_before_id, chain_id, domain_before_obj.start, new_end)
-            
-            # Use this domain as new parent for children
-            if not new_parent_id:
-                new_parent_id = domain_before_id
-                
+            # Plan to expand 'before' domain
+            update_target_id = domain_before[0]
+            update_new_start = domain_before[1].start
+            update_new_end = end 
+            final_reparent_target_id = update_target_id # Reparent children to this domain after update
+            print(f"Planning to update domain {update_target_id} to expand range to {update_new_start}-{update_new_end}")
+
         elif domain_after:
-            # Extend the domain after to cover the deleted domain
-            domain_after_id, domain_after_obj = domain_after
-            new_start = start
-            
-            print(f"Updating domain {domain_after_id} to expand range from {domain_after_obj.start}-{domain_after_obj.end} to {new_start}-{domain_after_obj.end}")
-            new_domain_id = self.update_domain(domain_after_id, chain_id, new_start, domain_after_obj.end)
-            
-            # Use this domain as new parent for children
-            if not new_parent_id:
-                new_parent_id = domain_after_id
-        
-        # Now delete the domain
+            # Plan to expand 'after' domain 
+            update_target_id = domain_after[0]
+            update_new_start = start 
+            update_new_end = domain_after[1].end
+            final_reparent_target_id = update_target_id # Reparent children to this domain after update
+            print(f"Planning to update domain {update_target_id} to expand range to {update_new_start}-{update_new_end}")
+
+        # --- Perform Deletion FIRST --- 
+        print(f"Deleting original domain {deleted_domain_name} ({domain_id}) now.")
         self._delete_domain_direct(domain_id)
         
-        # Reparent any child domains to the new parent
-        self._reparent_child_domains(children_to_reparent, new_parent_id)
+        # --- Perform Update AFTER Deletion --- 
+        updated_domain_id_result = None
+        if update_target_id is not None:
+            print(f"Executing update for domain {update_target_id} to range {update_new_start}-{update_new_end}")
+            # Call update_domain. The returned ID might be new if the range change was significant
+            # enough to alter the standard ID format (though less likely with simple expansion)
+            updated_domain_id_result = self.update_domain(update_target_id, chain_id, update_new_start, update_new_end)
+            final_reparent_target_id = updated_domain_id_result # Ensure reparenting uses the potentially new ID
+        else:
+             print("No adjacent domain found to update.")
+
+        # --- Final Steps --- 
         
-        # Return the ID of the domain that replaced the deleted domain, if any
-        return new_domain_id
+        # Reparent any children of the originally deleted domain
+        print(f"Reparenting children to target: {final_reparent_target_id}")
+        self._reparent_child_domains(children_to_reparent, final_reparent_target_id)
         
+        # Return the ID of the domain that filled the gap (potentially the new ID after update)
+        return updated_domain_id_result
+
     def _reparent_child_domains(self, child_domain_ids: List[str], new_parent_id: Optional[str]):
         """Reparent child domains to a new parent
         
@@ -1107,8 +1085,9 @@ class MoleculeWrapper:
 
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
+        print(f"DEBUG: _setup_domain_network called for domain {domain.name}, Range: {chain_id} ({start}-{end})") # DEBUG
         if not domain.object or not domain.node_group:
-            print("Domain object or node group is missing")
+            print("DEBUG: _setup_domain_network - Domain object or node group is missing") # DEBUG
             return False
             
         try:
@@ -1117,7 +1096,7 @@ class MoleculeWrapper:
             output_node = nodes.get_output(domain.node_group)
             
             if not (input_node and output_node):
-                print("Could not find input/output nodes in domain node group")
+                print("DEBUG: _setup_domain_network - Could not find input/output nodes in domain node group") # DEBUG
                 return False
                 
             # Find or create nodes - reuse existing when possible
@@ -1175,6 +1154,7 @@ class MoleculeWrapper:
                 select_res_id_range.location = (chain_select.location.x + 200, chain_select.location.y)
             
             # Update the residue range
+            print(f"DEBUG: _setup_domain_network - Setting Res ID Range Min: {start}, Max: {end}") # DEBUG
             select_res_id_range.inputs["Min"].default_value = start
             select_res_id_range.inputs["Max"].default_value = end
             
@@ -1309,7 +1289,7 @@ class MoleculeWrapper:
             return True
             
         except Exception as e:
-            print(f"Error setting up domain network: {str(e)}")
+            print(f"DEBUG: Error in _setup_domain_network: {str(e)}") # DEBUG
             return False
 
     def _clean_unused_nodes(self, node_group):
@@ -1342,13 +1322,14 @@ class MoleculeWrapper:
 
     def _create_domain_mask_nodes(self, domain_id: str, chain_id: str, start: int, end: int):
         """Create nodes in the parent molecule to mask out the domain region"""
+        print(f"DEBUG: _create_domain_mask_nodes called for ID: {domain_id}, Range: {chain_id} ({start}-{end})") # DEBUG
         if not self.molecule.object:
             return
         
         # Get the parent molecule's node group
         parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
         if not parent_modifier or not parent_modifier.node_group:
-            print("Parent molecule has no valid node group")
+            print("DEBUG: _create_domain_mask_nodes - Parent molecule has no valid node group") # DEBUG
             return
             
         parent_node_group = parent_modifier.node_group
@@ -1357,12 +1338,12 @@ class MoleculeWrapper:
             # Find main style node
             main_style_node = self.get_main_style_node()
             if not main_style_node:
-                print("Could not find main style node in parent molecule")
+                print("DEBUG: _create_domain_mask_nodes - Could not find main style node in parent molecule") # DEBUG
                 return
             
             # Check if domain infrastructure is set up
             if self.domain_join_node is None:
-                print("Domain infrastructure not set up. Call _setup_protein_domain_infrastructure first.")
+                print("DEBUG: _create_domain_mask_nodes - Domain infrastructure not set up. Call _setup_protein_domain_infrastructure first.") # DEBUG
                 return
                 
             # Step 1: Create and configure chain selection node
@@ -1439,7 +1420,7 @@ class MoleculeWrapper:
                     break
             
             if available_input is None:
-                print(f"Warning: No available inputs in multi-input OR node for domain {domain_id}")
+                print(f"DEBUG: Warning: No available inputs in multi-input OR node for domain {domain_id}") # DEBUG
                 return
             
             # Step 6: Connect residue selection to join node
@@ -1463,7 +1444,7 @@ class MoleculeWrapper:
                     parent_node_group.links.remove(link)
             
         except Exception as e:
-            print(f"Error creating domain mask nodes: {str(e)}")
+            print(f"DEBUG: Error in _create_domain_mask_nodes: {str(e)}") # DEBUG
             import traceback
             traceback.print_exc()
 
