@@ -22,6 +22,8 @@ from .domain_operators import (
     MOLECULE_PB_OT_toggle_pivot_edit,
     MOLECULE_PB_OT_set_parent_domain,
     MOLECULE_PB_OT_update_parent_domain,
+    MOLECULE_PB_OT_reset_domain_transform,
+    MOLECULE_PB_OT_snap_pivot_to_residue,
 )
 
 CLASSES = (
@@ -44,4 +46,6 @@ CLASSES = (
     MOLECULE_PB_OT_set_parent_domain,
     MOLECULE_PB_OT_update_parent_domain,
     MOLECULE_PB_OT_select_object,
+    MOLECULE_PB_OT_reset_domain_transform,
+    MOLECULE_PB_OT_snap_pivot_to_residue,
 )

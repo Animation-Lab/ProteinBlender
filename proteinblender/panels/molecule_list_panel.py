@@ -168,18 +168,17 @@ class MOLECULE_PB_PT_list(Panel):
                     # Create box for each domain
                     domain_header = domain_box.box()
                     header_row = domain_header.row()
-                    
+
                     # Add indentation based on hierarchy level
                     if indent_level > 0:
-                        for i in range(indent_level):
-                            indent = header_row.row()
-                            indent.scale_x = 0.5
-                            indent.label(text="")
-                    
+                        # Add indentation using blank labels
+                        for _ in range(indent_level):
+                             header_row.label(text="", icon='BLANK1')
+
                     # Add expand/collapse triangle
                     is_expanded = getattr(domain.object, "domain_expanded", False)
                     expand_icon = "TRIA_DOWN" if is_expanded else "TRIA_RIGHT"
-                    
+
                     # Try to use the custom operator, but fall back to direct property if not available
                     try:
                         expand_op = header_row.operator(
@@ -193,17 +192,17 @@ class MOLECULE_PB_PT_list(Panel):
                             expand_op.is_expanded = not is_expanded
                         else:
                             # Fallback to direct property toggle
-                            header_row.prop(domain.object, "domain_expanded", 
-                                         icon=expand_icon, 
+                            header_row.prop(domain.object, "domain_expanded",
+                                         icon=expand_icon,
                                          icon_only=True,
                                          emboss=False)
                     except Exception:
                         # Fallback to direct property toggle if operator fails
-                        header_row.prop(domain.object, "domain_expanded", 
-                                     icon=expand_icon, 
+                        header_row.prop(domain.object, "domain_expanded",
+                                     icon=expand_icon,
                                      icon_only=True,
                                      emboss=False)
-                        
+
                         # If expanding, update UI values to match domain
                         if not is_expanded and domain.object.domain_expanded:
                             # Add a hidden operator to update UI values
@@ -211,11 +210,10 @@ class MOLECULE_PB_PT_list(Panel):
                             hidden_row.scale_x = 0.01
                             hidden_row.scale_y = 0.01
                             hidden_row.operator("molecule.update_domain_ui_values", text="", emboss=False).domain_id = domain_id
-                    
-                    # Add domain label and info
-                    info_row = header_row.row()
-                    info_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
-                    
+
+                    # Add domain label and info directly to header_row
+                    header_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
+
                     # Add select object button
                     if domain.object:
                         select_op = header_row.operator(
@@ -225,13 +223,14 @@ class MOLECULE_PB_PT_list(Panel):
                         )
                         select_op.object_id = domain_id
                         select_op.is_domain = True
-                    
+
                     # Add visibility toggle
                     if domain.object:
-                        vis_row = header_row.row()
-                        vis_row.prop(domain.object, "hide_viewport", text="", emboss=False, 
+                        # Keep visibility toggle compact
+                        vis_row = header_row.row(align=True)
+                        vis_row.prop(domain.object, "hide_viewport", text="", emboss=False,
                                  icon='HIDE_OFF' if not domain.object.hide_viewport else 'HIDE_OFF')
-                    
+
                     # Add delete button
                     delete_op = header_row.operator(
                         "molecule.delete_domain",
@@ -239,14 +238,15 @@ class MOLECULE_PB_PT_list(Panel):
                         icon='X'
                     )
                     delete_op.domain_id = domain_id
-                    
+
                     # If expanded, show domain controls
                     if is_expanded:
+                        # Use a box inside the domain_header for controls
                         control_box = domain_header.box()
-                        
+
                         # Combined row for Domain Color and Style
                         props_row = control_box.row()
-                        
+
                         # Left side - Domain color picker
                         color_col = props_row.column()
                         color_col.label(text="Domain Color")
@@ -306,22 +306,59 @@ class MOLECULE_PB_PT_list(Panel):
                         # Transform controls
                         transform_box = control_box.box()
                         transform_box.label(text="Transform")
+
+                        # Add Reset Transform button
+                        reset_row = transform_box.row()
+                        reset_op = reset_row.operator(
+                            "molecule.reset_domain_transform", # New operator ID
+                            text="Snap Back To Original Position"
+                        )
+                        if reset_op:
+                           reset_op.domain_id = domain_id
+
+                        # --- Pivot Buttons Row ---
+                        pivot_row = transform_box.row(align=True) # Use align=True for compactness
                         
-                        # Add pivot edit button
-                        pivot_row = transform_box.row()
+                        # Button 1: Move/Set Pivot
                         try:
-                            pivot_op = pivot_row.operator(
+                            is_editing = domain.object.get("is_pivot_editing", False)
+                            button_text = "Set Pivot" if is_editing else "Move Pivot"
+                            button_icon = 'CHECKMARK' if is_editing else 'PIVOT_BOUNDBOX'
+
+                            move_pivot_op = pivot_row.operator(
                                 "molecule.toggle_pivot_edit",
-                                text="Move Pivot",
-                                icon='PIVOT_BOUNDBOX'
+                                text=button_text,
+                                icon=button_icon,
+                                depress=is_editing
                             )
-                            if pivot_op:  # Only set domain_id if operator was created successfully
-                                pivot_op.domain_id = domain_id
+                            if move_pivot_op:
+                                move_pivot_op.domain_id = domain_id
                         except Exception as e:
-                            print(f"Error creating pivot operator: {str(e)}")
-                            # Add a label instead if operator creation fails
-                            pivot_row.label(text="Move Pivot", icon='PIVOT_BOUNDBOX')
-                        
+                            print(f"Error creating move pivot button: {str(e)}")
+                            pivot_row.label(text="Move Pivot", icon='ERROR') # Fallback label on error
+
+                        # Button 2: Snap to Start AA
+                        snap_start_op = pivot_row.operator(
+                            "molecule.snap_pivot_to_residue",
+                            text="Start AA", 
+                            icon='TRIA_LEFT_BAR' # Icon suggesting start/beginning
+                        )
+                        if snap_start_op:
+                            snap_start_op.domain_id = domain_id
+                            snap_start_op.target_residue = 'START'
+
+                        # Button 3: Snap to End AA
+                        snap_end_op = pivot_row.operator(
+                            "molecule.snap_pivot_to_residue",
+                            text="End AA", 
+                            icon='TRIA_RIGHT_BAR' # Icon suggesting end
+                        )
+                        if snap_end_op:
+                            snap_end_op.domain_id = domain_id
+                            snap_end_op.target_residue = 'END'
+
+                        # --- End Pivot Buttons Row ---
+
                         # Location
                         loc_row = transform_box.row(align=True)
                         loc_row.prop(domain.object, "location", text="")
