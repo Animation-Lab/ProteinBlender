@@ -22,7 +22,7 @@ class MOLECULE_PB_OT_create_domain(Operator):
             self.report({'ERROR'}, "No molecule selected")
             return {'CANCELLED'}
         
-        # get the chain_id as an int
+        # Get the chain_id as an int
         chain_id_char = molecule.chain_mapping.get(int(scene.new_domain_chain) if scene.new_domain_chain.isdigit() else scene.new_domain_chain, str(scene.new_domain_chain))
         print(f"Checking overlap for chain {chain_id_char} ({scene.new_domain_start}-{scene.new_domain_end})")
         check_overlap = molecule._check_domain_overlap(
@@ -36,9 +36,9 @@ class MOLECULE_PB_OT_create_domain(Operator):
             return {'CANCELLED'}
         
         # Log the domain creation
-        print(f"Creating primary domain for chain {scene.new_domain_chain} ({scene.new_domain_start}-{scene.new_domain_end})")
+        print(f"Operator: Requesting domain creation for chain {scene.new_domain_chain} ({scene.new_domain_start}-{scene.new_domain_end})")
         
-        # Create the domain with values from the UI
+        # Create the domain using the MoleculeWrapper method (which now handles pivot setting)
         domain_id = molecule.create_domain(
             chain_id=scene.new_domain_chain,  # Use the chain selected in UI
             start=scene.new_domain_start,  # Use the start value from UI
@@ -46,37 +46,25 @@ class MOLECULE_PB_OT_create_domain(Operator):
         )
         
         if domain_id is None:
-            self.report({'ERROR'}, "Failed to create domain")
+            self.report({'ERROR'}, "Failed to create domain via MoleculeWrapper")
             return {'CANCELLED'}
             
-        # Automatically expand the new domain and set initial pivot
+        # Automatically expand the new domain in the UI
+        # (Pivot setting is now handled inside molecule.create_domain)
         if domain_id in molecule.domains:
             domain = molecule.domains[domain_id]
-            
             if domain.object:
-                # Set domain_expanded property
                 try:
                     domain.object["domain_expanded"] = True
                     if hasattr(domain, "color"):
-                        domain.object.domain_color = domain.color
-                except:
-                    if not hasattr(domain.object, "domain_expanded"):
-                        bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
-                    domain.object.domain_expanded = True
-                    if hasattr(domain, "color") and hasattr(domain.object, "domain_color"):
-                        domain.object.domain_color = domain.color
-                
-                # --- Set the initial pivot using the new robust method --- 
-                print(f"Setting initial pivot for new domain {domain.name}")
-                start_aa_pos = _find_residue_alpha_carbon_pos(context, molecule, domain, residue_target='START')
-                
-                if start_aa_pos:
-                    if not _set_domain_origin_and_update_matrix(context, domain, start_aa_pos):
-                        self.report({'WARNING'}, f"Could not set initial pivot for domain {domain.name}. Origin remains at default.")
-                else:
-                    self.report({'WARNING'}, f"Could not find Start AA Cα for domain {domain.name}. Origin remains at default.")
-                # --- End initial pivot setting --- 
+                         # Ensure UI color property reflects actual color if available
+                        if hasattr(domain.object, "domain_color"):
+                            domain.object.domain_color = domain.color
+                except Exception as e:
+                    print(f"Warning: Could not set domain_expanded or initial color: {e}")
+                    # Continue even if UI update fails slightly
                  
+        self.report({'INFO'}, f"Domain {domain_id} created successfully.")
         return {'FINISHED'}
     
     # --- Remove old pivot setting methods --- 
@@ -732,171 +720,6 @@ class MOLECULE_PB_OT_reset_domain_transform(Operator):
         
         return {'FINISHED'}
 
-# Helper function to find Alpha Carbon position
-def _find_residue_alpha_carbon_pos(context, molecule, domain, residue_target):
-    """
-    Finds the 3D coordinates of the Alpha Carbon (CA) for a specific residue.
-    For START, searches forward from domain.start until a CA is found.
-    For END, searches backward from domain.end until a CA is found.
-
-    Returns:
-        mathutils.Vector: The coordinates if found, otherwise None.
-    """
-    try:
-        mol_obj = molecule.object
-        if not mol_obj or not domain.object or not hasattr(mol_obj.data, "attributes"):
-            print("Error: Molecule object, domain object, or attributes not found.")
-            return None
-
-        attrs = mol_obj.data.attributes
-        print(f"DEBUG: Available attributes on {mol_obj.name}.data: {list(attrs.keys())}") # Print available attributes
-
-        # Determine residue number attribute
-        residue_attr_name = None
-        if "residue_number" in attrs:
-            residue_attr_name = "residue_number"
-        elif "res_id" in attrs:
-            residue_attr_name = "res_id"
-        else:
-            print("Error: Residue number attribute ('residue_number' or 'res_id') not found.")
-            return None
-
-        # Check for required attributes
-        required_attrs = ["atom_name", "chain_id", residue_attr_name, "position"]
-        if not all(attr in attrs for attr in required_attrs):
-            print(f"Error: Missing one or more required attributes: {required_attrs}")
-            return None
-
-        # Get domain info
-        domain_chain_id = domain.chain_id
-        start_res = domain.start
-        end_res = domain.end
-        print(f"Searching for Cα for {residue_target} in chain '{domain_chain_id}', range {start_res}-{end_res}")
-
-        # --- Helper functions nested inside for clarity ---
-        def get_possible_chain_ids(chain_id):
-            search_ids = [chain_id]
-            if isinstance(chain_id, str) and chain_id.isalpha():
-                try:
-                    numeric_chain = ord(chain_id.upper()) - ord('A')
-                    search_ids.append(str(numeric_chain))
-                    search_ids.append(numeric_chain)
-                except Exception: pass
-            elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
-                try:
-                    int_chain_id = int(chain_id)
-                    alpha_chain = chr(int_chain_id + ord('A'))
-                    search_ids.append(alpha_chain)
-                    search_ids.append(int_chain_id)
-                    search_ids.append(str(int_chain_id))
-                except Exception: pass
-            return list(set(filter(None.__ne__, search_ids)))
-        # --- End of nested helpers ---
-
-        search_chain_ids = get_possible_chain_ids(domain_chain_id)
-        print(f"Possible chain IDs to search: {search_chain_ids}")
-
-        # Get attribute data arrays
-        atom_names_data = attrs["atom_name"].data # Keep for potential future use, but not for CA check
-        chain_ids_data = attrs["chain_id"].data
-        res_nums_data = attrs[residue_attr_name].data
-        positions_data = attrs["position"].data
-        # --- Get the correct attribute for Cα --- 
-        is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
-        if not is_alpha_carbon_attr:
-            print("Error: 'is_alpha_carbon' attribute not found.")
-            return None
-        is_alpha_carbon_data = is_alpha_carbon_attr.data
-        # --- End Get Attribute --- 
-
-        # Determine search range based on target
-        residue_search_range = None
-        if residue_target == 'START':
-            residue_search_range = range(start_res, end_res + 1)
-        elif residue_target == 'END':
-            residue_search_range = range(end_res, start_res - 1, -1) # Iterate backwards
-        else:
-            print(f"Error: Invalid residue_target '{residue_target}'")
-            return None
-
-        print(f"Residue search order: {list(residue_search_range)}")
-
-        # --- Search for the first CA encountered in the specified range order ---
-        for target_res_num in residue_search_range:
-            print(f"Checking residue {target_res_num}...")
-            # Iterate through all atoms in the structure
-            for atom_idx in range(len(positions_data)):
-                try:
-                    # Check if this atom belongs to the current target residue and chain
-                    atom_res_num = res_nums_data[atom_idx].value
-                    if atom_res_num != target_res_num:
-                        continue 
-                    
-                    chain_id_val = chain_ids_data[atom_idx].value
-                    in_target_chain = False
-                    if chain_id_val in search_chain_ids:
-                        in_target_chain = True
-                        
-                    if not in_target_chain:
-                        continue 
-                        
-                    # --- Check using the is_alpha_carbon attribute --- 
-                    if is_alpha_carbon_data[atom_idx].value: # Check the boolean value
-                        # Found the first CA in the search order!
-                        pos = positions_data[atom_idx].vector
-                        print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx} using 'is_alpha_carbon' attribute, position {pos}")
-                        return pos # Return the position
-                    # --- End Check --- 
-                        
-                except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
-                    continue # Skip malformed atom data
-            
-            # If we finished checking all atoms for target_res_num and didn't find CA, continue to the next residue in the range
-            print(f"No Cα found in residue {target_res_num} (checked 'is_alpha_carbon').")
-
-        # If we finish the loop without finding any CA in the entire range
-        print(f"Error: No Alpha Carbon (CA) found using 'is_alpha_carbon' attribute within range {start_res}-{end_res} for chain {domain_chain_id}.")
-        return None
-
-    except Exception as e:
-        print(f"Error in _find_residue_alpha_carbon_pos: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-# --- New Helper: Set Origin and Update Matrix ---
-def _set_domain_origin_and_update_matrix(context, domain, target_pos):
-    """Sets the domain object's origin to target_pos and updates initial_matrix_local."""
-    if not domain or not domain.object or target_pos is None:
-        print("Error: Invalid domain, object, or target position for setting origin.")
-        return False
-
-    orig_cursor_loc = context.scene.cursor.location.copy()
-    try:
-        # Set cursor to target position
-        context.scene.cursor.location = target_pos
-
-        # Ensure the domain object is selected and active
-        bpy.ops.object.select_all(action='DESELECT')
-        domain.object.select_set(True)
-        context.view_layer.objects.active = domain.object
-
-        # Set origin to cursor
-        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-
-        # Update the stored initial matrix
-        domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
-        print(f"Set origin and updated initial matrix for {domain.name}.")
-        return True
-
-    except Exception as e:
-        print(f"Error in _set_domain_origin_and_update_matrix: {e}")
-        return False
-    finally:
-        # Restore cursor location
-        context.scene.cursor.location = orig_cursor_loc
-# --- End New Helper --- 
-
 # --- New Operator ---
 class MOLECULE_PB_OT_snap_pivot_to_residue(Operator):
     """Snaps the domain's pivot point (origin) to the Alpha Carbon of the start or end residue."""
@@ -937,8 +760,8 @@ class MOLECULE_PB_OT_snap_pivot_to_residue(Operator):
             self.report({'ERROR'}, f"Domain '{self.domain_id}' or its object not found.")
             return {'CANCELLED'}
 
-        # Find the Cα position using the helper function
-        alpha_carbon_pos = _find_residue_alpha_carbon_pos(context, molecule, domain, self.target_residue)
+        # Find the Cα position using the helper function on the molecule object
+        alpha_carbon_pos = molecule._find_residue_alpha_carbon_pos(context, domain, self.target_residue)
 
         if alpha_carbon_pos is None:
             self.report({'ERROR'}, f"Could not find Alpha Carbon for {self.target_residue} residue ({domain.start if self.target_residue == 'START' else domain.end}).")

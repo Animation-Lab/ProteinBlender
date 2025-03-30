@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import colorsys
 import random
+from mathutils import Vector
 
 from ..utils.molecularnodes.entities import fetch, load_local
 from ..utils.molecularnodes.entities.molecule.molecule import Molecule
@@ -12,6 +13,7 @@ from ..utils.molecularnodes.props import MolecularNodesSceneProperties
 from ..utils.molecularnodes.session import MNSession
 from ..utils.molecularnodes.addon import _test_register
 from .domain import Domain, DomainDefinition
+from ..core.domain import ensure_domain_properties_registered
 
 class MoleculeWrapper:
     """
@@ -300,7 +302,6 @@ class MoleculeWrapper:
         domain.object["parent_molecule_id"] = self.identifier
         
         # Ensure all domain properties are registered before using them
-        from ..core.domain import ensure_domain_properties_registered
         ensure_domain_properties_registered()
         
         # Set the domain_style property - safely handle the case if it's not registered yet
@@ -318,6 +319,20 @@ class MoleculeWrapper:
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
         
+        # --- Set the initial pivot using the new robust method --- 
+        if domain.object: # Check again if object exists before setting pivot
+            print(f"Setting initial pivot for new domain {domain.name} within create_domain")
+            start_aa_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START') # Call internal method
+            
+            if start_aa_pos:
+                if not self._set_domain_origin_and_update_matrix(bpy.context, domain, start_aa_pos): # Call internal method
+                     # Optionally report a warning if setting pivot failed, though the helper logs errors
+                     pass 
+            else:
+                 # Optionally report a warning if Cα not found, though the helper logs errors
+                 pass
+        # --- End initial pivot setting --- 
+
         # Update residue assignments
         self._update_residue_assignments(domain)
         
@@ -333,7 +348,181 @@ class MoleculeWrapper:
             self._create_additional_domains_to_span_chain(chain_id, start, end, mapped_chain, min_res, max_res, domain_id)
         
         return domain_id
-        
+
+    # --- Moved Helper: Find Alpha Carbon Position --- 
+    def _find_residue_alpha_carbon_pos(self, context, domain: DomainDefinition, residue_target: str) -> Optional[Vector]:
+        """
+        Finds the 3D coordinates of the Alpha Carbon (CA) for a specific residue.
+        For START, searches forward from domain.start until a CA is found.
+        For END, searches backward from domain.end until a CA is found.
+
+        Returns:
+            mathutils.Vector: The coordinates if found, otherwise None.
+        """
+        try:
+            mol_obj = self.molecule.object # Use self.molecule.object
+            if not mol_obj or not domain.object or not hasattr(mol_obj.data, "attributes"):
+                print("Error: Molecule object, domain object, or attributes not found.")
+                return None
+
+            attrs = mol_obj.data.attributes
+            # print(f"DEBUG: Available attributes on {mol_obj.name}.data: {list(attrs.keys())}") # Keep commented out for now
+
+            # Determine residue number attribute
+            residue_attr_name = None
+            if "residue_number" in attrs:
+                residue_attr_name = "residue_number"
+            elif "res_id" in attrs:
+                residue_attr_name = "res_id"
+            else:
+                print("Error: Residue number attribute ('residue_number' or 'res_id') not found.")
+                return None
+
+            # Check for required attributes (adjust if needed, e.g., is_alpha_carbon instead of atom_name)
+            required_attrs = ["is_alpha_carbon", "chain_id", residue_attr_name, "position"]
+            if not all(attr in attrs for attr in required_attrs):
+                # Check for atom_name as fallback for older MN versions?
+                if "atom_name" not in attrs: 
+                   print(f"Error: Missing one or more required attributes: {required_attrs}")
+                   return None
+                else: # If atom_name exists but is_alpha_carbon doesn't, proceed with warning?
+                   print("Warning: 'is_alpha_carbon' not found, will attempt using 'atom_name' but might be unreliable.")
+                   # We'll handle checking atom_name later if is_alpha_carbon fails
+                   pass
+
+            # Get domain info
+            domain_chain_id = domain.chain_id
+            start_res = domain.start
+            end_res = domain.end
+            print(f"Searching for Cα for {residue_target} in chain '{domain_chain_id}', range {start_res}-{end_res}")
+
+            # --- Helper function for chain IDs --- (Can remain nested or become internal method)
+            def get_possible_chain_ids(chain_id):
+                 # ... (implementation remains the same) ...
+                 search_ids = [chain_id]
+                 if isinstance(chain_id, str) and chain_id.isalpha():
+                     try:
+                         numeric_chain = ord(chain_id.upper()) - ord('A')
+                         search_ids.append(str(numeric_chain))
+                         search_ids.append(numeric_chain)
+                     except Exception: pass
+                 elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
+                     try:
+                         int_chain_id = int(chain_id)
+                         alpha_chain = chr(int_chain_id + ord('A'))
+                         search_ids.append(alpha_chain)
+                         search_ids.append(int_chain_id)
+                         search_ids.append(str(int_chain_id))
+                     except Exception: pass
+                 return list(set(filter(None.__ne__, search_ids)))
+            # --- End helper --- 
+
+            search_chain_ids = get_possible_chain_ids(domain_chain_id)
+            print(f"Possible chain IDs to search: {search_chain_ids}")
+
+            # Get attribute data arrays
+            chain_ids_data = attrs["chain_id"].data
+            res_nums_data = attrs[residue_attr_name].data
+            positions_data = attrs["position"].data
+            
+            is_alpha_carbon_data = None
+            is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
+            if is_alpha_carbon_attr:
+                is_alpha_carbon_data = is_alpha_carbon_attr.data
+            else:
+                # Fallback: Try getting atom_name data if is_alpha_carbon isn't present
+                atom_names_data = attrs.get("atom_name", None)
+                if atom_names_data:
+                   atom_names_data = atom_names_data.data
+                else:
+                    print("Error: Neither 'is_alpha_carbon' nor 'atom_name' attribute found.")
+                    return None
+
+            # Determine search range based on target
+            residue_search_range = None
+            if residue_target == 'START':
+                residue_search_range = range(start_res, end_res + 1)
+            elif residue_target == 'END':
+                residue_search_range = range(end_res, start_res - 1, -1) # Iterate backwards
+            else:
+                print(f"Error: Invalid residue_target '{residue_target}'")
+                return None
+
+            print(f"Residue search order: {list(residue_search_range)}")
+
+            # --- Search for the first CA encountered in the specified range order ---
+            for target_res_num in residue_search_range:
+                print(f"Checking residue {target_res_num}...")
+                for atom_idx in range(len(positions_data)):
+                    try:
+                        atom_res_num = res_nums_data[atom_idx].value
+                        if atom_res_num != target_res_num:
+                            continue 
+                        
+                        chain_id_val = chain_ids_data[atom_idx].value
+                        in_target_chain = False
+                        if chain_id_val in search_chain_ids:
+                            in_target_chain = True
+                        elif str(chain_id_val) in search_chain_ids:
+                             in_target_chain = True
+                            
+                        if not in_target_chain:
+                            continue 
+                            
+                        # --- Check using the preferred method (is_alpha_carbon) --- 
+                        is_ca = False
+                        if is_alpha_carbon_data: 
+                            is_ca = is_alpha_carbon_data[atom_idx].value
+                        elif atom_names_data: # Fallback to checking name 'CA'
+                            atom_name = str(atom_names_data[atom_idx].value).strip().upper()
+                            if atom_name == "CA":
+                                is_ca = True
+                        
+                        if is_ca:
+                            pos = positions_data[atom_idx].vector
+                            print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx}, position {pos}")
+                            return pos # Return the position
+                            
+                    except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
+                        continue # Skip malformed atom data
+                
+                print(f"No Cα found in residue {target_res_num}.")
+
+            # If we finish the loop without finding any CA in the entire range
+            print(f"Error: No Alpha Carbon (CA) found within range {start_res}-{end_res} for chain {domain_chain_id}.")
+            return None
+
+        except Exception as e:
+            print(f"Error in _find_residue_alpha_carbon_pos: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    # --- End Moved Helper --- 
+
+    # --- Moved Helper: Set Origin and Update Matrix --- 
+    def _set_domain_origin_and_update_matrix(self, context, domain: DomainDefinition, target_pos: Vector):
+        """Sets the domain object's origin to target_pos and updates initial_matrix_local."""
+        if not domain or not domain.object or target_pos is None:
+            print("Error: Invalid domain, object, or target position for setting origin.")
+            return False
+
+        orig_cursor_loc = context.scene.cursor.location.copy()
+        try:
+            context.scene.cursor.location = target_pos
+            bpy.ops.object.select_all(action='DESELECT')
+            domain.object.select_set(True)
+            context.view_layer.objects.active = domain.object
+            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
+            print(f"Set origin and updated initial matrix for {domain.name}.")
+            return True
+        except Exception as e:
+            print(f"Error in _set_domain_origin_and_update_matrix: {e}")
+            return False
+        finally:
+            context.scene.cursor.location = orig_cursor_loc
+    # --- End Moved Helper --- 
+
     def _create_additional_domains_to_span_chain(self, chain_id: str, start: int, end: int, mapped_chain: str, min_res: int, max_res: int, domain_id: str):
         """Create additional domains to span the entire chain when a partial domain is created.
         
