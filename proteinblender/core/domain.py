@@ -297,6 +297,20 @@ def ensure_domain_properties_registered():
             default="ribbon",
             update=lambda self, context: domain_style_update(self, context)
         )
+        
+    if not hasattr(bpy.types.Object, 'domain_name'):
+        bpy.types.Object.domain_name = bpy.props.StringProperty(
+            name="Domain Name",
+            description="Name of this domain",
+            default=""
+        )
+        
+    if not hasattr(bpy.types.Object, 'temp_domain_name'):
+        bpy.types.Object.temp_domain_name = bpy.props.StringProperty(
+            name="Temporary Domain Name",
+            description="Temporary storage for domain name editing",
+            default=""
+        )
 
 def register():
     """Register property classes"""

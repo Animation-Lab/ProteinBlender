@@ -211,8 +211,17 @@ class MOLECULE_PB_PT_list(Panel):
                             hidden_row.scale_y = 0.01
                             hidden_row.operator("molecule.update_domain_ui_values", text="", emboss=False).domain_id = domain_id
 
-                    # Add domain label and info directly to header_row
-                    header_row.label(text=f"{domain.name}: Chain {domain.chain_id} ({domain.start}-{domain.end})")
+                    # Add domain name in bold
+                    name_row = header_row.row()
+                    name_row.scale_y = 1.1
+                    name_row.label(text=domain.name)
+                    
+                    # Add chain and residue info in a smaller, less prominent format
+                    info_row = header_row.row()
+                    info_row.scale_x = 0.9
+                    info_row.scale_y = 0.8
+                    info_row.alignment = 'RIGHT'
+                    info_row.label(text=f"Chain {domain.chain_id} ({domain.start}-{domain.end})")
 
                     # Add select object button
                     if domain.object:
@@ -243,7 +252,90 @@ class MOLECULE_PB_PT_list(Panel):
                     if is_expanded:
                         # Use a box inside the domain_header for controls
                         control_box = domain_header.box()
-
+                        
+                        # Add Domain Name field at the top with proper layout
+                        name_row = control_box.row(align=True)
+                        
+                        # Label on the left
+                        label_col = name_row.column()
+                        label_col.scale_x = 0.4
+                        label_col.label(text="Domain Name:")
+                        
+                        # Text field in the middle
+                        text_col = name_row.column()
+                        text_col.scale_x = 0.7
+                        
+                        # Check if we have the temp property and it has a value
+                        has_temp_name = (hasattr(domain.object, "temp_domain_name") and 
+                                        domain.object.temp_domain_name)
+                        
+                        if has_temp_name:
+                            # Normal case - just show the property
+                            text_col.prop(domain.object, "temp_domain_name", text="")
+                        else:
+                            # When temp_domain_name is not available or is empty
+                            text_col.label(text=domain.name)
+                            
+                            # Add a hidden row to trigger initialization
+                            hidden_row = text_col.row()
+                            hidden_row.scale_y = 0.01
+                            hidden_row.scale_x = 0.01
+                            init_op = hidden_row.operator(
+                                "molecule.initialize_domain_temp_name",
+                                text="", 
+                                emboss=False
+                            )
+                            init_op.domain_id = domain_id
+                        
+                        # Confirm button on the right - made to stand out
+                        btn_col = name_row.column()
+                        btn_col.scale_x = 1.0  # Adjust width to match screenshot
+                        btn_col.scale_y = 1.0   # Ensure standard height
+                        
+                        # Add padding space to align with text field
+                        btn_row = btn_col.row()
+                        btn_row.alignment = 'CENTER'  # Center the button
+                        
+                        # The actual button
+                        confirm_op = btn_row.operator(
+                            "molecule.update_domain_name",
+                            text="",
+                            icon='CHECKMARK',
+                            emboss=True
+                        )
+                        confirm_op.domain_id = domain_id
+                        confirm_op.name = domain.object.temp_domain_name if has_temp_name else domain.name
+                        
+                        # Add separator after name field
+                        control_box.separator()
+                        
+                        # Parent domain info (if applicable) - moved up from below
+                        if hasattr(domain, 'parent_domain_id') and domain.parent_domain_id:
+                            parent_box = control_box.box()
+                            parent_box.label(text="Parent Domain")
+                            parent_row = parent_box.row()
+                            parent_domain = molecule.domains.get(domain.parent_domain_id)
+                            if parent_domain:
+                                parent_row.label(text=f"{parent_domain.name}: Chain {parent_domain.chain_id} ({parent_domain.start}-{parent_domain.end})")
+                            else:
+                                parent_row.label(text=f"ID: {domain.parent_domain_id} (Not Found)")
+                        
+                        # Parent domain selector - moved up from below
+                        parent_box = control_box.box()
+                        parent_box.label(text="Set Parent Domain")
+                        parent_dropdown = parent_box.row()
+                        
+                        # Create parent selection operator
+                        parent_op = parent_dropdown.operator(
+                            "molecule.set_parent_domain",
+                            text="Select Parent Domain"
+                        )
+                        if parent_op:
+                            parent_op.domain_id = domain_id
+                        
+                        # Add separator after parent domain sections
+                        control_box.separator()
+                        
                         # Combined row for Domain Color and Style
                         props_row = control_box.row()
 
@@ -278,30 +370,6 @@ class MOLECULE_PB_PT_list(Panel):
                             text=style_display,
                             icon='MATERIAL'
                         )
-                        
-                        # Parent domain info (if applicable)
-                        if hasattr(domain, 'parent_domain_id') and domain.parent_domain_id:
-                            parent_box = control_box.box()
-                            parent_box.label(text="Parent Domain")
-                            parent_row = parent_box.row()
-                            parent_domain = molecule.domains.get(domain.parent_domain_id)
-                            if parent_domain:
-                                parent_row.label(text=f"{parent_domain.name}: Chain {parent_domain.chain_id} ({parent_domain.start}-{parent_domain.end})")
-                            else:
-                                parent_row.label(text=f"ID: {domain.parent_domain_id} (Not Found)")
-                        
-                        # Parent domain selector
-                        parent_box = control_box.box()
-                        parent_box.label(text="Set Parent Domain")
-                        parent_dropdown = parent_box.row()
-                        
-                        # Create parent selection operator
-                        parent_op = parent_dropdown.operator(
-                            "molecule.set_parent_domain",
-                            text="Select Parent Domain"
-                        )
-                        if parent_op:
-                            parent_op.domain_id = domain_id
                         
                         # Transform controls
                         transform_box = control_box.box()

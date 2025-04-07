@@ -34,6 +34,7 @@ class MOLECULE_PB_OT_create_domain(Operator):
         if check_overlap:
             self.report({'ERROR'}, "Domain overlaps with existing domain")
             return {'CANCELLED'}
+            
         
         # Log the domain creation
         print(f"Operator: Requesting domain creation for chain {scene.new_domain_chain} ({scene.new_domain_start}-{scene.new_domain_end})")
@@ -60,6 +61,17 @@ class MOLECULE_PB_OT_create_domain(Operator):
                          # Ensure UI color property reflects actual color if available
                         if hasattr(domain.object, "domain_color"):
                             domain.object.domain_color = domain.color
+                            
+                    # Make sure domain_name is properly set
+                    if hasattr(domain.object, "domain_name"):
+                        domain.object.domain_name = domain.name
+                    else:
+                        domain.object["domain_name"] = domain.name
+                    
+                    # Initialize the temp_domain_name property for editing
+                    if hasattr(domain.object, "temp_domain_name"):
+                        domain.object.temp_domain_name = domain.name
+                        
                 except Exception as e:
                     print(f"Warning: Could not set domain_expanded or initial color: {e}")
                     # Continue even if UI update fails slightly
@@ -306,6 +318,66 @@ class MOLECULE_PB_OT_update_domain_color(Operator):
             self.report({'ERROR'}, "Failed to update domain color")
             return {'CANCELLED'}
             
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_update_domain_name(Operator):
+    bl_idname = "molecule.update_domain_name"
+    bl_label = "Update Domain Name"
+    bl_description = "Update the name of the selected domain"
+    
+    domain_id: StringProperty()
+    name: StringProperty(default="")
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the molecule and domain
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get the domain
+        domain = molecule.domains.get(self.domain_id)
+        if not domain:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
+        
+        # Skip update if name hasn't changed
+        if domain.name == self.name:
+            return {'CANCELLED'}
+            
+        # Update the domain name
+        domain.name = self.name
+        
+        # Also update the name in the object if it exists
+        if domain.object:
+            # Try setting the domain_name property first
+            try:
+                if hasattr(domain.object, "domain_name"):
+                    domain.object.domain_name = self.name
+                else:
+                    domain.object["domain_name"] = self.name
+                
+                # Update the temp property used for editing
+                if hasattr(domain.object, "temp_domain_name"):
+                    domain.object.temp_domain_name = self.name
+            except Exception as e:
+                print(f"Warning: Could not set domain_name: {e}")
+            
+            # Update the object name to include the new domain name
+            current_name = domain.object.name
+            if "_" in current_name:
+                # Extract the domain-specific part (after the domain name)
+                suffix = current_name.split("_", 1)[1]
+                # Create new name with the updated domain name
+                domain.object.name = f"{self.name}_{suffix}"
+            else:
+                # If no underscore, just set the name directly
+                domain.object.name = self.name
+        
+        self.report({'INFO'}, f"Domain name updated to '{self.name}'")
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_update_domain_style(Operator):
@@ -604,28 +676,9 @@ class MOLECULE_PB_OT_update_parent_domain(Operator):
             self.report({'ERROR'}, "Setting this parent would create a circular dependency.")
             return {'CANCELLED'}
             
-        # Update the parent domain ID
-        domain.set_parent(self.parent_domain_id if self.parent_domain_id else None)
-        
-        # Update the object hierarchy in Blender
-        if domain.object:
-            parent_object = None
-            if self.parent_domain_id:
-                parent_domain = molecule.domains.get(self.parent_domain_id)
-                if parent_domain:
-                    parent_object = parent_domain.object
-                else:
-                    # If parent domain doesn't exist, default to main molecule object
-                    parent_object = molecule.object
-            else:
-                # No parent, so parent to the main molecule object
-                parent_object = molecule.object
-                
-            if parent_object and domain.object.parent != parent_object:
-                # Keep transform when parenting
-                orig_matrix = domain.object.matrix_world.copy()
-                domain.object.parent = parent_object
-                domain.object.matrix_world = orig_matrix
+        # Update the parent domain ID using the molecule wrapper's method
+        # Instead of calling domain.set_parent() which doesn't exist
+        molecule._set_domain_parent(domain, self.parent_domain_id if self.parent_domain_id else None)
 
         return {'FINISHED'}
 
@@ -795,6 +848,60 @@ class MOLECULE_PB_OT_snap_pivot_to_residue(Operator):
 
         return {'FINISHED'}
 
+# New dialog operator that looks like a text field but opens a dialog
+class MOLECULE_PB_OT_update_domain_name_dialog(Operator):
+    bl_idname = "molecule.update_domain_name_dialog"
+    bl_label = "Edit Domain Name"
+    bl_description = "Edit the name of this domain"
+    
+    domain_id: StringProperty()
+    name: StringProperty(name="Name", description="Enter new name for the domain")
+    
+    def invoke(self, context, event):
+        # Get the current domain name
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        if molecule and self.domain_id in molecule.domains:
+            domain = molecule.domains[self.domain_id]
+            self.name = domain.name
+        
+        # Show the dialog
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self, width=300)
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "name")
+    
+    def execute(self, context):
+        # Call the standard update operator with the new name
+        bpy.ops.molecule.update_domain_name(domain_id=self.domain_id, name=self.name)
+        return {'FINISHED'}
+
+# Operator to initialize temp_domain_name (called from UI when needed)
+class MOLECULE_PB_OT_initialize_domain_temp_name(Operator):
+    bl_idname = "molecule.initialize_domain_temp_name"
+    bl_label = "Initialize Domain Name Field"
+    bl_description = "Initialize the domain name editing field"
+    bl_options = {'INTERNAL'}  # Internal operator, not shown in UI
+    
+    domain_id: StringProperty(description="The ID of the domain to initialize")
+    
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        
+        if not molecule or self.domain_id not in molecule.domains:
+            return {'CANCELLED'}
+            
+        domain = molecule.domains[self.domain_id]
+        if domain.object and hasattr(domain.object, "temp_domain_name"):
+            # Only set the temp name if it's empty
+            if not domain.object.temp_domain_name:
+                domain.object.temp_domain_name = domain.name
+                
+        return {'FINISHED'}
+
 # List of all operator classes in this file
 classes = (
     MOLECULE_PB_OT_create_domain,
@@ -805,12 +912,15 @@ classes = (
     MOLECULE_PB_OT_toggle_domain_expanded,
     MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
+    MOLECULE_PB_OT_update_domain_name,
     MOLECULE_PB_OT_update_domain_style,
     MOLECULE_PB_OT_toggle_pivot_edit,
     MOLECULE_PB_OT_set_parent_domain,
     MOLECULE_PB_OT_update_parent_domain,
     MOLECULE_PB_OT_reset_domain_transform,
-    MOLECULE_PB_OT_snap_pivot_to_residue
+    MOLECULE_PB_OT_snap_pivot_to_residue,
+    MOLECULE_PB_OT_update_domain_name_dialog,
+    MOLECULE_PB_OT_initialize_domain_temp_name
 )
 
 def register():
