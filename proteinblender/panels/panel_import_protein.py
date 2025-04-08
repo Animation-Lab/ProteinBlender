@@ -38,9 +38,12 @@ class PROTEIN_PB_PT_import_protein(Panel):
         
         col.separator(factor=1.5)
         
-        # Add button with some padding
-        row = col.row()
-        row.scale_y = 1.2
-        row.operator("protein.import_protein", text="Add to Scene")
+        # Find the execute button and add a local import button next to it
+        button_row = box.row(align=True)
+        button_row.scale_y = 1.2
+        button_row.operator("protein.import_protein", text="Download From PDB")
+
+        # Add a local file import button
+        local_op = button_row.operator("protein.import_local", text="Import Local File")
         
         box.separator(factor=0.5)

@@ -216,3 +216,23 @@ class ProteinBlenderScene:
         scene.active_molecule = data['active_molecule']
         scene.display_settings = data['display_settings']
         return scene 
+
+    def import_molecule_from_file(self, filepath: str, identifier: str) -> bool:
+        """Import a molecule from a local file"""
+        try:
+            # Import the molecule using MoleculeManager
+            molecule = self.molecule_manager.import_from_file(filepath, identifier)
+            
+            if not molecule:
+                print(f"Failed to create molecule from file: {filepath}")
+                return False
+            
+            # Update UI list
+            self._add_molecule_to_list(molecule.identifier)
+            
+            return True
+        except Exception as e:
+            print(f"Error creating molecule from file {filepath}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False 

@@ -8,11 +8,11 @@ from .molecule_operators import (
     MOLECULE_PB_OT_change_style,
 )
 from .operator_import_protein import PROTEIN_OT_import_protein
+from .operator_import_local import PROTEIN_OT_import_local
 from .selection_operators import MOLECULE_PB_OT_select_object
 from .domain_operators import (
     MOLECULE_PB_OT_delete_domain,
-    MOLECULE_PB_OT_keyframe_domain_location,
-    MOLECULE_PB_OT_keyframe_domain_rotation,
+    MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_update_domain,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_toggle_domain_expanded,
@@ -28,6 +28,13 @@ from .domain_operators import (
     MOLECULE_PB_OT_reset_domain_transform,
     MOLECULE_PB_OT_snap_pivot_to_residue,
 )
+from .pose_operators import (
+    MOLECULE_PB_OT_create_pose,
+    MOLECULE_PB_OT_apply_pose,
+    MOLECULE_PB_OT_update_pose,
+    MOLECULE_PB_OT_delete_pose,
+    MOLECULE_PB_OT_rename_pose,
+)
 
 CLASSES = (
     MOLECULE_PB_OT_select,
@@ -35,11 +42,11 @@ CLASSES = (
     MOLECULE_PB_OT_delete,
     MOLECULE_PB_OT_update_identifier,
     PROTEIN_OT_import_protein,
+    PROTEIN_OT_import_local,
     MOLECULE_PB_OT_change_style,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_delete_domain,
-    MOLECULE_PB_OT_keyframe_domain_location,
-    MOLECULE_PB_OT_keyframe_domain_rotation,
+    MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_update_domain,
     MOLECULE_PB_OT_toggle_domain_expanded,
     MOLECULE_PB_OT_update_domain_ui_values,
@@ -54,4 +61,9 @@ CLASSES = (
     MOLECULE_PB_OT_select_object,
     MOLECULE_PB_OT_reset_domain_transform,
     MOLECULE_PB_OT_snap_pivot_to_residue,
+    MOLECULE_PB_OT_create_pose,
+    MOLECULE_PB_OT_apply_pose,
+    MOLECULE_PB_OT_update_pose,
+    MOLECULE_PB_OT_delete_pose,
+    MOLECULE_PB_OT_rename_pose,
 )

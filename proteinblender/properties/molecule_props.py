@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import (BoolProperty, StringProperty, CollectionProperty, 
-                      IntProperty, EnumProperty, FloatVectorProperty)
+                      IntProperty, EnumProperty, FloatVectorProperty, PointerProperty)
 from bpy.types import PropertyGroup
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.scene_manager import ProteinBlenderScene
@@ -53,7 +53,26 @@ def get_chain_items(self, context):
                    for chain_id in chain_ids]
     return []
 
+class DomainTransformData(PropertyGroup):
+    """Stores transform data for a domain in a pose"""
+    domain_id: StringProperty(name="Domain ID", description="ID of the domain")
+    location: FloatVectorProperty(name="Location", size=3)
+    rotation: FloatVectorProperty(name="Rotation", size=3, subtype='EULER')
+    scale: FloatVectorProperty(name="Scale", size=3, default=(1, 1, 1))
 
+class MoleculePose(PropertyGroup):
+    """Group of properties representing a saved pose for a molecule"""
+    name: StringProperty(name="Pose Name", description="Name of this pose", default="New Pose")
+    
+    # Add properties for the main protein object transform
+    has_protein_transform: BoolProperty(name="Has Protein Transform", default=False)
+    protein_location: FloatVectorProperty(name="Protein Location", size=3)
+    protein_rotation: FloatVectorProperty(name="Protein Rotation", size=3, subtype='EULER')
+    protein_scale: FloatVectorProperty(name="Protein Scale", size=3, default=(1, 1, 1))
+    
+    # Collection of domain transforms
+    domain_transforms: CollectionProperty(type=DomainTransformData)
+    
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""
     identifier: StringProperty(
@@ -92,6 +111,9 @@ class MoleculeListItem(PropertyGroup):
     )
     
     domains: CollectionProperty(type=Domain)
+    
+    poses: CollectionProperty(type=MoleculePose, description="Saved poses for this molecule")
+    active_pose_index: IntProperty(name="Active Pose", default=0, min=0)
     
     def get_chain_range(self, context):
         """Get the range for the currently selected chain"""
@@ -250,6 +272,8 @@ def register():
     # Register Domain first since other classes might depend on it
     bpy.utils.register_class(Domain)
     bpy.utils.register_class(ChainSelectionItem)
+    bpy.utils.register_class(DomainTransformData)
+    bpy.utils.register_class(MoleculePose)
     bpy.utils.register_class(MoleculeListItem)
     
     # Register temporary properties needed for domain editing
@@ -366,6 +390,33 @@ def register():
 
 def unregister():
     """Unregister molecule properties"""
+    
+    # Safely unregister classes
+    try:
+        bpy.utils.unregister_class(MoleculeListItem)
+    except Exception:
+        pass
+    
+    try:
+        bpy.utils.unregister_class(ChainSelectionItem)
+    except Exception:
+        pass
+    
+    try:
+        bpy.utils.unregister_class(DomainTransformData)
+    except Exception:
+        pass
+    
+    try:
+        bpy.utils.unregister_class(MoleculePose)
+    except Exception:
+        pass
+    
+    try:
+        bpy.utils.unregister_class(Domain)
+    except Exception:
+        pass
+    
     # Safely unregister properties with checks
     if hasattr(bpy.types.Scene, "chain_selections"):
         del bpy.types.Scene.chain_selections
@@ -399,20 +450,4 @@ def unregister():
         del bpy.types.Scene.temp_domain_id
     if hasattr(bpy.types.Object, "domain_color"):
         del bpy.types.Object.domain_color
-    
-    # Safely unregister classes
-    try:
-        bpy.utils.unregister_class(MoleculeListItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(ChainSelectionItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(Domain)
-    except Exception:
-        pass
     

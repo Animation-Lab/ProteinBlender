@@ -82,6 +82,11 @@ class MOLECULE_PB_PT_list(Panel):
                 style_row.prop(scene, "molecule_style", text="")
                 style_row.operator("molecule.change_style", text="Change Style")
                 
+                # Add the keyframe button here
+                keyframe_row = settings_box.row(align=True)
+                keyframe_row.scale_y = 1.2
+                keyframe_row.operator("molecule.keyframe_protein", text="Keyframe Protein", icon='KEYFRAME')
+                
                 settings_box.separator()
 
                 # Chain selector
@@ -105,6 +110,83 @@ class MOLECULE_PB_PT_list(Panel):
                         depress=chain_item.is_selected
                     )
                     btn.chain_id = chain_item.chain_id
+                
+                # Poses Section - Add this before Domain Creation
+                settings_box.separator()
+                poses_box = settings_box.box()
+                poses_box.label(text="Protein Poses:", icon='ARMATURE_DATA')
+                
+                # Get molecule item for poses
+                molecule_item = None
+                for item in scene.molecule_list_items:
+                    if item.identifier == molecule_id:
+                        molecule_item = item
+                        break
+                
+                if molecule_item:
+                    # Create New Pose button
+                    row = poses_box.row(align=True)
+                    row.scale_y = 1.2
+                    row.operator("molecule.create_pose", text="Save Current State as Pose", icon='ADD')
+                    
+                    # If no poses, show message
+                    if not molecule_item.poses or len(molecule_item.poses) == 0:
+                        poses_box.label(text="No poses saved", icon='INFO')
+                    else:
+                        # List of poses with management options
+                        poses_box.separator()
+                        
+                        # Create a grid layout for poses
+                        grid_flow = poses_box.grid_flow(row_major=True, columns=1, even_columns=True, even_rows=False)
+                        
+                        for idx, pose in enumerate(molecule_item.poses):
+                            # Create a box for each pose to contain everything
+                            pose_box = grid_flow.box()
+                            
+                            # Create a label row for the pose name
+                            label_row = pose_box.row()
+                            label_row.label(text=pose.name, icon='POSE_HLT')
+                            
+                            # Create row with all action buttons as requested
+                            btn_row = pose_box.row(align=True)
+                            
+                            # Apply button
+                            apply_op = btn_row.operator(
+                                "molecule.apply_pose", 
+                                text="Apply Pose",
+                                icon='OUTLINER_OB_ARMATURE',
+                                depress=(idx == molecule_item.active_pose_index)
+                            )
+                            apply_op.pose_index = str(idx)
+                            
+                            # Set/Update button (creates a new pose with the same name, replacing the existing one)
+                            update_btn = btn_row.operator(
+                                "molecule.update_pose", 
+                                text="Update Pose",
+                                icon='FILE_REFRESH'
+                            )
+                            update_btn.pose_index = str(idx)
+                            
+                            # Rename button
+                            rename_op = btn_row.operator(
+                                "molecule.rename_pose", 
+                                text="Rename",
+                                icon='GREASEPENCIL'
+                            )
+                            
+                            # Delete button
+                            delete_op = btn_row.operator(
+                                "molecule.delete_pose", 
+                                text="Delete",
+                                icon='X'
+                            )
+                            
+                            # Show domain transform count as info text
+                            info_row = pose_box.row()
+                            info_text = f"Contains {len(pose.domain_transforms)} domain transforms"
+                            if pose.has_protein_transform:
+                                info_text += " + protein position"
+                            info_row.label(text=info_text, icon='INFO')
 
                 # Domain Creation Section
                 settings_box.separator()
@@ -438,13 +520,6 @@ class MOLECULE_PB_PT_list(Panel):
                         # Scale
                         scale_row = transform_box.row(align=True)
                         scale_row.prop(domain.object, "scale", text="")
-                        
-                        # Animation controls
-                        anim_box = control_box.box()
-                        anim_box.label(text="Animation")
-                        anim_row = anim_box.row()
-                        anim_row.operator("molecule.keyframe_domain_location", text="Keyframe Location")
-                        anim_row.operator("molecule.keyframe_domain_rotation", text="Keyframe Rotation")
                     
                     # Draw child domains recursively (if any)
                     if domain_id in child_domains:

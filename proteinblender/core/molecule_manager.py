@@ -360,7 +360,7 @@ class MoleculeWrapper:
             mathutils.Vector: The coordinates if found, otherwise None.
         """
         try:
-            mol_obj = self.molecule.object # Use self.molecule.object
+            mol_obj = self.molecule.object  # Use self.molecule.object
             if not mol_obj or not domain.object or not hasattr(mol_obj.data, "attributes"):
                 print("Error: Molecule object, domain object, or attributes not found.")
                 return None
@@ -403,7 +403,6 @@ class MoleculeWrapper:
                  if isinstance(chain_id, str) and chain_id.isalpha():
                      try:
                          numeric_chain = ord(chain_id.upper()) - ord('A')
-                         search_ids.append(str(numeric_chain))
                          search_ids.append(numeric_chain)
                      except Exception: pass
                  elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
@@ -479,9 +478,19 @@ class MoleculeWrapper:
                                 is_ca = True
                         
                         if is_ca:
-                            pos = positions_data[atom_idx].vector
-                            print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx}, position {pos}")
-                            return pos # Return the position
+                            # Get local position from attributes
+                            local_pos = positions_data[atom_idx].vector
+                            
+                            # *** FIX: Transform local position to world space using protein's matrix_world ***
+                            # We need to apply the parent protein's transformation to get the correct world position
+                            world_pos = mol_obj.matrix_world @ local_pos
+                            
+                            print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx}")
+                            print(f"  Local position: {local_pos}")
+                            print(f"  World position: {world_pos}")
+                            print(f"  Parent protein position: {mol_obj.location}")
+                            
+                            return world_pos  # Return the world position, not local position
                             
                     except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
                         continue # Skip malformed atom data
@@ -501,25 +510,60 @@ class MoleculeWrapper:
 
     # --- Moved Helper: Set Origin and Update Matrix --- 
     def _set_domain_origin_and_update_matrix(self, context, domain: DomainDefinition, target_pos: Vector):
-        """Sets the domain object's origin to target_pos and updates initial_matrix_local."""
+        """
+        Sets the domain object's origin to target_pos and updates initial_matrix_local.
+        
+        Args:
+            context: The current Blender context
+            domain: The DomainDefinition instance
+            target_pos: The world space position to set as origin
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if not domain or not domain.object or target_pos is None:
             print("Error: Invalid domain, object, or target position for setting origin.")
             return False
 
+        print(f"Setting origin for domain {domain.name} to position {target_pos}")
+        
+        # Store the original cursor location
         orig_cursor_loc = context.scene.cursor.location.copy()
+        
         try:
+            # Set the 3D cursor to our target position (in world space)
             context.scene.cursor.location = target_pos
+            
+            # Deselect all objects
             bpy.ops.object.select_all(action='DESELECT')
+            
+            # Select only our domain object
             domain.object.select_set(True)
             context.view_layer.objects.active = domain.object
+            
+            # Set origin to cursor position
             bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            
+            # Store the domain's local matrix for resetting later
+            # This is critical for Reset Transform functionality
             domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
-            print(f"Set origin and updated initial matrix for {domain.name}.")
+            
+            print(f"Successfully set origin for {domain.name} at {target_pos}")
+            print(f"Stored initial_matrix_local: {domain.object.matrix_local}")
+            
             return True
+            
         except Exception as e:
             print(f"Error in _set_domain_origin_and_update_matrix: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Restore cursor location on error
+            context.scene.cursor.location = orig_cursor_loc
             return False
+        
         finally:
+            # Always restore cursor location
             context.scene.cursor.location = orig_cursor_loc
     # --- End Moved Helper --- 
 

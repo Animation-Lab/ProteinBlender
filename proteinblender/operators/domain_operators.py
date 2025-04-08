@@ -204,27 +204,52 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         
         return {'FINISHED'}
 
-class MOLECULE_PB_OT_keyframe_domain_location(Operator):
-    bl_idname = "molecule.keyframe_domain_location"
-    bl_label = "Keyframe Location"
-    bl_description = "Add keyframe for domain location"
+class MOLECULE_PB_OT_keyframe_protein(Operator):
+    bl_idname = "molecule.keyframe_protein"
+    bl_label = "Keyframe Protein"
+    bl_description = "Add keyframes for the protein and all its domains' transforms at the current frame"
     
     def execute(self, context):
-        obj = context.active_object
-        if obj:
-            obj.keyframe_insert(data_path="location")
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Get the selected molecule
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+        
+        # First keyframe the main protein object if available
+        if molecule.object:
+            self._keyframe_object_transforms(molecule.object)
+        
+        # Then keyframe all domains
+        keyframed_domains = 0
+        for domain_id, domain in molecule.domains.items():
+            if domain.object:
+                self._keyframe_object_transforms(domain.object)
+                keyframed_domains += 1
+        
+        self.report({'INFO'}, f"Added keyframes for protein and {keyframed_domains} domains at frame {scene.frame_current}")
         return {'FINISHED'}
-
-class MOLECULE_PB_OT_keyframe_domain_rotation(Operator):
-    bl_idname = "molecule.keyframe_domain_rotation"
-    bl_label = "Keyframe Rotation"
-    bl_description = "Add keyframe for domain rotation"
     
-    def execute(self, context):
-        obj = context.active_object
-        if obj:
-            obj.keyframe_insert(data_path="rotation_euler")
-        return {'FINISHED'}
+    def _keyframe_object_transforms(self, obj):
+        """Helper method to keyframe an object's transforms with proper interpolation"""
+        current_frame = bpy.context.scene.frame_current
+        
+        # Insert keyframes for all transforms
+        obj.keyframe_insert(data_path="location", frame=current_frame)
+        obj.keyframe_insert(data_path="rotation_euler", frame=current_frame)
+        obj.keyframe_insert(data_path="scale", frame=current_frame)
+        
+        # Set better interpolation for smoother animations
+        if obj.animation_data and obj.animation_data.action:
+            for fcurve in obj.animation_data.action.fcurves:
+                for keyframe in fcurve.keyframe_points:
+                    if keyframe.co.x == current_frame:
+                        keyframe.interpolation = 'BEZIER'  # Smoother interpolation
+                        
+        return True
 
 class MOLECULE_PB_OT_toggle_domain_expanded(Operator):
     bl_idname = "molecule.toggle_domain_expanded"
@@ -814,38 +839,20 @@ class MOLECULE_PB_OT_snap_pivot_to_residue(Operator):
             return {'CANCELLED'}
 
         # Find the Cα position using the helper function on the molecule object
+        # This now returns world space coordinates with our fix
         alpha_carbon_pos = molecule._find_residue_alpha_carbon_pos(context, domain, self.target_residue)
 
         if alpha_carbon_pos is None:
             self.report({'ERROR'}, f"Could not find Alpha Carbon for {self.target_residue} residue ({domain.start if self.target_residue == 'START' else domain.end}).")
             return {'CANCELLED'}
 
-        # --- Set the origin ---
-        orig_cursor_loc = context.scene.cursor.location.copy()
-        try:
-            context.scene.cursor.location = alpha_carbon_pos
-
-            # Ensure the domain object is selected and active
-            bpy.ops.object.select_all(action='DESELECT')
-            domain.object.select_set(True)
-            context.view_layer.objects.active = domain.object
-
-            # Set origin to cursor
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-
-            # --- IMPORTANT: Update the stored initial matrix ---
-            domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
-            print(f"Updated initial matrix for {domain.name} after snapping pivot to {self.target_residue} AA.")
-
-            self.report({'INFO'}, f"Pivot snapped to {self.target_residue} residue's Cα.")
-
-        except Exception as e:
-            self.report({'ERROR'}, f"Failed to set origin: {e}")
+        # Set the origin using the world space position from the above helper
+        if not molecule._set_domain_origin_and_update_matrix(context, domain, alpha_carbon_pos):
+            self.report({'ERROR'}, "Failed to set domain origin.")
             return {'CANCELLED'}
-        finally:
-            # Restore cursor location
-            context.scene.cursor.location = orig_cursor_loc
 
+        # Report success
+        self.report({'INFO'}, f"Set pivot to {self.target_residue} residue's Alpha Carbon.")
         return {'FINISHED'}
 
 # New dialog operator that looks like a text field but opens a dialog
@@ -907,8 +914,7 @@ classes = (
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_update_domain,
     MOLECULE_PB_OT_delete_domain,
-    MOLECULE_PB_OT_keyframe_domain_location,
-    MOLECULE_PB_OT_keyframe_domain_rotation,
+    MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_toggle_domain_expanded,
     MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
