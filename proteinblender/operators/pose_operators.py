@@ -65,13 +65,8 @@ class MOLECULE_PB_OT_create_pose(Operator):
         pose = molecule_item.poses.add()
         pose.name = self.pose_name
         
-        # Store the main protein object transform
-        if molecule.object:
-            pose.has_protein_transform = True
-            pose.protein_location = molecule.object.location.copy()
-            pose.protein_rotation = molecule.object.rotation_euler.copy()
-            pose.protein_scale = molecule.object.scale.copy()
-            print(f"Stored protein transforms: {molecule.object.name} at {pose.protein_location}")
+        # Don't store the main protein object transform
+        pose.has_protein_transform = False
         
         # For each domain, store its current transforms
         for domain_id, domain in molecule.domains.items():
@@ -137,12 +132,7 @@ class MOLECULE_PB_OT_apply_pose(Operator):
         
         pose = molecule_item.poses[pose_idx]
         
-        # Apply the main protein object transform first
-        if pose.has_protein_transform and molecule.object:
-            molecule.object.location = pose.protein_location
-            molecule.object.rotation_euler = pose.protein_rotation
-            molecule.object.scale = pose.protein_scale
-            print(f"Applied protein transforms to {molecule.object.name}: {pose.protein_location}")
+        # Skip applying protein transform - only apply domain transforms
         
         # Get list of domains that exist in the pose
         domains_in_pose = {transform.domain_id for transform in pose.domain_transforms}
@@ -378,13 +368,8 @@ class MOLECULE_PB_OT_update_pose(Operator):
         pose = molecule_item.poses[pose_idx]
         pose_name = pose.name
         
-        # Update the main protein object transform
-        if molecule.object:
-            pose.has_protein_transform = True
-            pose.protein_location = molecule.object.location.copy()
-            pose.protein_rotation = molecule.object.rotation_euler.copy()
-            pose.protein_scale = molecule.object.scale.copy()
-            print(f"Updated protein transforms: {molecule.object.name} at {pose.protein_location}")
+        # Don't update the main protein object transform
+        pose.has_protein_transform = False
         
         # Clear existing domain transformations
         pose.domain_transforms.clear()

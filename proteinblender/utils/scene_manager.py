@@ -50,6 +50,39 @@ class ProteinBlenderScene:
             'display_settings': self.display_settings
         })
 
+    def _create_domains_for_each_chain(self, molecule):
+        """Create a domain for each chain in the molecule"""
+        # Get all available chains
+        available_chains = molecule._get_available_chains()
+        if not available_chains:
+            print("No chains found in molecule")
+            return
+
+        # For each chain, create a domain spanning the entire chain
+        for chain_id in available_chains:
+            # Get chain residue range
+            chain_id_int = int(chain_id) if chain_id.isdigit() else chain_id
+            mapped_chain = molecule.chain_mapping.get(chain_id_int, str(chain_id))
+            
+            if mapped_chain in molecule.chain_residue_ranges:
+                min_res, max_res = molecule.chain_residue_ranges[mapped_chain]
+                
+                # Create domain name
+                domain_name = f"Chain {mapped_chain}"
+                
+                # Create the domain with auto_fill_chain=False since we're manually creating domains
+                # for all chains
+                molecule._create_domain_with_params(
+                    chain_id=chain_id,
+                    start=min_res,
+                    end=max_res,
+                    name=domain_name,
+                    auto_fill_chain=False
+                )
+                print(f"Created domain for chain {mapped_chain} ({min_res}-{max_res})")
+            else:
+                print(f"No residue range found for chain {mapped_chain}")
+
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
         try:
@@ -77,6 +110,9 @@ class ProteinBlenderScene:
             # Store with unique identifier
             self.molecules[base_identifier] = molecule
             molecule.identifier = base_identifier  # Update the molecule's identifier
+            
+            # Create domains for each chain
+            self._create_domains_for_each_chain(molecule)
             
             # Add to UI list
             scene = bpy.context.scene
@@ -227,6 +263,9 @@ class ProteinBlenderScene:
                 print(f"Failed to create molecule from file: {filepath}")
                 return False
             
+            # Create domains for each chain
+            self._create_domains_for_each_chain(molecule)
+            
             # Update UI list
             self._add_molecule_to_list(molecule.identifier)
             
@@ -236,3 +275,15 @@ class ProteinBlenderScene:
             import traceback
             traceback.print_exc()
             return False 
+
+    def _add_molecule_to_list(self, identifier):
+        """Add a molecule to the UI list and set it as active"""
+        scene = bpy.context.scene
+        item = scene.molecule_list_items.add()
+        item.identifier = identifier
+        
+        # Set as active molecule
+        self.active_molecule = identifier
+        
+        # Force UI refresh
+        self._refresh_ui() 
