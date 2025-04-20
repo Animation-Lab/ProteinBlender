@@ -542,12 +542,15 @@ def _create_object(
             return color.color_chains(att_atomic_number(), att_chain_id())
 
     def att_is_alpha():
-        return np.isin(array.atom_name, "CA")
+        # Identify alpha carbons by stripping whitespace and matching 'CA'
+        # This handles atom names with padding in PDB files.
+        names = np.char.strip(array.atom_name.astype(str))
+        return np.char.upper(names) == "CA"
 
     def att_is_solvent():
         return struc.filter_solvent(array)
 
-    def att_is_backbone():
+    def att_is_backbone() -> npt.NDArray[np.bool_]:
         """
         Get the atoms that appear in peptide backbone or nucleic acid phosphate backbones.
         Filter differs from the Biotite's `struc.filter_peptide_backbone()` in that this

@@ -55,6 +55,7 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .tox/
+example_pdbs/
 
 # Documentation
 docs/_build/

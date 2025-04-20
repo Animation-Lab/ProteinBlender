@@ -114,12 +114,9 @@ class MoleculeWrapper:
             # Connect NOT output to style Selection - this should be the ONLY connection to style's Selection
             parent_node_group.links.new(final_not.outputs["Boolean"], main_style_node.inputs["Selection"])
             
-            # Ensure style node's Selection is only connected to the final NOT node
-            '''
-            for link in list(main_style_node.inputs["Selection"].links):
-                if link.from_node != final_not:
-                    parent_node_group.links.remove(link)
-            '''
+            # Track join nodes and final NOT node for dynamic expansion
+            self.join_nodes = [self.domain_join_node]
+            self.final_not = final_not
             
         except Exception as e:
             print(f"Error setting up protein domain infrastructure: {str(e)}")
@@ -449,6 +446,11 @@ class MoleculeWrapper:
 
             print(f"Residue search order: {list(residue_search_range)}")
 
+            # Map geometry node chain_id attribute to actual chain IDs via object custom property
+            obj_chain_ids_list = None
+            if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
+                obj_chain_ids_list = mol_obj["chain_ids"]
+
             # --- Search for the first CA encountered in the specified range order ---
             for target_res_num in residue_search_range:
                 print(f"Checking residue {target_res_num}...")
@@ -458,16 +460,19 @@ class MoleculeWrapper:
                         if atom_res_num != target_res_num:
                             continue 
                         
+                        # Determine actual chain ID for this atom using custom mapping
                         chain_id_val = chain_ids_data[atom_idx].value
-                        in_target_chain = False
-                        if chain_id_val in search_chain_ids:
-                            in_target_chain = True
-                        elif str(chain_id_val) in search_chain_ids:
-                             in_target_chain = True
-                            
-                        if not in_target_chain:
+                        if obj_chain_ids_list is not None:
+                            try:
+                                actual_chain_id = obj_chain_ids_list[chain_id_val]
+                            except (IndexError, TypeError):
+                                actual_chain_id = chain_id_val
+                        else:
+                            actual_chain_id = chain_id_val
+                        # Skip atoms not in the target chain
+                        if str(actual_chain_id) != str(domain_chain_id):
                             continue 
-                            
+                        
                         # --- Check using the preferred method (is_alpha_carbon) --- 
                         is_ca = False
                         if is_alpha_carbon_data: 
@@ -1455,27 +1460,47 @@ class MoleculeWrapper:
             # Connect chain select to res select
             parent_node_group.links.new(chain_select.outputs["Selection"], res_select.inputs["And"])
             
-            # Step 5: Find next available input on join node
+            # Step 5: Find next available input on the current join node
+            # Use the most recent join node for input slots
+            last_join = self.join_nodes[-1]
             available_input = None
             for i in range(1, 9):  # Check inputs 1-8
                 input_name = f"Input_{i}"
-                if input_name in self.domain_join_node.inputs and not self.domain_join_node.inputs[input_name].is_linked:
+                if input_name in last_join.inputs and not last_join.inputs[input_name].is_linked:
                     available_input = input_name
                     break
             
+            # If all slots are filled, create an overflow join and chain it
             if available_input is None:
-                print(f"DEBUG: Warning: No available inputs in multi-input OR node for domain {domain_id}") # DEBUG
-                return
-            
-            # Step 6: Connect residue selection to join node
-            # First remove any existing connections to this input
-            if self.domain_join_node.inputs[available_input].is_linked:
-                for link in list(self.domain_join_node.inputs[available_input].links):
+                # Create a new multi-boolean OR for overflow
+                overflow_group = nodes.create_multi_boolean_or()
+                overflow_join = parent_node_group.nodes.new("GeometryNodeGroup")
+                overflow_join.node_tree = overflow_group
+                overflow_join.location = (last_join.location.x + 400, last_join.location.y)
+                overflow_join.name = f"Domain_Boolean_Join_{len(self.join_nodes) + 1}"
+                # Chain previous join result into new join's first input
+                parent_node_group.links.new(last_join.outputs["Result"], overflow_join.inputs["Input_1"])
+                # Reconnect final_not to take its input from the new join
+                for link in list(self.final_not.inputs[0].links):
                     parent_node_group.links.remove(link)
-                    
-            # Connect residue selection output to join node input
-            parent_node_group.links.new(res_select.outputs["Selection"], 
-                                     self.domain_join_node.inputs[available_input])
+                parent_node_group.links.new(overflow_join.outputs["Result"], self.final_not.inputs[0])
+                # Track new join node and use it for remaining inputs
+                self.join_nodes.append(overflow_join)
+                # Switch to using this new join and locate its first free slot
+                last_join = overflow_join
+                for i in range(1, 9):
+                    input_name = f"Input_{i}"
+                    if input_name in last_join.inputs and not last_join.inputs[input_name].is_linked:
+                        available_input = input_name
+                        break
+            
+            # Step 6: Connect residue selection to the appropriate join node
+            # First remove any existing connections to this input slot
+            if last_join.inputs[available_input].is_linked:
+                for link in list(last_join.inputs[available_input].links):
+                    parent_node_group.links.remove(link)
+            # Connect residue selection output to that join input
+            parent_node_group.links.new(res_select.outputs["Selection"], last_join.inputs[available_input])
             
             # Store the nodes for future reference
             self.domain_mask_nodes[domain_id] = (chain_select, res_select)
