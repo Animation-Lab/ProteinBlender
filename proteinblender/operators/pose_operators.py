@@ -132,8 +132,6 @@ class MOLECULE_PB_OT_apply_pose(Operator):
         
         pose = molecule_item.poses[pose_idx]
         
-        # Skip applying protein transform - only apply domain transforms
-        
         # Get list of domains that exist in the pose
         domains_in_pose = {transform.domain_id for transform in pose.domain_transforms}
         
@@ -165,16 +163,13 @@ class MOLECULE_PB_OT_apply_pose(Operator):
             # Skip domains that were handled above
             if domain_id in domains_in_pose:
                 continue
-                
             # Skip domains without objects
             if not domain.object:
                 continue
-                
             # Reset to default transforms (identity)
             domain.object.location = (0, 0, 0)
             domain.object.rotation_euler = (0, 0, 0)
             domain.object.scale = (1, 1, 1)
-            
             # Attempt to restore from initial_matrix_local if available
             try:
                 if "initial_matrix_local" in domain.object:
@@ -184,8 +179,6 @@ class MOLECULE_PB_OT_apply_pose(Operator):
                     domain.object.matrix_local = initial_matrix
             except Exception as e:
                 print(f"Warning: Could not restore initial matrix for {domain.name}: {e}")
-                # Already set to identity transforms above, so we can continue
-            
             reset_count += 1
         
         report_message = f"Applied pose '{pose.name}' to {applied_count} domains"

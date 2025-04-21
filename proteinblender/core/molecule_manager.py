@@ -313,6 +313,22 @@ class MoleculeWrapper:
         # Set the domain's parent using the centralized method
         self._set_domain_parent(domain, domain.parent_domain_id)
         
+        # Generate a default color for this new domain using golden ratio for color distribution
+        try:
+            domain_index = len(self.domains)
+            golden_ratio = 0.618033988749895
+            hue = (domain_index * golden_ratio) % 1.0
+            saturation = 0.8
+            value = 0.9
+            rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+            domain_color = (rgb[0], rgb[1], rgb[2], 1.0)
+            domain.color = domain_color
+            # Set the Blender object property for UI color picker
+            if domain.object:
+                domain.object.domain_color = domain_color
+        except Exception as e:
+            print(f"Warning: failed to assign default domain color: {e}")
+        
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
         
@@ -985,11 +1001,14 @@ class MoleculeWrapper:
         # Update Blender parenting relationship
         if domain.object:
             try:
-                # Set the parent in Blender
+                # Preserve world transform before changing parent
+                world_mat = domain.object.matrix_world.copy()
+                # Set the new parent
                 domain.object.parent = parent_obj
-                
-                # Reset the matrix to maintain world position
+                # Compute parent inverse to maintain world transform
                 domain.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
+                # Restore the original world transform
+                domain.object.matrix_world = world_mat
             except Exception as e:
                 print(f"Error updating parent for {domain.name}: {str(e)}")
 
@@ -1245,7 +1264,7 @@ class MoleculeWrapper:
                 
                 # Also set the domain_color property on the Blender object for UI
                 if domain.object:
-                    domain.object["domain_color"] = domain_color
+                    domain.object.domain_color = domain_color
                 
                 color_emit = nodes.add_custom(domain.node_group, "Color Common")
                 color_emit.location = (select_res_id_range.location.x - 400, select_res_id_range.location.y)
@@ -1264,6 +1283,15 @@ class MoleculeWrapper:
                     color_emit.inputs["Carbon"].default_value = domain_color
                 elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
                     color_emit.inputs[0].default_value = domain_color
+            else:
+                # Override existing Color Common node to our domain color
+                try:
+                    if "Carbon" in color_emit.inputs:
+                        color_emit.inputs["Carbon"].default_value = domain.color
+                    elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
+                        color_emit.inputs[0].default_value = domain.color
+                except Exception as e:
+                    print(f"Warning: failed to override Color Common for domain {domain.domain_id}: {e}")
             
             if not set_color:
                 set_color = nodes.add_custom(domain.node_group, "Set Color")
