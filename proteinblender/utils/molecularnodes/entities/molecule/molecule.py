@@ -14,7 +14,6 @@ from biotite import InvalidFileError
 
 from ... import blender as bl
 from ... import color, data, utils
-from databpy import Domains, AttributeTypes
 import databpy
 from ..entity import MolecularEntity, EntityType
 
@@ -409,8 +408,8 @@ def _create_object(
         bob.store_named_attribute(
             data=bond_types,
             name="bond_type",
-            atype=AttributeTypes.INT,
-            domain=Domains.EDGE,
+            atype=databpy.AttributeTypes.INT,
+            domain=databpy.Domains.EDGE,
         )
 
     # The attributes for the model are initially defined as single-use functions. This allows
