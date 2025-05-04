@@ -73,6 +73,11 @@ class MoleculePose(PropertyGroup):
     # Collection of domain transforms
     domain_transforms: CollectionProperty(type=DomainTransformData)
     
+class MoleculeKeyframe(PropertyGroup):
+    """Group of properties representing a saved keyframe for a molecule"""
+    name: StringProperty(name="Keyframe Name", description="Name of this keyframe", default="")
+    frame: IntProperty(name="Frame Number", description="Frame number of the keyframe", default=0)
+
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""
     identifier: StringProperty(
@@ -114,6 +119,8 @@ class MoleculeListItem(PropertyGroup):
     
     poses: CollectionProperty(type=MoleculePose, description="Saved poses for this molecule")
     active_pose_index: IntProperty(name="Active Pose", default=0, min=0)
+    keyframes: CollectionProperty(type=MoleculeKeyframe, description="Saved keyframes for this molecule")
+    active_keyframe_index: IntProperty(name="Active Keyframe", default=0, min=0)
     
     def get_chain_range(self, context):
         """Get the range for the currently selected chain"""
@@ -274,6 +281,7 @@ def register():
     bpy.utils.register_class(ChainSelectionItem)
     bpy.utils.register_class(DomainTransformData)
     bpy.utils.register_class(MoleculePose)
+    bpy.utils.register_class(MoleculeKeyframe)
     bpy.utils.register_class(MoleculeListItem)
     
     # Register temporary properties needed for domain editing
@@ -394,6 +402,11 @@ def unregister():
     # Safely unregister classes
     try:
         bpy.utils.unregister_class(MoleculeListItem)
+    except Exception:
+        pass
+    
+    try:
+        bpy.utils.unregister_class(MoleculeKeyframe)
     except Exception:
         pass
     

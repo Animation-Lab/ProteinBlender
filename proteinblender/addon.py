@@ -1,5 +1,6 @@
 import bpy
 from bpy.props import PointerProperty, BoolProperty
+
 from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
 from .operators import CLASSES as operator_classes

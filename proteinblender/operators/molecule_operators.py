@@ -13,7 +13,13 @@ class MOLECULE_PB_OT_select(Operator):
     molecule_id: StringProperty()
     
     def execute(self, context):
-        context.scene.selected_molecule_id = self.molecule_id
+        scene = context.scene
+        # Toggle collapse when clicking the active molecule
+        if scene.selected_molecule_id == self.molecule_id:
+            scene.selected_molecule_id = ""
+            return {'FINISHED'}
+        # Select this molecule
+        scene.selected_molecule_id = self.molecule_id
         scene_manager = ProteinBlenderScene.get_instance()
         molecule = scene_manager.molecules.get(self.molecule_id)
         

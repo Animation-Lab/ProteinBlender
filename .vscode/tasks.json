@@ -4,7 +4,7 @@
         {
             "label": "plugin: build‑wheels",
             "type": "process",
-            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.4\\4.4\\python\\bin\\python.exe",
+            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.3\\4.3\\python\\bin\\python.exe",
             "args": [
                 "${workspaceFolder}\\build.py"
             ]
@@ -12,7 +12,7 @@
         {
             "label": "plugin: install‑deps",
             "type": "process",
-            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.4\\4.4\\python\\bin\\python.exe",
+            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.3\\4.3\\python\\bin\\python.exe",
             "args": [
                 "-m", "ensurepip", "--upgrade"
             ]
@@ -21,11 +21,9 @@
             "label": "plugin: pip‑deps",
             "type": "process",
             "dependsOn": "plugin: install‑deps",
-            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.4\\4.4\\python\\bin\\python.exe",
+            "command": "C:\\Program Files\\Blender Foundation\\Blender 4.3\\4.3\\python\\bin\\python.exe",
             "args": [
-                "-m", "pip", "install", "--upgrade", "--no-deps",
-                "--no-index",
-                "--find-links", "${workspaceFolder}\\proteinblender\\wheels",
+                "-m", "pip", "install", "--upgrade",
                 "databpy==0.0.8",
                 "MDAnalysis>=2.8.0",
                 "biotite>=0.41.2",
@@ -43,7 +41,7 @@
                     "args": ["/c"]
                 }
             },
-            "command": "\"C:\\Program Files\\Blender Foundation\\Blender 4.4\\blender.exe\"",
+            "command": "\"C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe\"",
             "args": [
                 "--python", "${workspaceFolder}\\dev_register.py"
             ],

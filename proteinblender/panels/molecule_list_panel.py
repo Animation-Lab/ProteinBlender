@@ -82,34 +82,7 @@ class MOLECULE_PB_PT_list(Panel):
                 style_row.prop(scene, "molecule_style", text="")
                 style_row.operator("molecule.change_style", text="Change Style")
                 
-                # Add the keyframe button here
-                keyframe_row = settings_box.row(align=True)
-                keyframe_row.scale_y = 1.2
-                keyframe_row.operator("molecule.keyframe_protein", text="Keyframe Protein", icon='KEYFRAME')
-                
-                settings_box.separator()
-
-                # Chain selector
-                chain_row = settings_box.row()
-                flow = settings_box.column_flow(columns=0)
-                flow.alignment = 'CENTER'
-                
-                # Create a grid flow that will wrap buttons
-                grid = flow.grid_flow(row_major=True, columns=10, even_columns=True, even_rows=True, align=True)
-                
-                for chain_item in scene.chain_selections:
-                    # Create sub-row for scaling
-                    btn_row = grid.row(align=True)
-                    btn_row.scale_x = 1.2
-                    btn_row.scale_y = 0.8
-                    
-                    # Create button in scaled row
-                    btn = btn_row.operator(
-                        "molecule.toggle_chain_selection",
-                        text=chain_item.chain_id,
-                        depress=chain_item.is_selected
-                    )
-                    btn.chain_id = chain_item.chain_id
+                # Chain selector UI removed per user request
                 
                 # Poses Section - Add this before Domain Creation
                 settings_box.separator()
@@ -188,6 +161,34 @@ class MOLECULE_PB_PT_list(Panel):
                                 info_text += " + protein position"
                             info_row.label(text=info_text, icon='INFO')
 
+                # Keyframes Section
+                settings_box.separator()
+                kf_box = settings_box.box()
+                kf_box.label(text="Protein Keyframes:", icon='KEYFRAME')
+                if molecule_item:
+                    # Add new keyframe button
+                    row = kf_box.row(align=True)
+                    row.scale_y = 1.2
+                    row.operator("molecule.keyframe_protein", text="Add Keyframe", icon='KEYFRAME')
+                    # List existing keyframes
+                    if not molecule_item.keyframes or len(molecule_item.keyframes) == 0:
+                        kf_box.label(text="No keyframes saved", icon='INFO')
+                    else:
+                        for idx, kf in enumerate(molecule_item.keyframes):
+                            kf_row = kf_box.row(align=True)
+                            select_op = kf_row.operator(
+                                "molecule.select_keyframe",
+                                text=kf.name,
+                                depress=(idx == molecule_item.active_keyframe_index)
+                            )
+                            select_op.keyframe_index = idx
+                            delete_op = kf_row.operator(
+                                "molecule.delete_keyframe",
+                                text="",
+                                icon='X'
+                            )
+                            delete_op.keyframe_index = idx
+
                 # Domain Creation Section
                 settings_box.separator()
                 domain_box = settings_box.box()
@@ -247,6 +248,13 @@ class MOLECULE_PB_PT_list(Panel):
                 
                 # Helper function to recursively draw domains with proper indentation
                 def draw_domain_hierarchy(domain_id, domain, indent_level=0):
+                    # Skip if domain object has been removed
+                    try:
+                        obj = domain.object
+                    except ReferenceError:
+                        return
+                    if not obj:
+                        return
                     # Create box for each domain
                     domain_header = domain_box.box()
                     header_row = domain_header.row()
@@ -258,7 +266,7 @@ class MOLECULE_PB_PT_list(Panel):
                              header_row.label(text="", icon='BLANK1')
 
                     # Add expand/collapse triangle
-                    is_expanded = getattr(domain.object, "domain_expanded", False)
+                    is_expanded = getattr(obj, "domain_expanded", False)
                     expand_icon = "TRIA_DOWN" if is_expanded else "TRIA_RIGHT"
 
                     # Try to use the custom operator, but fall back to direct property if not available
@@ -274,19 +282,19 @@ class MOLECULE_PB_PT_list(Panel):
                             expand_op.is_expanded = not is_expanded
                         else:
                             # Fallback to direct property toggle
-                            header_row.prop(domain.object, "domain_expanded",
+                            header_row.prop(obj, "domain_expanded",
                                          icon=expand_icon,
                                          icon_only=True,
                                          emboss=False)
                     except Exception:
                         # Fallback to direct property toggle if operator fails
-                        header_row.prop(domain.object, "domain_expanded",
+                        header_row.prop(obj, "domain_expanded",
                                      icon=expand_icon,
                                      icon_only=True,
                                      emboss=False)
 
                         # If expanding, update UI values to match domain
-                        if not is_expanded and domain.object.domain_expanded:
+                        if not is_expanded and obj.domain_expanded:
                             # Add a hidden operator to update UI values
                             hidden_row = header_row.row()
                             hidden_row.scale_x = 0.01
@@ -306,7 +314,7 @@ class MOLECULE_PB_PT_list(Panel):
                     info_row.label(text=f"Chain {domain.chain_id} ({domain.start}-{domain.end})")
 
                     # Add select object button
-                    if domain.object:
+                    if obj:
                         select_op = header_row.operator(
                             "molecule.select_object",
                             text="",
@@ -316,11 +324,11 @@ class MOLECULE_PB_PT_list(Panel):
                         select_op.is_domain = True
 
                     # Add visibility toggle
-                    if domain.object:
+                    if obj:
                         # Keep visibility toggle compact
                         vis_row = header_row.row(align=True)
-                        vis_row.prop(domain.object, "hide_viewport", text="", emboss=False,
-                                 icon='HIDE_OFF' if not domain.object.hide_viewport else 'HIDE_OFF')
+                        vis_row.prop(obj, "hide_viewport", text="", emboss=False,
+                                 icon='HIDE_OFF' if not obj.hide_viewport else 'HIDE_OFF')
 
                     # Add delete button
                     delete_op = header_row.operator(
@@ -348,12 +356,12 @@ class MOLECULE_PB_PT_list(Panel):
                         text_col.scale_x = 0.7
                         
                         # Check if we have the temp property and it has a value
-                        has_temp_name = (hasattr(domain.object, "temp_domain_name") and 
-                                        domain.object.temp_domain_name)
+                        has_temp_name = (hasattr(obj, "temp_domain_name") and 
+                                        obj.temp_domain_name)
                         
                         if has_temp_name:
                             # Normal case - just show the property
-                            text_col.prop(domain.object, "temp_domain_name", text="")
+                            text_col.prop(obj, "temp_domain_name", text="")
                         else:
                             # When temp_domain_name is not available or is empty
                             text_col.label(text=domain.name)
@@ -386,7 +394,7 @@ class MOLECULE_PB_PT_list(Panel):
                             emboss=True
                         )
                         confirm_op.domain_id = domain_id
-                        confirm_op.name = domain.object.temp_domain_name if has_temp_name else domain.name
+                        confirm_op.name = obj.temp_domain_name if has_temp_name else domain.name
                         
                         # Add separator after name field
                         control_box.separator()
@@ -424,7 +432,7 @@ class MOLECULE_PB_PT_list(Panel):
                         # Left side - Domain color picker
                         color_col = props_row.column()
                         color_col.label(text="Domain Color")
-                        color_col.prop(domain.object, "domain_color", text="")
+                        color_col.prop(obj, "domain_color", text="")
                         
                         # Right side - Domain style dropdown
                         style_col = props_row.column()
@@ -437,17 +445,17 @@ class MOLECULE_PB_PT_list(Panel):
                         except (AttributeError, TypeError):
                             # Try to get from object property
                             try:
-                                style_display = domain.object.domain_style.capitalize()
+                                style_display = obj.domain_style.capitalize()
                             except (AttributeError, TypeError):
                                 # Fall back to custom property
-                                if hasattr(domain.object, "__getitem__") and "domain_style" in domain.object:
-                                    style_display = str(domain.object["domain_style"]).capitalize()
+                                if hasattr(obj, "__getitem__") and "domain_style" in obj:
+                                    style_display = str(obj["domain_style"]).capitalize()
                                 else:
                                     style_display = "Style"
                                     
                         # Display the dropdown
                         style_col.prop_menu_enum(
-                            domain.object, 
+                            obj, 
                             "domain_style", 
                             text=style_display,
                             icon='MATERIAL'
@@ -471,7 +479,7 @@ class MOLECULE_PB_PT_list(Panel):
                         
                         # Button 1: Move/Set Pivot
                         try:
-                            is_editing = domain.object.get("is_pivot_editing", False)
+                            is_editing = obj.get("is_pivot_editing", False)
                             button_text = "Set Pivot" if is_editing else "Move Pivot"
                             button_icon = 'CHECKMARK' if is_editing else 'PIVOT_BOUNDBOX'
 
@@ -511,15 +519,15 @@ class MOLECULE_PB_PT_list(Panel):
 
                         # Location
                         loc_row = transform_box.row(align=True)
-                        loc_row.prop(domain.object, "location", text="")
+                        loc_row.prop(obj, "location", text="")
                         
                         # Rotation
                         rot_row = transform_box.row(align=True)
-                        rot_row.prop(domain.object, "rotation_euler", text="")
+                        rot_row.prop(obj, "rotation_euler", text="")
                         
                         # Scale
                         scale_row = transform_box.row(align=True)
-                        scale_row.prop(domain.object, "scale", text="")
+                        scale_row.prop(obj, "scale", text="")
                     
                     # Draw child domains recursively (if any)
                     if domain_id in child_domains:
@@ -528,6 +536,11 @@ class MOLECULE_PB_PT_list(Panel):
                 
                 # Draw the domain hierarchy starting with top-level domains
                 for domain_id, domain in top_level_domains:
+                    try:
+                        draw_domain_hierarchy(domain_id, domain)
+                    except ReferenceError:
+                        # Domain object was removed, skip drawing
+                        continue
                     draw_domain_hierarchy(domain_id, domain)
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):

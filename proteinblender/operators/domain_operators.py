@@ -208,7 +208,33 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
     bl_idname = "molecule.keyframe_protein"
     bl_label = "Keyframe Protein"
     bl_description = "Add keyframes for the protein and all its domains' transforms at the current frame"
-    
+    bl_options = {'REGISTER', 'UNDO'}
+    # Dialog properties
+    keyframe_name: StringProperty(
+        name="Name",
+        description="Name for this keyframe",
+        default=""
+    )
+    frame_number: IntProperty(
+        name="Frame",
+        description="Frame number to insert the keyframe",
+        default=1,
+        min=1
+    )
+    def invoke(self, context, event):
+        scene = context.scene
+        # Initialize defaults
+        self.frame_number = scene.frame_current
+        if not self.keyframe_name:
+            self.keyframe_name = f"Frame {self.frame_number}"
+        # Show popup dialog
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "keyframe_name")
+        layout.prop(self, "frame_number")
+
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
@@ -219,37 +245,94 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
             self.report({'ERROR'}, "No molecule selected")
             return {'CANCELLED'}
         
-        # First keyframe the main protein object if available
+        # Use dialog inputs
+        frame_to_use = self.frame_number
+        name_to_use = self.keyframe_name.strip() or f"Frame {frame_to_use}"
+        # Keyframe only the main object and its children
+        objects_to_key = []
         if molecule.object:
-            self._keyframe_object_transforms(molecule.object)
+            objects_to_key.append(molecule.object)
+            # Recursively include children
+            objects_to_key.extend(list(molecule.object.children_recursive))
+        # Insert transforms at specified frame
+        for obj in objects_to_key:
+            # Insert keyframes at the chosen frame
+            obj.keyframe_insert(data_path="location", frame=frame_to_use)
+            obj.keyframe_insert(data_path="rotation_euler", frame=frame_to_use)
+            obj.keyframe_insert(data_path="scale", frame=frame_to_use)
+            # Adjust interpolation for new keyframes
+            if obj.animation_data and obj.animation_data.action:
+                for fcurve in obj.animation_data.action.fcurves:
+                    for kp in fcurve.keyframe_points:
+                        if kp.co.x == frame_to_use:
+                            kp.interpolation = 'BEZIER'
+        keyframed_domains = len(objects_to_key) - 1 if molecule.object else 0
+
+        # Record keyframe in the UI list
+        for item in scene.molecule_list_items:
+            if item.identifier == scene.selected_molecule_id:
+                new_kf = item.keyframes.add()
+                new_kf.frame = frame_to_use
+                new_kf.name = name_to_use
+                item.active_keyframe_index = len(item.keyframes) - 1
+                break
         
-        # Then keyframe all domains
-        keyframed_domains = 0
-        for domain_id, domain in molecule.domains.items():
-            if domain.object:
-                self._keyframe_object_transforms(domain.object)
-                keyframed_domains += 1
-        
-        self.report({'INFO'}, f"Added keyframes for protein and {keyframed_domains} domains at frame {scene.frame_current}")
+        self.report({'INFO'}, f"Added keyframes for protein and {keyframed_domains} domains at frame {frame_to_use}")
         return {'FINISHED'}
-    
-    def _keyframe_object_transforms(self, obj):
-        """Helper method to keyframe an object's transforms with proper interpolation"""
-        current_frame = bpy.context.scene.frame_current
-        
-        # Insert keyframes for all transforms
-        obj.keyframe_insert(data_path="location", frame=current_frame)
-        obj.keyframe_insert(data_path="rotation_euler", frame=current_frame)
-        obj.keyframe_insert(data_path="scale", frame=current_frame)
-        
-        # Set better interpolation for smoother animations
-        if obj.animation_data and obj.animation_data.action:
-            for fcurve in obj.animation_data.action.fcurves:
-                for keyframe in fcurve.keyframe_points:
-                    if keyframe.co.x == current_frame:
-                        keyframe.interpolation = 'BEZIER'  # Smoother interpolation
-                        
-        return True
+
+# Operator to select and jump to a saved keyframe
+class MOLECULE_PB_OT_select_keyframe(Operator):
+    bl_idname = "molecule.select_keyframe"
+    bl_label = "Select Keyframe"
+    bl_description = "Select a saved keyframe and jump to that frame"
+    keyframe_index: IntProperty()
+    def execute(self, context):
+        scene = context.scene
+        # Find the active molecule list item
+        for item in scene.molecule_list_items:
+            if item.identifier == scene.selected_molecule_id:
+                idx = self.keyframe_index
+                if 0 <= idx < len(item.keyframes):
+                    item.active_keyframe_index = idx
+                    # Jump to the keyframe frame
+                    scene.frame_current = item.keyframes[idx].frame
+                break
+        return {'FINISHED'}
+
+# Operator to delete a saved keyframe
+class MOLECULE_PB_OT_delete_keyframe(Operator):
+    bl_idname = "molecule.delete_keyframe"
+    bl_label = "Delete Keyframe"
+    bl_description = "Delete a saved keyframe"
+    keyframe_index: IntProperty()
+    def execute(self, context):
+        scene = context.scene
+        # Find and delete both UI entry and timeline keyframes
+        for item in scene.molecule_list_items:
+            if item.identifier == scene.selected_molecule_id:
+                idx = self.keyframe_index
+                if 0 <= idx < len(item.keyframes):
+                    # Remove keyframes from timeline
+                    kf = item.keyframes[idx]
+                    frame_to_delete = kf.frame
+                    scene_manager = ProteinBlenderScene.get_instance()
+                    molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+                    if molecule and molecule.object:
+                        targets = [molecule.object] + list(molecule.object.children_recursive)
+                        for obj in targets:
+                            try:
+                                obj.keyframe_delete(data_path="location", frame=frame_to_delete)
+                                obj.keyframe_delete(data_path="rotation_euler", frame=frame_to_delete)
+                                obj.keyframe_delete(data_path="scale", frame=frame_to_delete)
+                            except Exception:
+                                pass
+                    # Remove from UI list
+                    item.keyframes.remove(idx)
+                    # Adjust active index
+                    if item.active_keyframe_index >= len(item.keyframes):
+                        item.active_keyframe_index = max(len(item.keyframes) - 1, 0)
+                break
+        return {'FINISHED'}
 
 class MOLECULE_PB_OT_toggle_domain_expanded(Operator):
     bl_idname = "molecule.toggle_domain_expanded"
@@ -926,7 +1009,9 @@ classes = (
     MOLECULE_PB_OT_reset_domain_transform,
     MOLECULE_PB_OT_snap_pivot_to_residue,
     MOLECULE_PB_OT_update_domain_name_dialog,
-    MOLECULE_PB_OT_initialize_domain_temp_name
+    MOLECULE_PB_OT_initialize_domain_temp_name,
+    MOLECULE_PB_OT_select_keyframe,
+    MOLECULE_PB_OT_delete_keyframe
 )
 
 def register():
