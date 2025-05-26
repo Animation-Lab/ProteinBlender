@@ -409,7 +409,7 @@ def _create_object(
             data=bond_types,
             name="bond_type",
             atype=databpy.AttributeTypes.INT,
-            domain=databpy.Domains.EDGE,
+            domain="EDGE",
         )
 
     # The attributes for the model are initially defined as single-use functions. This allows

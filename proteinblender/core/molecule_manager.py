@@ -160,25 +160,21 @@ class MoleculeWrapper:
             # Get chain attribute data
             chain_attr = self.object.data.attributes["chain_id"]
             numeric_chain_ids = sorted({value.value for value in chain_attr.data})
-            print(f"Numeric chain IDs: {numeric_chain_ids}")
             
             # Get chain mapping if available
             mapping_str = self.object.data.get("chain_mapping_str", "")
-            print(f"Chain mapping string: {mapping_str}")
             chain_mapping = {}
             if mapping_str:
                 for pair in mapping_str.split(","):
                     if ":" in pair:
                         k, v = pair.split(":")
                         chain_mapping[int(k)] = v
-            print(f"Chain mapping dict: {chain_mapping}")
             
             # Map numeric IDs to author chain IDs
             mapped_chains = {}
             for chain_id in numeric_chain_ids:
                 mapped_chain_id = chain_mapping.get(chain_id, str(chain_id))
                 mapped_chains[str(mapped_chain_id)] = chain_id
-            print(f"Mapped chains: {mapped_chains}")
 
     def create_domain(self, chain_id: Optional[str] = None, start: int = 1, end: int = 9999, name: Optional[str] = None) -> Optional[str]:
         """Create a new domain with default or provided values"""
@@ -259,6 +255,11 @@ class MoleculeWrapper:
         # Create domain ID
         domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
         
+        # Prevent duplicate domains: if this domain already exists, return its ID
+        if domain_id in self.domains:
+            print(f"Domain {domain_id} already exists. Skipping creation.")
+            return domain_id
+        
         # Create domain definition
         domain = DomainDefinition(mapped_chain, start, end, name)
         domain.parent_molecule_id = self.identifier
@@ -334,7 +335,6 @@ class MoleculeWrapper:
         
         # --- Set the initial pivot using the new robust method --- 
         if domain.object: # Check again if object exists before setting pivot
-            print(f"Setting initial pivot for new domain {domain.name} within create_domain")
             start_aa_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START') # Call internal method
             
             if start_aa_pos:
@@ -407,7 +407,6 @@ class MoleculeWrapper:
             domain_chain_id = domain.chain_id
             start_res = domain.start
             end_res = domain.end
-            print(f"Searching for Cα for {residue_target} in chain '{domain_chain_id}', range {start_res}-{end_res}")
 
             # --- Helper function for chain IDs --- (Can remain nested or become internal method)
             def get_possible_chain_ids(chain_id):
@@ -430,7 +429,6 @@ class MoleculeWrapper:
             # --- End helper --- 
 
             search_chain_ids = get_possible_chain_ids(domain_chain_id)
-            print(f"Possible chain IDs to search: {search_chain_ids}")
 
             # Get attribute data arrays
             chain_ids_data = attrs["chain_id"].data
@@ -460,8 +458,6 @@ class MoleculeWrapper:
                 print(f"Error: Invalid residue_target '{residue_target}'")
                 return None
 
-            print(f"Residue search order: {list(residue_search_range)}")
-
             # Map geometry node chain_id attribute to actual chain IDs via object custom property
             obj_chain_ids_list = None
             if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
@@ -469,7 +465,6 @@ class MoleculeWrapper:
 
             # --- Search for the first CA encountered in the specified range order ---
             for target_res_num in residue_search_range:
-                print(f"Checking residue {target_res_num}...")
                 for atom_idx in range(len(positions_data)):
                     try:
                         atom_res_num = res_nums_data[atom_idx].value
@@ -545,8 +540,6 @@ class MoleculeWrapper:
         if not domain or not domain.object or target_pos is None:
             print("Error: Invalid domain, object, or target position for setting origin.")
             return False
-
-        print(f"Setting origin for domain {domain.name} to position {target_pos}")
         
         # Store the original cursor location
         orig_cursor_loc = context.scene.cursor.location.copy()
@@ -568,9 +561,6 @@ class MoleculeWrapper:
             # Store the domain's local matrix for resetting later
             # This is critical for Reset Transform functionality
             domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
-            
-            print(f"Successfully set origin for {domain.name} at {target_pos}")
-            print(f"Stored initial_matrix_local: {domain.object.matrix_local}")
             
             return True
             
@@ -622,7 +612,6 @@ class MoleculeWrapper:
             
             if not self._check_domain_overlap(mapped_chain, before_start, before_end):
                 # Create domain from min_res to start-1
-                print(f"Creating additional domain to span the beginning of chain {chain_id}: {before_start}-{before_end}")
                 before_domain_id = self._create_domain_with_params(
                     chain_id=chain_id,
                     start=before_start,

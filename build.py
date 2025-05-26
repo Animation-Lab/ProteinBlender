@@ -1,16 +1,20 @@
+'''
+Shamelessly stolen from https://github.com/molecularnodes/molecularnodes/blob/main/build.py
+
+This script is used to build the ProteinBlender extension for Blender.
+
+It is used to download the necessary wheels for the extension, and then build the extension.
+
+It is used to update the blender manifest.toml file with the necessary wheels for the extension.
+
+'''
+
 import glob
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from typing import List, Union
-# Try importing Blender API for extension CLI; skip if not running inside Blender
-try:
-    import bpy
-    HAVE_BPY = True
-except ImportError:
-    HAVE_BPY = False
-import shutil  # packaging utilities
 
 
 def run_python(args: str | List[str]):
@@ -35,7 +39,7 @@ except ModuleNotFoundError:
     run_python("-m pip install tomlkit")
     import tomlkit
 
-TOML_PATH = "./proteinblender/blender_manifest.toml"
+TOML_PATH = "proteinblender/blender_manifest.toml"
 WHL_PATH = "./proteinblender/wheels"
 PYPROJ_PATH = "./pyproject.toml"
 
@@ -151,38 +155,38 @@ def clean_files(suffix: str = ".blend1") -> None:
         os.remove(blend1_file)
 
 
+def get_blender_path():
+    blender_path = os.environ.get("BLENDER_PATH")
+    if not blender_path:
+        raise RuntimeError(
+            "The BLENDER_PATH environment variable must be set to the path for blender.exe. "
+            "Please set BLENDER_PATH and try again."
+        )
+    return blender_path
+
+
 def build_extension(split: bool = True) -> None:
-    # Clean up any Blender temporary files
     for suffix in [".blend1", ".MNSession"]:
         clean_files(suffix=suffix)
 
-    # If running inside Blender, use CLI extension build for dev workflows
-    if HAVE_BPY:
-        try:
-            cmd = [bpy.app.binary_path, "--command", "extension", "build"]
-            if split:
-                cmd.append("--split-platforms")
-            cmd.extend(["--source-dir", "proteinblender", "--output-dir", "."])
-            subprocess.run(cmd, check=True)
-        except Exception as e:
-            print(f"Blender extension CLI build failed: {e}")
-
-    # Create dist directory for output zip
-    dist_dir = os.path.join(os.getcwd(), "dist")
-    os.makedirs(dist_dir, exist_ok=True)
-
-    # Determine addon name and version from pyproject.toml
-    name = pyproj["project"]["name"]
-    version = pyproj["project"]["version"]
-    zip_base = f"{name}-{version}"
-    zip_path = os.path.join(dist_dir, zip_base)
-    # Remove existing zip if present
-    if os.path.exists(zip_path + ".zip"):
-        os.remove(zip_path + ".zip")
-
-    # Create zip archive of the addon folder for Blender installation
-    shutil.make_archive(base_name=zip_path, format="zip", root_dir=".", base_dir=name)
-    print(f"Created addon zip at {zip_path}.zip")
+    blender_path = get_blender_path()
+    if split:
+        command = [
+            blender_path,
+            "--command", "extension", "build",
+            "--split-platforms",
+            "--source-dir", "proteinblender",
+            "--output-dir", "."
+        ]
+    else:
+        command = [
+            blender_path,
+            "--command", "extension", "build",
+            "--source-dir", "proteinblender",
+            "--output-dir", "."
+        ]
+    print(f"Running command: {command}")
+    subprocess.run(command)
 
 
 def build(platform) -> None:

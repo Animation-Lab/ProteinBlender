@@ -176,12 +176,21 @@ class MOLECULE_PB_PT_list(Panel):
                     else:
                         for idx, kf in enumerate(molecule_item.keyframes):
                             kf_row = kf_box.row(align=True)
+                            # Jump to keyframe
                             select_op = kf_row.operator(
                                 "molecule.select_keyframe",
                                 text=kf.name,
                                 depress=(idx == molecule_item.active_keyframe_index)
                             )
                             select_op.keyframe_index = idx
+                            # Edit keyframe parameters
+                            edit_op = kf_row.operator(
+                                "molecule.edit_keyframe",
+                                text="",
+                                icon='GREASEPENCIL'
+                            )
+                            edit_op.keyframe_index = idx
+                            # Delete keyframe
                             delete_op = kf_row.operator(
                                 "molecule.delete_keyframe",
                                 text="",
@@ -192,56 +201,47 @@ class MOLECULE_PB_PT_list(Panel):
                 # Domain Creation Section
                 settings_box.separator()
                 domain_box = settings_box.box()
-                domain_box.label(text="Domains:")
-                
-                # Domain creation controls with chain and range inputs
-                creation_box = domain_box.box()
-                creation_box.label(text="Create New Domain")
-                
-                # Chain selection dropdown
-                chain_row = creation_box.row()
-                chain_row.prop(scene, "new_domain_chain", text="Chain")
-                
-                # Residue range inputs
-                range_row = creation_box.row(align=True)
-                range_row.prop(scene, "new_domain_start", text="Start")
-                range_row.prop(scene, "new_domain_end", text="End")
-                
-                # Domain creation button
-                domain_row = creation_box.row(align=True)
-                domain_row.scale_y = 1.2
-                create_op = domain_row.operator(
-                    "molecule.create_domain",
-                    text="Create Domain",
-                    icon='ADD'
-                )
+                domain_box.label(text="Domains")
+
+                # Temporarily disable domain preview section until it's fully implemented
+                #preview_row = domain_box.row(align=True)
+                #preview_row.prop(scene, "show_domain_preview", text="Show Selection")
                 
                 # Add separator after creation controls
                 domain_box.separator()
                 
                 # Display existing domains - safely handle sorted domains
                 try:
-                    # Try to use the get_sorted_domains method if it exists
-                    domain_items = molecule.get_sorted_domains().items()
+                    # Ensure domain_items is a list immediately
+                    domain_items_list = list(molecule.get_sorted_domains().items())
                 except AttributeError:
                     # Fall back to sorting domains manually if the method doesn't exist
-                    domain_items = sorted(
-                        molecule.domains.items(),
+                    domain_items_list = sorted(
+                        list(molecule.domains.items()), # Ensure this is also list if .items() is an iterator
                         key=lambda x: (x[1].chain_id, x[1].start)
                     )
                 
+                # --- DEBUG PRINTS --- 
+                print(f"PANEL DEBUG: Molecule ID: {molecule_id}")
+                print(f"PANEL DEBUG: molecule.domains raw: {molecule.domains}")
+                # Use domain_items_list for debug prints
+                print(f"PANEL DEBUG: domain_items_list count: {len(domain_items_list)}")
+                for did, dmn in domain_items_list:
+                    obj_status = "VALID" if dmn.object and hasattr(dmn.object, 'name') else "INVALID or None"
+                    parent_id_val = getattr(dmn, 'parent_domain_id', 'N/A')
+                    print(f"PANEL DEBUG: Domain ID: {did}, Name: {dmn.name}, Obj: {obj_status}, ParentID: {parent_id_val}")
+                # --- END DEBUG PRINTS --- 
+                
                 # Create a hierarchical representation of domains
-                # First, gather the top-level domains (those without parents or with parents outside current domains)
                 top_level_domains = []
                 child_domains = {}
                 
-                for domain_id, domain in domain_items:
+                # Iterate over the list
+                for domain_id, domain in domain_items_list: 
                     parent_id = getattr(domain, 'parent_domain_id', None)
-                    # Check if this is a top-level domain (no parent or parent not in current domains)
                     if not parent_id or parent_id not in molecule.domains:
                         top_level_domains.append((domain_id, domain))
                     else:
-                        # Add to child domains dictionary
                         if parent_id not in child_domains:
                             child_domains[parent_id] = []
                         child_domains[parent_id].append((domain_id, domain))
@@ -404,9 +404,11 @@ class MOLECULE_PB_PT_list(Panel):
                             parent_box = control_box.box()
                             parent_box.label(text="Parent Domain")
                             parent_row = parent_box.row()
-                            parent_domain = molecule.domains.get(domain.parent_domain_id)
-                            if parent_domain:
-                                parent_row.label(text=f"{parent_domain.name}: Chain {parent_domain.chain_id} ({parent_domain.start}-{parent_domain.end})")
+                            # Need to access molecule from the outer scope, make sure it's available
+                            # or pass it to draw_domain_hierarchy
+                            parent_domain_obj = molecule.domains.get(domain.parent_domain_id)
+                            if parent_domain_obj:
+                                parent_row.label(text=f"{parent_domain_obj.name}: Chain {parent_domain_obj.chain_id} ({parent_domain_obj.start}-{parent_domain_obj.end})")
                             else:
                                 parent_row.label(text=f"ID: {domain.parent_domain_id} (Not Found)")
                         
@@ -531,17 +533,27 @@ class MOLECULE_PB_PT_list(Panel):
                     
                     # Draw child domains recursively (if any)
                     if domain_id in child_domains:
-                        for child_id, child_domain in child_domains[domain_id]:
-                            draw_domain_hierarchy(child_id, child_domain, indent_level + 1)
+                        for child_id, child_domain_obj_ref in child_domains[domain_id]: # Renamed to avoid conflict
+                            draw_domain_hierarchy(child_id, child_domain_obj_ref, indent_level + 1)
                 
-                # Draw the domain hierarchy starting with top-level domains
-                for domain_id, domain in top_level_domains:
-                    try:
-                        draw_domain_hierarchy(domain_id, domain)
-                    except ReferenceError:
-                        # Domain object was removed, skip drawing
-                        continue
-                    draw_domain_hierarchy(domain_id, domain)
+                # --- Main loop to draw top-level domains and their children ---
+                if not domain_items_list: # Check the list
+                    domain_box.label(text="No domains defined for this molecule.", icon='INFO')
+                else:
+                    # Add a debug print for top_level_domains count
+                    print(f"PANEL DEBUG: top_level_domains count: {len(top_level_domains)}")
+                    if not top_level_domains and domain_items_list: # If no top-level but domains exist
+                         domain_box.label(text="Domains exist but none are top-level. Check parenting.", icon='ERROR')
+                    
+                    for domain_id, domain_obj_ref in top_level_domains: # Renamed to avoid conflict
+                        try:
+                            # The draw_domain_hierarchy function will handle its own object checks
+                            # and recursively draw its children.
+                            draw_domain_hierarchy(domain_id, domain_obj_ref, indent_level=0)
+                        except ReferenceError: # Should ideally not happen if list is clean
+                            print(f"Warning: Stale reference to domain {domain_id} during UI draw.")
+                            continue
+                # End of the domain drawing section
 
 class MOLECULE_PB_OT_toggle_chain_selection(Operator):
     bl_idname = "molecule.toggle_chain_selection"
@@ -568,5 +580,20 @@ class MOLECULE_PB_OT_toggle_chain_selection(Operator):
                              if item.is_selected]
             # Update the molecule's chain selection
             molecule.select_chains(selected_chains)
+        
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_delete_selected_object(Operator):
+    bl_idname = "molecule.delete_selected_object"
+    bl_label = "Delete Selected Object"
+    bl_description = "Delete the selected object"
+    
+    def execute(self, context):
+        scene = context.scene
+        
+        # Find and delete the selected object
+        selected_object = scene.selected_object
+        if selected_object:
+            bpy.data.objects.remove(selected_object, do_unlink=True)
         
         return {'FINISHED'}

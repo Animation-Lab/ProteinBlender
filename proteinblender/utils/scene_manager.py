@@ -50,38 +50,90 @@ class ProteinBlenderScene:
             'display_settings': self.display_settings
         })
 
-    def _create_domains_for_each_chain(self, molecule):
-        """Create a domain for each chain in the molecule"""
-        # Get all available chains
-        available_chains = molecule._get_available_chains()
-        if not available_chains:
-            print("No chains found in molecule")
+    def _create_domains_for_each_chain(self, molecule: MoleculeWrapper):
+        """Create one domain for each unique mapped chain in the molecule."""
+        if not molecule.chain_residue_ranges:
+            print(f"No chain residue ranges found for molecule {molecule.identifier}. Cannot auto-create domains.")
             return
 
-        # For each chain, create a domain spanning the entire chain
-        for chain_id in available_chains:
-            # Get chain residue range
-            chain_id_int = int(chain_id) if chain_id.isdigit() else chain_id
-            mapped_chain = molecule.chain_mapping.get(chain_id_int, str(chain_id))
+        print(f"Creating domains for molecule {molecule.identifier}")
+        print(f"Chain residue ranges (mapped): {molecule.chain_residue_ranges}")
+        print(f"Original chain mapping (numeric to mapped): {molecule.chain_mapping}")
+
+        # Reverse the chain_mapping to easily find original numeric ID from mapped ID
+        # Handles cases where multiple numeric IDs might map to the same author ID,
+        # by preferring the smallest numeric ID.
+        numeric_to_mapped = molecule.chain_mapping
+        mapped_to_numeric = {}
+        if numeric_to_mapped:
+            for num_id, map_id in sorted(numeric_to_mapped.items()): # Sort by numeric ID
+                if map_id not in mapped_to_numeric: # Take the first (smallest) numeric ID
+                    mapped_to_numeric[map_id] = num_id
+        
+        created_mapped_chains = set() # Keep track of mapped chains for which domains have been made
+
+        # Iterate over the mapped chain IDs from chain_residue_ranges
+        # These are the "author" chain IDs like 'A', 'B'
+        for mapped_chain_id_str, (min_res, max_res) in molecule.chain_residue_ranges.items():
+            if mapped_chain_id_str in created_mapped_chains:
+                print(f"Domain for mapped chain {mapped_chain_id_str} already processed or created. Skipping.")
+                continue
+
+            # Try to find the original numeric chain ID.
+            original_numeric_chain_id = None
             
-            if mapped_chain in molecule.chain_residue_ranges:
-                min_res, max_res = molecule.chain_residue_ranges[mapped_chain]
-                
-                # Create domain name
-                domain_name = f"Chain {mapped_chain}"
-                
-                # Create the domain with auto_fill_chain=False since we're manually creating domains
-                # for all chains
-                molecule._create_domain_with_params(
-                    chain_id=chain_id,
-                    start=min_res,
-                    end=max_res,
-                    name=domain_name,
-                    auto_fill_chain=False
-                )
-                print(f"Created domain for chain {mapped_chain} ({min_res}-{max_res})")
+            if mapped_chain_id_str in mapped_to_numeric:
+                original_numeric_chain_id = mapped_to_numeric[mapped_chain_id_str]
             else:
-                print(f"No residue range found for chain {mapped_chain}")
+                found_match = False
+                if numeric_to_mapped: # Search in the original mapping
+                    for num_id, map_id_val in sorted(numeric_to_mapped.items()):
+                        if map_id_val == mapped_chain_id_str:
+                            original_numeric_chain_id = num_id
+                            found_match = True
+                            break
+                
+                if not found_match:
+                    if mapped_chain_id_str.isdigit():
+                        original_numeric_chain_id = int(mapped_chain_id_str)
+                    else:
+                        print(f"Warning: Mapped chain ID '{mapped_chain_id_str}' from residue ranges has no clear original numeric ID. Skipping domain creation for this chain.")
+                        continue
+           
+            if original_numeric_chain_id is None:
+                 print(f"Error: Could not determine original numeric chain ID for mapped chain '{mapped_chain_id_str}'. Skipping.")
+                 continue
+
+            domain_name = f"Chain {mapped_chain_id_str}"
+            
+            print(f"Attempting to create domain: Name='{domain_name}', MappedChain='{mapped_chain_id_str}', OriginalNumericChain='{original_numeric_chain_id}', Range=({min_res}-{max_res})")
+
+            created_domain_id = molecule._create_domain_with_params(
+                chain_id=str(original_numeric_chain_id), 
+                start=min_res,
+                end=max_res,
+                name=domain_name,
+                auto_fill_chain=False
+            )
+            
+            if created_domain_id:
+                print(f"Successfully created domain '{created_domain_id}' for mapped chain '{mapped_chain_id_str}' (Original Numeric: {original_numeric_chain_id}) range {min_res}-{max_res}")
+                created_mapped_chains.add(mapped_chain_id_str)
+            else:
+                 print(f"Failed to create domain for mapped chain '{mapped_chain_id_str}' (Original Numeric: {original_numeric_chain_id})")
+
+    def _finalize_imported_molecule(self, molecule):
+        """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
+        # Create domains for each chain
+        self._create_domains_for_each_chain(molecule)
+        # Add to UI list
+        scene = bpy.context.scene
+        item = scene.molecule_list_items.add()
+        item.identifier = molecule.identifier
+        # Set as active molecule
+        self.active_molecule = molecule.identifier
+        # Force UI refresh
+        self._refresh_ui()
 
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
@@ -90,7 +142,6 @@ class ProteinBlenderScene:
             if not hasattr(bpy.context.scene, "MNSession"):
                 from ..utils.molecularnodes.addon import register as register_mn
                 register_mn()
-            
             # Create unique identifier if this ID already exists
             counter = 1
             base_identifier = f"{identifier}_{counter:03d}"
@@ -106,27 +157,12 @@ class ProteinBlenderScene:
                     database="alphafold",
                     color="plddt"
                 )
-            
             # Store with unique identifier
             self.molecules[base_identifier] = molecule
             molecule.identifier = base_identifier  # Update the molecule's identifier
-            
-            # Create domains for each chain
-            self._create_domains_for_each_chain(molecule)
-            
-            # Add to UI list
-            scene = bpy.context.scene
-            item = scene.molecule_list_items.add()
-            item.identifier = base_identifier
-            
-            # Set as active molecule
-            self.active_molecule = base_identifier
-            
-            # Force UI refresh
-            self._refresh_ui()
-            
+            # Finalize import (domains, UI, etc.)
+            self._finalize_imported_molecule(molecule)
             return True
-            
         except Exception as e:
             print(f"Error creating molecule: {str(e)}")
             return False
@@ -258,17 +294,11 @@ class ProteinBlenderScene:
         try:
             # Import the molecule using MoleculeManager
             molecule = self.molecule_manager.import_from_file(filepath, identifier)
-            
             if not molecule:
                 print(f"Failed to create molecule from file: {filepath}")
                 return False
-            
-            # Create domains for each chain
-            self._create_domains_for_each_chain(molecule)
-            
-            # Update UI list
-            self._add_molecule_to_list(molecule.identifier)
-            
+            # Finalize import (domains, UI, etc.)
+            self._finalize_imported_molecule(molecule)
             return True
         except Exception as e:
             print(f"Error creating molecule from file {filepath}: {str(e)}")

@@ -4,13 +4,15 @@ version = "4.2.10"
 description = "Visualize and animate proteins in Blender"
 readme = "README.md"
 dependencies = [
-    "databpy==0.0.8",
-    "MDAnalysis>=2.8.0",
-    "biotite>=0.41.2",
-    "mrcfile>=1.5.3",
-    "starfile>=0.5.11"
+    "databpy>=0.0.18",
+    "MDAnalysis>=2.7.0",
+    "biotite>=1.1",
+    "mrcfile",
+    "starfile",
+    "PyYAML"
 ]
 maintainers = [{name = "Dillon Lee", email = "dlee123@gmail.com"}]
+requires-python = "~=3.11"
 
 [project.urls]
 Homepage = "https://github.com/dillonl/ProteinBlender"
@@ -18,10 +20,11 @@ Repository = "https://github.com/dillonl/ProteinBlender"
 Documentation = "https://github.com/dillonl/ProteinBlender"
 
 [project.optional-dependencies]
-bpy =  ["bpy>=4.2"]
-dev = ["pytest", "pytest-cov", "syrupy", "scipy", "fake-bpy-module"]
-test = ["pytest", "pytest-cov", "syrupy", "scipy"]
-docs = ["quartodoc", "tomlkit", "nodepad"]
+bpy = ["bpy>=4.4"]
+jupyter = ["jupyter", "IPython"]
+dev = ["pytest", "pytest-cov", "syrupy", "scipy", "fake-bpy-module", "IPython"]
+test = ["pytest", "pytest-cov", "syrupy", "scipy", "IPython", "pytest-xdist"]
+docs = ["quartodoc", "tomlkit", "nodepad", "jupyter", "IPython", "jupyter-cache"]
 
 [build-system]
 build-backend = "setuptools.build_meta"
