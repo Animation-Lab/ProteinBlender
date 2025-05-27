@@ -80,7 +80,34 @@ class MOLECULE_PB_PT_list(Panel):
                 style_row = settings_box.row()
                 style_row.label(text="Style:")
                 style_row.prop(scene, "molecule_style", text="")
-                style_row.operator("molecule.change_style", text="Change Style")
+                
+                # --- Protein Pivot Controls ---
+                if molecule.object:
+                    pivot_box = settings_box.box()
+                    pivot_box.label(text="Protein Pivot", icon='PIVOT_BOUNDBOX')
+                    pivot_row = pivot_box.row(align=True)
+                    # Interactive Move/Set Pivot button
+                    is_editing = False
+                    helper_name = f"PB_PivotHelper_{molecule_id}"
+                    if helper_name in bpy.data.objects:
+                        is_editing = True
+                    button_text = "Set Pivot" if is_editing else "Move Pivot"
+                    button_icon = 'CHECKMARK' if is_editing else 'PIVOT_CURSOR'
+                    move_pivot_op = pivot_row.operator(
+                        "molecule.toggle_protein_pivot_edit",
+                        text=button_text,
+                        icon=button_icon,
+                        depress=is_editing
+                    )
+                    if move_pivot_op:
+                        move_pivot_op.molecule_id = molecule_id
+                    snap_center_op = pivot_row.operator(
+                        "molecule.snap_protein_pivot_center",
+                        text="Snap to Center",
+                        icon='PIVOT_BOUNDBOX'
+                    )
+                    if snap_center_op:
+                        snap_center_op.molecule_id = molecule_id
                 
                 # Chain selector UI removed per user request
                 

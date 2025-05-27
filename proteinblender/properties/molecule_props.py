@@ -354,7 +354,8 @@ def register():
         name="Style",
         description="Visualization style for the molecule",
         items=STYLE_ITEMS,
-        default="surface"
+        default="surface",
+        update=update_molecule_style
     )
     bpy.types.Scene.chain_selections = CollectionProperty(type=ChainSelectionItem)
     
@@ -570,6 +571,21 @@ def update_domain_color(self, context):
             molecule.update_domain_color(domain_id, self.domain_color)
             return
 
+def update_molecule_style(self, context):
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+    style = context.scene.molecule_style
+    if molecule and molecule.object:
+        from ..utils.molecularnodes.blender.nodes import change_style_node
+        change_style_node(molecule.object, style)
+        for domain in getattr(molecule, 'domains', {}).values():
+            if hasattr(domain, 'object') and domain.object:
+                try:
+                    domain.object.domain_style = style
+                except Exception as e:
+                    print(f"Failed to update style for domain {getattr(domain, 'name', '?')}: {e}")
+
 def register():
     """Register molecule properties"""
     # Try to unregister first if already registered
@@ -640,7 +656,8 @@ def register():
         name="Style",
         description="Visualization style for the molecule",
         items=STYLE_ITEMS,
-        default="surface"
+        default="surface",
+        update=update_molecule_style
     )
     bpy.types.Scene.chain_selections = CollectionProperty(type=ChainSelectionItem)
     

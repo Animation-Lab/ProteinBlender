@@ -165,8 +165,16 @@ class MOLECULE_PB_OT_change_style(Operator):
         
         if molecule and molecule.object:
             from ..utils.molecularnodes.blender.nodes import change_style_node
-            change_style_node(molecule.object, context.scene.molecule_style)
-            
+            style = context.scene.molecule_style
+            change_style_node(molecule.object, style)
+            # Also update all domains to match the global style
+            for domain in getattr(molecule, 'domains', {}).values():
+                if hasattr(domain, 'object') and domain.object:
+                    try:
+                        domain.object.domain_style = style  # This triggers the callback and updates the node group
+                    except Exception as e:
+                        print(f"Failed to update style for domain {getattr(domain, 'name', '?')}: {e}")
+        
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_select_protein_chain(Operator):
@@ -189,3 +197,142 @@ class MOLECULE_PB_OT_select_protein_chain(Operator):
         '''
 
         return {'FINISHED'}
+
+class MOLECULE_PB_OT_move_protein_pivot(bpy.types.Operator):
+    bl_idname = "molecule.move_protein_pivot"
+    bl_label = "Move Protein Pivot to 3D Cursor"
+    bl_description = "Move the protein's origin to the 3D cursor location"
+
+    molecule_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+        if not molecule or not molecule.object:
+            self.report({'ERROR'}, "Molecule object not found.")
+            return {'CANCELLED'}
+        obj = molecule.object
+        # Store original cursor location
+        orig_cursor = context.scene.cursor.location.copy()
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            self.report({'INFO'}, "Protein pivot moved to 3D cursor.")
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to move pivot: {e}")
+        finally:
+            context.scene.cursor.location = orig_cursor
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
+    bl_idname = "molecule.snap_protein_pivot_center"
+    bl_label = "Snap Protein Pivot to Center"
+    bl_description = "Snap the protein's origin to its bounding box center"
+
+    molecule_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+        if not molecule or not molecule.object:
+            self.report({'ERROR'}, "Molecule object not found.")
+            return {'CANCELLED'}
+        obj = molecule.object
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+            self.report({'INFO'}, "Protein pivot snapped to bounding box center.")
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to snap pivot: {e}")
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
+    bl_idname = "molecule.toggle_protein_pivot_edit"
+    bl_label = "Move/Set Protein Pivot"
+    bl_description = "Interactively move the protein's pivot using a helper object."
+
+    _pivot_edit_active = dict()  # Class-level dict to track state per molecule
+
+    molecule_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+        if not molecule or not molecule.object:
+            self.report({'ERROR'}, "Molecule object not found.")
+            return {'CANCELLED'}
+        obj = molecule.object
+        # Toggle logic: if already editing, finish and set pivot; else, start editing
+        if self.molecule_id not in self._pivot_edit_active:
+            # Start pivot edit mode (match domain logic)
+            # Save state
+            self._pivot_edit_active[self.molecule_id] = {
+                'cursor_location': list(context.scene.cursor.location),
+                'previous_tool': context.workspace.tools.from_space_view3d_mode(context.mode, create=False).idname,
+                'object_location': obj.location.copy(),
+                'object_rotation': obj.rotation_euler.copy(),
+                'transform_orientation': context.scene.transform_orientation_slots[0].type,
+                'pivot_point': context.tool_settings.transform_pivot_point
+            }
+            # Deselect all
+            bpy.ops.object.select_all(action='DESELECT')
+            # Create ARROWS empty at protein origin
+            bpy.ops.object.empty_add(type='ARROWS', location=obj.location)
+            helper = context.active_object
+            helper.name = f"PB_PivotHelper_{self.molecule_id}"
+            helper.empty_display_size = 1.0
+            helper.show_in_front = True
+            helper.hide_select = False
+            helper.select_set(True)
+            context.view_layer.objects.active = helper
+            self._pivot_edit_active[self.molecule_id]['helper'] = helper
+            # Set up transform settings
+            context.scene.transform_orientation_slots[0].type = 'GLOBAL'
+            context.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
+            # Switch to move tool and show gizmo
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for region in area.regions:
+                        if region.type == 'WINDOW':
+                            override = context.copy()
+                            override['area'] = area
+                            override['region'] = region
+                            with context.temp_override(**override):
+                                bpy.ops.wm.tool_set_by_id(name="builtin.move")
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            space.show_gizmo = True
+                            space.show_gizmo_tool = True
+                            space.show_gizmo_object_translate = True
+            obj["is_pivot_editing"] = True
+            self.report({'INFO'}, "Use the transform gizmo to move the helper. Click 'Set Pivot' to apply.")
+            return {'FINISHED'}
+        else:
+            # Finish pivot edit mode
+            stored_state = self._pivot_edit_active[self.molecule_id]
+            helper = stored_state['helper']
+            # Store location before deleting helper
+            new_pivot_location = helper.location.copy()
+            # Set origin to helper location
+            context.scene.cursor.location = new_pivot_location
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            # Delete helper
+            bpy.ops.object.select_all(action='DESELECT')
+            helper.select_set(True)
+            context.view_layer.objects.active = helper
+            bpy.ops.object.delete()
+            # Restore previous selection/context
+            context.scene.cursor.location = stored_state['cursor_location']
+            context.scene.transform_orientation_slots[0].type = stored_state['transform_orientation']
+            context.tool_settings.transform_pivot_point = stored_state['pivot_point']
+            obj["is_pivot_editing"] = False
+            del self._pivot_edit_active[self.molecule_id]
+            self.report({'INFO'}, "Protein pivot updated.")
+            return {'FINISHED'}
