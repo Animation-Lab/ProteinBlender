@@ -614,40 +614,100 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
 
 class MOLECULE_PB_OT_toggle_domain_expanded(Operator):
     bl_idname = "molecule.toggle_domain_expanded"
-    bl_label = "Toggle Domain Expanded"
-    bl_description = "Toggle domain expanded state and load its values"
-    
+    bl_label = "Toggle Domain Expanded State"
+    bl_description = "Expand or collapse the domain settings in the UI"
+    bl_options = {'INTERNAL'}
+
     domain_id: StringProperty()
     is_expanded: BoolProperty()
-    
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
+        if not molecule or self.domain_id not in molecule.domains:
+            return {'CANCELLED'}
+
+        domain = molecule.domains[self.domain_id]
+        if domain.object:
+            domain.object["domain_expanded"] = self.is_expanded
+            
+            # If expanding, pre-fill split domain UI values and set active splitting ID
+            if self.is_expanded:
+                context.scene.active_splitting_domain_id = self.domain_id
+                # Ensure the domain properties (start, end) are accessible
+                # DomainDefinition objects should have .start and .end attributes
+                if hasattr(domain, 'start') and hasattr(domain, 'end'):
+                    context.scene.split_domain_new_start = domain.start
+                    context.scene.split_domain_new_end = domain.end
+                else:
+                    # Fallback or error if domain object doesn't have start/end as expected
+                    # This might happen if the domain definition is somehow incomplete
+                    print(f"Error: Domain {self.domain_id} definition is missing start/end attributes.")
+                    # Set to a safe default or leave as is, depending on desired robustness
+                    context.scene.split_domain_new_start = 1 
+                    context.scene.split_domain_new_end = 1
+            elif context.scene.active_splitting_domain_id == self.domain_id:
+                # If collapsing the currently active splitting domain, clear the active ID
+                context.scene.active_splitting_domain_id = ""
+
+        # Refresh the UI by triggering a redraw of panels that might depend on these properties
+        if context.area:
+            context.area.tag_redraw()
+        
+        return {'FINISHED'}
+
+class MOLECULE_PB_OT_split_domain(Operator):
+    bl_idname = "molecule.split_domain"
+    bl_label = "Split Domain"
+    bl_description = "Split an existing domain into new segments"
+
+    domain_id: StringProperty(description="ID of the domain to split")
+
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Get the selected molecule
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+
         if not molecule:
-            self.report({'ERROR'}, "No molecule selected")
+            self.report({'ERROR'}, "No molecule selected for domain splitting.")
             return {'CANCELLED'}
-            
-        # Get the domain
-        domain = molecule.domains.get(self.domain_id)
-        if not domain or not domain.object:
-            self.report({'ERROR'}, "Domain not found")
+
+        if not self.domain_id or self.domain_id not in molecule.domains:
+            self.report({'ERROR'}, f"Domain ID '{self.domain_id}' not found in selected molecule.")
             return {'CANCELLED'}
-            
-        # Toggle expanded state
-        try:
-            # Try to set the property directly
-            domain.object["domain_expanded"] = self.is_expanded
-        except:
-            # If that fails, ensure the property exists first
-            if not hasattr(domain.object, "domain_expanded"):
-                # Register the property if needed
-                bpy.types.Object.domain_expanded = bpy.props.BoolProperty(default=False)
-            # Then set it
-            domain.object.domain_expanded = self.is_expanded
+
+        original_domain = molecule.domains[self.domain_id]
+
+        # Get new start and end from scene properties
+        new_start = scene.split_domain_new_start
+        new_end = scene.split_domain_new_end
+
+        # Validate new start and end against the original domain's range
+        if not (original_domain.start <= new_start <= new_end <= original_domain.end):
+            self.report({'ERROR'}, f"New range ({new_start}-{new_end}) must be within original domain range ({original_domain.start}-{original_domain.end}).")
+            return {'CANCELLED'}
         
+        if new_start == original_domain.start and new_end == original_domain.end:
+            self.report({'INFO'}, "Split range is identical to the original domain. No action taken.")
+            return {'CANCELLED'} # Or FINISHED, depending on desired behavior for no-op
+
+        # Call the MoleculeWrapper method to perform the split
+        # The split_domain method will handle creating new domains and managing gaps.
+        new_domain_ids = molecule.split_domain(
+            original_domain_id=self.domain_id,
+            split_start=new_start,
+            split_end=new_end
+        )
+
+        if new_domain_ids:
+            self.report({'INFO'}, f"Domain {self.domain_id} split into: {', '.join(new_domain_ids)}.")
+            # Optionally, select the first new domain or expand it in the UI
+            if new_domain_ids[0] in molecule.domains and molecule.domains[new_domain_ids[0]].object:
+                molecule.domains[new_domain_ids[0]].object["domain_expanded"] = True
+        else:
+            self.report({'ERROR'}, "Failed to split domain.")
+            return {'CANCELLED'}
+
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_update_domain_ui_values(Operator):
@@ -1290,7 +1350,8 @@ classes = (
     MOLECULE_PB_OT_initialize_domain_temp_name,
     MOLECULE_PB_OT_select_keyframe,
     MOLECULE_PB_OT_delete_keyframe,
-    MOLECULE_PB_OT_edit_keyframe
+    MOLECULE_PB_OT_edit_keyframe,
+    MOLECULE_PB_OT_split_domain
 )
 
 def register():

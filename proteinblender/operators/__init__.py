@@ -30,6 +30,7 @@ from .domain_operators import (
     MOLECULE_PB_OT_update_parent_domain,
     MOLECULE_PB_OT_reset_domain_transform,
     MOLECULE_PB_OT_snap_pivot_to_residue,
+    MOLECULE_PB_OT_split_domain,
 )
 from .pose_operators import (
     MOLECULE_PB_OT_create_pose,
@@ -67,6 +68,7 @@ CLASSES = (
     MOLECULE_PB_OT_select_object,
     MOLECULE_PB_OT_reset_domain_transform,
     MOLECULE_PB_OT_snap_pivot_to_residue,
+    MOLECULE_PB_OT_split_domain,
     MOLECULE_PB_OT_create_pose,
     MOLECULE_PB_OT_apply_pose,
     MOLECULE_PB_OT_update_pose,

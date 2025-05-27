@@ -194,77 +194,46 @@ class ProteinBlenderScene:
 
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
-        if identifier in self.molecules:
-            # Remove from scene
-            molecule = self.molecules[identifier]
+        # Check if the molecule exists via the manager, which holds the actual MoleculeWrapper objects
+        if self.molecule_manager.get_molecule(identifier):
+            # Call the MoleculeManager's delete_molecule method
+            # This method now handles the core cleanup of the molecule wrapper, 
+            # its Blender object, and potentially its collection.
+            self.molecule_manager.delete_molecule(identifier)
             
-            # Clean up all associated domains first
-            print(f"Cleaning up all domains for molecule {identifier}")
-            molecule.cleanup()
-            
-            if molecule.object:
-                # Push to undo stack before making changes
-                print("Pushing to undo stack")
-                bpy.ops.ed.undo_push(message=f"Delete Molecule {identifier}")
-
-                print("Appending undo post handler")
-                bpy.app.handlers.undo_post.append(self.sync_molecule_list_after_undo)
-
-                print("Removing object")
-                # Store object data
-                obj_data = molecule.object.data
-                
-                # Clean up node groups
-                if molecule.object.modifiers:
-                    for modifier in molecule.object.modifiers:
-                        if modifier.type == 'NODES' and modifier.node_group:
-                            try:
-                                node_group = modifier.node_group
-                                bpy.data.node_groups.remove(node_group, do_unlink=True)
-                            except ReferenceError:
-                                # Node group already removed, skip
-                                pass
-                
-                # Remove the object
-                bpy.data.objects.remove(molecule.object, do_unlink=True)
-                
-                # Clean up object data if no other users
-                if obj_data and obj_data.users == 0:
-                    if isinstance(obj_data, bpy.types.Mesh):
-                        bpy.data.meshes.remove(obj_data, do_unlink=True)
-            
-            # Remove from our internal tracking
-            del self.molecules[identifier]
-            
-            # Update UI list - this will be restored by the undo handler if needed
+            # Update UI list - this part is for the ProteinBlenderScene's own UI management
             scene = bpy.context.scene
             for i, item in enumerate(scene.molecule_list_items):
                 if item.identifier == identifier:
                     scene.molecule_list_items.remove(i)
                     break
             
-            # Reset UI state
+            # Reset UI state if the deleted molecule was the selected one
             if scene.selected_molecule_id == identifier:
                 scene.selected_molecule_id = ""
-                scene.molecule_list_index = 0
-            
-            # Reset other UI properties - handle enums carefully
-            try:
-                # Get the first item from the enum items as default
-                enum_items = scene.bl_rna.properties["new_domain_chain"].enum_items
-                if enum_items:
-                    scene.new_domain_chain = enum_items[0].identifier
-            except (KeyError, AttributeError):
-                pass  # Property might not exist yet
-            
-            scene.new_domain_start = 1
-            scene.new_domain_end = 9999
-            scene.temp_domain_start = 1
-            scene.temp_domain_end = 9999
-            scene.temp_domain_id = ""
-            scene.show_domain_preview = False
-            scene.show_molecule_edit_panel = False
-            scene.edit_molecule_identifier = ""
+                # scene.molecule_list_index = 0 # Resetting index might not be desired
+                
+                # Reset other UI properties related to molecule/domain editing
+                try:
+                    enum_items = scene.bl_rna.properties["new_domain_chain"].enum_items
+                    if enum_items:
+                        scene.new_domain_chain = enum_items[0].identifier
+                except (KeyError, AttributeError, RuntimeError): # RuntimeError for enum not found
+                    pass 
+                
+                scene.new_domain_start = 1
+                scene.new_domain_end = 9999
+                # scene.temp_domain_start = 1 # These are for active split, might not need reset here
+                # scene.temp_domain_end = 9999
+                # scene.temp_domain_id = "" 
+                # scene.active_splitting_domain_id = "" # Also related to active split context
+
+                # scene.show_domain_preview = False # This relates to a different feature
+                scene.show_molecule_edit_panel = False
+                scene.edit_molecule_identifier = ""
+
+            # Refresh UI
+            self._refresh_ui()
             
             return True
         return False

@@ -228,9 +228,13 @@ class MoleculeWrapper:
         
         # This should not happen, but just in case
         print("Could not find suitable section for domain creation")
-        return None
+        return None # Changed from [] to None to match original return type for this specific path
         
-    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, auto_fill_chain: bool = True, parent_domain_id: Optional[str] = None) -> Optional[str]:
+    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, 
+                                   auto_fill_chain: bool = True, 
+                                   parent_domain_id: Optional[str] = None,
+                                   fill_boundaries_start: Optional[int] = None,
+                                   fill_boundaries_end: Optional[int] = None) -> List[str]: # Changed return type
         """Internal method to create a domain with specific parameters
         
         Args:
@@ -238,30 +242,46 @@ class MoleculeWrapper:
             start: Start residue
             end: End residue
             name: Optional name for the domain
-            auto_fill_chain: Whether to automatically create additional domains to fill the chain. 
-                             When true, this will trigger the creation of additional domains to span
-                             any areas of the chain not covered by this domain.
+            auto_fill_chain: Whether to automatically create additional domains to fill the chain/context.
             parent_domain_id: Optional ID of the parent domain
+            fill_boundaries_start: Optional start residue for the context to fill (used by auto_fill_chain).
+            fill_boundaries_end: Optional end residue for the context to fill (used by auto_fill_chain).
+        Returns:
+            A list of domain IDs created (the primary one, plus any auto-filled ones).
         """
+        created_domain_ids_list = []
+
         # Adjust end value based on chain's residue range if needed
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
         mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
         if mapped_chain in self.chain_residue_ranges:
-            min_res, max_res = self.chain_residue_ranges[mapped_chain]
-            start = max(min_res, start)
-            if end > max_res:
-                end = max_res
+            min_res_chain, max_res_chain = self.chain_residue_ranges[mapped_chain]
+            start = max(min_res_chain, start)
+            end = min(max_res_chain, end) # Clamp end to max_res_chain first
+            end = max(start, end)       # Ensure end is not less than start
             
-        # Create domain ID
-        domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
+        # Generate default name if None is provided
+        generated_name = None
+        if name is None:
+            # Default name format: "Chain <MappedChainID>: <start>-<end>"
+            generated_name = f"Chain {mapped_chain}: {start}-{end}"
+            
+        # Create domain ID - use a sanitized version of the name (original or generated) for more robust IDs
+        # This helps if names have spaces or special characters that might be problematic in IDs.
+        name_for_id = name if name is not None else generated_name
+        sanitized_name_part = "".join(c if c.isalnum() or c in '-_' else '_' for c in name_for_id)
+        domain_id = f"{self.identifier}_{mapped_chain}_{start}_{end}_{sanitized_name_part}"
         
-        # Prevent duplicate domains: if this domain already exists, return its ID
-        if domain_id in self.domains:
-            print(f"Domain {domain_id} already exists. Skipping creation.")
-            return domain_id
-        
-        # Create domain definition
-        domain = DomainDefinition(mapped_chain, start, end, name)
+        # Prevent duplicate domains more robustly: if this domain already exists, return its ID
+        idx = 0
+        base_domain_id = domain_id
+        while domain_id in self.domains:
+            idx += 1
+            domain_id = f"{base_domain_id}_{idx}"
+            print(f"Domain ID collision, trying {domain_id}")
+
+        # Create domain definition, using generated_name if original name was None
+        domain = DomainDefinition(mapped_chain, start, end, name if name is not None else generated_name)
         domain.parent_molecule_id = self.identifier
         
         # If parent_domain_id was provided, use it
@@ -354,13 +374,229 @@ class MoleculeWrapper:
         
         # Add the domain to our domain collection
         self.domains[domain_id] = domain
+        created_domain_ids_list.append(domain_id) # Add primary domain to list
         
-        # Check if we need to create additional domains to span the rest of the chain
-        # This is useful for visualizing the entire chain when users only select a portion
+        # Check if we need to create additional domains to span the rest of the chain/context
         if auto_fill_chain:
-            self._create_additional_domains_to_span_chain(chain_id, start, end, mapped_chain, min_res, max_res, domain_id)
+            # Determine the effective min/max residues for filling.
+            # If fill_boundaries are provided, use them. Otherwise, use full chain boundaries.
+            effective_min_res = fill_boundaries_start if fill_boundaries_start is not None else self.chain_residue_ranges.get(mapped_chain, (start, end))[0]
+            effective_max_res = fill_boundaries_end if fill_boundaries_end is not None else self.chain_residue_ranges.get(mapped_chain, (start, end))[1]
+            
+            # Ensure start and end of current domain are within these effective boundaries for auto-fill logic
+            # (They should be if fill_boundaries were from a parent being split)
+            if not (effective_min_res <= start <= effective_max_res and effective_min_res <= end <= effective_max_res):
+                 print(f"Warning: Domain ({start}-{end}) is outside effective fill boundaries ({effective_min_res}-{effective_max_res}). Auto-fill might be skipped or incorrect.")
+            
+            additional_created_ids = self._create_additional_domains_to_span_context(
+                chain_id=chain_id,                    # Original numeric chain ID for consistency
+                current_domain_start=start,
+                current_domain_end=end,
+                mapped_chain=mapped_chain,
+                context_min_res=effective_min_res,
+                context_max_res=effective_max_res,
+                # domain_id_of_current=domain_id, # Not strictly needed by the revised logic
+                parent_domain_id_for_fillers=parent_domain_id
+            )
+            created_domain_ids_list.extend(additional_created_ids)
         
-        return domain_id
+        # Normalization will be handled by the calling function (e.g., split_domain, update_domain)
+        # after all related domains are created/updated.
+        # if domain_id in self.domains: # Should always be true if we added it
+        #      self._normalize_domain_name(domain_id) # REMOVED INTERNAL NORMALIZATION
+        # else:
+        #     print(f"Warning: Domain {domain_id} not in self.domains before normalization call.")
+
+        return created_domain_ids_list # Return list of all created IDs
+
+    def _normalize_domain_name(self, domain_id_to_normalize: str):
+        if domain_id_to_normalize not in self.domains:
+            print(f"_normalize_domain_name: Domain {domain_id_to_normalize} not found.")
+            return
+
+        domain = self.domains[domain_id_to_normalize]
+        mapped_chain_id = domain.chain_id # This is the mapped chain ID like 'A'
+        
+        # Get the full residue range for this domain's specific chain from the molecule's overall chain_residue_ranges
+        chain_min_res, chain_max_res = self.chain_residue_ranges.get(mapped_chain_id, (domain.start, domain.end))
+
+        # Count domains on the same chain
+        count_on_chain = 0
+        for d_id, d_obj in self.domains.items():
+            if d_obj.chain_id == mapped_chain_id:
+                count_on_chain += 1
+
+        new_name = None
+        # Check if current name is already custom (i.e., not matching default patterns)
+        is_current_name_short_default = domain.name == f"Chain {mapped_chain_id}"
+        is_current_name_long_default_correct_range = domain.name == f"Chain {mapped_chain_id}: {domain.start}-{domain.end}"
+        # More general check for any default-like long name, helps catch if range was slightly off but still auto-named
+        is_current_name_long_default_any_range = domain.name.startswith(f"Chain {mapped_chain_id}: ") and \
+                                               len(domain.name.split(': ')) > 1 and \
+                                               '-' in domain.name.split(': ')[-1]
+        
+        is_custom_name = not (is_current_name_short_default or is_current_name_long_default_any_range)
+
+        is_sole_full_span_domain = (count_on_chain == 1 and 
+                                  domain.start == chain_min_res and 
+                                  domain.end == chain_max_res)
+
+        if not is_custom_name: # Only attempt to normalize if the name isn't already custom
+            if is_sole_full_span_domain:
+                # If it's the sole full-span domain, preferred name is short
+                if not is_current_name_short_default: # Only change if not already the correct short name
+                    new_name = f"Chain {mapped_chain_id}"
+            else:
+                # Not sole full-span, preferred name is long (if it was a default name)
+                # This also corrects long names that had the wrong range due to prior state
+                if not is_current_name_long_default_correct_range: # Only change if not already the correct long name
+                    new_name = f"Chain {mapped_chain_id}: {domain.start}-{domain.end}"
+
+        if new_name and new_name != domain.name:
+            print(f"Normalizing domain name for {domain_id_to_normalize}: '{domain.name}' -> '{new_name}'")
+            domain.name = new_name
+            if domain.object:
+                # Update Blender object name and custom properties
+                current_obj_name = domain.object.name
+                obj_name_suffix = ""
+
+                # Try to preserve existing suffixes like "_nodes" or user additions
+                # This is a heuristic. If the old domain name was part of the object name, extract the rest.
+                old_name_variations = [
+                    f"Chain {mapped_chain_id}: {domain.start}-{domain.end}", # Check against its actual range before normalization
+                    f"Chain {mapped_chain_id}" # Check against short form too
+                ]
+                # Add any previous name patterns if they were default-like
+                if domain.name != new_name: # If current name (before setting new_name) was different
+                     if domain.name.startswith(f"Chain {mapped_chain_id}: ") or domain.name == f"Chain {mapped_chain_id}":
+                        old_name_variations.append(domain.name)
+                
+                found_suffix = False
+                for old_n in set(old_name_variations): # Use set to avoid redundant checks
+                    if current_obj_name.startswith(old_n) and len(current_obj_name) > len(old_n):
+                        potential_suffix = current_obj_name[len(old_n):]
+                        # Common suffixes often start with _ or are numbers for uniqueness
+                        if potential_suffix.startswith('_') or potential_suffix.isdigit(): 
+                            obj_name_suffix = potential_suffix
+                            found_suffix = True
+                            break
+                if not found_suffix and current_obj_name != domain.name: # If no clear prefix match but names differ
+                    # This might be a fully custom object name, or suffix logic was too simple.
+                    # To be safe, append new domain name to existing object name if it doesn't seem to contain it.
+                    # However, for now, let's assume simple renaming if no clear suffix is found from defaults.
+                    pass # Stick to new_name + found obj_name_suffix (which is empty if not found)
+
+                domain.object.name = f"{new_name}{obj_name_suffix}"
+
+                if hasattr(domain.object, "domain_name"):
+                    domain.object.domain_name = new_name
+                if hasattr(domain.object, "temp_domain_name"):
+                    domain.object.temp_domain_name = new_name # Keep temp name in sync
+        elif is_custom_name:
+            print(f"Domain {domain_id_to_normalize} has custom name '{domain.name}'. Skipping normalization.")
+
+    def split_domain(self, original_domain_id: str, split_start: int, split_end: int, split_name: Optional[str] = None) -> List[str]:
+        """Splits an existing domain into multiple new domains.
+
+        The split is defined by a new start and end residue.
+        If auto_fill_chain was true for the original domain, the new segments will fill
+        the original domain's boundaries. Otherwise, they fill the protein chain's boundaries.
+
+        Args:
+            original_domain_id: The ID of the domain to be split.
+            split_start: The starting residue of the main new segment.
+            split_end: The ending residue of the main new segment.
+            split_name: Optional base name for the new split domain(s). This is currently ignored and names are auto-generated.
+
+        Returns:
+            A list of new domain IDs created by the split operation, or an empty list if failed.
+        """    
+        all_newly_created_domain_ids = [] # To collect all IDs from this operation
+
+        if original_domain_id not in self.domains:
+            print(f"Error: Original domain {original_domain_id} not found for splitting.")
+            return []
+
+        original_domain = self.domains[original_domain_id]
+        original_chain_id_auth = original_domain.chain_id # Author chain ID like 'A'
+        original_domain_actual_start = original_domain.start
+        original_domain_actual_end = original_domain.end
+        
+        # Validation: Ensure split_start and split_end are within the original domain's range
+        if not (original_domain_actual_start <= split_start <= split_end <= original_domain_actual_end):
+            print(f"Error: Split range {split_start}-{split_end} is outside the original domain's range {original_domain_actual_start}-{original_domain_actual_end}.")
+            bpy.ops.wm.call_message_box(message=f"Split range {split_start}-{split_end} must be within the domain's current range ({original_domain_actual_start}-{original_domain_actual_end}).", title="Invalid Split Range", icon='ERROR')
+            return []
+        if split_start == original_domain_actual_start and split_end == original_domain_actual_end:
+            print(f"Warning: Split range matches original domain range. No actual split performed.")
+            # bpy.ops.wm.call_message_box(message="Split range matches the domain's current range. No change made.", title="Split Matches Domain", icon='INFO')
+            return [original_domain_id] # No split, return original
+
+        original_numeric_chain_id = None
+        # Find the original numeric chain ID for _create_domain_with_params
+        for num_id, auth_id in self.chain_mapping.items():
+            if auth_id == original_chain_id_auth:
+                original_numeric_chain_id = str(num_id)
+                break
+        if not original_numeric_chain_id:
+            original_numeric_chain_id = original_chain_id_auth # Fallback
+
+        original_parent_id = getattr(original_domain, 'parent_domain_id', None)
+        
+        print(f"Splitting domain {original_domain_id} (Chain: {original_chain_id_auth}, Range: {original_domain_actual_start}-{original_domain_actual_end}, Parent: {original_parent_id})")
+        print(f"  New segment: {split_start}-{split_end}")
+
+        # --- Delete the original domain first --- 
+        # This simplifies logic, as _create_domain_with_params
+        # will then use its auto_fill_chain logic (now context-aware) 
+        # to create necessary prefix/suffix domains within the original domain's boundaries.
+        self._delete_domain_direct(original_domain_id) 
+        print(f"Deleted original domain {original_domain_id}")
+
+        # --- Create the main specified segment --- 
+        # Pass the original domain's boundaries as the fill_boundaries.
+        # The `auto_fill_chain=True` will now respect these boundaries.
+        main_segment_ids = self._create_domain_with_params(
+            chain_id=original_numeric_chain_id,
+            start=split_start,
+            end=split_end,
+            name=None, # Auto-generate name
+            auto_fill_chain=True, 
+            parent_domain_id=original_parent_id,
+            fill_boundaries_start=original_domain_actual_start, # Context for filling
+            fill_boundaries_end=original_domain_actual_end      # Context for filling
+        )
+
+        if main_segment_ids:
+            print(f"Successfully created main split segment(s): {main_segment_ids}")
+            all_newly_created_domain_ids.extend(main_segment_ids)
+        else:
+            print(f"Failed to create the main split domain segment. Attempting to restore original (this is a fallback and may not always work).")
+            # Fallback: try to recreate the original domain if split failed badly.
+            # This is a simplistic recovery.
+            restored_ids = self._create_domain_with_params(
+                chain_id=original_numeric_chain_id,
+                start=original_domain_actual_start,
+                end=original_domain_actual_end,
+                name=original_domain.name, # Try to use its old name
+                auto_fill_chain=False, # Don't auto-fill if restoring
+                parent_domain_id=original_parent_id
+            )
+            if restored_ids:
+                 print(f"Fallback: Recreated original-like domain(s): {restored_ids}")
+                 all_newly_created_domain_ids.extend(restored_ids) # Add to list for normalization
+            else:
+                 print(f"Fallback: Failed to recreate original domain.")
+        
+        # Normalize names for ALL newly created domains from this operation
+        for new_id in all_newly_created_domain_ids:
+            if new_id in self.domains: # Ensure it exists before normalizing
+                self._normalize_domain_name(new_id)
+            else:
+                print(f"Warning: Domain ID {new_id} from split operation not found in self.domains for normalization.")
+
+        print(f"Split operation resulted in domains: {all_newly_created_domain_ids}")
+        return all_newly_created_domain_ids
 
     # --- Moved Helper: Find Alpha Carbon Position --- 
     def _find_residue_alpha_carbon_pos(self, context, domain: DomainDefinition, residue_target: str) -> Optional[Vector]:
@@ -578,86 +814,82 @@ class MoleculeWrapper:
             context.scene.cursor.location = orig_cursor_loc
     # --- End Moved Helper --- 
 
-    def _create_additional_domains_to_span_chain(self, chain_id: str, start: int, end: int, mapped_chain: str, min_res: int, max_res: int, domain_id: str):
-        """Create additional domains to span the entire chain when a partial domain is created.
+    def _create_additional_domains_to_span_context(self, chain_id: str, 
+                                               current_domain_start: int, current_domain_end: int,
+                                               mapped_chain: str, 
+                                               context_min_res: int, context_max_res: int,
+                                               parent_domain_id_for_fillers: Optional[str] = None) -> List[str]:
+        """Create additional domains to span a given context (e.g., original domain's range or full chain).
         
-        This function is called after creating a domain that doesn't span the entire chain.
-        It automatically creates up to two additional domains to ensure the entire chain is visualized:
-        1. One domain from the chain's minimum residue to the start of the created domain (if needed)
-        2. One domain from the end of the created domain to the chain's maximum residue (if needed)
-        
-        For example, if Chain A spans residues 1-150 and the user creates a domain for residues 50-75,
-        this function will automatically create domains for residues 1-49 and 76-150.
+        This function is called after creating a domain that doesn't span the entire context.
+        It creates up to two additional domains:
+        1. Before the current_domain (context_min_res to current_domain_start - 1)
+        2. After the current_domain (current_domain_end + 1 to context_max_res)
         
         Args:
-            chain_id: The original chain ID
-            start: Start residue of the created domain
-            end: End residue of the created domain
-            mapped_chain: The mapped chain ID
-            min_res: Minimum residue ID in the chain
-            max_res: Maximum residue ID in the chain
-            domain_id: The ID of the created domain
+            chain_id: The original numeric chain ID (e.g., '0', '1').
+            current_domain_start: Start residue of the domain just created.
+            current_domain_end: End residue of the domain just created.
+            mapped_chain: The author chain ID (e.g., 'A', 'B').
+            context_min_res: Minimum residue ID of the context to fill.
+            context_max_res: Maximum residue ID of the context to fill.
+            parent_domain_id_for_fillers: The parent_domain_id for any created filler domains.
+        Returns:
+            A list of domain IDs created by this fill operation.
         """
-        # Check if the domain spans the entire chain
-        if start <= min_res and end >= max_res:
-            # No additional domains needed
-            return
+        created_filler_ids = []
         
-        # Create gaps to fill
-        # Gap 1: Before the domain (if needed)
-        if start > min_res:
-            # Check if a domain already exists in this range
-            before_start = min_res
-            before_end = start - 1
-            
-            if not self._check_domain_overlap(mapped_chain, before_start, before_end):
-                # Create domain from min_res to start-1
-                before_domain_id = self._create_domain_with_params(
-                    chain_id=chain_id,
-                    start=before_start,
-                    end=before_end,
-                    name=f"Domain_{chain_id}_{before_start}_{before_end}",
-                    auto_fill_chain=False,  # Prevent recursion
-                    parent_domain_id=None   # Don't set parent - will default to original protein
-                )
-                
-                # Ensure color is properly synchronized for the flanking domain
-                if before_domain_id and before_domain_id in self.domains:
-                    before_domain = self.domains[before_domain_id]
-                    if before_domain.object and before_domain.node_group:
-                        # Update the color in both the node tree and UI
-                        self.update_domain_color(before_domain_id, before_domain.color)
-                        before_domain.object.domain_color = before_domain.color
-            else:
-                print(f"Skipping creation of beginning domain ({before_start}-{before_end}) due to overlap with existing domain")
+        # Check if the current domain already spans the entire context
+        if current_domain_start <= context_min_res and current_domain_end >= context_max_res:
+            return [] # No additional domains needed
         
-        # Gap 2: After the domain (if needed)
-        if end < max_res:
-            # Check if a domain already exists in this range
-            after_start = end + 1
-            after_end = max_res
+        # Create Prefix Domain (if needed)
+        if current_domain_start > context_min_res:
+            prefix_start = context_min_res
+            prefix_end = current_domain_start - 1
             
-            if not self._check_domain_overlap(mapped_chain, after_start, after_end):
-                # Create domain from end+1 to max_res
-                print(f"Creating additional domain to span the end of chain {chain_id}: {after_start}-{after_end}")
-                after_domain_id = self._create_domain_with_params(
+            if prefix_start <= prefix_end: # Ensure valid range
+                if not self._check_domain_overlap(mapped_chain, prefix_start, prefix_end):
+                    print(f"Creating prefix filler domain for context: Chain {mapped_chain}, Range {prefix_start}-{prefix_end}")
+                    # _create_domain_with_params returns a list, so we extend
+                    prefix_ids = self._create_domain_with_params(
                     chain_id=chain_id,
-                    start=after_start,
-                    end=after_end,
-                    name=f"Domain_{chain_id}_{after_start}_{after_end}",
-                    auto_fill_chain=False,  # Prevent recursion
-                    parent_domain_id=None   # Don't set parent - will default to original protein
-                )
-                
-                # Ensure color is properly synchronized for the flanking domain
-                if after_domain_id and after_domain_id in self.domains:
-                    after_domain = self.domains[after_domain_id]
-                    if after_domain.object and after_domain.node_group:
-                        # Update the color in both the node tree and UI
-                        self.update_domain_color(after_domain_id, after_domain.color)
-                        after_domain.object.domain_color = after_domain.color
+                        start=prefix_start,
+                        end=prefix_end,
+                        name=None, # Auto-generate name
+                        auto_fill_chain=False,  # Prevent recursion within this fill step
+                        parent_domain_id=parent_domain_id_for_fillers,
+                        # No fill_boundaries here, as these are the fillers themselves
+                    )
+                    created_filler_ids.extend(prefix_ids)
+                    
+                    # Color sync (already handled within _create_domain_with_params via its setup calls)
             else:
-                print(f"Skipping creation of end domain ({after_start}-{after_end}) due to overlap with existing domain")
+                    print(f"Skipping creation of prefix filler domain ({prefix_start}-{prefix_end}) due to overlap.")
+        
+        # Create Suffix Domain (if needed)
+        if current_domain_end < context_max_res:
+            suffix_start = current_domain_end + 1
+            suffix_end = context_max_res
+            
+            if suffix_start <= suffix_end: # Ensure valid range
+                if not self._check_domain_overlap(mapped_chain, suffix_start, suffix_end):
+                    print(f"Creating suffix filler domain for context: Chain {mapped_chain}, Range {suffix_start}-{suffix_end}")
+                    # _create_domain_with_params returns a list, so we extend
+                    suffix_ids = self._create_domain_with_params(
+                    chain_id=chain_id,
+                        start=suffix_start,
+                        end=suffix_end,
+                        name=None, # Auto-generate name
+                    auto_fill_chain=False,  # Prevent recursion
+                        parent_domain_id=parent_domain_id_for_fillers,
+                    )
+                    created_filler_ids.extend(suffix_ids)
+                    # Color sync handled by _create_domain_with_params
+            else:
+                    print(f"Skipping creation of suffix filler domain ({suffix_start}-{suffix_end}) due to overlap.")
+        
+        return created_filler_ids
         
     def _find_next_available_section(self, chain_id: str) -> Optional[tuple]:
         """Find the next available non-overlapping section in a chain"""
@@ -792,9 +1024,16 @@ class MoleculeWrapper:
             if domain_id != new_domain_id:
                 print(f"DEBUG: update_domain - Domain ID changed from {domain_id} to {new_domain_id}. Updating dictionary.") # DEBUG
                 self.domains[new_domain_id] = domain
-                del self.domains[domain_id]
+                if domain_id in self.domains: # Ensure old ID exists before attempting to delete
+                    del self.domains[domain_id]
+                # Normalization called by the caller of update_domain, or if ID does not change, see below.
+                # For now, let's assume caller handles normalization for the *returned* ID.
+                # However, if the ID changes, the *new* domain should be normalized.
+                self._normalize_domain_name(new_domain_id) 
                 return new_domain_id
             
+            # If domain ID didn't change, still normalize its name as its range or context might have.
+            self._normalize_domain_name(domain_id)
             return domain_id
             
         except Exception as e:
@@ -835,89 +1074,143 @@ class MoleculeWrapper:
         # Note: We're no longer removing the domain infrastructure nodes (join node and NOT node)
         # when all domains are deleted. They will persist for future domain creations.
 
-    def delete_domain(self, domain_id: str) -> Optional[str]:
+    def delete_domain(self, domain_id: str, is_cleanup_call: bool = False) -> Optional[str]:
         """Delete a domain and its object.
 
-        If the domain is flanked by other domains on the same chain, the adjacent
-        domain (preferring the preceding one) will expand to fill the gap.
+        If the domain is the only one on its chain, deletion is prevented by the UI.
+        If multiple domains exist on the chain, deleting one will cause an adjacent
+        domain (preferring the one with a lower start residue) to expand and fill the gap.
+        
+        Args:
+            domain_id (str): The ID of the domain to delete.
+            is_cleanup_call (bool): True if called during full molecule cleanup, to suppress UI messages.
         
         Returns:
             Optional[str]: The ID of the domain that filled the gap, if any.
         """
         if domain_id not in self.domains:
+            print(f"Warning: Domain {domain_id} not found for deletion.")
             return None
         
-        # Get domain info before deletion
         domain_to_delete = self.domains[domain_id]
         chain_id = domain_to_delete.chain_id
-        start = domain_to_delete.start
-        end = domain_to_delete.end
+        start_del = domain_to_delete.start
+        end_del = domain_to_delete.end
         deleted_domain_name = domain_to_delete.name # For logging
+        original_parent_id = getattr(domain_to_delete, 'parent_domain_id', None)
+
+        # Count domains on the same chain
+        domains_on_this_chain = []
+        for d_id, d_obj in self.domains.items():
+            if d_obj.chain_id == chain_id:
+                domains_on_this_chain.append((d_id, d_obj))
         
-        # Find child domains that need reparenting
+        # UI should prevent deleting the last domain on a chain, but double check here
+        if len(domains_on_this_chain) <= 1 and domain_id in [d[0] for d in domains_on_this_chain] and not is_cleanup_call:
+            print(f"Deletion of domain {domain_id} prevented as it's the last on chain {chain_id}.")
+            if not is_cleanup_call: # Only show message if not part of a full cleanup
+                bpy.ops.wm.call_message_box(message=f"Cannot delete the last domain ({deleted_domain_name}) on chain {chain_id}.", title="Deletion Prevented", icon='ERROR')
+            return None # Should not happen if UI is working correctly
+
         children_to_reparent = []
         for child_id, child_domain in self.domains.items():
             if hasattr(child_domain, 'parent_domain_id') and child_domain.parent_domain_id == domain_id:
                 children_to_reparent.append(child_id)
-                
-        # Find the deleted domain's parent (will be inherited by children if no merge/expand occurs)
-        deleted_domain_parent_id = getattr(domain_to_delete, 'parent_domain_id', None)
             
         # --- Find adjacent domains on the same chain --- 
-        domain_before = None # Tuple: (id, domain_obj) ending right before 'start'
-        domain_after = None  # Tuple: (id, domain_obj) starting right after 'end'
+        domain_before = None # Tuple: (id, domain_obj) ending right before 'start_del'
+        domain_after = None  # Tuple: (id, domain_obj) starting right after 'end_del'
 
-        for adj_domain_id, adj_domain in self.domains.items():
-            if adj_domain_id != domain_id and adj_domain.chain_id == chain_id:
-                if adj_domain.end == start - 1:
+        for adj_domain_id, adj_domain in domains_on_this_chain:
+            if adj_domain_id == domain_id: # Skip the domain being deleted
+                continue
+            if adj_domain.end == start_del - 1:
                     domain_before = (adj_domain_id, adj_domain)
-                elif adj_domain.start == end + 1:
+            elif adj_domain.start == end_del + 1:
                     domain_after = (adj_domain_id, adj_domain)
         
         # --- Determine update target and range BEFORE deletion --- 
         update_target_id = None
         update_new_start = -1
         update_new_end = -1
-        final_reparent_target_id = deleted_domain_parent_id # Default if no update happens
+        final_reparent_target_id = original_parent_id
 
-        if domain_before:
-            # Plan to expand 'before' domain
+        # Determine which domain to expand or if merging is more complex
+        if domain_before and domain_after:
+            # Scenario: A - B(del) - C.  Expand A to cover B. C remains separate.
+            # update_target_id becomes domain_before.
+            # domain_after is NOT deleted in this specific step, domain_before just expands.
             update_target_id = domain_before[0]
             update_new_start = domain_before[1].start
-            update_new_end = end 
-            final_reparent_target_id = update_target_id # Reparent children to this domain after update
-            print(f"Planning to update domain {update_target_id} to expand range to {update_new_start}-{update_new_end}")
-
+            update_new_end = end_del # Expand domain_before to cover the deleted domain
+            print(f"Planning to expand {update_target_id} (ending at {domain_before[1].end}) to cover deleted range, new end: {update_new_end}. Domain {domain_after[0]} remains.")
+        elif domain_before:
+            # Scenario: A - B(del). Expand A to cover B.
+            update_target_id = domain_before[0]
+            update_new_start = domain_before[1].start
+            update_new_end = end_del
+            print(f"Planning to expand {update_target_id} to cover deleted range: {update_new_start}-{update_new_end}")
         elif domain_after:
-            # Plan to expand 'after' domain 
+            # Scenario: B(del) - C. Expand C to cover B.
             update_target_id = domain_after[0]
-            update_new_start = start 
+            update_new_start = start_del
             update_new_end = domain_after[1].end
-            final_reparent_target_id = update_target_id # Reparent children to this domain after update
-            print(f"Planning to update domain {update_target_id} to expand range to {update_new_start}-{update_new_end}")
+            print(f"Planning to expand {update_target_id} to cover deleted range: {update_new_start}-{update_new_end}")
+        else:
+            # No adjacent domains on this chain to expand. 
+            print(f"No adjacent domains to merge with {domain_id} on chain {chain_id}. It will be deleted directly.")
 
-        # --- Perform Deletion FIRST --- 
-        print(f"Deleting original domain {deleted_domain_name} ({domain_id}) now.")
+        if update_target_id:
+             final_reparent_target_id = update_target_id 
+
+        # --- Perform Deletion of the primary domain FIRST --- 
+        print(f"Deleting original domain {deleted_domain_name} ({domain_id}).")
         self._delete_domain_direct(domain_id)
         
-        # --- Perform Update AFTER Deletion --- 
+        # If domain_before and domain_after existed (A-B(del)-C case):
+        # The old logic was: merge all three into domain_before, and delete domain_after.
+        # New logic: domain_before expands to cover B. domain_after is untouched here.
+        # So, we no longer need to explicitly delete domain_after here as part of a three-way merge.
+        # if domain_before and domain_after and domain_after[0] in self.domains:
+        #     print(f"Old logic would have deleted merged domain {domain_after[0]}. New logic keeps it separate.")
+            # self._delete_domain_direct(domain_after[0]) # REMOVED: domain_after is not deleted now
+
+        # --- Perform Update AFTER Deletion(s) --- 
         updated_domain_id_result = None
-        if update_target_id is not None:
+        if update_target_id is not None and update_target_id in self.domains: # Check if target still exists
             print(f"Executing update for domain {update_target_id} to range {update_new_start}-{update_new_end}")
-            # Call update_domain. The returned ID might be new if the range change was significant
-            # enough to alter the standard ID format (though less likely with simple expansion)
             updated_domain_id_result = self.update_domain(update_target_id, chain_id, update_new_start, update_new_end)
-            final_reparent_target_id = updated_domain_id_result # Ensure reparenting uses the potentially new ID
+            final_reparent_target_id = updated_domain_id_result # Ensure reparenting uses the potentially new ID from update_domain
+            # Normalization is handled by update_domain if successful, or by _create_domain_with_params if new ones are made.
+            # If update_domain itself returns a new ID, that new ID would have been normalized.
+            # If it returns the same ID, it will normalize that one.
+            # So, no explicit call to _normalize_domain_name here for updated_domain_id_result is needed,
+            # as update_domain should handle it.
+        elif update_target_id:
+            print(f"Warning: Update target domain {update_target_id} was not found after deletions. Cannot expand.")
         else:
-             print("No adjacent domain found to update.")
+             print("No adjacent domain found to update or merge with.")
 
         # --- Final Steps --- 
-        
-        # Reparent any children of the originally deleted domain
-        print(f"Reparenting children to target: {final_reparent_target_id}")
+        print(f"Reparenting children of {deleted_domain_name} to target: {final_reparent_target_id}")
         self._reparent_child_domains(children_to_reparent, final_reparent_target_id)
         
-        # Return the ID of the domain that filled the gap (potentially the new ID after update)
+        # After deletion and potential merge, re-normalize names of all remaining domains on the affected chain
+        # This is because their status (e.g. sole domain) might have changed.
+        # Need to use the original chain_id of the deleted domain.
+        affected_chain_id = chain_id # This was `domain_to_delete.chain_id` (author chain id)
+        
+        # Create a list of domain IDs on this chain to iterate over, as self.domains might change during normalization
+        # if object names/etc., are modified in a way that affects ID generation (though less likely with current setup)
+        ids_on_chain_to_normalize = []
+        for d_id, d_obj in self.domains.items():
+            if d_obj.chain_id == affected_chain_id:
+                ids_on_chain_to_normalize.append(d_id)
+        
+        for id_to_norm in ids_on_chain_to_normalize:
+            if id_to_norm in self.domains: # Check if it still exists (e.g. wasn't the merged 'after' domain)
+                self._normalize_domain_name(id_to_norm)
+                
         return updated_domain_id_result
 
     def _reparent_child_domains(self, child_domain_ids: List[str], new_parent_id: Optional[str]):
@@ -1005,7 +1298,7 @@ class MoleculeWrapper:
         """Remove all domains and clean up resources"""
         # First clean up all domains
         for domain_id in list(self.domains.keys()):
-            self.delete_domain(domain_id)
+            self.delete_domain(domain_id, is_cleanup_call=True) # Pass True here
         
         # Clean up domain infrastructure nodes in parent molecule
         if self.molecule and self.molecule.object:
@@ -1013,33 +1306,52 @@ class MoleculeWrapper:
             if parent_modifier and parent_modifier.node_group:
                 parent_node_group = parent_modifier.node_group
                 
-                # Clean up domain join node and its node tree
-                if self.domain_join_node:
-                    # Remove the node tree first
-                    if self.domain_join_node.node_tree:
-                        bpy.data.node_groups.remove(self.domain_join_node.node_tree, do_unlink=True)
-                    # Then remove the node itself
-                    parent_node_group.nodes.remove(self.domain_join_node)
-                    self.domain_join_node = None
+                # List of specific node *instances* to remove from the parent molecule's node group
+                # These are part of the domain masking infrastructure.
+                infra_node_instances_to_remove = []
+
+                # Gather all join nodes (primary and overflows)
+                if hasattr(self, 'join_nodes'): 
+                    for node_instance in self.join_nodes:
+                        if node_instance and node_instance.name in parent_node_group.nodes:
+                            if node_instance not in infra_node_instances_to_remove:
+                                infra_node_instances_to_remove.append(node_instance)
                 
-                # Clean up any remaining domain-related nodes
-                nodes_to_remove = []
-                for node in parent_node_group.nodes:
-                    if (node.name.startswith("Domain_Chain_Select_") or 
-                        node.name.startswith("Domain_Res_Select_") or
-                        node.name == "Domain_Final_Not" or
-                        node.name == "Domain_Boolean_Join"):
-                        nodes_to_remove.append(node)
+                # Gather the final_not node
+                if hasattr(self, 'final_not') and self.final_not and self.final_not.name in parent_node_group.nodes:
+                    if self.final_not not in infra_node_instances_to_remove: # Avoid double add
+                        infra_node_instances_to_remove.append(self.final_not)
                 
-                # Remove all links connected to these nodes first
-                for link in list(parent_node_group.links):
-                    if (link.from_node in nodes_to_remove or 
-                        link.to_node in nodes_to_remove):
-                        parent_node_group.links.remove(link)
+                # Note: Domain_Chain_Select_ and Domain_Res_Select_ nodes (per-domain masks)
+                # are already removed by _delete_domain_mask_nodes when each domain is deleted in the loop above.
+
+                # Remove links connected to these infrastructure nodes before removing the nodes themselves.
+                if infra_node_instances_to_remove:
+                    links_to_detach_for_infra = []
+                    for link in parent_node_group.links: # Iterate over a copy if modifying links directly
+                        if link.from_node in infra_node_instances_to_remove or \
+                           link.to_node in infra_node_instances_to_remove:
+                            links_to_detach_for_infra.append(link)
+                    
+                    for link in links_to_detach_for_infra:
+                        try:
+                            parent_node_group.links.remove(link)
+                        except RuntimeError: # Link might have been removed due to other node removals
+                            pass
+
+                    # Remove the infrastructure node instances themselves
+                    for node_instance in infra_node_instances_to_remove:
+                        # IMPORTANT: We remove the node *instance* from this specific parent_node_group.
+                        # We DO NOT remove node_instance.node_tree, as it might be a shared asset.
+                        try:
+                            parent_node_group.nodes.remove(node_instance)
+                        except RuntimeError: # Node might have been removed already
+                            pass
                 
-                # Then remove the nodes
-                for node in nodes_to_remove:
-                    parent_node_group.nodes.remove(node)
+                # Reset internal trackers for these nodes
+                self.domain_join_node = None # This was the primary one, typically the first in self.join_nodes
+                if hasattr(self, 'join_nodes'): self.join_nodes = []
+                if hasattr(self, 'final_not'): self.final_not = None
         
         # Clear all domain-related dictionaries
         self.domains.clear()
@@ -1668,3 +1980,54 @@ class MoleculeManager:
     def get_molecule(self, identifier: str) -> Optional[MoleculeWrapper]:
         """Get a molecule by its identifier (PDB ID or name)"""
         return self.molecules.get(identifier) 
+
+    def delete_molecule(self, identifier: str):
+        """Deletes a molecule and all its associated Blender objects and data."""
+        print(f"Attempting to delete molecule: {identifier}")
+        molecule_wrapper = self.get_molecule(identifier)
+        if not molecule_wrapper:
+            print(f"Molecule {identifier} not found in manager.")
+            return
+
+        # 1. Call cleanup on the MoleculeWrapper to remove domains and their objects/nodes
+        print(f"Cleaning up domains for molecule {identifier}...")
+        molecule_wrapper.cleanup()
+
+        # 2. Delete the main Blender object for the molecule
+        if molecule_wrapper.molecule and molecule_wrapper.molecule.object:
+            main_mol_object = molecule_wrapper.molecule.object
+            object_name = main_mol_object.name
+            collection_name = main_mol_object.users_collection[0].name if main_mol_object.users_collection else None
+            print(f"Deleting main molecule object: {object_name}")
+            try:
+                bpy.data.objects.remove(main_mol_object, do_unlink=True)
+            except Exception as e:
+                print(f"Error removing main molecule object {object_name}: {e}")
+
+            # 3. Attempt to remove the collection if it was specific to this molecule and is now empty
+            # This is a heuristic. A more robust system might tag collections or use naming conventions.
+            if collection_name:
+                collection = bpy.data.collections.get(collection_name)
+                if collection and not collection.all_objects: # If collection is empty
+                    # Further check if the collection name matches a pattern or the molecule identifier
+                    # to avoid deleting general-purpose collections.
+                    if identifier in collection_name or object_name.startswith(collection_name): # Basic check
+                        print(f"Deleting empty collection: {collection_name}")
+                        try:
+                            bpy.data.collections.remove(collection)
+                        except Exception as e:
+                            print(f"Error removing collection {collection_name}: {e}")
+                    else:
+                        print(f"Collection {collection_name} is empty but not deemed specific to {identifier}, not deleting.")
+                elif collection:
+                    print(f"Collection {collection_name} is not empty, not deleting.")
+
+        # 4. Remove the molecule from the manager's dictionary
+        if identifier in self.molecules:
+            del self.molecules[identifier]
+            print(f"Molecule {identifier} removed from manager.")
+
+        # Ensure UI updates if an operator calls this
+        # This might involve tagging areas for redraw or using a message bus
+        # For now, this function focuses on data cleanup.
+        # Operators calling this should handle their own UI refresh.

@@ -330,13 +330,22 @@ class MOLECULE_PB_PT_list(Panel):
                         vis_row.prop(obj, "hide_viewport", text="", emboss=False,
                                  icon='HIDE_OFF' if not obj.hide_viewport else 'HIDE_OFF')
 
-                    # Add delete button
-                    delete_op = header_row.operator(
+                    # Add delete button - check if it should be enabled
+                    # Count domains on the same chain
+                    domains_on_same_chain = 0
+                    for d_id, d_obj in molecule.domains.items():
+                        if d_obj.chain_id == domain.chain_id:
+                            domains_on_same_chain += 1
+                    
+                    delete_op_row = header_row.row(align=True)
+                    delete_op = delete_op_row.operator(
                         "molecule.delete_domain",
                         text="",
                         icon='X'
                     )
                     delete_op.domain_id = domain_id
+                    if domains_on_same_chain <= 1:
+                        delete_op_row.enabled = False # Disable the row containing the operator
 
                     # If expanded, show domain controls
                     if is_expanded:
@@ -530,7 +539,27 @@ class MOLECULE_PB_PT_list(Panel):
                         # Scale
                         scale_row = transform_box.row(align=True)
                         scale_row.prop(obj, "scale", text="")
-                    
+
+                        # --- Domain Splitting UI ---
+                        split_box = control_box.box()
+                        split_box.label(text="Split Domain")
+
+                        # New start and end inputs
+                        split_inputs_row = split_box.row(align=True)
+                        split_inputs_row.prop(scene, "split_domain_new_start", text="New Start")
+                        split_inputs_row.prop(scene, "split_domain_new_end", text="New End")
+                        
+                        # Split button
+                        split_button_row = split_box.row()
+                        split_op = split_button_row.operator(
+                            "molecule.split_domain", 
+                            text="Split This Domain", 
+                            icon='MOD_EDGESPLIT'
+                        )
+                        if split_op:
+                            split_op.domain_id = domain_id
+                        # --- End Domain Splitting UI ---
+
                     # Draw child domains recursively (if any)
                     if domain_id in child_domains:
                         for child_id, child_domain_obj_ref in child_domains[domain_id]: # Renamed to avoid conflict
