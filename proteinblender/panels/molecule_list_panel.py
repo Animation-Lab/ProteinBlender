@@ -59,7 +59,14 @@ class MOLECULE_PB_PT_list(Panel):
                 
                 # Visibility toggle
                 vis_row = row.row()
-                vis_row.prop(molecule.object, "hide_viewport", text="", emboss=False, icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_OFF')
+                # Toggle visibility of molecule and its domains
+                toggle_vis = vis_row.operator(
+                    "molecule.toggle_visibility",
+                    text="",
+                    emboss=False,
+                    icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_ON'
+                )
+                toggle_vis.molecule_id = molecule_id
                 
                 # Delete button
                 delete_op = row.operator("molecule.delete", text="", icon='X')

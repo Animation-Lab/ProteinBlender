@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty
 from ..utils.scene_manager import ProteinBlenderScene
 from mathutils import Vector
 import random
@@ -730,7 +730,9 @@ class MOLECULE_PB_OT_update_domain_color(Operator):
     bl_description = "Update the color of the selected domain"
     
     domain_id: StringProperty()
-    color: FloatProperty(
+    color: FloatVectorProperty(
+        name="Color",
+        subtype='COLOR',
         size=4,
         min=0.0, max=1.0,
         default=(0.8, 0.1, 0.8, 1.0)

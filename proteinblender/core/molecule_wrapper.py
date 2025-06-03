@@ -1,4 +1,4 @@
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Union, Set
 import bpy
 import numpy as np
 import colorsys
@@ -19,14 +19,38 @@ class MoleculeWrapper:
         self.style = "spheres"  # Default style
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
+        self.residue_sets: Dict[str, Set[int]] = {} # For custom residue selections
         
-        # Store the chain mapping if available
-        self.chain_mapping = {}
-        if hasattr(molecule.array, 'chain_mapping_str'):
-            self.chain_mapping = self._parse_chain_mapping(molecule.array.chain_mapping_str)
+        # Ensure the molecule has the necessary integer chain ID attribute
+        if not self.molecule.array.has_annotation("chain_id_int"):
+            self.molecule.array.add_annotation("chain_id_int", dtype=int)
+            unique_chain_ids, int_indices = np.unique(self.molecule.array.chain_id, return_inverse=True)
+            self.molecule.array.set_annotation("chain_id_int", int_indices)
+            print(f"DEBUG MoleWrap.__init__: Added 'chain_id_int' annotation. Unique chains processed: {len(unique_chain_ids)}")
+
+        # 1. Author-provided chain ID map (often from mmCIF _atom_site.auth_asym_id)
+        # Biotite's chain_mapping_str() typically provides a map from an integer index (related to unique auth_asym_ids) to the auth_asym_id string.
+        # Let's verify its structure and content.
+        raw_auth_map = molecule.array.chain_mapping_str() if hasattr(molecule.array, 'chain_mapping_str') else {}
+        self.auth_chain_id_map: Dict[int, str] = {}
+        if isinstance(raw_auth_map, dict):
+            self.auth_chain_id_map = {k: v for k, v in raw_auth_map.items() if isinstance(k, int) and isinstance(v, str)}
+        print(f"DEBUG MoleWrap.__init__: self.auth_chain_id_map (processed from chain_mapping_str): {self.auth_chain_id_map}")
+
+        # 2. Map from internal integer chain index (0,1,2...) to _atom_site.label_asym_id ('A','B','C'...)
+        # This uses molecule.array.chain_id which Biotite populates with label_asym_id for mmCIF.
+        self.idx_to_label_asym_id_map: Dict[int, str] = {}
+        if hasattr(molecule.array, 'chain_id'): # This is label_asym_id from Biotite for mmCIF
+            unique_label_asym_ids = sorted(list(np.unique(molecule.array.chain_id)))
+            print(f"DEBUG MoleWrap.__init__: Unique label_asym_ids from molecule.array.chain_id: {unique_label_asym_ids}")
+            for i, label_id_str in enumerate(unique_label_asym_ids):
+                self.idx_to_label_asym_id_map[i] = str(label_id_str) # Ensure it's a string
+        else:
+            print("Warning MoleWrap.__init__: molecule.array.chain_id not found. Cannot create idx_to_label_asym_id_map.")
+        print(f"DEBUG MoleWrap.__init__: self.idx_to_label_asym_id_map: {self.idx_to_label_asym_id_map}")
         
-        # Initialize chain residue ranges
-        self.chain_residue_ranges = self._get_chain_residue_ranges()
+        self.chain_residue_ranges: Dict[str, Tuple[int, int]] = self._get_chain_residue_ranges()
+        print(f"DEBUG MoleWrap.__init__: self.chain_residue_ranges: {self.chain_residue_ranges}")
         
         # Add after existing initialization
         self.preview_nodes = None
@@ -216,7 +240,7 @@ class MoleculeWrapper:
         
         # Determine the mapped chain
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        mapped_chain = self.auth_chain_id_map.get(chain_id_int, str(chain_id))
         
         # Check if the mapped chain has residue ranges
         if mapped_chain not in self.chain_residue_ranges:
@@ -376,7 +400,7 @@ class MoleculeWrapper:
         """Find the next available non-overlapping section on a chain"""
         # Get the residue range for this chain
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        mapped_chain = self.auth_chain_id_map.get(chain_id_int, str(chain_id))
         
         print(f"Finding available section for chain_id={chain_id}, mapped_chain={mapped_chain}")
         print(f"Available residue ranges: {self.chain_residue_ranges}")
@@ -438,76 +462,71 @@ class MoleculeWrapper:
         return None
     
     def _parse_chain_mapping(self, mapping_str: str) -> dict:
-        """Parse chain mapping string into a dictionary"""
+        """Parse chain mapping string (likely numeric_id_from_source_file -> auth_asym_id) into a dictionary"""
         mapping = {}
         if mapping_str:
-            for pair in mapping_str.split(","):
-                if ":" in pair:
-                    k, v = pair.split(":")
-                    mapping[int(k)] = v
+            for pair in mapping_str.split(\",\"):
+                if \":\" in pair:
+                    try:
+                        k_str, v = pair.split(\":\")
+                        mapping[int(k_str)] = v
+                    except ValueError:
+                        print(f"Warning: Could not parse pair '{pair}' in chain_mapping_str '{mapping_str}'")
         return mapping
     
-    def _get_chain_residue_ranges(self) -> Dict[str, tuple]:
-        """Get the residue ranges for each chain in the molecule"""
-        ranges = {}
-        
-        if not self.molecule.object:
-            print("No molecule object found")
-            return ranges
+    def _get_chain_residue_ranges(self) -> Dict[str, Tuple[int, int]]:
+        """Computes the min and max residue numbers for each chain, keyed by label_asym_id."""
+        ranges: Dict[str, Tuple[int, int]] = {}
+        if not hasattr(self.molecule.array, 'res_id') or not hasattr(self.molecule.array, 'chain_id_int'):
+            print("Warning MoleWrap._get_chain_residue_ranges: Missing 'res_id' or 'chain_id_int' annotation. Cannot compute ranges.")
+            return {}
+
+        res_ids = self.molecule.array.res_id
+        # Use 'chain_id_int' for grouping, as this is our reliable internal integer index (0, 1, 2...)
+        int_chain_indices = self.molecule.array.chain_id_int 
+
+        unique_int_chain_keys = np.unique(int_chain_indices)
+        print(f"DEBUG MoleWrap._get_chain_residue_ranges: Unique integer chain keys found: {unique_int_chain_keys}")
+
+        for int_chain_key in unique_int_chain_keys:
+            # Convert integer chain key to label_asym_id for the ranges dictionary key
+            label_asym_id_for_key = self.idx_to_label_asym_id_map.get(int(int_chain_key))
             
-        # Check if we have chain_id attribute at least
-        if "chain_id" in self.molecule.object.data.attributes:
-            # Get chain attribute
-            chain_attr = self.molecule.object.data.attributes["chain_id"]
+            if not label_asym_id_for_key:
+                print(f"Warning MoleWrap._get_chain_residue_ranges: Integer chain_id {int_chain_key} not in idx_to_label_asym_id_map. Trying auth_chain_id_map or skipping.")
+                # Fallback attempt using auth_chain_id_map if it has this integer key
+                label_asym_id_for_key = self.auth_chain_id_map.get(int(int_chain_key))
+                if not label_asym_id_for_key:
+                    print(f"Warning MoleWrap._get_chain_residue_ranges: Still no mapping for int_chain_key {int_chain_key}. Using str({int_chain_key}) as fallback key.")
+                    label_asym_id_for_key = str(int_chain_key) # Last resort, use the int as string
             
-            # If we have residue_number attribute, use it to determine ranges
-            if "residue_number" in self.molecule.object.data.attributes:
-                res_attr = self.molecule.object.data.attributes["residue_number"]
-                
-                # Ensure both attributes have data
-                if len(res_attr.data) > 0 and len(chain_attr.data) > 0:
-                    # Group residues by chain
-                    chain_residues = {}
-                    for i in range(len(res_attr.data)):
-                        chain_id = str(chain_attr.data[i].value)
-                        res_num = res_attr.data[i].value
-                        
-                        if chain_id not in chain_residues:
-                            chain_residues[chain_id] = []
-                            
-                        chain_residues[chain_id].append(res_num)
-                        
-                    # Calculate min/max for each chain
-                    for chain_id, residues in chain_residues.items():
-                        if residues:
-                            ranges[chain_id] = (min(residues), max(residues))
-            
-            # If we still have no ranges but we have chains, create default ranges
-            if not ranges:
-                print("No residue ranges found, creating default ranges")
-                
-                # Get unique chain IDs
-                unique_chains = sorted(set(str(value.value) for value in chain_attr.data))
-                
-                # Create default ranges (1-100 for each chain)
-                for chain_id in unique_chains:
-                    ranges[chain_id] = (1, 100)
-                    
-                print(f"Created default residue ranges for {len(ranges)} chains")
+            print(f"DEBUG MoleWrap._get_chain_residue_ranges: Processing int_chain_key: {int_chain_key}, resolved label_asym_id_for_key: {label_asym_id_for_key}")
+
+            mask = (int_chain_indices == int_chain_key)
+            if np.any(mask):
+                chain_res_ids = res_ids[mask]
+                if chain_res_ids.size > 0:
+                    ranges[label_asym_id_for_key] = (int(np.min(chain_res_ids)), int(np.max(chain_res_ids)))
         else:
-            print("No chain_id attribute found in molecule data")
+                    print(f"Warning MoleWrap._get_chain_residue_ranges: No residues found for int_chain_key {int_chain_key} (mapped to {label_asym_id_for_key}) despite mask being non-empty.")
+            else:
+                 print(f"Warning MoleWrap._get_chain_residue_ranges: No atoms found for int_chain_key {int_chain_key} (mask was empty).")
             
-        # Add debug information
-        print(f"Found chain residue ranges: {ranges}")
         if not ranges:
-            print("Warning: No residue ranges found for any chain")
-            
+            print("Warning MoleWrap._get_chain_residue_ranges: No residue ranges could be determined for any chain.")
+            # As a last resort, if idx_to_label_asym_id_map exists, create default (e.g., 1-100) ranges for all known label_asym_ids
+            if self.idx_to_label_asym_id_map:
+                print("Creating default (1-100) ranges for all chains known from idx_to_label_asym_id_map as a final fallback.")
+                for label_asym_id_val in self.idx_to_label_asym_id_map.values():
+                    ranges[label_asym_id_val] = (1, 100) # Default placeholder range
+
+        print(f"DEBUG MoleWrap._get_chain_residue_ranges: Final 'ranges' to be returned: {ranges}")
         return ranges
     '''
     def _check_domain_overlap(self, chain_id: int, start: int, end: int, exclude_domain_id: Optional[str] = None) -> bool:
         """Check if a domain would overlap with existing domains"""
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        mapped_chain = self.auth_chain_id_map.get(chain_id_int, str(chain_id))
         
         for domain_id, domain in self.domains.items():
             if exclude_domain_id and domain_id == exclude_domain_id:
@@ -584,7 +603,7 @@ class MoleculeWrapper:
                     input_socket.default_value = False
                     
             # Set the selected chain
-            mapped_chain = self.chain_mapping.get(chain_id, str(chain_id))
+            mapped_chain = self.auth_chain_id_map.get(chain_id, str(chain_id))
             for input_socket in chain_select.inputs:
                 if input_socket.name == mapped_chain:
                     input_socket.default_value = True
@@ -627,543 +646,548 @@ class MoleculeWrapper:
         # Remove from tracking dictionary
         del self.domain_mask_nodes[domain_id]
     
-    def _create_domain_mask_nodes(self, domain_id: str, chain_id: str, start: int, end: int):
-        """Create nodes to mask out a domain in the parent molecule"""
-        # Get the parent molecule's node group
-        parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
-        if not parent_modifier or not parent_modifier.node_group:
+    def _create_domain_mask_nodes(self, domain: DomainDefinition, chain_id_int_str: str, start: int, end: int):
+        """Creates the Geometry Node setup on the domain object to mask the parent molecule."""
+        if not domain.object:
+            print(f"ERROR MoleWrap._create_domain_mask_nodes: Domain object for {domain.id} not found.")
             return
             
-        parent_node_group = parent_modifier.node_group
-        
-        # Step 1: Create chain selection node
-        chain_select_name = f"Domain_Chain_Select_{domain_id}"
-        chain_select = None
-        for node in parent_node_group.nodes:
-            if node.name == chain_select_name:
-                chain_select = node
-                break
-                
-        if not chain_select:
-            # Create chain selection node - but don't use nodes.add_selection directly
-            # as it automatically connects to the style node
-            chain_select_group = nodes.custom_iswitch(
-                name="selection", 
-                iter_list=self.chain_mapping.values() or [str(chain_id)], 
-                field="chain_id", 
-                dtype="BOOLEAN"
-            )
-            
-            chain_select = nodes.add_custom(
-                parent_node_group,
-                chain_select_group.name
-            )
-            
-            # Position to the left of the join node
-            chain_select.location = (self.domain_join_node.location.x - 600, 
-                                   self.domain_join_node.location.y - 100 - len(self.domain_mask_nodes) * 100)
-            chain_select.name = chain_select_name
-        
-        # Step 2: Configure chain selection
-        mapped_chain = self.chain_mapping.get(int(chain_id) if chain_id.isdigit() else chain_id, str(chain_id))
-        for input_socket in chain_select.inputs:
-            # Skip non-boolean inputs (like group inputs)
-            if input_socket.type != 'BOOLEAN':
-                continue
-            if input_socket.name == mapped_chain:
-                input_socket.default_value = True
-            else:
-                input_socket.default_value = False
-        
-        # Step 3: Create residue range selection node
-        res_select_name = f"Domain_Res_Select_{domain_id}"
-        res_select = None
-        for node in parent_node_group.nodes:
-            if node.name == res_select_name:
-                res_select = node
-                break
-                
-        if not res_select:
-            # Create residue range selection node
-            res_select_group = nodes.custom_range(
-                name="selection", 
-                field="residue_number", 
-                dtype="INT"
-            )
-            
-            res_select = nodes.add_custom(
-                parent_node_group,
-                res_select_group.name
-            )
-            
-            # Position to the right of chain selection
-            res_select.location = (chain_select.location.x + 300, chain_select.location.y)
-            res_select.name = res_select_name
-        
-        # Step 4: Configure residue range
-        if "Min" in res_select.inputs:
-            res_select.inputs["Min"].default_value = start
-        if "Max" in res_select.inputs:
-            res_select.inputs["Max"].default_value = end
-        
-        # Step 5: Connect chain and residue selection
-        if chain_select and res_select:
-            print("Connecting chain selection to residue range")
-            # Find the output socket from chain selection
-            chain_out = None
-            for output in chain_select.outputs:
-                if output.type == 'GEOMETRY':
-                    chain_out = output
-                    print(f"Found chain selection output socket: {output.name}")
-                    break
-                    
-            # Find the geometry input socket for residue selection
-            res_in = None
-            for input_socket in res_select.inputs:
-                if input_socket.type == 'GEOMETRY':
-                    res_in = input_socket
-                    print(f"Found residue range input socket: {input_socket.name}")
-                    break
-                    
-            if chain_out and res_in:
-                try:
-                    node_group.links.new(chain_out, res_in)
-                    print(f"Connected chain selection output to residue range input")
-                except Exception as e:
-                    print(f"Error connecting chain selection to residue range: {e}")
-            else:
-                print(f"Could not connect chain to residue selection: chain_out={chain_out is not None}, res_in={res_in is not None}")
-        
-        # Step 6: Connect to the style node
-        style_node = None
-        for node in node_group.nodes:
-            if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Style" in node.node_tree.name:
-                style_node = node
-                print(f"Found style node: {node.name}")
-                break
-                
-        if style_node and res_select:
-            print("Connecting residue range to style node")
-            res_out = None
-            for output in res_select.outputs:
-                if output.type == 'GEOMETRY':
-                    res_out = output
-                    print(f"Found residue range output socket: {output.name}")
-                    break
-                    
-            if res_out:
-                # Find the geometry input socket for style node
-                style_in = None
-                for input_socket in style_node.inputs:
-                    if input_socket.type == 'GEOMETRY':
-                        style_in = input_socket
-                        print(f"Found style node input socket: {input_socket.name}")
-                        break
-                        
-                if style_in:
-                    try:
-                        node_group.links.new(res_out, style_in)
-                        print(f"Connected residue range output to style node input")
-                    except Exception as e:
-                        print(f"Error connecting residue range to style node: {e}")
-                else:
-                    print("Could not find geometry input socket for style node")
-            else:
-                print("Could not find geometry output socket for residue range")
+        print(f"DEBUG MoleWrap._create_domain_mask_nodes: Setting up GN for domain {domain.id}, chain_int_str '{chain_id_int_str}', range {start}-{end}")
+
+        # Ensure there's a GN modifier
+        if not domain.object.modifiers:
+            gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
         else:
-            print(f"Could not connect residue range to style: style_node={style_node is not None}, res_select={res_select is not None}")
+            gn_mod = domain.object.modifiers.get("ProteinBlender Domain Mask")
+            if not gn_mod:
+                gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
         
-        # Step 7: Clean up any unused nodes
-        print("Cleaning up unused nodes")
-        self._clean_unused_nodes(node_group)
+        if not gn_mod.node_group:
+            gn_mod.node_group = bpy.data.node_groups.new(name=f"ng_{domain.id}_mask", type='GeometryNodeTree')
         
-        print("Domain network setup complete")
-    
-    def _clean_unused_nodes(self, node_group):
-        """Clean up unused nodes in a node group"""
-        # Find all connected nodes starting from the group output
-        connected_nodes = set()
-        output_node = None
+        ng = gn_mod.node_group
+        nodes = ng.nodes
+        links = ng.links
+        nodes.clear()
+
+        # Group Input and Output
+        group_input = nodes.new(type='NodeGroupInput')
+        group_input.location = (-400, 0)
+        group_output = nodes.new(type='NodeGroupOutput')
+        group_output.location = (400, 0)
+
+        # Object Info node for the parent molecule
+        obj_info_node = nodes.new(type='GeometryNodeObjectInfo')
+        obj_info_node.location = (-200, 200)
+        obj_info_node.transform_space = 'RELATIVE' # Important for instanced molecules too
+        if self.molecule.object:
+            obj_info_node.inputs[0].default_value = self.molecule.object # Link to parent molecule
+
+        # Named Attribute for chain_id_int
+        chain_attr_node = nodes.new(type='GeometryNodeInputNamedAttribute')
+        chain_attr_node.location = (-200, 100)
+        chain_attr_node.data_type = 'INT'
+        chain_attr_node.inputs["Name"].default_value = "chain_id_int"
+
+        # Compare node for chain_id_int
+        compare_chain_node = nodes.new(type='FunctionNodeCompare')
+        compare_chain_node.location = (0, 100)
+        compare_chain_node.data_type = 'INT'
+        compare_chain_node.operation = 'EQUAL'
+        compare_chain_node.inputs[2].default_value = int(chain_id_int_str) # B input
+
+        # Named Attribute for res_id
+        res_attr_node = nodes.new(type='GeometryNodeInputNamedAttribute')
+        res_attr_node.location = (-200, 0)
+        res_attr_node.data_type = 'INT'
+        res_attr_node.inputs["Name"].default_value = "res_id"
+
+        # Compare node for start residue (res_id >= start)
+        compare_start_node = nodes.new(type='FunctionNodeCompare')
+        compare_start_node.location = (0, 0)
+        compare_start_node.data_type = 'INT'
+        compare_start_node.operation = 'GREATER_THAN_OR_EQUAL'
+        compare_start_node.inputs[2].default_value = start # B input
+
+        # Compare node for end residue (res_id <= end)
+        compare_end_node = nodes.new(type='FunctionNodeCompare')
+        compare_end_node.location = (0, -100)
+        compare_end_node.data_type = 'INT'
+        compare_end_node.operation = 'LESS_THAN_OR_EQUAL'
+        compare_end_node.inputs[2].default_value = end # B input
+
+        # Boolean Math AND node (Chain AND Start)
+        and1_node = nodes.new(type='FunctionNodeBooleanMath')
+        and1_node.location = (200, 50)
+        and1_node.operation = 'AND'
+
+        # Boolean Math AND node ((Chain AND Start) AND End)
+        and2_node = nodes.new(type='FunctionNodeBooleanMath')
+        and2_node.location = (200, -50)
+        and2_node.operation = 'AND'
+
+        # Link nodes
+        links.new(obj_info_node.outputs['Geometry'], chain_attr_node.inputs['Geometry'])
+        links.new(obj_info_node.outputs['Geometry'], res_attr_node.inputs['Geometry'])
         
-        # Find the group output node
-        for node in node_group.nodes:
-            if node.bl_idname == 'NodeGroupOutput':
-                output_node = node
-                break
-                
-        if not output_node:
-            return
-            
-        # Recursive function to find all connected nodes
-        def find_connected_nodes(node):
-            if node in connected_nodes:
-                return
-                
-            connected_nodes.add(node)
-            
-            # Check all input links
-            for input_socket in node.inputs:
-                for link in input_socket.links:
-                    find_connected_nodes(link.from_node)
+        links.new(chain_attr_node.outputs['Attribute'], compare_chain_node.inputs[1]) # A input
+        links.new(res_attr_node.outputs['Attribute'], compare_start_node.inputs[1])   # A input
+        links.new(res_attr_node.outputs['Attribute'], compare_end_node.inputs[1])     # A input
+
+        links.new(compare_chain_node.outputs['Result'], and1_node.inputs[0])
+        links.new(compare_start_node.outputs['Result'], and1_node.inputs[1])
         
-        # Start from the output node
-        find_connected_nodes(output_node)
-        
-        # Remove all nodes that are not connected to the output
-        for node in list(node_group.nodes):
-            if node not in connected_nodes:
-                node_group.nodes.remove(node)
-    
-    def update_domain(self, domain_id: str, chain_id: str, start: int, end: int) -> bool:
-        """Update an existing domain with new parameters"""
-        if domain_id not in self.domains:
-            return False
-            
+        links.new(and1_node.outputs['Boolean'], and2_node.inputs[0])
+        links.new(compare_end_node.outputs['Result'], and2_node.inputs[1])
+
+        # Output the original geometry and the selection
+        if not ng.outputs:
+            ng.outputs.new('NodeSocketGeometry', 'Geometry')
+            ng.outputs.new('NodeSocketBool', 'Selection')
+        elif len(ng.outputs) < 2:
+            if 'Geometry' not in ng.outputs: ng.outputs.new('NodeSocketGeometry', 'Geometry')
+            if 'Selection' not in ng.outputs: ng.outputs.new('NodeSocketBool', 'Selection')
+        else: # Ensure correct names if they exist
+            if ng.outputs[0].name != 'Geometry': ng.outputs[0].name = 'Geometry'
+            if ng.outputs[1].name != 'Selection': ng.outputs[1].name = 'Selection'
+
+        links.new(obj_info_node.outputs['Geometry'], group_output.inputs['Geometry'])
+        links.new(and2_node.outputs['Boolean'], group_output.inputs['Selection'])
+
+        print(f"DEBUG MoleWrap._create_domain_mask_nodes: GN setup complete for domain {domain.id}")
+
+    def _create_domain_with_params(self, chain_id_int_str: str, start: int, end: int, name: Optional[str] = None, 
+                                   auto_fill_chain: bool = True, 
+                                   parent_domain_id: Optional[str] = None,
+                                   fill_boundaries_start: Optional[int] = None,
+                                   fill_boundaries_end: Optional[int] = None,
+                                   parent_domain_id_for_fillers: Optional[str] = None
+                                   ) -> Optional[str]:
+        """Internal method to create a domain with specific parameters.
+        Args:
+            chain_id_int_str: The STRINGIFIED INTEGER chain ID (e.g., '0', '1', '2') used for attribute lookups in Blender.
+            start: Start residue
+            end: End residue
+            name: Optional name for the domain
+            auto_fill_chain: Whether to automatically create additional domains to fill the chain.
+            parent_domain_id: ID of an existing domain this new one might be a sub-part of.
+            fill_boundaries_start: Optional start of the context to fill (used by auto_fill_chain)
+            fill_boundaries_end: Optional end of the context to fill (used by auto_fill_chain)
+            parent_domain_id_for_fillers: Explicit parent for fillers if different from 'parent_domain_id'
+        """
         try:
-            domain = self.domains[domain_id]
+            chain_id_int = int(chain_id_int_str)
+        except ValueError:
+            print(f"ERROR MoleWrap._create_domain_with_params: chain_id_int_str '{chain_id_int_str}' could not be converted to int. Skipping domain.")
+            return None
+
+        label_asym_id_for_domain = self.idx_to_label_asym_id_map.get(chain_id_int)
+        if not label_asym_id_for_domain:
+            print(f"Warning MoleWrap._create_domain_with_params: Integer chain ID {chain_id_int} not found in idx_to_label_asym_id_map. Attempting fallback to auth_chain_id_map or using stringified int.")
+            label_asym_id_for_domain = self.auth_chain_id_map.get(chain_id_int, chain_id_int_str) # Fallback
+            print(f"Fallback: Using '{label_asym_id_for_domain}' for domain naming/definition based on fallback for int chain id {chain_id_int}.")
+
+        domain_name = name if name else f"Chain {label_asym_id_for_domain}"
+        # Use label_asym_id for domain_id generation if possible, otherwise the int string
+        base_chain_id_for_domain_obj = label_asym_id_for_domain 
+
+        domain_id = f"{self.identifier}_{base_chain_id_for_domain_obj}_{start}_{end}_{name if name else 'domain'}".replace(" ", "_")
+        if domain_id in self.domains:
+            print(f"Warning: Domain ID '{domain_id}' already exists. Skipping.")
+            return domain_id # Or None, depending on desired behavior for duplicates
+
+        current_start, current_end = start, end
+        # Clamp start/end to actual chain residue ranges using label_asym_id_for_domain as key
+        if label_asym_id_for_domain in self.chain_residue_ranges:
+            min_res_chain, max_res_chain = self.chain_residue_ranges[label_asym_id_for_domain]
+            current_start = max(current_start, min_res_chain)
+            current_end = min(current_end, max_res_chain)
+            if current_start > current_end:
+                print(f"Warning MoleWrap._create_domain_with_params: Domain for {label_asym_id_for_domain} (Int ID: {chain_id_int_str}) has start ({start}>{end}) or ({current_start}>{current_end}) after clamping. Range: ({min_res_chain}-{max_res_chain}). Skipping.")
+                return None
+        else:
+            print(f"Warning MoleWrap._create_domain_with_params: Chain key '{label_asym_id_for_domain}' (derived from int_id {chain_id_int_str}) not in self.chain_residue_ranges. Cannot accurately clamp. Ranges: {self.chain_residue_ranges}. Skipping.")
+            return None
+
+        domain = DomainDefinition(
+            id=domain_id, 
+            name=domain_name, 
+            molecule_wrapper=self, 
+            chain_id=label_asym_id_for_domain, # Store the label_asym_id here
+            start=current_start, 
+            end=current_end,
+            parent_domain_id=parent_domain_id
+        )
+
+        # _setup_domain_network MUST receive the stringified INTEGER chain ID (chain_id_int_str) for attribute comparison in Blender
+        if not self._setup_domain_network(domain, chain_id_int_str, current_start, current_end):
+            print(f"Warning MoleWrap._create_domain_with_params: Domain '{domain.name}' (Labelled Chain: {label_asym_id_for_domain}, Int Attr: {chain_id_int_str}, Range: {current_start}-{current_end}) could not be fully initialized via _setup_domain_network. Skipping.")
+            if domain.object and domain.object.name in bpy.data.objects: # Cleanup if object was created
+                try: bpy.data.objects.remove(domain.object, do_unlink=True)
+                except: pass
+            return None
+
+        if not domain.object:
+             print(f"Critical Error MoleWrap._create_domain_with_params: domain.object is not set after successful _setup_domain_network for {domain_id}. This should not happen. Skipping further setup.")
+             return None # Cannot proceed without the Blender object
+
+        domain.object["domain_expanded"] = False
+        domain.object["domain_color_field_name"] = f"domain_color_{domain_id}"
+        domain.object["parent_protein_obj_name"] = self.molecule.object.name
+        if parent_domain_id:
+            domain.object["parent_domain_id"] = parent_domain_id
+
+        self.domains[domain_id] = domain
+        print(f"DEBUG MoleWrap._create_domain_with_params: Domain '{domain_id}' added to self.domains. Current count: {len(self.domains)}")
+
+        # Handle auto-fill logic. This should not change the return of *this* primary domain_id.
+        if auto_fill_chain and parent_domain_id_for_fillers:
+            print(f"DEBUG MoleWrap._create_domain_with_params: auto_fill_chain is True for {domain_id}. Parent for fillers: {parent_domain_id_for_fillers}")
+            context_min_res_for_fill = fill_boundaries_start if fill_boundaries_start is not None else self.chain_residue_ranges[label_asym_id_for_domain][0]
+            context_max_res_for_fill = fill_boundaries_end if fill_boundaries_end is not None else self.chain_residue_ranges[label_asym_id_for_domain][1]
             
-            # Check for overlaps with other domains
-            if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
-                print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
-                return False
-                
-            # Update domain definition
-            domain.chain_id = chain_id
-            domain.start = start
-            domain.end = end
-            
-            # Update domain object name
-            new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
-            domain.object.name = f"{domain.name}_{chain_id}_{start}_{end}"
-            
-            # Update domain node network
-            self._setup_domain_network(domain, chain_id, start, end)
-            
-            # Update domain mask nodes
-            self._delete_domain_mask_nodes(domain_id)
-            self._create_domain_mask_nodes(new_domain_id, chain_id, start, end)
-            
-            # Update residue assignments
-            self._update_residue_assignments(domain)
-            
-            # If the domain ID has changed, update the dictionary
-            if domain_id != new_domain_id:
-                # Store domain under new ID
-                self.domains[new_domain_id] = domain
-                # Remove old ID entry
-                del self.domains[domain_id]
-                # Return the new domain ID
-                return True
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error updating domain: {str(e)}")
+            self._create_additional_domains_to_span_context(
+                chain_id_int_str=chain_id_int_str, 
+                current_domain_start=current_start,
+                current_domain_end=current_end,
+                mapped_chain_label_asym_id=label_asym_id_for_domain, 
+                context_min_res=context_min_res_for_fill,
+                context_max_res=context_max_res_for_fill,
+                parent_domain_id_for_fillers=parent_domain_id_for_fillers
+            )
+        
+        return domain_id # Return the primary domain ID string
+
+    def _setup_domain_network(self, domain: DomainDefinition, chain_id_int_str: str, start: int, end: int) -> bool:
+        """
+        Sets up the Blender object and Geometry Nodes for the domain.
+        Args:
+            domain: The DomainDefinition object.
+            chain_id_int_str: The STRINGIFIED INTEGER chain ID (e.g., '0', '1', '2') to use for attribute comparison.
+            start: The start residue for this domain.
+            end: The end residue for this domain.
+        Returns:
+            True if setup was successful, False otherwise.
+        """
+        if not self.molecule.object:
+            print("ERROR MoleWrap._setup_domain_network: Parent molecule object does not exist.")
             return False
 
-    def get_author_chain_id(self, chain_id):
-        """
-        Convert internal chain ID to author chain ID.
-        
-        Parameters
-        ----------
-        chain_id : str or int
-            The internal chain ID to convert.
-            
-        Returns
-        -------
-        str
-            The author chain ID corresponding to the internal chain ID.
-            If no mapping exists, returns the string representation of the chain ID.
-        """
-        # Convert numeric chain_id to int for lookup
-        chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        
-        # Check if we have a mapping for this chain
-        if chain_id_int in self.chain_mapping:
-            return self.chain_mapping[chain_id_int]
-            
-        # If no mapping found, try to match chain_id as a string against chain_residue_ranges
-        if str(chain_id) in self.chain_residue_ranges:
-            return str(chain_id)
-            
-        # No mapping found, just return chain_id as string with a warning
-        print(f"Warning: No chain mapping found for chain {chain_id}. Using numeric ID.")
-        return str(chain_id)
+        # Create new Blender object for the domain, parented to the main molecule object
+        domain_obj = bpy.data.objects.new(name=domain.id, object_data=None)
+        domain_obj.empty_display_type = 'ARROWS' # or 'PLAIN_AXES', 'SPHERE', etc.
+        domain_obj.empty_display_size = 0.1
+        bpy.context.scene.collection.objects.link(domain_obj)
+        domain_obj.parent = self.molecule.object
+        domain.object = domain_obj # Assign to the domain definition
+        print(f"DEBUG MoleWrap._setup_domain_network: Created Blender object for domain: {domain.id}")
 
-    def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
-        """Set up the node network for a domain"""
-        if not domain.object or not domain.node_group:
-            print("Domain object or node group is missing")
+        # Store domain metadata on the Blender object
+        domain_obj["is_protein_blender_domain"] = True
+        domain_obj["pb_domain_id"] = domain.id
+        domain_obj["pb_chain_id"] = domain.chain_id # This is label_asym_id
+        domain_obj["pb_start_residue"] = start
+        domain_obj["pb_end_residue"] = end
+        domain_obj["pb_molecule_id"] = self.identifier
+
+        attrs = self.molecule.object.data.attributes
+        residue_attr_name = "res_id" # Standard residue ID attribute
+        chain_attr_name = "chain_id_int" # Our integer chain ID attribute
+        position_attr_name = "position"
+        atom_name_attr = "atom_name"
+        is_alpha_carbon_attr = "is_alpha_carbon"
+
+        has_atom_name_attr = atom_name_attr in attrs
+        has_is_alpha_carbon_attr = is_alpha_carbon_attr in attrs
+
+        if not (residue_attr_name in attrs and chain_attr_name in attrs and position_attr_name in attrs):
+            print(f"ERROR MoleWrap._setup_domain_network: Missing required attributes ('{residue_attr_name}', '{chain_attr_name}', or '{position_attr_name}') on parent molecule mesh. Cannot find Cα. Domain: {domain.id}")
+            return False
+
+        ca_pos_start = None
+        print(f"DEBUG MoleWrap._setup_domain_network: Searching for Cα for START of domain {domain.name}, target chain_id_int_str: '{chain_id_int_str}', target res_id: {start}")
+        for i in range(len(attrs[residue_attr_name].data)):
+            atom_chain_id_val = str(attrs[chain_attr_name].data[i].value) # Compare string vs string
+            atom_res_num = attrs[residue_attr_name].data[i].value
+            
+            is_ca = False
+            if has_is_alpha_carbon_attr:
+                is_ca = attrs[is_alpha_carbon_attr].data[i].value
+            elif has_atom_name_attr:
+                is_ca = (attrs[atom_name_attr].data[i].value == 2) # 2 is the integer for 'CA' from atom_names.json
+
+            if atom_chain_id_val == chain_id_int_str and atom_res_num == start and is_ca:
+                ca_pos_start = attrs[position_attr_name].data[i].vector.copy()
+                print(f"DEBUG MoleWrap._setup_domain_network: Found Cα for START of domain {domain.name} at atom index {i}. Position: {ca_pos_start}")
+                break
+        
+        if ca_pos_start is None:
+            print(f"ERROR MoleWrap._setup_domain_network: No Alpha Carbon (CA) atom found for the start residue {start} of chain (int_id_str) {chain_id_int_str} for domain '{domain.name}'. Searched {len(attrs[residue_attr_name].data)} atoms.")
+            # Try to print some atoms from the target chain and residue to debug
+            count = 0
+            for i in range(len(attrs[residue_attr_name].data)):
+                if str(attrs[chain_attr_name].data[i].value) == chain_id_int_str and attrs[residue_attr_name].data[i].value == start and count < 5:
+                    atom_name_val = attrs[atom_name_attr].data[i].value if has_atom_name_attr else 'N/A'
+                    is_ca_val = attrs[is_alpha_carbon_attr].data[i].value if has_is_alpha_carbon_attr else 'N/A'
+                    print(f"  Nearby atom: chain={str(attrs[chain_attr_name].data[i].value)}, res={attrs[residue_attr_name].data[i].value}, name_code={atom_name_val}, is_CA_attr={is_ca_val}")
+                    count += 1
+            return False # Cannot proceed without Cα for start
+
+        # Set the domain object's location to the Cα of the start residue (in world space)
+        domain_obj.location = self.molecule.object.matrix_world @ ca_pos_start
+        print(f"DEBUG MoleWrap._setup_domain_network: Set domain object '{domain.id}' location to {domain_obj.location}")
+        
+        # Call the method to create geometry nodes for masking this domain
+        self._create_domain_mask_nodes(domain, chain_id_int_str, start, end)
+        return True
+    
+    def _create_additional_domains_to_span_context(
+        self,
+        chain_id_int_str: str, 
+        current_domain_start: int, 
+        current_domain_end: int,
+        mapped_chain_label_asym_id: str, # The label_asym_id for the chain context
+        context_min_res: int, 
+        context_max_res: int,
+        parent_domain_id_for_fillers: str
+    ) -> List[str]:
+        """Creates domains to fill gaps before and after a given domain within a chain's full context."""
+        created_filler_domain_ids: List[str] = []
+        print(f"DEBUG MoleWrap._create_additional_domains: Called for chain {mapped_chain_label_asym_id} (int_str: {chain_id_int_str}), domain {current_domain_start}-{current_domain_end}, context {context_min_res}-{context_max_res}, parent_for_fillers: {parent_domain_id_for_fillers}")
+
+        # Fill before the current domain if needed
+        if current_domain_start > context_min_res:
+            filler_start = context_min_res
+            filler_end = current_domain_start - 1
+            filler_name = f"{mapped_chain_label_asym_id}_{filler_start}-{filler_end}_filler_pre"
+            print(f"Attempting to create PRE-filler: {filler_name} for chain {mapped_chain_label_asym_id} (int_str: {chain_id_int_str})")
+            filler_id = self._create_domain_with_params(
+                chain_id_int_str=chain_id_int_str,
+                start=filler_start, 
+                end=filler_end, 
+                name=filler_name, 
+                auto_fill_chain=False, # Fillers should not auto-fill themselves
+                parent_domain_id=parent_domain_id_for_fillers, # Parented to the original domain that triggered auto-fill
+                parent_domain_id_for_fillers=None # Fillers don't have their own fillers
+            )
+            if filler_id:
+                created_filler_domain_ids.append(filler_id)
+                print(f"Successfully created PRE-filler domain: {filler_id}")
+            else:
+                print(f"Failed to create PRE-filler domain for {mapped_chain_label_asym_id} range {filler_start}-{filler_end}")
+
+        # Fill after the current domain if needed
+        if current_domain_end < context_max_res:
+            filler_start = current_domain_end + 1
+            filler_end = context_max_res
+            filler_name = f"{mapped_chain_label_asym_id}_{filler_start}-{filler_end}_filler_post"
+            print(f"Attempting to create POST-filler: {filler_name} for chain {mapped_chain_label_asym_id} (int_str: {chain_id_int_str})")
+            filler_id = self._create_domain_with_params(
+                chain_id_int_str=chain_id_int_str,
+                start=filler_start, 
+                end=filler_end, 
+                name=filler_name, 
+                auto_fill_chain=False, 
+                parent_domain_id=parent_domain_id_for_fillers,
+                parent_domain_id_for_fillers=None
+            )
+            if filler_id:
+                created_filler_domain_ids.append(filler_id)
+                print(f"Successfully created POST-filler domain: {filler_id}")
+            else:
+                print(f"Failed to create POST-filler domain for {mapped_chain_label_asym_id} range {filler_start}-{filler_end}")
+        
+        return created_filler_domain_ids
+
+    def _create_domain_mask_nodes(self, domain: DomainDefinition, chain_id_int_str: str, start: int, end: int):
+        """Creates the Geometry Node setup on the domain object to mask the parent molecule."""
+        if not domain.object:
+            print(f"ERROR MoleWrap._create_domain_mask_nodes: Domain object for {domain.id} not found.")
             return
-            
-        print(f"Setting up domain network for chain {chain_id}, range {start}-{end}")
-            
-        # Get the domain's node group
-        node_group = domain.node_group
-        
-        # Step 1: Create chain selection node
-        chain_select = None
-        for node in node_group.nodes:
-            if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Chain" in node.node_tree.name:
-                chain_select = node
-                print(f"Found existing chain selection node: {node.name}")
-                break
-                
-        if not chain_select:
-            print("Creating new chain selection node")
-            # Create chain selection node
-            try:
-                chain_select_group = nodes.custom_iswitch(
-                    name="selection", 
-                    iter_list=self.chain_mapping.values() or [str(chain_id)], 
-                    field="chain_id", 
-                    dtype="BOOLEAN"
-                )
-                
-                chain_select = nodes.add_custom(
-                    node_group,
-                    chain_select_group.name
-                )
-                print(f"Created chain selection node: {chain_select.name}")
-            except Exception as e:
-                print(f"Error creating chain selection node: {e}")
-            
-            # Position appropriately
-            style_node = None
-            for node in node_group.nodes:
-                if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Style" in node.node_tree.name:
-                    style_node = node
-                    break
-                    
-            if style_node:
-                chain_select.location = (style_node.location.x - 600, style_node.location.y)
-                print(f"Positioned chain selection node relative to style node")
-        
-        # Step 2: Configure chain selection
-        mapped_chain = self.chain_mapping.get(int(chain_id) if chain_id.isdigit() else chain_id, str(chain_id))
-        print(f"Configuring chain selection for mapped chain: {mapped_chain}")
-        for input_socket in chain_select.inputs:
-            # Skip non-boolean inputs (like group inputs)
-            if input_socket.type != 'BOOLEAN':
-                continue
-            if input_socket.name == mapped_chain:
-                input_socket.default_value = True
-                print(f"Set input socket {input_socket.name} to True")
-            else:
-                input_socket.default_value = False
-        
-        # Step 3: Create residue range selection node
-        res_select = None
-        for node in node_group.nodes:
-            if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Range" in node.node_tree.name:
-                res_select = node
-                print(f"Found existing residue range node: {node.name}")
-                break
-                
-        if not res_select:
-            print("Creating new residue range selection node")
-            # Create residue range selection node
-            try:
-                # Check if custom_range function exists
-                if not hasattr(nodes, 'custom_range'):
-                    print("ERROR: nodes module does not have custom_range function")
-                    # Create a simple node group for range selection
-                    # This is a fallback in case the custom_range function is not available
-                    tree_name = "Range Selection"
-                    tree = bpy.data.node_groups.get(tree_name)
-                    if not tree:
-                        tree = bpy.data.node_groups.new(tree_name, 'GeometryNodeTree')
-                        
-                        # Create input/output nodes
-                        input_node = tree.nodes.new('NodeGroupInput')
-                        output_node = tree.nodes.new('NodeGroupOutput')
-                        input_node.location = (-600, 0)
-                        output_node.location = (600, 0)
-                        
-                        # Create attribute input node
-                        attr_node = tree.nodes.new("GeometryNodeInputNamedAttribute")
-                        attr_node.data_type = "INT"
-                        attr_node.location = (-400, 0)
-                        attr_node.inputs["Name"].default_value = "residue_number"
-                        
-                        # Create comparison nodes
-                        compare_min = tree.nodes.new("FunctionNodeCompare")
-                        compare_min.data_type = "INT"
-                        compare_min.operation = "GREATER_EQUAL"
-                        compare_min.location = (-200, 50)
-                        
-                        compare_max = tree.nodes.new("FunctionNodeCompare")
-                        compare_max.data_type = "INT"
-                        compare_max.operation = "LESS_EQUAL"
-                        compare_max.location = (-200, -50)
-                        
-                        # Create AND node
-                        and_node = tree.nodes.new("FunctionNodeBooleanMath")
-                        and_node.operation = "AND"
-                        and_node.location = (0, 0)
-                        
-                        # Create filter node
-                        filter_node = tree.nodes.new("GeometryNodeDeleteGeometry")
-                        filter_node.domain = "POINT"
-                        filter_node.mode = "ALL"
-                        filter_node.location = (200, 0)
-                        
-                        # Create interface sockets
-                        geom_in = tree.interface.new_socket("Geometry", "INPUT", "NodeSocketGeometry")
-                        min_in = tree.interface.new_socket("Min", "INPUT", "NodeSocketInt")
-                        max_in = tree.interface.new_socket("Max", "INPUT", "NodeSocketInt")
-                        selection_out = tree.interface.new_socket("Selection", "OUTPUT", "NodeSocketGeometry")
-                        inverted_out = tree.interface.new_socket("Inverted", "OUTPUT", "NodeSocketGeometry")
-                        
-                        # Set default values
-                        min_in.default_value = 1
-                        max_in.default_value = 100
-                        
-                        # Connect nodes
-                        links = tree.links
-                        # Connect inputs
-                        links.new(input_node.outputs[geom_in.identifier], filter_node.inputs["Geometry"])
-                        links.new(input_node.outputs[min_in.identifier], compare_min.inputs[1])
-                        links.new(input_node.outputs[max_in.identifier], compare_max.inputs[1])
-                        
-                        # Connect attribute to comparisons
-                        links.new(attr_node.outputs["Attribute"], compare_min.inputs[0])
-                        links.new(attr_node.outputs["Attribute"], compare_max.inputs[0])
-                        
-                        # Connect comparisons to AND
-                        links.new(compare_min.outputs[0], and_node.inputs[0])
-                        links.new(compare_max.outputs[0], and_node.inputs[1])
-                        
-                        # Connect AND to filter
-                        links.new(and_node.outputs[0], filter_node.inputs["Selection"])
-                        
-                        # Connect filter to outputs
-                        links.new(filter_node.outputs["Geometry"], output_node.inputs[selection_out.identifier])
-                        links.new(filter_node.outputs["Inverted"], output_node.inputs[inverted_out.identifier])
-                    
-                    res_select_group = tree
-                else:
-                    res_select_group = nodes.custom_range(
-                        name="selection", 
-                        field="residue_number", 
-                        dtype="INT"
-                    )
-                    print(f"Created residue range group: {res_select_group.name}")
-                
-                res_select = nodes.add_custom(
-                    node_group,
-                    res_select_group.name
-                )
-                print(f"Added residue range node to node group: {res_select.name}")
-            except Exception as e:
-                print(f"Error creating residue range node: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # Position to the right of chain selection
-            if chain_select:
-                res_select.location = (chain_select.location.x + 300, chain_select.location.y)
-                print(f"Positioned residue range node relative to chain selection node")
-        
-        # Step 4: Configure residue range
-        if res_select:
-            print(f"Configuring residue range: {start}-{end}")
-            if "Min" in res_select.inputs:
-                res_select.inputs["Min"].default_value = start
-                print(f"Set Min input to {start}")
-            else:
-                print(f"WARNING: Min input not found in residue range node")
-                
-            if "Max" in res_select.inputs:
-                res_select.inputs["Max"].default_value = end
-                print(f"Set Max input to {end}")
-            else:
-                print(f"WARNING: Max input not found in residue range node")
-        else:
-            print("ERROR: Failed to create or find residue range node")
-            
-        # Step 5: Connect chain and residue selection
-        if chain_select and res_select:
-            print("Connecting chain selection to residue range")
-            # Find the output socket from chain selection
-            chain_out = None
-            for output in chain_select.outputs:
-                if output.type == 'GEOMETRY':
-                    chain_out = output
-                    print(f"Found chain selection output socket: {output.name}")
-                    break
-                    
-            # Find the geometry input socket for residue selection
-            res_in = None
-            for input_socket in res_select.inputs:
-                if input_socket.type == 'GEOMETRY':
-                    res_in = input_socket
-                    print(f"Found residue range input socket: {input_socket.name}")
-                    break
-                    
-            if chain_out and res_in:
-                try:
-                    node_group.links.new(chain_out, res_in)
-                    print(f"Connected chain selection output to residue range input")
-                except Exception as e:
-                    print(f"Error connecting chain selection to residue range: {e}")
-            else:
-                print(f"Could not connect chain to residue selection: chain_out={chain_out is not None}, res_in={res_in is not None}")
-        
-        # Step 6: Connect to the style node
-        style_node = None
-        for node in node_group.nodes:
-            if node.bl_idname == 'GeometryNodeGroup' and node.node_tree and "Style" in node.node_tree.name:
-                style_node = node
-                print(f"Found style node: {node.name}")
-                break
-                
-        if style_node and res_select:
-            print("Connecting residue range to style node")
-            res_out = None
-            for output in res_select.outputs:
-                if output.type == 'GEOMETRY':
-                    res_out = output
-                    print(f"Found residue range output socket: {output.name}")
-                    break
-                    
-            if res_out:
-                # Find the geometry input socket for style node
-                style_in = None
-                for input_socket in style_node.inputs:
-                    if input_socket.type == 'GEOMETRY':
-                        style_in = input_socket
-                        print(f"Found style node input socket: {input_socket.name}")
-                        break
-                        
-                if style_in:
-                    try:
-                        node_group.links.new(res_out, style_in)
-                        print(f"Connected residue range output to style node input")
-                    except Exception as e:
-                        print(f"Error connecting residue range to style node: {e}")
-                else:
-                    print("Could not find geometry input socket for style node")
-            else:
-                print("Could not find geometry output socket for residue range")
-        else:
-            print(f"Could not connect residue range to style: style_node={style_node is not None}, res_select={res_select is not None}")
-        
-        # Step 7: Clean up any unused nodes
-        print("Cleaning up unused nodes")
-        self._clean_unused_nodes(node_group)
-        
-        print("Domain network setup complete")
 
-    def get_sorted_domains(self) -> Dict[str, DomainDefinition]:
-        """
-        Returns domains sorted by their start residue ID.
-        This ensures consistent display order in the UI.
-        """
-        # Sort the domains by chain first, then by start residue
-        sorted_items = sorted(
-            self.domains.items(), 
-            key=lambda x: (x[1].chain_id, x[1].start)
-        )
-        return dict(sorted_items)
+        print(f"DEBUG MoleWrap._create_domain_mask_nodes: Setting up GN for domain {domain.id}, chain_int_str '{chain_id_int_str}', range {start}-{end}")
+
+        # Ensure there's a GN modifier
+        if not domain.object.modifiers:
+            gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
+            else:
+            gn_mod = domain.object.modifiers.get("ProteinBlender Domain Mask")
+            if not gn_mod:
+                gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
+        
+        if not gn_mod.node_group:
+            gn_mod.node_group = bpy.data.node_groups.new(name=f"ng_{domain.id}_mask", type='GeometryNodeTree')
+        
+        ng = gn_mod.node_group
+        nodes = ng.nodes
+        links = ng.links
+        nodes.clear()
+
+        # Group Input and Output
+        group_input = nodes.new(type='NodeGroupInput')
+        group_input.location = (-400, 0)
+        group_output = nodes.new(type='NodeGroupOutput')
+        group_output.location = (400, 0)
+
+        # Object Info node for the parent molecule
+        obj_info_node = nodes.new(type='GeometryNodeObjectInfo')
+        obj_info_node.location = (-200, 200)
+        obj_info_node.transform_space = 'RELATIVE' # Important for instanced molecules too
+        if self.molecule.object:
+            obj_info_node.inputs[0].default_value = self.molecule.object # Link to parent molecule
+
+        # Named Attribute for chain_id_int
+        chain_attr_node = nodes.new(type='GeometryNodeInputNamedAttribute')
+        chain_attr_node.location = (-200, 100)
+        chain_attr_node.data_type = 'INT'
+        chain_attr_node.inputs["Name"].default_value = "chain_id_int"
+
+        # Compare node for chain_id_int
+        compare_chain_node = nodes.new(type='FunctionNodeCompare')
+        compare_chain_node.location = (0, 100)
+        compare_chain_node.data_type = 'INT'
+        compare_chain_node.operation = 'EQUAL'
+        compare_chain_node.inputs[2].default_value = int(chain_id_int_str) # B input
+
+        # Named Attribute for res_id
+        res_attr_node = nodes.new(type='GeometryNodeInputNamedAttribute')
+        res_attr_node.location = (-200, 0)
+        res_attr_node.data_type = 'INT'
+        res_attr_node.inputs["Name"].default_value = "res_id"
+
+        # Compare node for start residue (res_id >= start)
+        compare_start_node = nodes.new(type='FunctionNodeCompare')
+        compare_start_node.location = (0, 0)
+        compare_start_node.data_type = 'INT'
+        compare_start_node.operation = 'GREATER_THAN_OR_EQUAL'
+        compare_start_node.inputs[2].default_value = start # B input
+
+        # Compare node for end residue (res_id <= end)
+        compare_end_node = nodes.new(type='FunctionNodeCompare')
+        compare_end_node.location = (0, -100)
+        compare_end_node.data_type = 'INT'
+        compare_end_node.operation = 'LESS_THAN_OR_EQUAL'
+        compare_end_node.inputs[2].default_value = end # B input
+
+        # Boolean Math AND node (Chain AND Start)
+        and1_node = nodes.new(type='FunctionNodeBooleanMath')
+        and1_node.location = (200, 50)
+        and1_node.operation = 'AND'
+
+        # Boolean Math AND node ((Chain AND Start) AND End)
+        and2_node = nodes.new(type='FunctionNodeBooleanMath')
+        and2_node.location = (200, -50)
+        and2_node.operation = 'AND'
+
+        # Link nodes
+        links.new(obj_info_node.outputs['Geometry'], chain_attr_node.inputs['Geometry'])
+        links.new(obj_info_node.outputs['Geometry'], res_attr_node.inputs['Geometry'])
+        
+        links.new(chain_attr_node.outputs['Attribute'], compare_chain_node.inputs[1]) # A input
+        links.new(res_attr_node.outputs['Attribute'], compare_start_node.inputs[1])   # A input
+        links.new(res_attr_node.outputs['Attribute'], compare_end_node.inputs[1])     # A input
+
+        links.new(compare_chain_node.outputs['Result'], and1_node.inputs[0])
+        links.new(compare_start_node.outputs['Result'], and1_node.inputs[1])
+        
+        links.new(and1_node.outputs['Boolean'], and2_node.inputs[0])
+        links.new(compare_end_node.outputs['Result'], and2_node.inputs[1])
+
+        # Output the original geometry and the selection
+        if not ng.outputs:
+            ng.outputs.new('NodeSocketGeometry', 'Geometry')
+            ng.outputs.new('NodeSocketBool', 'Selection')
+        elif len(ng.outputs) < 2:
+            if 'Geometry' not in ng.outputs: ng.outputs.new('NodeSocketGeometry', 'Geometry')
+            if 'Selection' not in ng.outputs: ng.outputs.new('NodeSocketBool', 'Selection')
+        else: # Ensure correct names if they exist
+            if ng.outputs[0].name != 'Geometry': ng.outputs[0].name = 'Geometry'
+            if ng.outputs[1].name != 'Selection': ng.outputs[1].name = 'Selection'
+
+        links.new(obj_info_node.outputs['Geometry'], group_output.inputs['Geometry'])
+        links.new(and2_node.outputs['Boolean'], group_output.inputs['Selection'])
+
+        print(f"DEBUG MoleWrap._create_domain_mask_nodes: GN setup complete for domain {domain.id}")
+
+    def get_domain_by_id(self, domain_id: str) -> Optional[DomainDefinition]:
+        return self.domains.get(domain_id)
+
+    def delete_domain(self, domain_id: str):
+        domain_def = self.domains.pop(domain_id, None)
+        if domain_def and domain_def.object:
+            if domain_def.object.name in bpy.data.objects:
+                bpy.data.objects.remove(domain_def.object, do_unlink=True)
+            # Also remove associated residue sets if any were created for this domain
+            self.residue_sets.pop(domain_id, None)
+            print(f"Domain {domain_id} and its Blender object deleted.")
+            return True
+        print(f"Domain {domain_id} not found for deletion.")
+        return False
+
+    def update_domain_color(self, domain_id: str, color: Tuple[float, float, float, float]):
+        domain = self.get_domain_by_id(domain_id)
+        if domain and domain.object:
+            # Ensure the color field attribute exists on the parent molecule
+            mol_obj = self.molecule.object
+            color_field_name = domain.object.get("domain_color_field_name", f"domain_color_{domain_id}")
+            
+            if mol_obj:
+                if color_field_name not in mol_obj.data.attributes:
+                    # Create the attribute (Color type, Point domain)
+                    attr = mol_obj.data.attributes.new(name=color_field_name, type="FLOAT_COLOR", domain="POINT")
+                    # Initialize with a default color (e.g., transparent black or white)
+                    # Ensure this is done efficiently for all points.
+                    # For now, it will be black by default.
+                    print(f"Created color attribute '{color_field_name}' on {mol_obj.name}")
+            else:
+                    attr = mol_obj.data.attributes[color_field_name]
+                
+                # Update the domain object's stored color
+                domain.object["domain_color_rgba"] = color 
+                domain.color = color # Update in the definition too
+
+                # Trigger an update of the geometry nodes that use this (if any)
+                # This might involve setting a property that the GN tree is listening to,
+                # or directly modifying a node input if the color is passed to the domain's GN tree.
+                # For now, we assume the main molecule's material/shader will read this attribute.
+                print(f"Stored color {color} for domain {domain_id} on its object and in attr '{color_field_name}'. Shader needs to use it.")
+                else:
+                print(f"Error: Molecule object not found for {self.identifier}")
+            else:
+            print(f"Error: Domain or domain object not found for {domain_id}")
+
+    def get_all_domains(self) -> List[DomainDefinition]:
+        return list(self.domains.values())
+
+    def clear_all_domains(self):
+        domain_ids_to_delete = list(self.domains.keys())
+        for domain_id in domain_ids_to_delete:
+            self.delete_domain(domain_id)
+        print("All domains cleared.")
+
+    def get_unique_label_asym_ids(self) -> List[str]:
+        """Returns a sorted list of unique label_asym_id strings present in the molecule."""
+        if hasattr(self.molecule.array, 'chain_id'): # This is label_asym_id
+            return sorted(list(np.unique(self.molecule.array.chain_id).astype(str)))
+        return []
+
+    def get_chain_atoms_count(self) -> Dict[str, int]:
+        """Returns a dictionary mapping label_asym_id to atom count for that chain."""
+        counts = {}
+        if hasattr(self.molecule.array, 'chain_id'): # This is label_asym_id
+            chain_ids, atom_counts = np.unique(self.molecule.array.chain_id, return_counts=True)
+            for chain_id_val, count in zip(chain_ids, atom_counts):
+                counts[str(chain_id_val)] = int(count)
+        return counts
+
+    def get_int_chain_index(self, label_asym_id: str) -> Optional[int]:
+        """Return the internal integer chain index for a given label_asym_id, or None if not found."""
+        # Direct mapping from idx_to_label_asym_id_map
+        for idx, lab in self.idx_to_label_asym_id_map.items():
+            if lab == label_asym_id:
+                return idx
+        # Fallback mapping from auth_chain_id_map (auth asym ID to index)
+        for idx, auth_lab in self.auth_chain_id_map.items():
+            if auth_lab == label_asym_id:
+                return idx
+        return None

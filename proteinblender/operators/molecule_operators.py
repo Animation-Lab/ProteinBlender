@@ -336,3 +336,28 @@ class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
             del self._pivot_edit_active[self.molecule_id]
             self.report({'INFO'}, "Protein pivot updated.")
             return {'FINISHED'}
+
+# Add operator to toggle visibility of molecule and its domains
+class MOLECULE_PB_OT_toggle_visibility(Operator):
+    bl_idname = "molecule.toggle_visibility"
+    bl_label = "Toggle Molecule Visibility"
+    bl_description = "Toggle visibility of this molecule and its domains"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        # Get the molecule wrapper
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+        if not molecule or not molecule.object:
+            return {'CANCELLED'}
+        # Determine new visibility state (False = visible, True = hidden)
+        new_state = not molecule.object.hide_viewport
+        # Toggle main molecule
+        molecule.object.hide_viewport = new_state
+        # Also toggle all domains for this molecule
+        for domain in getattr(molecule, 'domains', {}).values():
+            if domain.object:
+                domain.object.hide_viewport = new_state
+        return {'FINISHED'}

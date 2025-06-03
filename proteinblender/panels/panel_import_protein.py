@@ -33,17 +33,23 @@ class PROTEIN_PB_PT_import_protein(Panel):
         row = col.row()
         if props.import_method == 'PDB':
             row.prop(props, "pdb_id", text="PDB")
-        else:
+            # Add remote format dropdown for PDB
+            col.prop(props, "remote_format", text="Format")
+        elif props.import_method == 'ALPHAFOLD':
             row.prop(props, "uniprot_id", text="UniProt ID")
-        
+            # Add remote format dropdown for AlphaFold
+            col.prop(props, "remote_format", text="Format")
+        elif props.import_method == 'MMCIF':
+            row.prop(props, "mmcif_path", text="mmCIF File")
         col.separator(factor=1.5)
         
         # Find the execute button and add a local import button next to it
         button_row = box.row(align=True)
         button_row.scale_y = 1.2
-        button_row.operator("protein.import_protein", text="Download From PDB")
-
-        # Add a local file import button
-        local_op = button_row.operator("protein.import_local", text="Import Local File")
+        if props.import_method == 'MMCIF':
+            button_row.operator("protein.import_local", text="Import mmCIF File")
+        else:
+            button_row.operator("protein.import_protein", text="Download From PDB")
+            button_row.operator("protein.import_local", text="Import Local File")
         
         box.separator(factor=0.5)

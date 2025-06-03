@@ -21,7 +21,8 @@ class PROTEIN_OT_import_protein(Operator):
             
         success = scene_manager.create_molecule_from_id(
             identifier, 
-            import_method=props.import_method
+            import_method=props.import_method,
+            remote_format=props.remote_format
         )
         
         if not success:

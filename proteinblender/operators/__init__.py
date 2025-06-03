@@ -9,6 +9,7 @@ from .molecule_operators import (
     MOLECULE_PB_OT_move_protein_pivot,
     MOLECULE_PB_OT_snap_protein_pivot_center,
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
+    MOLECULE_PB_OT_toggle_visibility,
 )
 from .operator_import_protein import PROTEIN_OT_import_protein
 from .operator_import_local import PROTEIN_OT_import_local
@@ -54,6 +55,7 @@ CLASSES = (
     MOLECULE_PB_OT_move_protein_pivot,
     MOLECULE_PB_OT_snap_protein_pivot_center,
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
+    MOLECULE_PB_OT_toggle_visibility,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,

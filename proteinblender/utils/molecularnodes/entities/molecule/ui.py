@@ -17,20 +17,36 @@ from .sdf import SDF
 from ...style import STYLE_ITEMS
 
 
-def parse(filepath) -> Molecule:
+def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molecule:
     # TODO: I don't like that we might be dealing with bytes or a filepath here,
     # I need to work out a nicer way to have it be cleanly one or the other
 
-    if isinstance(filepath, io.BytesIO):
+    resolved_filepath_for_parsing = filepath_or_stream
+    
+    if isinstance(filepath_or_stream, io.BytesIO):
+        # Binary stream is assumed to be BCIF by MolecularNodes download logic
         suffix = ".bcif"
+    elif isinstance(filepath_or_stream, io.StringIO):
+        if not stream_format_hint:
+            # This case should ideally not happen if called from fetch.
+            # If it does, raise an error or make a best guess.
+            # For now, raising an error is safer to ensure stream_format_hint is provided.
+            raise ValueError("StringIO stream received in parse() without a 'stream_format_hint'.")
+        suffix = "." + stream_format_hint.lower()
     else:
-        filepath = path_resolve(filepath)
-        suffix = Path(filepath).suffix
+        # Assumed to be a file path string
+        try:
+            resolved_filepath_for_parsing = path_resolve(filepath_or_stream)
+            suffix = Path(resolved_filepath_for_parsing).suffix
+        except TypeError: # path_resolve likely failed due to unexpected type
+             raise ValueError(f"Expected a file path string or a stream object, but got {type(filepath_or_stream)}: {filepath_or_stream}")
+
 
     parser = {
         ".pdb": PDB,
-        ".pdbx": CIF,
+        ".pdbx": CIF, # .pdbx is sometimes used, maps to CIF
         ".cif": CIF,
+        ".mmcif": CIF, 
         ".bcif": BCIF,
         ".mol": SDF,
         ".sdf": SDF,
@@ -38,10 +54,22 @@ def parse(filepath) -> Molecule:
 
     if suffix not in parser:
         raise ValueError(f"Unable to open local file. Format '{suffix}' not supported.")
+    
+    selected_parser = parser[suffix]
+    
     try:
-        molecule = parser[suffix](filepath)
-    except InvalidFileError:
-        molecule = OldCIF(filepath)
+        # The parser's __init__ (which calls _read) should handle both paths and streams
+        molecule = selected_parser(resolved_filepath_for_parsing)
+    except InvalidFileError: # This is a biotite error
+        # Attempt fallback to OldCIF for CIF-like formats if primary parsing fails
+        if suffix in {".cif", ".mmcif", ".pdbx"}:
+             print(f"Primary parser for {suffix} failed with InvalidFileError. Attempting OldCIF parser.")
+             molecule = OldCIF(resolved_filepath_for_parsing) # OldCIF should also handle streams
+        else:
+             raise # Re-raise if not a CIF-like format or if OldCIF also fails
+    except Exception as e:
+        print(f"Error during parsing with {selected_parser.__name__} for suffix {suffix} using input '{str(resolved_filepath_for_parsing)[:100]}...': {e}")
+        raise
 
     return molecule
 
@@ -55,17 +83,21 @@ def fetch(
     cache_dir: str | None = None,
     build_assembly: bool = False,
     database: str = "rcsb",
-    format: str = "bcif",
+    format: str = "bcif", # This format hint is crucial for streams
     color: str = "common",
 ) -> Molecule:
     if build_assembly:
         centre = ""
 
-    file_path = download(
+    file_path_or_stream = download(
         code=pdb_code, format=format, cache=cache_dir, database=database
     )
 
-    mol = parse(file_path)
+    if isinstance(file_path_or_stream, (io.BytesIO, io.StringIO)):
+        mol = parse(file_path_or_stream, stream_format_hint=format)
+    else: # It's a file path string
+        mol = parse(file_path_or_stream)
+
 
     obj = mol.create_object(
         name=pdb_code,
@@ -119,7 +151,7 @@ class Import_Molecule(bpy.types.Operator):
     )
     centre: EnumProperty(  # type: ignore
         name="Centre",
-        description="Centre the structure at the world origin using the given method",
+        description="Centre the structure's centre of mass to be at the world origin",
         default="None",
         items=(
             ("None", "None", "No centering is applied", 1),
@@ -225,6 +257,7 @@ class MN_FH_Import_Molecule(bpy.types.FileHandler):
 DOWNLOAD_FORMATS = (
     ("bcif", ".bcif", "Binary compressed .cif file, fastest for downloading"),
     ("cif", ".cif", "The new standard of .cif / .mmcif"),
+    ("mmcif", ".mmcif", "The new standard mmCIF format (same as .cif)"),
     ("pdb", ".pdb", "The classic (and depcrecated) PDB format"),
 )
 
@@ -310,11 +343,7 @@ bpy.types.Scene.MN_import_del_hydrogen = BoolProperty(
 bpy.types.Scene.MN_import_format_download = EnumProperty(
     name="Format",
     description="Format to download as from the PDB",
-    items=(
-        ("bcif", ".bcif", "Binary compressed .cif file, fastest for downloading"),
-        ("cif", ".cif", "The new standard of .cif / .mmcif"),
-        ("pdb", ".pdb", "The classic (and depcrecated) PDB format"),
-    ),
+    items=DOWNLOAD_FORMATS,
 )
 bpy.types.Scene.MN_import_local_path = StringProperty(
     name="File",
@@ -340,11 +369,7 @@ bpy.types.Scene.MN_alphafold_code = StringProperty(
 bpy.types.Scene.MN_import_format_alphafold = EnumProperty(
     name="Format",
     description="Format to download as from the PDB",
-    items=(
-        # ("bcif", ".bcif", "Binary compressed .cif file, fastest for downloading"),
-        ("cif", ".cif", "The new standard of .cif / .mmcif"),
-        ("pdb", ".pdb", "The classic (and depcrecated) PDB format"),
-    ),
+    items=DOWNLOAD_FORMATS,
 )
 
 

@@ -1,7 +1,7 @@
 from .file_io import get_protein_file
 import json
 import bpy
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Set
 from .molecularnodes.entities import fetch, load_local
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from bpy.app.handlers import undo_post, undo_pre
@@ -50,82 +50,94 @@ class ProteinBlenderScene:
             'display_settings': self.display_settings
         })
 
-    def _create_domains_for_each_chain(self, molecule: MoleculeWrapper):
-        """Create one domain for each unique mapped chain in the molecule."""
-        if not molecule.chain_residue_ranges:
-            print(f"No chain residue ranges found for molecule {molecule.identifier}. Cannot auto-create domains.")
+    def _create_domains_for_each_chain(self, molecule_id: str):
+        molecule = self.molecule_manager.get_molecule(molecule_id)
+        if not molecule:
+            print(f"Molecule {molecule_id} not found for domain creation.")
             return
 
-        print(f"Creating domains for molecule {molecule.identifier}")
-        print(f"Chain residue ranges (mapped): {molecule.chain_residue_ranges}")
-        print(f"Original chain mapping (numeric to mapped): {molecule.chain_mapping}")
-
-        # Reverse the chain_mapping to easily find original numeric ID from mapped ID
-        # Handles cases where multiple numeric IDs might map to the same author ID,
-        # by preferring the smallest numeric ID.
-        numeric_to_mapped = molecule.chain_mapping
-        mapped_to_numeric = {}
-        if numeric_to_mapped:
-            for num_id, map_id in sorted(numeric_to_mapped.items()): # Sort by numeric ID
-                if map_id not in mapped_to_numeric: # Take the first (smallest) numeric ID
-                    mapped_to_numeric[map_id] = num_id
+        print(f"DEBUG SceneManager._create_domains_for_each_chain: Creating domains for molecule {molecule_id}")
+        # Log the maps from MoleculeWrapper that we will use for deriving chain information
+        if hasattr(molecule, 'idx_to_label_asym_id_map'):
+            print(f"DEBUG SceneManager: molecule.idx_to_label_asym_id_map = {molecule.idx_to_label_asym_id_map}")
+        else:
+            print("DEBUG SceneManager: molecule.idx_to_label_asym_id_map not found.")
         
-        created_mapped_chains = set() # Keep track of mapped chains for which domains have been made
+        if hasattr(molecule, 'auth_chain_id_map'):
+            print(f"DEBUG SceneManager: molecule.auth_chain_id_map = {molecule.auth_chain_id_map}")
+        else:
+            print("DEBUG SceneManager: molecule.auth_chain_id_map not found.")
 
-        # Iterate over the mapped chain IDs from chain_residue_ranges
-        # These are the "author" chain IDs like 'A', 'B'
-        for mapped_chain_id_str, (min_res, max_res) in molecule.chain_residue_ranges.items():
-            if mapped_chain_id_str in created_mapped_chains:
-                print(f"Domain for mapped chain {mapped_chain_id_str} already processed or created. Skipping.")
+        # Use the chain_residue_ranges from MoleculeWrapper, which should now be keyed by label_asym_id.
+        chain_ranges_from_wrapper = molecule.chain_residue_ranges
+        print(f"DEBUG SceneManager: chain_ranges_from_wrapper (molecule.chain_residue_ranges) = {chain_ranges_from_wrapper}")
+
+        if not chain_ranges_from_wrapper:
+            print(f"Warning SceneManager: No chain residue ranges found in molecule wrapper for {molecule_id}. Cannot create default domains.")
+            return
+
+        # Map each chain label to an integer index:
+        label_asym_id_to_idx_map: Dict[str, int] = {}
+        # 1) Use MoleculeWrapper.idx_to_label_asym_id_map if present
+        if hasattr(molecule, 'idx_to_label_asym_id_map') and molecule.idx_to_label_asym_id_map:
+            label_asym_id_to_idx_map = {v: k for k, v in molecule.idx_to_label_asym_id_map.items()}
+        # 2) Fallback: sequential indices over chain_ranges_from_wrapper keys
+        if not label_asym_id_to_idx_map:
+            for idx, label in enumerate(chain_ranges_from_wrapper.keys()):
+                label_asym_id_to_idx_map[label] = idx
+        print(f"DEBUG SceneManager: Using label_asym_id_to_idx_map = {label_asym_id_to_idx_map}")
+
+        created_domain_ids_for_molecule: List[str] = []
+        # Keep track of processed label_asym_ids to avoid duplicates if chain_ranges_from_wrapper somehow has redundant entries
+        processed_label_asym_ids: Set[str] = set()
+
+        for label_asym_id_key, (min_res, max_res) in chain_ranges_from_wrapper.items():
+            if label_asym_id_key in processed_label_asym_ids:
+                print(f"DEBUG SceneManager: Label_asym_id '{label_asym_id_key}' already processed. Skipping.")
                 continue
 
-            # Try to find the original numeric chain ID.
-            original_numeric_chain_id = None
+            current_min_res = min_res
+            if current_min_res == 0: # Adjusting 0-indexed min_res, though chain_residue_ranges should ideally be 1-indexed from wrapper
+                print(f"Warning SceneManager: Adjusting 0-indexed min_res to 1 for label_asym_id '{label_asym_id_key}'. Original range: ({min_res}-{max_res})")
+                current_min_res = 1
             
-            if mapped_chain_id_str in mapped_to_numeric:
-                original_numeric_chain_id = mapped_to_numeric[mapped_chain_id_str]
-            else:
-                found_match = False
-                if numeric_to_mapped: # Search in the original mapping
-                    for num_id, map_id_val in sorted(numeric_to_mapped.items()):
-                        if map_id_val == mapped_chain_id_str:
-                            original_numeric_chain_id = num_id
-                            found_match = True
-                            break
-                
-                if not found_match:
-                    if mapped_chain_id_str.isdigit():
-                        original_numeric_chain_id = int(mapped_chain_id_str)
-                    else:
-                        print(f"Warning: Mapped chain ID '{mapped_chain_id_str}' from residue ranges has no clear original numeric ID. Skipping domain creation for this chain.")
-                        continue
-           
-            if original_numeric_chain_id is None:
-                 print(f"Error: Could not determine original numeric chain ID for mapped chain '{mapped_chain_id_str}'. Skipping.")
-                 continue
+            # Get the corresponding integer chain index string for Blender attribute lookups
+            int_chain_idx = label_asym_id_to_idx_map.get(label_asym_id_key)
+            if int_chain_idx is None:
+                print(f"ERROR SceneManager: Could not find integer index for label_asym_id '{label_asym_id_key}' in label_asym_id_to_idx_map. Skipping domain creation for this chain.")
+                continue
+            chain_id_int_str_for_domain = str(int_chain_idx)
 
-            domain_name = f"Chain {mapped_chain_id_str}"
-            
-            print(f"Attempting to create domain: Name='{domain_name}', MappedChain='{mapped_chain_id_str}', OriginalNumericChain='{original_numeric_chain_id}', Range=({min_res}-{max_res})")
+            domain_name = f"Chain {label_asym_id_key}" # Default name
+            print(f"DEBUG SceneManager: Attempting to create domain: Name='{domain_name}', LabelAsymID='{label_asym_id_key}', IntChainIdxStr='{chain_id_int_str_for_domain}', Range=({current_min_res}-{max_res})")
 
+            # Call using positional arguments: chain_id_int_str, start, end, name, auto_fill_chain, parent_domain_id
             created_domain_id = molecule._create_domain_with_params(
-                chain_id=str(original_numeric_chain_id), 
-                start=min_res,
-                end=max_res,
-                name=domain_name,
-                auto_fill_chain=False
+                chain_id_int_str_for_domain,
+                current_min_res,
+                max_res,
+                domain_name,
+                False,  # auto_fill_chain
+                None    # parent_domain_id
             )
             
             if created_domain_id:
-                print(f"Successfully created domain '{created_domain_id}' for mapped chain '{mapped_chain_id_str}' (Original Numeric: {original_numeric_chain_id}) range {min_res}-{max_res}")
-                created_mapped_chains.add(mapped_chain_id_str)
+                print(f"DEBUG SceneManager: Successfully processed LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}) resulting in domain ID '{created_domain_id}' for range {current_min_res}-{max_res}")
+                created_domain_ids_for_molecule.append(created_domain_id)
+                processed_label_asym_ids.add(label_asym_id_key)
             else:
-                 print(f"Failed to create domain for mapped chain '{mapped_chain_id_str}' (Original Numeric: {original_numeric_chain_id})")
+                 print(f"DEBUG SceneManager: Failed to create a valid domain for LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}). It may have been skipped or failed in MoleculeWrapper.")
+        
+        if created_domain_ids_for_molecule:
+            # self.update_molecule_domain_list_in_ui(molecule_id) # Assuming a method to refresh UI if needed
+            print(f"SceneManager: Finished creating default domains for {molecule_id}. Created IDs: {created_domain_ids_for_molecule}")
+        else:
+            print(f"SceneManager: No domains were created for {molecule_id} during default domain creation.")
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
         # Create domains for each chain
-        self._create_domains_for_each_chain(molecule)
+        self._create_domains_for_each_chain(molecule.identifier)
         # Add to UI list
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()
@@ -135,7 +147,7 @@ class ProteinBlenderScene:
         # Force UI refresh
         self._refresh_ui()
 
-    def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB') -> bool:
+    def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB', remote_format: str = 'pdb') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
         try:
             # Ensure MNSession is initialized
@@ -149,13 +161,18 @@ class ProteinBlenderScene:
                 counter += 1
                 base_identifier = f"{identifier}_{counter:03d}"
             if import_method == 'PDB':
-                molecule = self.molecule_manager.import_from_pdb(identifier, base_identifier)  # Use original ID for fetch
+                molecule = self.molecule_manager.import_from_pdb(
+                    identifier,
+                    base_identifier,
+                    format=remote_format
+                )
             else:  # AlphaFold
                 molecule = self.molecule_manager.import_from_pdb(
-                    identifier,  # Use original ID for fetch
+                    identifier,
                     base_identifier,
                     database="alphafold",
-                    color="plddt"
+                    color="plddt",
+                    format=remote_format
                 )
             # Store with unique identifier
             self.molecules[base_identifier] = molecule

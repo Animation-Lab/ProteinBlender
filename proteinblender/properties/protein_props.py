@@ -5,7 +5,8 @@ class ProteinProperties(bpy.types.PropertyGroup):
     import_method: EnumProperty(
         items=[
             ('PDB', 'PDB', 'Import from PDB database'),
-            ('ALPHAFOLD', 'AlphaFold', 'Import from AlphaFold database')
+            ('ALPHAFOLD', 'AlphaFold', 'Import from AlphaFold database'),
+            ('MMCIF', 'mmCIF', 'Import from local mmCIF file'),
         ],
         name="Import Method",
         default='PDB'
@@ -21,6 +22,23 @@ class ProteinProperties(bpy.types.PropertyGroup):
         name="UniProt ID",
         description="UniProt ID for AlphaFold structure",
         default=""
+    )
+
+    mmcif_path: StringProperty(
+        name="mmCIF File",
+        description="Path to the mmCIF file to import",
+        default="",
+        subtype="FILE_PATH"
+    )
+
+    remote_format: EnumProperty(
+        name="Remote Format",
+        description="File format to download from the PDB",
+        items=[
+            ('pdb', 'PDB', 'Download as .pdb'),
+            ('cif', 'mmCIF', 'Download as .cif (mmCIF)'),
+        ],
+        default='pdb',
     )
 
 def register():
