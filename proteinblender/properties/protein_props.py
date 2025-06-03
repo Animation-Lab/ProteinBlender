@@ -4,9 +4,9 @@ from bpy.props import StringProperty, EnumProperty
 class ProteinProperties(bpy.types.PropertyGroup):
     import_method: EnumProperty(
         items=[
-            ('PDB', 'PDB', 'Import from PDB database'),
-            ('ALPHAFOLD', 'AlphaFold', 'Import from AlphaFold database'),
-            ('MMCIF', 'mmCIF', 'Import from local mmCIF file'),
+            ('PDB', 'PDB', 'Download PDB file from RCSB'),
+            ('MMCIF', 'mmCIF', 'Download mmCIF file from RCSB'),
+            ('ALPHAFOLD', 'AlphaFold', 'Download structure from AlphaFold'),
         ],
         name="Import Method",
         default='PDB'

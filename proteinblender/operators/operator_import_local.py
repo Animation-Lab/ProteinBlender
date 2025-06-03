@@ -12,7 +12,7 @@ class PROTEIN_OT_import_local(Operator, ImportHelper):
     
     # File browser properties
     filename_ext = ".pdb"
-    filter_glob: StringProperty(default="*.pdb;*.ent;*.cif;*.mmcif;*.bcif;*.pdbx", options={'HIDDEN'})
+    filter_glob: StringProperty(default="*.pdb;*.ent;*.cif;*.mmcif;*.bcif;*.pdbx;*.gz", options={'HIDDEN'})
     
     def execute(self, context):
         filepath = self.filepath

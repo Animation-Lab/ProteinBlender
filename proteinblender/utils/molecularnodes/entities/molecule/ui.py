@@ -6,6 +6,7 @@ from bpy.props import EnumProperty, StringProperty, BoolProperty, CollectionProp
 from biotite import InvalidFileError
 import os
 import io
+import gzip
 
 from ...download import FileDownloadPDBError, download, CACHE_DIR
 from ...blender import path_resolve
@@ -21,11 +22,16 @@ def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molec
     # TODO: I don't like that we might be dealing with bytes or a filepath here,
     # I need to work out a nicer way to have it be cleanly one or the other
 
-    resolved_filepath_for_parsing = filepath_or_stream
-    
+    input_for_parser = filepath_or_stream
+    original_filepath_str = None # Store original filepath if it's a path
+
     if isinstance(filepath_or_stream, io.BytesIO):
         # Binary stream is assumed to be BCIF by MolecularNodes download logic
-        suffix = ".bcif"
+        # unless stream_format_hint suggests otherwise (e.g. decompressed .gz stream)
+        if stream_format_hint:
+            suffix = "." + stream_format_hint.lower()
+        else:
+            suffix = ".bcif"
     elif isinstance(filepath_or_stream, io.StringIO):
         if not stream_format_hint:
             # This case should ideally not happen if called from fetch.
@@ -36,10 +42,52 @@ def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molec
     else:
         # Assumed to be a file path string
         try:
-            resolved_filepath_for_parsing = path_resolve(filepath_or_stream)
-            suffix = Path(resolved_filepath_for_parsing).suffix
+            original_filepath_str = str(filepath_or_stream) # Keep original for .gz handling
+            resolved_filepath = path_resolve(filepath_or_stream)
+            
+            # Check for .gz extension first
+            if str(resolved_filepath).lower().endswith(".gz"):
+                # Get the inner suffix (e.g., .cif from .cif.gz)
+                stem = Path(resolved_filepath).stem # e.g., '1atn.cif' from '1atn.cif.gz'
+                inner_suffix = Path(stem).suffix    # e.g., '.cif'
+                
+                if not inner_suffix: # Handles cases like '.gz' directly (e.g. from a bad name)
+                    raise ValueError(f"Compressed file has no inner extension: {resolved_filepath}")
+
+                suffix = inner_suffix.lower()
+                
+                # Decompress the file into an in-memory stream
+                with open(resolved_filepath, 'rb') as f_in:
+                    decompressed_data = gzip.decompress(f_in.read())
+                
+                # Determine if the decompressed data is text or binary
+                # Most structural biology files that are gzipped are text-based (PDB, CIF)
+                # BCIF is binary but usually not gzipped in this context.
+                # We'll assume text and wrap in StringIO. If a binary format (like a gzipped BCIF,
+                # which is unusual but possible) needs handling, this logic might need refinement.
+                try:
+                    # Attempt to decode as UTF-8 first
+                    input_for_parser = io.StringIO(decompressed_data.decode('utf-8'))
+                except UnicodeDecodeError:
+                    # If UTF-8 fails, assume it's binary and wrap in BytesIO
+                    # This is important if, for example, a .bcif.gz was passed.
+                    input_for_parser = io.BytesIO(decompressed_data)
+                    # If we made a BytesIO, the original suffix logic for BytesIO might need
+                    # to re-evaluate based on 'inner_suffix' if it wasn't bcif.
+                    # For now, we trust 'inner_suffix'.
+                
+                print(f"Decompressed {resolved_filepath}, determined inner format: {suffix}")
+
+            else: # Not a .gz file
+                suffix = Path(resolved_filepath).suffix.lower()
+            input_for_parser = resolved_filepath if not isinstance(input_for_parser, (io.BytesIO, io.StringIO)) else input_for_parser
+
         except TypeError: # path_resolve likely failed due to unexpected type
              raise ValueError(f"Expected a file path string or a stream object, but got {type(filepath_or_stream)}: {filepath_or_stream}")
+        except gzip.BadGzipFile:
+            raise ValueError(f"File {original_filepath_str} is not a valid .gz file or is corrupted.")
+        except Exception as e:
+            raise ValueError(f"Error processing file path {filepath_or_stream}: {e}")
 
 
     parser = {
@@ -53,22 +101,24 @@ def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molec
     }
 
     if suffix not in parser:
-        raise ValueError(f"Unable to open local file. Format '{suffix}' not supported.")
+        raise ValueError(f"Unable to open local file. Format '{suffix}' (derived from '{original_filepath_str or filepath_or_stream}') not supported.")
     
     selected_parser = parser[suffix]
     
     try:
         # The parser's __init__ (which calls _read) should handle both paths and streams
-        molecule = selected_parser(resolved_filepath_for_parsing)
+        # input_for_parser will be either the original path (if not .gz) 
+        # or an in-memory stream (if .gz or originally a stream)
+        molecule = selected_parser(input_for_parser)
     except InvalidFileError: # This is a biotite error
         # Attempt fallback to OldCIF for CIF-like formats if primary parsing fails
         if suffix in {".cif", ".mmcif", ".pdbx"}:
-             print(f"Primary parser for {suffix} failed with InvalidFileError. Attempting OldCIF parser.")
-             molecule = OldCIF(resolved_filepath_for_parsing) # OldCIF should also handle streams
+             print(f"Primary parser for {suffix} failed with InvalidFileError. Attempting OldCIF parser for '{str(input_for_parser)[:100]}...'.")
+             molecule = OldCIF(input_for_parser) 
         else:
-             raise # Re-raise if not a CIF-like format or if OldCIF also fails
+             raise 
     except Exception as e:
-        print(f"Error during parsing with {selected_parser.__name__} for suffix {suffix} using input '{str(resolved_filepath_for_parsing)[:100]}...': {e}")
+        print(f"Error during parsing with {selected_parser.__name__} for suffix {suffix} using input '{str(input_for_parser)[:100]}...': {e}")
         raise
 
     return molecule

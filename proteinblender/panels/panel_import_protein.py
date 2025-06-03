@@ -24,32 +24,21 @@ class PROTEIN_PB_PT_import_protein(Panel):
         col.use_property_split = False  # Keep False for full-width controls
         col.use_property_decorate = False
         
-        # Add the method selector as a dropdown
-        row = col.row()
+        # Method selector and identifier input
+        row = col.row(align=True)
         row.prop(props, "import_method", text="Method")
-        col.separator(factor=1.0)
-        
-        # Add the appropriate ID field based on method with full width
-        row = col.row()
-        if props.import_method == 'PDB':
-            row.prop(props, "pdb_id", text="PDB")
-            # Add remote format dropdown for PDB
-            col.prop(props, "remote_format", text="Format")
+        if props.import_method in {'PDB', 'MMCIF'}:
+            row.prop(props, "pdb_id", text="PDB ID")
         elif props.import_method == 'ALPHAFOLD':
             row.prop(props, "uniprot_id", text="UniProt ID")
-            # Add remote format dropdown for AlphaFold
-            col.prop(props, "remote_format", text="Format")
-        elif props.import_method == 'MMCIF':
-            row.prop(props, "mmcif_path", text="mmCIF File")
-        col.separator(factor=1.5)
-        
-        # Find the execute button and add a local import button next to it
+        col.separator(factor=1.0)
+
+        # Remote download and local import buttons
         button_row = box.row(align=True)
         button_row.scale_y = 1.2
-        if props.import_method == 'MMCIF':
-            button_row.operator("protein.import_local", text="Import mmCIF File")
-        else:
-            button_row.operator("protein.import_protein", text="Download From PDB")
-            button_row.operator("protein.import_local", text="Import Local File")
+        # Download from selected source
+        button_row.operator("protein.import_protein", text="Download")
+        # Import any local file (.pdb, .cif, .mmcif, etc.)
+        button_row.operator("protein.import_local", text="Import Local File")
         
         box.separator(factor=0.5)
