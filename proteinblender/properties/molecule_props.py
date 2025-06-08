@@ -284,28 +284,25 @@ def update_domain_color(self, context):
             molecule.update_domain_color(domain_id, self.domain_color)
             return
 
+# --- Classes to register ---
+CLASSES = [
+    Domain,
+    ChainSelectionItem,
+    DomainTransformData,
+    MoleculePose,
+    MoleculeKeyframe,
+    MoleculeListItem
+]
+
 def register():
     """Register molecule properties"""
-    # Try to unregister first if already registered
-    try:
-        unregister()
-    except Exception:
-        pass
-        
-    # Register Domain first since other classes might depend on it
-    bpy.utils.register_class(Domain)
-    bpy.utils.register_class(ChainSelectionItem)
-    bpy.utils.register_class(DomainTransformData)
-    bpy.utils.register_class(MoleculePose)
-    bpy.utils.register_class(MoleculeKeyframe)
-    bpy.utils.register_class(MoleculeListItem)
-    
     # Register temporary properties needed for domain editing
     bpy.types.Scene.temp_domain_start = IntProperty(
         name="Start",
         description="Temporary start residue for domain editing",
         default=1,
-        min=1
+        min=1, # Broad min, will be effectively constrained by update logic and initial setting
+        update=update_split_end
     )
     
     bpy.types.Scene.temp_domain_end = IntProperty(
@@ -386,7 +383,7 @@ def register():
         subtype='COLOR',
         size=4,
         min=0.0, max=1.0,
-        default=(0.8, 0.1, 0.8, 1.0)  # Default to purple
+        default=(0.8, 0.1, 0.8, 1.0)
     )
     
     # Properties for editing existing domains
@@ -423,53 +420,17 @@ def register():
     # Properties for domain splitting UI
     bpy.types.Scene.split_domain_new_start = IntProperty(
         name="New Start",
-        description="New starting residue for the split domain",
-        default=1,
-        min=1, # Broad min, will be effectively constrained by update logic and initial setting
-        update=update_split_start
+        description="New start for the split-off part of the domain",
+        default=1, min=1, update=update_split_start
     )
     bpy.types.Scene.split_domain_new_end = IntProperty(
         name="New End",
-        description="New ending residue for the split domain",
-        default=1,
-        min=1, # Broad min, will be effectively constrained by update logic and initial setting
-        update=update_split_end
+        description="New end for the split-off part of the domain",
+        default=1, min=1, update=update_split_end
     )
 
 def unregister():
     """Unregister molecule properties"""
-    
-    # Safely unregister classes
-    try:
-        bpy.utils.unregister_class(MoleculeListItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(MoleculeKeyframe)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(ChainSelectionItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(DomainTransformData)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(MoleculePose)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(Domain)
-    except Exception:
-        pass
-    
     # Safely unregister properties with checks
     if hasattr(bpy.types.Scene, "chain_selections"):
         del bpy.types.Scene.chain_selections
@@ -512,102 +473,120 @@ def unregister():
     if hasattr(bpy.types.Scene, "active_splitting_domain_id"):
         del bpy.types.Scene.active_splitting_domain_id
     
-# --- Update Callbacks for Split Domain Properties ---
+    # Add this line to cover the missing property from your provided `unregister` snippet
+    if hasattr(bpy.types.Scene, 'selected_chain'):
+        delattr(bpy.types.Scene, 'selected_chain')
+        
+    # Remove temporary properties
+    if hasattr(bpy.types.Scene, "temp_domain_id"):
+        del bpy.types.Scene.temp_domain_id
+    if hasattr(bpy.types.Scene, "temp_domain_color"):
+        delattr(bpy.types.Scene, 'temp_domain_color')
+
 def update_split_start(self, context):
+    """Callback to update split domain start based on UI"""
     scene = context.scene
-    if not scene.selected_molecule_id or not hasattr(scene, 'active_splitting_domain_id') or not scene.active_splitting_domain_id:
-        return
-
     scene_manager = get_protein_blender_scene()
-    molecule = scene_manager.molecules.get(scene.selected_molecule_id)
-    if not molecule or scene.active_splitting_domain_id not in molecule.domains:
+    
+    # Find the active domain from the scene property
+    domain_id = scene.active_splitting_domain_id
+    if not domain_id:
         return
+        
+    # Extract molecule_id and simple_domain_id from the full domain_id
+    parts = domain_id.split('_domain_')
+    if len(parts) != 2:
+        return # Invalid domain_id format
     
-    active_domain = molecule.domains[scene.active_splitting_domain_id]
+    molecule_id, simple_domain_id = parts
     
-    # Clamp start value
-    new_start_val = scene.split_domain_new_start # Read once
-    clamped_start = max(active_domain.start, new_start_val)
-    clamped_start = min(clamped_start, scene.split_domain_new_end - 1) # Must be at least 1 less than end
-    clamped_start = min(clamped_start, active_domain.end -1) # Cannot exceed domain end -1
-
-    if scene.split_domain_new_start != clamped_start:
-        scene.split_domain_new_start = clamped_start
+    # Retrieve the specific domain object
+    molecule = scene_manager.get_molecule(molecule_id)
+    if not molecule:
+        return
+        
+    domain = molecule.get_domain_by_id(f"{molecule_id}_domain_{simple_domain_id}")
+    if not domain:
+        return
+        
+    # Update the preview
+    domain.update_split_preview('start', scene.split_domain_new_start)
 
 def update_split_end(self, context):
+    """Callback to update split domain end based on UI"""
     scene = context.scene
-    if not scene.selected_molecule_id or not hasattr(scene, 'active_splitting_domain_id') or not scene.active_splitting_domain_id:
-        return
-
     scene_manager = get_protein_blender_scene()
-    molecule = scene_manager.molecules.get(scene.selected_molecule_id)
-    if not molecule or scene.active_splitting_domain_id not in molecule.domains:
+    
+    # Find the active domain from the scene property
+    domain_id = scene.active_splitting_domain_id
+    if not domain_id:
         return
+        
+    # Extract molecule_id and simple_domain_id from the full domain_id
+    parts = domain_id.split('_domain_')
+    if len(parts) != 2:
+        return # Invalid domain_id format
     
-    active_domain = molecule.domains[scene.active_splitting_domain_id]
-
-    # Clamp end value
-    new_end_val = scene.split_domain_new_end # Read once
-    clamped_end = min(active_domain.end, new_end_val)
-    clamped_end = max(clamped_end, scene.split_domain_new_start + 1) # Must be at least 1 greater than start
-    clamped_end = max(clamped_end, active_domain.start + 1) # Cannot be less than domain start + 1
+    molecule_id, simple_domain_id = parts
     
-    if scene.split_domain_new_end != clamped_end:
-        scene.split_domain_new_end = clamped_end
-
-# Callback for domain_color property update
-def update_domain_color(self, context):
-    domain_id = self["domain_id"]
-    parent_molecule_id = self["parent_molecule_id"]
-    
-    # Get scene manager and find which domain this object belongs to
-    scene_manager = ProteinBlenderScene.get_instance()
-    print(f"Updating domain color for domain: {domain_id} in molecule: {parent_molecule_id}")
-    # Find which molecule and domain this object belongs to
-    for molecule_id, molecule in scene_manager.molecules.items():
-        print(f"Checking molecule: {molecule_id}")
-        if parent_molecule_id.startswith(molecule_id):
-            print(f"Updating domain color for domain: {domain_id} in molecule: {molecule_id}")
-            molecule.update_domain_color(domain_id, self.domain_color)
-            return
+    # Retrieve the specific domain object
+    molecule = scene_manager.get_molecule(molecule_id)
+    if not molecule:
+        return
+        
+    domain = molecule.get_domain_by_id(f"{molecule_id}_domain_{simple_domain_id}")
+    if not domain:
+        return
+        
+    # Update the preview
+    domain.update_split_preview('end', scene.split_domain_new_end)
 
 def update_molecule_style(self, context):
-    from ..utils.scene_manager import ProteinBlenderScene
+    """Update style of selected molecule"""
     scene_manager = ProteinBlenderScene.get_instance()
-    molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
-    style = context.scene.molecule_style
-    if molecule and molecule.object:
-        from ..utils.molecularnodes.blender.nodes import change_style_node
-        change_style_node(molecule.object, style)
-        for domain in getattr(molecule, 'domains', {}).values():
-            if hasattr(domain, 'object') and domain.object:
-                try:
-                    domain.object.domain_style = style
-                except Exception as e:
-                    print(f"Failed to update style for domain {getattr(domain, 'name', '?')}: {e}")
+    molecule = scene_manager.get_selected_molecule(context)
+    if molecule:
+        # Assuming the molecule object has a style property that can be updated
+        nodes.change_style_node(molecule.object, context.scene.molecule_style)
+
+def update_domain_color(self, context):
+    """Update the color of the domain's material."""
+    domain_id = self.get("domain_id")
+    if not domain_id:
+        return
+
+    # Find the associated molecule from a custom property on the domain object
+    parent_molecule_id = self.get("parent_molecule_id")
+    if not parent_molecule_id:
+        return
+        
+    # Get the scene manager instance
+    scene_manager = get_protein_blender_scene()
+    molecule = scene_manager.get_molecule(parent_molecule_id)
+    
+    if molecule:
+        molecule.update_domain_color(domain_id, self.domain_color)
 
 def register():
-    """Register molecule properties"""
-    # Try to unregister first if already registered
+    """Register all properties"""
+    
+    # Unregister any existing properties first
     try:
         unregister()
     except Exception:
         pass
         
-    # Register Domain first since other classes might depend on it
-    bpy.utils.register_class(Domain)
-    bpy.utils.register_class(ChainSelectionItem)
-    bpy.utils.register_class(DomainTransformData)
-    bpy.utils.register_class(MoleculePose)
-    bpy.utils.register_class(MoleculeKeyframe)
-    bpy.utils.register_class(MoleculeListItem)
+    # Register classes
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
     
     # Register temporary properties needed for domain editing
     bpy.types.Scene.temp_domain_start = IntProperty(
         name="Start",
         description="Temporary start residue for domain editing",
         default=1,
-        min=1
+        min=1,
+        update=update_split_end
     )
     
     bpy.types.Scene.temp_domain_end = IntProperty(
@@ -688,7 +667,7 @@ def register():
         subtype='COLOR',
         size=4,
         min=0.0, max=1.0,
-        default=(0.8, 0.1, 0.8, 1.0)  # Default to purple
+        default=(0.8, 0.1, 0.8, 1.0)
     )
     
     # Properties for editing existing domains
@@ -708,9 +687,9 @@ def register():
     bpy.types.Object.domain_color = FloatVectorProperty(
         name="Domain Color",
         subtype='COLOR',
-        size=4,  # RGBA
+        size=4,
         min=0.0, max=1.0,
-        default=(0.8, 0.1, 0.8, 1.0),  # Default purple to match DomainDefinition
+        default=(0.8, 0.1, 0.8, 1.0),
         description="Color of the domain",
         update=lambda self, context: update_domain_color(self, context)
     )
@@ -725,92 +704,82 @@ def register():
     # Properties for domain splitting UI
     bpy.types.Scene.split_domain_new_start = IntProperty(
         name="New Start",
-        description="New starting residue for the split domain",
-        default=1,
-        min=1, # Broad min, will be effectively constrained by update logic and initial setting
-        update=update_split_start
+        description="New start for the split-off part of the domain",
+        default=1, min=1, update=update_split_start
     )
     bpy.types.Scene.split_domain_new_end = IntProperty(
         name="New End",
-        description="New ending residue for the split domain",
-        default=1,
-        min=1, # Broad min, will be effectively constrained by update logic and initial setting
-        update=update_split_end
+        description="New end for the split-off part of the domain",
+        default=1, min=1, update=update_split_end
+    )
+    
+    # --- Register Scene Properties for Domain Splitting ---
+    bpy.types.Scene.active_splitting_domain_id = StringProperty()
+    bpy.types.Scene.split_domain_new_start = IntProperty(
+        name="New Start",
+        description="New start for the split-off part of the domain",
+        default=1, min=1, update=update_split_start
+    )
+    bpy.types.Scene.split_domain_new_end = IntProperty(
+        name="New End",
+        description="New end for the split-off part of the domain",
+        default=1, min=1, update=update_split_end
+    )
+    
+    # --- Register Object Properties ---
+    bpy.types.Object.domain_color = FloatVectorProperty(
+        name="Domain Color",
+        subtype='COLOR',
+        size=4,
+        min=0.0, max=1.0,
+        default=(0.8, 0.1, 0.8, 1.0),
+        description="Color of the domain",
+        update=update_domain_color
+    )
+    
+    # --- Temporary properties ---
+    bpy.types.Scene.temp_domain_id = StringProperty()
+    bpy.types.Scene.temp_domain_color = FloatVectorProperty(
+        name="Temp Domain Color",
+        subtype='COLOR',
+        size=4,
+        min=0.0, max=1.0,
+        default=(0.8, 0.1, 0.8, 1.0)
     )
 
 def unregister():
-    """Unregister molecule properties"""
+    """Unregister all properties"""
     
-    # Safely unregister classes
-    try:
-        bpy.utils.unregister_class(MoleculeListItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(MoleculeKeyframe)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(ChainSelectionItem)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(DomainTransformData)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(MoleculePose)
-    except Exception:
-        pass
-    
-    try:
-        bpy.utils.unregister_class(Domain)
-    except Exception:
-        pass
-    
-    # Safely unregister properties with checks
-    if hasattr(bpy.types.Scene, "chain_selections"):
-        del bpy.types.Scene.chain_selections
-    if hasattr(bpy.types.Scene, "molecule_style"):
-        del bpy.types.Scene.molecule_style
-    if hasattr(bpy.types.Scene, "edit_molecule_identifier"):
-        del bpy.types.Scene.edit_molecule_identifier
-    if hasattr(bpy.types.Scene, "show_molecule_edit_panel"):
-        del bpy.types.Scene.show_molecule_edit_panel
-    if hasattr(bpy.types.Scene, "selected_molecule_id"):
-        del bpy.types.Scene.selected_molecule_id
-    if hasattr(bpy.types.Scene, "molecule_list_index"):
-        del bpy.types.Scene.molecule_list_index
-    if hasattr(bpy.types.Scene, "molecule_list_items"):
-        del bpy.types.Scene.molecule_list_items
-    
-    # Unregister new domain creation properties
-    if hasattr(bpy.types.Scene, "new_domain_chain"):
-        del bpy.types.Scene.new_domain_chain
-    if hasattr(bpy.types.Scene, "new_domain_start"):
-        del bpy.types.Scene.new_domain_start
-    if hasattr(bpy.types.Scene, "new_domain_end"):
-        del bpy.types.Scene.new_domain_end
-    
-    # Unregister temporary domain editing properties
-    if hasattr(bpy.types.Scene, "temp_domain_start"):
-        del bpy.types.Scene.temp_domain_start
-    if hasattr(bpy.types.Scene, "temp_domain_end"):
-        del bpy.types.Scene.temp_domain_end
+    # --- Unregister Classes ---
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
+
+    # --- Unregister Scene Properties ---
+    # Use a list of properties to unregister to avoid repetition
+    scene_props_to_unregister = [
+        'protein_properties',
+        'molecule_list_items', 'molecule_list_index', 
+        'selected_molecule_id', 'show_molecule_edit_panel', 
+        'edit_molecule_identifier', 'selected_chain_for_domain',
+        'domain_start', 'domain_end', 'show_domain_preview',
+        'active_splitting_domain_id', 'split_domain_new_start',
+        'split_domain_new_end', 'temp_domain_id', 'temp_domain_color'
+    ]
+    for prop in scene_props_to_unregister:
+        if hasattr(bpy.types.Scene, prop):
+            delattr(bpy.types.Scene, prop)
+            
+    # --- Unregister Object Properties ---
+    if hasattr(bpy.types.Object, 'domain_color'):
+        delattr(bpy.types.Object, 'domain_color')
+
+    # Clean up other scene properties
+    if hasattr(bpy.types.Scene, 'selected_chain'):
+        delattr(bpy.types.Scene, 'selected_chain')
+        
+    # Remove temporary properties
     if hasattr(bpy.types.Scene, "temp_domain_id"):
         del bpy.types.Scene.temp_domain_id
-    if hasattr(bpy.types.Object, "domain_color"):
-        del bpy.types.Object.domain_color
-    
-    # Unregister domain splitting UI properties
-    if hasattr(bpy.types.Scene, "split_domain_new_start"):
-        del bpy.types.Scene.split_domain_new_start
-    if hasattr(bpy.types.Scene, "split_domain_new_end"):
-        del bpy.types.Scene.split_domain_new_end
-    if hasattr(bpy.types.Scene, "active_splitting_domain_id"):
-        del bpy.types.Scene.active_splitting_domain_id
-    
+    if hasattr(bpy.types.Scene, "temp_domain_color"):
+        delattr(bpy.types.Scene, 'temp_domain_color')
+        

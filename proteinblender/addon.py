@@ -6,7 +6,7 @@ from .handlers import CLASSES as handler_classes
 from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes
 from .properties.protein_props import  register as register_protein_props, unregister as unregister_protein_props
-from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
+from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props, CLASSES as molecule_classes
 from .utils import scene_manager
 from .layout.workspace_setup import ProteinWorkspaceManager
 
@@ -15,7 +15,7 @@ from .utils.molecularnodes.props import MolecularNodesObjectProperties
 # from .utils.scene_manager import ProteinBlenderScene, sync_molecule_list_after_undo
 
 # Track registered classes
-registered_classes = set()
+registered_classes = []
 
 all_pb_classes = (
     core_classes,
@@ -23,6 +23,7 @@ all_pb_classes = (
     operator_classes,
     panel_classes,
     session.CLASSES,
+    molecule_classes,
 )
 
 def _test_register():
@@ -53,7 +54,7 @@ def register():
         for cls in op:
             try:
                 bpy.utils.register_class(cls)
-                registered_classes.add(cls)
+                registered_classes.append(cls)
             except Exception as e:
                 print(f"Failed to register {cls.__name__}: {e}")
                 pass
@@ -73,6 +74,7 @@ def register():
     # Register MolecularNodes object properties
     try:
         bpy.utils.register_class(MolecularNodesObjectProperties)
+        registered_classes.append(MolecularNodesObjectProperties)
     except Exception as e:
         print(f"Failed to register MolecularNodesObjectProperties: {e}")
         pass
@@ -118,20 +120,11 @@ def unregister():
     if hasattr(bpy.types.Object, "mn"):
         del bpy.types.Object.mn
     
-    # Unregister MolecularNodesObjectProperties
-    try:
-        bpy.utils.unregister_class(MolecularNodesObjectProperties)
-    except Exception as e:
-        print(f"Failed to unregister MolecularNodesObjectProperties: {e}")
-        pass
-
-    # Unregister classes
-    for op in reversed(all_pb_classes):
-        for cls in reversed(op):
-            try:
-                bpy.utils.unregister_class(cls)
-                if cls in registered_classes:
-                    registered_classes.remove(cls)
-            except Exception as e:
-                print(f"Failed to unregister {cls.__name__}: {e}")
-                pass
+    # Unregister all registered classes
+    for cls in reversed(registered_classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception as e:
+            print(f"Failed to unregister {cls.__name__}: {e}")
+    
+    registered_classes.clear()
