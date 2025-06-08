@@ -56,21 +56,8 @@ class ProteinBlenderScene:
             print(f"Molecule {molecule_id} not found for domain creation.")
             return
 
-        print(f"DEBUG SceneManager._create_domains_for_each_chain: Creating domains for molecule {molecule_id}")
-        # Log the maps from MoleculeWrapper that we will use for deriving chain information
-        if hasattr(molecule, 'idx_to_label_asym_id_map'):
-            print(f"DEBUG SceneManager: molecule.idx_to_label_asym_id_map = {molecule.idx_to_label_asym_id_map}")
-        else:
-            print("DEBUG SceneManager: molecule.idx_to_label_asym_id_map not found.")
-        
-        if hasattr(molecule, 'auth_chain_id_map'):
-            print(f"DEBUG SceneManager: molecule.auth_chain_id_map = {molecule.auth_chain_id_map}")
-        else:
-            print("DEBUG SceneManager: molecule.auth_chain_id_map not found.")
-
         # Use the chain_residue_ranges from MoleculeWrapper, which should now be keyed by label_asym_id.
         chain_ranges_from_wrapper = molecule.chain_residue_ranges
-        print(f"DEBUG SceneManager: chain_ranges_from_wrapper (molecule.chain_residue_ranges) = {chain_ranges_from_wrapper}")
 
         if not chain_ranges_from_wrapper:
             print(f"Warning SceneManager: No chain residue ranges found in molecule wrapper for {molecule_id}. Cannot create default domains.")
@@ -85,9 +72,8 @@ class ProteinBlenderScene:
         if not label_asym_id_to_idx_map:
             for idx, label in enumerate(chain_ranges_from_wrapper.keys()):
                 label_asym_id_to_idx_map[label] = idx
-        print(f"DEBUG SceneManager: Using label_asym_id_to_idx_map = {label_asym_id_to_idx_map}")
 
-        created_domain_ids_for_molecule: List[str] = []
+        created_domain_ids_for_molecule: List[List[str]] = []
         # Keep track of processed label_asym_ids to avoid duplicates if chain_ranges_from_wrapper somehow has redundant entries
         processed_label_asym_ids: Set[str] = set()
 
@@ -109,10 +95,9 @@ class ProteinBlenderScene:
             chain_id_int_str_for_domain = str(int_chain_idx)
 
             domain_name = f"Chain {label_asym_id_key}" # Default name
-            print(f"DEBUG SceneManager: Attempting to create domain: Name='{domain_name}', LabelAsymID='{label_asym_id_key}', IntChainIdxStr='{chain_id_int_str_for_domain}', Range=({current_min_res}-{max_res})")
 
             # Call using positional arguments: chain_id_int_str, start, end, name, auto_fill_chain, parent_domain_id
-            created_domain_id = molecule._create_domain_with_params(
+            created_domain_ids = molecule._create_domain_with_params(
                 chain_id_int_str_for_domain,
                 current_min_res,
                 max_res,
@@ -121,9 +106,8 @@ class ProteinBlenderScene:
                 None    # parent_domain_id
             )
             
-            if created_domain_id:
-                print(f"DEBUG SceneManager: Successfully processed LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}) resulting in domain ID '{created_domain_id}' for range {current_min_res}-{max_res}")
-                created_domain_ids_for_molecule.append(created_domain_id)
+            if created_domain_ids:
+                created_domain_ids_for_molecule.append(created_domain_ids)
                 processed_label_asym_ids.add(label_asym_id_key)
             else:
                  print(f"DEBUG SceneManager: Failed to create a valid domain for LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}). It may have been skipped or failed in MoleculeWrapper.")

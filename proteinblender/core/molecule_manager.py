@@ -666,11 +666,23 @@ class MoleculeWrapper:
 
             search_chain_ids = get_possible_chain_ids(domain_chain_id)
 
+            # Determine which chain attribute to use (support 'chain_id' or 'chain_id_int')
+            if "chain_id" in attrs:
+                chain_attr_name = "chain_id"
+            elif "chain_id_int" in attrs:
+                chain_attr_name = "chain_id_int"
+            else:
+                print("Error: Chain ID attribute ('chain_id' or 'chain_id_int') not found.")
+                return None
+
             # Get attribute data arrays
-            chain_ids_data = attrs["chain_id"].data
+            chain_ids_data = attrs[chain_attr_name].data
             res_nums_data = attrs[residue_attr_name].data
             positions_data = attrs["position"].data
-            
+
+            # Prepare string versions of possible chain IDs for comparison
+            search_chain_ids_str = [str(s) for s in search_chain_ids]
+
             is_alpha_carbon_data = None
             is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
             if is_alpha_carbon_attr:
@@ -716,8 +728,8 @@ class MoleculeWrapper:
                                 actual_chain_id = chain_id_val
                         else:
                             actual_chain_id = chain_id_val
-                        # Skip atoms not in the target chain
-                        if str(actual_chain_id) != str(domain_chain_id):
+                        # Skip atoms not in the target chain(s)
+                        if str(actual_chain_id) not in search_chain_ids_str:
                             continue 
                         
                         # --- Check using the preferred method (is_alpha_carbon) --- 
@@ -1454,7 +1466,6 @@ class MoleculeWrapper:
 
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
-        print(f"DEBUG: _setup_domain_network called for domain {domain.name}, Range: {chain_id} ({start}-{end})") # DEBUG
         if not domain.object or not domain.node_group:
             print("DEBUG: _setup_domain_network - Domain object or node group is missing") # DEBUG
             return False
@@ -1485,7 +1496,7 @@ class MoleculeWrapper:
                 # as it automatically connects to the style node
                 chain_select_group = nodes.custom_iswitch(
                     name="selection", 
-                    iter_list=self.chain_mapping.values() or [str(chain_id)], 
+                    iter_list=list(self.chain_residue_ranges.keys()) or [str(chain_id)], 
                     field="chain_id", 
                     dtype="BOOLEAN"
                 )
@@ -1523,7 +1534,6 @@ class MoleculeWrapper:
                 select_res_id_range.location = (chain_select.location.x + 200, chain_select.location.y)
             
             # Update the residue range
-            print(f"DEBUG: _setup_domain_network - Setting Res ID Range Min: {start}, Max: {end}") # DEBUG
             select_res_id_range.inputs["Min"].default_value = start
             select_res_id_range.inputs["Max"].default_value = end
             
@@ -1737,7 +1747,7 @@ class MoleculeWrapper:
                 # as it automatically connects to the style node
                 chain_select_group = nodes.custom_iswitch(
                     name="selection", 
-                    iter_list=self.chain_mapping.values() or [str(chain_id)], 
+                    iter_list=list(self.chain_residue_ranges.keys()) or [str(chain_id)], 
                     field="chain_id", 
                     dtype="BOOLEAN"
                 )
@@ -1842,7 +1852,7 @@ class MoleculeWrapper:
                     parent_node_group.links.remove(link)
             
         except Exception as e:
-            print(f"DEBUG: Error in _create_domain_mask_nodes: {str(e)}") # DEBUG
+            # Error in mask node creation suppressed to reduce log noise
             import traceback
             traceback.print_exc()
 
