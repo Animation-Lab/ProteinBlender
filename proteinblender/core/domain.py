@@ -315,21 +315,21 @@ def ensure_domain_properties_registered():
 def register():
     """Register property classes"""
     from bpy.utils import register_class
-    register_class(DomainProperties)
-    register_class(Domain)
+    for cls in [DomainProperties, Domain]:
+        try:
+            register_class(cls)
+        except ValueError: # Class already registered
+            pass
     
     # Register custom object properties - these directly call the ensure function
     ensure_domain_properties_registered()
 
 def unregister():
-    try:
-        bpy.utils.unregister_class(DomainProperties)
-    except:
-        pass
-    try:
-        bpy.utils.unregister_class(Domain)
-    except:
-        pass
+    for cls in [DomainProperties, Domain]:
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, Exception): # Class not registered
+            pass
 
 def domain_style_update(obj, context):
     """Callback when domain style is changed"""
@@ -342,8 +342,8 @@ def domain_style_update(obj, context):
         parent_molecule_id = obj["parent_molecule_id"]
         
         # Get scene manager and molecule
-        from ..utils.scene_manager import ProteinBlenderScene
-        scene_manager = ProteinBlenderScene.get_instance()
+        from ..utils.scene_manager import get_protein_blender_scene
+        scene_manager = get_protein_blender_scene(bpy.context)
         molecule = scene_manager.molecules.get(parent_molecule_id)
         
         if not molecule:

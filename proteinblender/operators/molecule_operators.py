@@ -1,100 +1,64 @@
 import bpy
-from bpy.types import Operator
+from bpy.types import Operator, Panel
 from bpy.props import StringProperty, EnumProperty
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import get_protein_blender_scene
 from ..utils.molecularnodes.style import STYLE_ITEMS
+from ..properties.molecule_props import MoleculeListItem
 
-class MOLECULE_PB_OT_select(Operator):
+class MOLECULE_OT_select(Operator):
     bl_idname = "molecule.select"
     bl_label = "Select Molecule"
-    bl_description = "Select this molecule"
-    bl_order = 0
+    bl_description = "Select a molecule"
     
-    molecule_id: StringProperty()
+    molecule_id: bpy.props.StringProperty()
     
     def execute(self, context):
-        scene = context.scene
-        # Toggle collapse when clicking the active molecule
-        if scene.selected_molecule_id == self.molecule_id:
-            scene.selected_molecule_id = ""
-            return {'FINISHED'}
-        # Select this molecule
-        scene.selected_molecule_id = self.molecule_id
-        scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(self.molecule_id)
-        
+        context.scene.selected_molecule_id = self.molecule_id
+        return {'FINISHED'}
+
+class MOLECULE_OT_delete(Operator):
+    bl_idname = "molecule.delete"
+    bl_label = "Delete Molecule"
+    bl_description = "Delete a molecule"
+    
+    molecule_id: bpy.props.StringProperty()
+    
+    def execute(self, context):
+        scene_manager = get_protein_blender_scene(context)
+        scene_manager.remove_molecule(self.molecule_id)
+        return {'FINISHED'}
+
+class MOLECULE_OT_add_domain(Operator):
+    """Add a new domain to the selected molecule"""
+    bl_idname = "molecule.add_domain"
+    bl_label = "Add Domain"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene_manager = get_protein_blender_scene(context)
+        molecule = scene_manager.active_molecule
         if molecule:
-            # Clear existing chain selections
-            context.scene.chain_selections.clear()
-            
-            # Get unique chain IDs from the molecule's object
-            if molecule.object and "chain_id" in molecule.object.data.attributes:
-                chain_attr = molecule.object.data.attributes["chain_id"]
-                chain_ids = sorted(set(value.value for value in chain_attr.data))
-                
-                # Create selection items for each chain
-                for chain_id in chain_ids:
-                    item = context.scene.chain_selections.add()
-                    item.chain_id = str(chain_id)
-                    item.is_selected = False
-            
-            # Set the edit identifier when selecting
-            context.scene.edit_molecule_identifier = molecule.identifier
-            
-            # Initialize domain creation UI properties
-            if chain_ids and len(chain_ids) > 0:
-                first_chain = str(chain_ids[0])
-                context.scene.new_domain_chain = first_chain
-                
-                # Get residue range for the first chain
-                if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
-                    # Get the mapped chain (handle numeric vs. alphabetic chains)
-                    mapped_chain = molecule.chain_mapping.get(
-                        int(first_chain) if first_chain.isdigit() else first_chain, 
-                        str(first_chain)
-                    )
-                    
-                    # Get residue range for this chain
-                    if mapped_chain in molecule.chain_residue_ranges:
-                        min_res, max_res = molecule.chain_residue_ranges[mapped_chain]
-                        context.scene.new_domain_start = min_res
-                        context.scene.new_domain_end = max_res
-            
-            # Deselect all objects first
-            bpy.ops.object.select_all(action='DESELECT')
-            # Select the molecule's object
-            molecule.object.select_set(True)
-            context.view_layer.objects.active = molecule.object
-            
-            # Get unique chain IDs from the molecule's object
-            if molecule.object:
-                # Get the geometry nodes modifier
-                gn_mod = molecule.object.modifiers.get("MolecularNodes")
-                if gn_mod and gn_mod.node_group:
-                    # Create chain enum items
-                    chain_items = []
-                    # Get chain IDs from the molecule's attributes
-                    chain_ids = set()  # Using a set to get unique chain IDs
-                    if "chain_id" in molecule.object.data.attributes:
-                        chain_attr = molecule.object.data.attributes["chain_id"]
-                        for value in chain_attr.data:
-                            chain_ids.add(value.value)
-                    
-                    # Create enum items for each chain
-                    chain_items = [("NONE", "None", "None")]
-                    chain_items.extend([(str(chain), f"Chain {chain}", f"Chain {chain}") 
-                                      for chain in sorted(chain_ids)])
-                    
-                    # Update the enum property
-                    bpy.types.Scene.selected_chain = EnumProperty(
-                        name="Chain",
-                        description="Selects the protein's chain",
-                        items=chain_items,
-                        default="NONE"
-                    )
-                    # Force a property update
-                    context.scene.selected_chain = "NONE"
-            
+            molecule.create_domain()
+        else:
+            self.report({'WARNING'}, "No active molecule to add a domain to.")
+        return {'FINISHED'}
+
+
+class MOLECULE_OT_delete_domain(Operator):
+    """Delete a domain from the selected molecule"""
+    bl_idname = "molecule.delete_domain"
+    bl_label = "Delete Domain"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    domain_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        scene_manager = get_protein_blender_scene(context)
+        molecule = scene_manager.active_molecule
+        if molecule and self.domain_id:
+            molecule.delete_domain(self.domain_id)
+        else:
+            self.report({'WARNING'}, "No domain selected for deletion.")
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_edit(Operator):
@@ -109,19 +73,6 @@ class MOLECULE_PB_OT_edit(Operator):
         context.scene.selected_molecule_id = self.molecule_id
         return {'FINISHED'}
 
-class MOLECULE_PB_OT_delete(Operator):
-    bl_idname = "molecule.delete"
-    bl_label = "Delete Molecule"
-    bl_description = "Delete this molecule"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    molecule_id: StringProperty()
-    
-    def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
-        scene_manager.delete_molecule(self.molecule_id)
-        return {'FINISHED'}
-
 class MOLECULE_PB_OT_update_identifier(Operator):
     bl_idname = "molecule.update_identifier"
     bl_label = "Update Identifier"
@@ -130,7 +81,7 @@ class MOLECULE_PB_OT_update_identifier(Operator):
     
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         old_id = scene.selected_molecule_id
         new_id = scene.edit_molecule_identifier
         
@@ -160,7 +111,7 @@ class MOLECULE_PB_OT_change_style(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
         
         if molecule and molecule.object:
@@ -184,7 +135,7 @@ class MOLECULE_PB_OT_select_protein_chain(Operator):
 
 
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
         molecule.select_protein_chain = context.scene.selected_chain
 
@@ -206,7 +157,7 @@ class MOLECULE_PB_OT_move_protein_pivot(bpy.types.Operator):
     molecule_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             self.report({'ERROR'}, "Molecule object not found.")
@@ -234,7 +185,7 @@ class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
     molecule_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             self.report({'ERROR'}, "Molecule object not found.")
@@ -260,7 +211,7 @@ class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
     molecule_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             self.report({'ERROR'}, "Molecule object not found.")
@@ -348,7 +299,7 @@ class MOLECULE_PB_OT_toggle_visibility(Operator):
 
     def execute(self, context):
         # Get the molecule wrapper
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             return {'CANCELLED'}
@@ -361,3 +312,31 @@ class MOLECULE_PB_OT_toggle_visibility(Operator):
             if domain.object:
                 domain.object.hide_viewport = new_state
         return {'FINISHED'}
+
+CLASSES = [
+    MOLECULE_OT_select,
+    MOLECULE_OT_delete,
+    MOLECULE_OT_add_domain,
+    MOLECULE_OT_delete_domain,
+    MOLECULE_PB_OT_edit,
+    MOLECULE_PB_OT_update_identifier,
+    MOLECULE_PB_OT_change_style,
+    MOLECULE_PB_OT_select_protein_chain,
+    MOLECULE_PB_OT_move_protein_pivot,
+    MOLECULE_PB_OT_snap_protein_pivot_center,
+    MOLECULE_PB_OT_toggle_protein_pivot_edit,
+    MOLECULE_PB_OT_toggle_visibility,
+]
+
+def register():
+    print(f"MOLECULE_OPERATORS DEBUG: Registering {len(CLASSES)} operators: {[cls.__name__ for cls in CLASSES]}")
+    for cls in CLASSES:
+        try:
+            bpy.utils.register_class(cls)
+            print(f"  Successfully registered: {cls.__name__}")
+        except Exception as e:
+            print(f"  Failed to register {cls.__name__}: {e}")
+
+def unregister():
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)

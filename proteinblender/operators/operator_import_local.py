@@ -3,7 +3,7 @@ import os
 from bpy.types import Operator
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import get_protein_blender_scene
 
 class PROTEIN_OT_import_local(Operator, ImportHelper):
     bl_idname = "protein.import_local"
@@ -24,7 +24,7 @@ class PROTEIN_OT_import_local(Operator, ImportHelper):
         filename = os.path.basename(filepath)
         identifier = os.path.splitext(filename)[0]
         
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         success = scene_manager.import_molecule_from_file(filepath, identifier)
         
         if not success:

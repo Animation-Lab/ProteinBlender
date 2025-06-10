@@ -86,14 +86,21 @@ def register():
     # Schedule workspace creation after 0.5 seconds
     bpy.app.timers.register(create_workspace_callback, first_interval=0.25)
 
-    # Register undo handler if not already registered
-    # if sync_molecule_list_after_undo not in bpy.app.handlers.undo_post:
-        # bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
+    # PropertyGroups automatically integrate with Blender's undo system
+    # No custom undo handler needed
 
 def unregister():
-    # Clear any pending timers to prevent creation of new workspace during unregistration
+    # No undo handler to clean up since PropertyGroups handle undo automatically
+    
+    # Clear any pending timers
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)
+    
+    # Clear the scene manager cache
+    # Note: This is a simple approach. A more complex addon might need to
+    # handle scene removal via an `app.handlers.scene_pre` handler.
+    from .utils.scene_manager import _scene_managers
+    _scene_managers.clear()
 
     # Unregister properties
     try:

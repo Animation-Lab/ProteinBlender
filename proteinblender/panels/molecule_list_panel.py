@@ -1,12 +1,67 @@
 import bpy
-from bpy.types import Panel, Operator
+from bpy.types import Panel, Operator, UIList
 from bpy.props import StringProperty
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import ProteinBlenderScene, get_protein_blender_scene
 from ..operators.domain_operators import MOLECULE_PB_OT_toggle_pivot_edit
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
 ensure_domain_properties_registered()
+
+class MOLECULE_UL_items(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        molecule = item
+        
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(molecule, "name", text="", emboss=False, icon='OBJECT_DATA')
+            
+            # Add a delete button
+            op = row.operator("molecule.delete", text="", icon='TRASH')
+            op.molecule_id = molecule.identifier
+            
+        elif self.layout_type in {'GRID'}:
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon_value=icon)
+
+class MOLECULE_PT_molecule_list(Panel):
+    bl_label = "Molecules"
+    bl_idname = "MOLECULE_PT_molecule_list"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "object"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        
+        # Draw the list of molecules
+        layout.template_list(
+            "MOLECULE_UL_items",
+            "",
+            scene,
+            "molecule_list_items",
+            scene,
+            "molecule_list_index"
+        )
+        
+        # Draw details for the selected molecule
+        scene_manager = get_protein_blender_scene(context)
+        active_molecule = scene_manager.active_molecule
+        
+        if active_molecule:
+            box = layout.box()
+            box.label(text=f"Domains for {active_molecule.name}")
+            
+            # List domains for the active molecule
+            for domain_id, domain in active_molecule.domains.items():
+                row = box.row()
+                row.label(text=domain.name)
+                op = row.operator("molecule.delete_domain", text="", icon='TRASH')
+                op.domain_id = domain_id
+            
+            # Add a button to create a new domain
+            box.operator("molecule.add_domain", text="Add Domain")
 
 class MOLECULE_PB_PT_list(Panel):
     bl_label = "Molecules in Scene"
@@ -23,7 +78,7 @@ class MOLECULE_PB_PT_list(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         
         # Create box for list
         box = layout.box()
@@ -635,7 +690,7 @@ class MOLECULE_PB_OT_toggle_chain_selection(Operator):
                 break
                 
         # Update the molecule visualization
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         if molecule and molecule.object:
             # Get all selected chain IDs
@@ -660,3 +715,20 @@ class MOLECULE_PB_OT_delete_selected_object(Operator):
             bpy.data.objects.remove(selected_object, do_unlink=True)
         
         return {'FINISHED'}
+
+CLASSES = [
+    MOLECULE_UL_items,
+    MOLECULE_PT_molecule_list,
+]
+
+def register():
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.molecule_list_items = bpy.props.CollectionProperty(type=MoleculeListItem)
+    bpy.types.Scene.molecule_list_index = bpy.props.IntProperty(name="Molecule List Index", default=0)
+
+def unregister():
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
+    del bpy.types.Scene.molecule_list_items
+    del bpy.types.Scene.molecule_list_index

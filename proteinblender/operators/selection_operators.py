@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, BoolProperty
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import get_protein_blender_scene
 
 class MOLECULE_PB_OT_select_object(Operator):
     bl_idname = "molecule.select_object"
@@ -20,7 +20,7 @@ class MOLECULE_PB_OT_select_object(Operator):
     )
     
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         
         # First deselect all objects
         bpy.ops.object.select_all(action='DESELECT')

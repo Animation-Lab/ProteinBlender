@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Panel
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import get_protein_blender_scene
 
 class MOLECULE_PB_PT_poses(Panel):
     bl_label = "Protein Poses"
@@ -18,7 +18,7 @@ class MOLECULE_PB_PT_poses(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         if not molecule:

@@ -5,59 +5,86 @@ from typing import Dict, Optional, List, Set
 from .molecularnodes.entities import fetch, load_local
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from bpy.app.handlers import undo_post, undo_pre
+from databpy.object import LinkedObjectError
 
 class ProteinBlenderScene:
-    _instance = None
-
-    @classmethod
-    def get_instance(cls):
-        """Get or create the singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def __init__(self):
-        # Initialize the singleton instance
-        self.molecule_manager = MoleculeManager()
-        self.active_molecule: Optional[str] = None
-        self.display_settings = {}
-
+    """A manager for the ProteinBlender scene, providing access to molecules and domains."""
+    
+    def __init__(self, context):
+        self._scene = context.scene
+        self._molecule_manager = MoleculeManager(self._scene)
 
     @property
-    def molecules(self) -> Dict[str, MoleculeWrapper]:
-        return self.molecule_manager.molecules
+    def molecules(self) -> Dict[str, 'MoleculeWrapper']:
+        """Get the dictionary of all molecules in the scene."""
+        return self._molecule_manager.molecules
 
-    def set_active_molecule(self, molecule_id):
-        """Set the active molecule."""
-        self.active_molecule = molecule_id
+    @property
+    def active_molecule(self) -> Optional['MoleculeWrapper']:
+        """Get the currently active molecule."""
+        active_id = self._scene.selected_molecule_id
+        return self.get_molecule(active_id) if active_id else None
 
-    def add_molecule(self, molecule):
-        """Add a molecule to the scene."""
-        self.molecule_manager.add_molecule(molecule)
-        self.active_molecule = molecule.identifier
+    def get_molecule(self, identifier: str) -> Optional['MoleculeWrapper']:
+        """Get a molecule by its identifier."""
+        return self._molecule_manager.get_molecule(identifier)
+    
+    def import_molecule(self, *args, **kwargs) -> Optional['MoleculeWrapper']:
+        """Import a molecule using the molecule manager."""
+        # This now becomes a simple pass-through, keeping the scene manager as the main interface.
+        # Determine import type from kwargs
+        molecule = None
+        if 'pdb_id' in kwargs:
+            molecule = self._molecule_manager.import_from_pdb(*args, **kwargs)
+        elif 'filepath' in kwargs:
+            molecule = self._molecule_manager.import_from_file(*args, **kwargs)
+        else:
+            print("Error: No valid import source provided (pdb_id or filepath).")
+            return None
+            
+        # If import was successful, finalize the molecule (create domains, update UI)
+        if molecule:
+            self._finalize_imported_molecule(molecule)
+            
+        return molecule
 
-    def remove_molecule(self, identifier):
+    def remove_molecule(self, identifier: str):
         """Remove a molecule from the scene."""
-        self.molecule_manager.remove_molecule(identifier)
-        if self.active_molecule == identifier:
-            self.active_molecule = next(iter(self.molecules)) if self.molecules else None
+        self._molecule_manager.delete_molecule(identifier)
+        
+        # After deleting, update the active molecule if it was the one deleted
+        if self._scene.selected_molecule_id == identifier:
+            # Select the first available molecule or clear the selection
+            all_ids = list(self.molecules.keys())
+            self._scene.selected_molecule_id = all_ids[0] if all_ids else ""
+
+
+
+    def get_selected_molecule(self, context) -> Optional['MoleculeWrapper']:
+        """Get the currently selected molecule based on the scene property."""
+        sel_id = context.scene.selected_molecule_id
+        if not sel_id:
+            return None
+        return self.get_molecule(sel_id)
 
     def to_json(self):
         """Convert the scene to JSON."""
         return json.dumps({
             'molecules': {id: molecule.to_json() for id, molecule in self.molecules.items()},
-            'active_molecule': self.active_molecule,
-            'display_settings': self.display_settings
+            'active_molecule': self.active_molecule.identifier if self.active_molecule else None,
+            'display_settings': {}
         })
 
     def _create_domains_for_each_chain(self, molecule_id: str):
-        molecule = self.molecule_manager.get_molecule(molecule_id)
+        print(f"SCENE_MANAGER DEBUG: Starting domain creation for molecule {molecule_id}")
+        molecule = self._molecule_manager.get_molecule(molecule_id)
         if not molecule:
             print(f"Molecule {molecule_id} not found for domain creation.")
             return
 
         # Use the chain_residue_ranges from MoleculeWrapper, which should now be keyed by label_asym_id.
         chain_ranges_from_wrapper = molecule.chain_residue_ranges
+        print(f"SCENE_MANAGER DEBUG: Chain ranges from wrapper: {chain_ranges_from_wrapper}")
 
         if not chain_ranges_from_wrapper:
             print(f"Warning SceneManager: No chain residue ranges found in molecule wrapper for {molecule_id}. Cannot create default domains.")
@@ -120,14 +147,22 @@ class ProteinBlenderScene:
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
+        print(f"SCENE_MANAGER DEBUG: Finalizing import for molecule {molecule.identifier}")
+        
         # Create domains for each chain
+        print(f"SCENE_MANAGER DEBUG: Creating domains for {molecule.identifier}")
         self._create_domains_for_each_chain(molecule.identifier)
+        
         # Add to UI list
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()
         item.identifier = molecule.identifier
+        item.name = molecule.identifier  # Also set name
+        
         # Set as active molecule
-        self.active_molecule = molecule.identifier
+        scene.selected_molecule_id = molecule.identifier
+        print(f"SCENE_MANAGER DEBUG: Set active molecule to {molecule.identifier}")
+        
         # Force UI refresh
         self._refresh_ui()
 
@@ -167,31 +202,6 @@ class ProteinBlenderScene:
         except Exception as e:
             print(f"Error creating molecule: {str(e)}")
             return False
-
-    def sync_molecule_list_after_undo(*args):
-        """Synchronize the molecule list UI after undo/redo operations"""
-        print("Syncing molecule list after undo/redo")
-        # THIS FUNCTION WILL BE CALLED WHENEVER AN UNDO OR REDO IS DONE
-        '''
-        scene_manager = ProteinBlenderScene.get_instance()
-        scene = bpy.context.scene
-        
-        # Clear existing list
-        scene.molecule_list_items.clear()
-        
-        # Rebuild list from current molecules
-        for identifier, molecule in scene_manager.molecules.items():
-            if molecule.object and molecule.object.name in bpy.data.objects:
-                item = scene.molecule_list_items.add()
-                item.identifier = identifier
-        
-        # Ensure active molecule is valid
-        if scene_manager.active_molecule not in scene_manager.molecules:
-            scene_manager.active_molecule = next(iter(scene_manager.molecules)) if scene_manager.molecules else None
-        
-        # Force UI refresh
-        scene_manager._refresh_ui()
-        '''
 
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
@@ -287,3 +297,31 @@ class ProteinBlenderScene:
         
         # Force UI refresh
         self._refresh_ui() 
+
+# Helper function to get the scene manager instance for the current context.
+# This replaces the singleton `get_instance()` method.
+_scene_managers = {}
+
+def get_protein_blender_scene(context=None):
+    """
+    Returns a ProteinBlenderScene instance for the given context.
+    Caches the instance per Blender scene to maintain a single manager per scene.
+    """
+    if context is None:
+        context = bpy.context
+    
+    scene = context.scene
+    # Use the scene's memory address as a unique key
+    scene_key = hash(scene)
+    
+    if scene_key not in _scene_managers:
+        _scene_managers[scene_key] = ProteinBlenderScene(context)
+        
+    return _scene_managers[scene_key]
+
+def clear_scene_manager_cache(scene):
+    """Function to be called when a scene is removed."""
+    scene_key = hash(scene)
+    if scene_key in _scene_managers:
+        del _scene_managers[scene_key]
+        print(f"Cleared scene manager for scene: {scene.name}") 

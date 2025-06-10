@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, FloatVectorProperty
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import get_protein_blender_scene
 
 class MOLECULE_PB_OT_create_pose(Operator):
     bl_idname = "molecule.create_pose"
@@ -17,7 +17,7 @@ class MOLECULE_PB_OT_create_pose(Operator):
     def invoke(self, context, event):
         # Set a better default name based on molecule and pose count
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         
         if molecule:
@@ -43,7 +43,7 @@ class MOLECULE_PB_OT_create_pose(Operator):
     
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         
         if not molecule:
@@ -98,7 +98,7 @@ class MOLECULE_PB_OT_apply_pose(Operator):
     
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
+        scene_manager = get_protein_blender_scene(context)
         molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         
         if not molecule:

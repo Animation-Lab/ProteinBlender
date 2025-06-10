@@ -14,6 +14,7 @@ from ..utils.molecularnodes.session import MNSession
 from ..utils.molecularnodes.addon import _test_register
 from .domain import Domain, DomainDefinition
 from ..core.domain import ensure_domain_properties_registered
+from databpy.object import LinkedObjectError
 
 class MoleculeWrapper:
     """
@@ -601,175 +602,76 @@ class MoleculeWrapper:
     # --- Moved Helper: Find Alpha Carbon Position --- 
     def _find_residue_alpha_carbon_pos(self, context, domain: DomainDefinition, residue_target: str) -> Optional[Vector]:
         """
-        Finds the 3D coordinates of the Alpha Carbon (CA) for a specific residue.
-        For START, searches forward from domain.start until a CA is found.
-        For END, searches backward from domain.end until a CA is found.
-
-        Returns:
-            mathutils.Vector: The coordinates if found, otherwise None.
+        Find the position of the alpha carbon for a target residue ('START' or 'END') within a domain.
+        If the alpha carbon is not found, it returns the geometric center of all atoms in that residue.
         """
-        try:
-            mol_obj = self.molecule.object  # Use self.molecule.object
-            if not mol_obj or not domain.object or not hasattr(mol_obj.data, "attributes"):
-                print("Error: Molecule object, domain object, or attributes not found.")
-                return None
+        target_res_id = domain.start if residue_target == 'START' else domain.end
 
-            attrs = mol_obj.data.attributes
-            # print(f"DEBUG: Available attributes on {mol_obj.name}.data: {list(attrs.keys())}") # Keep commented out for now
-
-            # Determine residue number attribute
-            residue_attr_name = None
-            if "residue_number" in attrs:
-                residue_attr_name = "residue_number"
-            elif "res_id" in attrs:
-                residue_attr_name = "res_id"
-            else:
-                print("Error: Residue number attribute ('residue_number' or 'res_id') not found.")
-                return None
-
-            # Check for required attributes (adjust if needed, e.g., is_alpha_carbon instead of atom_name)
-            required_attrs = ["is_alpha_carbon", "chain_id", residue_attr_name, "position"]
-            if not all(attr in attrs for attr in required_attrs):
-                # Check for atom_name as fallback for older MN versions?
-                if "atom_name" not in attrs: 
-                   print(f"Error: Missing one or more required attributes: {required_attrs}")
-                   return None
-                else: # If atom_name exists but is_alpha_carbon doesn't, proceed with warning?
-                   print("Warning: 'is_alpha_carbon' not found, will attempt using 'atom_name' but might be unreliable.")
-                   # We'll handle checking atom_name later if is_alpha_carbon fails
-                   pass
-
-            # Get domain info
-            domain_chain_id = domain.chain_id
-            start_res = domain.start
-            end_res = domain.end
-
-            # --- Helper function for chain IDs --- (Can remain nested or become internal method)
-            def get_possible_chain_ids(chain_id):
-                 # ... (implementation remains the same) ...
-                 search_ids = [chain_id]
-                 if isinstance(chain_id, str) and chain_id.isalpha():
-                     try:
-                         numeric_chain = ord(chain_id.upper()) - ord('A')
-                         search_ids.append(numeric_chain)
-                     except Exception: pass
-                 elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
-                     try:
-                         int_chain_id = int(chain_id)
-                         alpha_chain = chr(int_chain_id + ord('A'))
-                         search_ids.append(alpha_chain)
-                         search_ids.append(int_chain_id)
-                         search_ids.append(str(int_chain_id))
-                     except Exception: pass
-                 return list(set(filter(None.__ne__, search_ids)))
-            # --- End helper --- 
-
-            search_chain_ids = get_possible_chain_ids(domain_chain_id)
-
-            # Determine which chain attribute to use (support 'chain_id' or 'chain_id_int')
-            if "chain_id" in attrs:
-                chain_attr_name = "chain_id"
-            elif "chain_id_int" in attrs:
-                chain_attr_name = "chain_id_int"
-            else:
-                print("Error: Chain ID attribute ('chain_id' or 'chain_id_int') not found.")
-                return None
-
-            # Get attribute data arrays
-            chain_ids_data = attrs[chain_attr_name].data
-            res_nums_data = attrs[residue_attr_name].data
-            positions_data = attrs["position"].data
-
-            # Prepare string versions of possible chain IDs for comparison
-            search_chain_ids_str = [str(s) for s in search_chain_ids]
-
-            is_alpha_carbon_data = None
-            is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
-            if is_alpha_carbon_attr:
-                is_alpha_carbon_data = is_alpha_carbon_attr.data
-            else:
-                # Fallback: Try getting atom_name data if is_alpha_carbon isn't present
-                atom_names_data = attrs.get("atom_name", None)
-                if atom_names_data:
-                   atom_names_data = atom_names_data.data
-                else:
-                    print("Error: Neither 'is_alpha_carbon' nor 'atom_name' attribute found.")
-                    return None
-
-            # Determine search range based on target
-            residue_search_range = None
-            if residue_target == 'START':
-                residue_search_range = range(start_res, end_res + 1)
-            elif residue_target == 'END':
-                residue_search_range = range(end_res, start_res - 1, -1) # Iterate backwards
-            else:
-                print(f"Error: Invalid residue_target '{residue_target}'")
-                return None
-
-            # Map geometry node chain_id attribute to actual chain IDs via object custom property
-            obj_chain_ids_list = None
-            if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
-                obj_chain_ids_list = mol_obj["chain_ids"]
-
-            # --- Search for the first CA encountered in the specified range order ---
-            for target_res_num in residue_search_range:
-                for atom_idx in range(len(positions_data)):
-                    try:
-                        atom_res_num = res_nums_data[atom_idx].value
-                        if atom_res_num != target_res_num:
-                            continue 
-                        
-                        # Determine actual chain ID for this atom using custom mapping
-                        chain_id_val = chain_ids_data[atom_idx].value
-                        if obj_chain_ids_list is not None:
-                            try:
-                                actual_chain_id = obj_chain_ids_list[chain_id_val]
-                            except (IndexError, TypeError):
-                                actual_chain_id = chain_id_val
-                        else:
-                            actual_chain_id = chain_id_val
-                        # Skip atoms not in the target chain(s)
-                        if str(actual_chain_id) not in search_chain_ids_str:
-                            continue 
-                        
-                        # --- Check using the preferred method (is_alpha_carbon) --- 
-                        is_ca = False
-                        if is_alpha_carbon_data: 
-                            is_ca = is_alpha_carbon_data[atom_idx].value
-                        elif atom_names_data: # Fallback to checking name 'CA'
-                            atom_name = str(atom_names_data[atom_idx].value).strip().upper()
-                            if atom_name == "CA":
-                                is_ca = True
-                        
-                        if is_ca:
-                            # Get local position from attributes
-                            local_pos = positions_data[atom_idx].vector
-                            
-                            # *** FIX: Transform local position to world space using protein's matrix_world ***
-                            # We need to apply the parent protein's transformation to get the correct world position
-                            world_pos = mol_obj.matrix_world @ local_pos
-                            
-                            print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx}")
-                            print(f"  Local position: {local_pos}")
-                            print(f"  World position: {world_pos}")
-                            print(f"  Parent protein position: {mol_obj.location}")
-                            
-                            return world_pos  # Return the world position, not local position
-                            
-                    except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
-                        continue # Skip malformed atom data
-                
-                print(f"No Cα found in residue {target_res_num}.")
-
-            # If we finish the loop without finding any CA in the entire range
-            print(f"Error: No Alpha Carbon (CA) found within range {start_res}-{end_res} for chain {domain_chain_id}.")
+        # Get parent object and its data
+        parent_obj = self.object
+        if not parent_obj or not hasattr(parent_obj.data, 'attributes'):
             return None
 
-        except Exception as e:
-            print(f"Error in _find_residue_alpha_carbon_pos: {e}")
-            import traceback
-            traceback.print_exc()
+        # Check for required attributes
+        attributes = parent_obj.data.attributes
+        if not all(k in attributes for k in ["res_id", "atom_name", "chain_id"]):
             return None
+
+        # Create numpy arrays from Blender attributes for fast searching
+        res_ids = np.empty(len(attributes["res_id"].data), dtype=int)
+        attributes["res_id"].data.foreach_get("value", res_ids)
+
+        atom_names = np.empty(len(attributes["atom_name"].data), dtype=int)
+        attributes["atom_name"].data.foreach_get("value", atom_names)
+
+        chain_ids = np.empty(len(attributes["chain_id"].data), dtype=int)
+        attributes["chain_id"].data.foreach_get("value", chain_ids)
+
+        # Get atom positions
+        positions = np.empty(len(parent_obj.data.vertices) * 3, dtype=np.float32)
+        parent_obj.data.vertices.foreach_get("co", positions)
+        positions = positions.reshape(-1, 3)
+
+        # First, try to find the Alpha Carbon ('CA') for the target residue
+        # Get chain mapping and find numeric chain_id for the domain
+        numeric_chain_id = -1
+        for num_id, author_id in self.chain_mapping.items():
+            if author_id == domain.chain_id:
+                numeric_chain_id = num_id
+                break
+        if numeric_chain_id == -1:  # Fallback if not in map
+            try: 
+                numeric_chain_id = int(domain.chain_id)
+            except (ValueError, TypeError): 
+                return None
+
+        # The atom_name for 'CA' is 1
+        ca_atom_name_id = 1 
+        
+        # Build a boolean mask to find the alpha carbon of the specific residue in the specific chain
+        mask = (res_ids == target_res_id) & (atom_names == ca_atom_name_id) & (chain_ids == numeric_chain_id)
+        
+        # Find indices where the mask is true
+        indices = np.where(mask)[0]
+
+        if indices.size > 0:
+            # If CA is found, return its position
+            ca_pos = positions[indices[0]]
+            return Vector(ca_pos)
+
+        # If CA is not found, calculate the geometric center of all atoms in that residue
+        # New mask for all atoms in the target residue on the correct chain
+        residue_mask = (res_ids == target_res_id) & (chain_ids == numeric_chain_id)
+        residue_indices = np.where(residue_mask)[0]
+
+        if residue_indices.size > 0:
+            # Calculate the mean position of all atoms in the residue
+            center_pos = np.mean(positions[residue_indices], axis=0)
+            return Vector(center_pos)
+
+        # If no atoms are found for the residue, report an error
+        print(f"Error: No atoms found for residue {target_res_id} on chain {domain.chain_id}.")
+        return None
     # --- End Moved Helper --- 
 
     # --- Moved Helper: Set Origin and Update Matrix --- 
@@ -1928,116 +1830,119 @@ class MoleculeWrapper:
         del self.domains[domain_id]
 
 class MoleculeManager:
-    """Manages all molecules in the scene"""
-    def __init__(self):
-        self.molecules: Dict[str, MoleculeWrapper] = {}
+    """
+    Manages the lifecycle of molecules in the scene.
+    This class is responsible for importing, deleting, and providing access to molecule wrappers.
+    Uses a simple instance-level dictionary that gets cleaned up properly.
+    """
+    
+    def __init__(self, scene):
+        # Store reference to scene for context
+        self._scene = scene
+        # Use a simple instance dictionary instead of trying to store on scene
+        self._molecules = {}
         self._initialize_molecularnodes()
-        
+
+    @property
+    def molecules(self) -> Dict[str, 'MoleculeWrapper']:
+        """Return molecules dictionary"""
+        return self._molecules
+
     def _initialize_molecularnodes(self):
-        """Initialize MolecularNodes system"""
-        # Register all MolecularNodes classes and systems
-        
-        # Register properties if needed
-        '''
-        if not hasattr(bpy.types.Scene, "mn"):
-            from bpy.utils import register_class
-            register_class(MolecularNodesSceneProperties)
-            bpy.types.Scene.mn = bpy.props.PointerProperty(type=MolecularNodesSceneProperties)
-        '''
-        
-    def import_from_pdb(self, pdb_id: str, molecule_id: str, style: str = "surface", **kwargs) -> MoleculeWrapper:
+        """Ensure MolecularNodes is set up."""
+        # This can be expanded with more robust setup if needed
+        pass
+
+    def add_molecule(self, wrapper: 'MoleculeWrapper'):
+        """Add a molecule to the manager."""
+        if wrapper and wrapper.identifier:
+            self._molecules[wrapper.identifier] = wrapper
+
+    def import_from_pdb(self, pdb_id: str, molecule_id: str, style: str = "surface", **kwargs) -> 'MoleculeWrapper':
         """Import a molecule from PDB"""
         try:
             # Use MolecularNodes fetch functionality
             mol = fetch(
                 pdb_code=pdb_id,
                 style=style,
-                del_solvent=True,  # Default settings, could be made configurable
+                del_solvent=True,
                 build_assembly=False,
                 **kwargs
             )
             
+            # Store the identifier on the object for redo reconstruction
+            if mol.object:
+                mol.object["molecule_identifier"] = molecule_id
+            
             # Create our wrapper object
             wrapper = MoleculeWrapper(mol, molecule_id)
-            self.molecules[molecule_id] = wrapper
+            self.add_molecule(wrapper)
             
             return wrapper
             
         except Exception as e:
-            print(f"Failed to import PDB {pdb_id}: {str(e)}")
-            raise
-            
-    def import_from_file(self, filepath: str, name: Optional[str] = None) -> MoleculeWrapper:
-        """Import a molecule from a local file"""
+            print(f"Error importing from PDB {pdb_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def import_from_file(self, filepath: str, name: Optional[str] = None) -> 'MoleculeWrapper':
+        """Import a molecule from a file"""
+        # ... (implementation for file import)
         try:
-            mol = load_local(
+            mol = load(
                 file_path=filepath,
-                name=name or Path(filepath).stem,
-                style="spheres",
-                del_solvent=True
+                style="surface",
+                # Other default settings
             )
+
+            # Generate a unique identifier
+            if not name:
+                name = bpy.path.display_name_from_filepath(filepath)
             
-            identifier = name or Path(filepath).stem
-            wrapper = MoleculeWrapper(mol, identifier)
-            self.molecules[identifier] = wrapper
+            # Ensure name is unique in the scene
+            unique_name = name
+            counter = 1
+            while unique_name in bpy.data.objects:
+                unique_name = f"{name}_{counter}"
+                counter += 1
+            mol.object.name = unique_name
+            
+            molecule_id = unique_name
+            mol.object["molecule_identifier"] = molecule_id
+            
+            wrapper = MoleculeWrapper(mol, molecule_id)
+            self.add_molecule(wrapper)
             
             return wrapper
             
         except Exception as e:
-            print(f"Failed to import file {filepath}: {str(e)}")
-            raise
-    
-    def get_molecule(self, identifier: str) -> Optional[MoleculeWrapper]:
-        """Get a molecule by its identifier (PDB ID or name)"""
-        return self.molecules.get(identifier) 
+            print(f"Error importing from file {filepath}: {e}")
+            return None
+
+    def get_molecule(self, identifier: str) -> Optional['MoleculeWrapper']:
+        """Get a molecule by its identifier."""
+        return self._molecules.get(identifier)
 
     def delete_molecule(self, identifier: str):
-        """Deletes a molecule and all its associated Blender objects and data."""
-        print(f"Attempting to delete molecule: {identifier}")
-        molecule_wrapper = self.get_molecule(identifier)
-        if not molecule_wrapper:
-            print(f"Molecule {identifier} not found in manager.")
+        """Delete a molecule and its associated Blender objects."""
+        wrapper = self.get_molecule(identifier)
+        if not wrapper:
             return
 
-        # 1. Call cleanup on the MoleculeWrapper to remove domains and their objects/nodes
-        print(f"Cleaning up domains for molecule {identifier}...")
-        molecule_wrapper.cleanup()
+        # Let the wrapper handle the cleanup of its Blender objects
+        wrapper.cleanup()
+        
+        # Remove from our managed list
+        if identifier in self._molecules:
+            del self._molecules[identifier]
+    
+    def get_all_molecules(self) -> Dict[str, 'MoleculeWrapper']:
+        """Returns all managed molecules."""
+        return self.molecules
 
-        # 2. Delete the main Blender object for the molecule
-        if molecule_wrapper.molecule and molecule_wrapper.molecule.object:
-            main_mol_object = molecule_wrapper.molecule.object
-            object_name = main_mol_object.name
-            collection_name = main_mol_object.users_collection[0].name if main_mol_object.users_collection else None
-            print(f"Deleting main molecule object: {object_name}")
-            try:
-                bpy.data.objects.remove(main_mol_object, do_unlink=True)
-            except Exception as e:
-                print(f"Error removing main molecule object {object_name}: {e}")
-
-            # 3. Attempt to remove the collection if it was specific to this molecule and is now empty
-            # This is a heuristic. A more robust system might tag collections or use naming conventions.
-            if collection_name:
-                collection = bpy.data.collections.get(collection_name)
-                if collection and not collection.all_objects: # If collection is empty
-                    # Further check if the collection name matches a pattern or the molecule identifier
-                    # to avoid deleting general-purpose collections.
-                    if identifier in collection_name or object_name.startswith(collection_name): # Basic check
-                        print(f"Deleting empty collection: {collection_name}")
-                        try:
-                            bpy.data.collections.remove(collection)
-                        except Exception as e:
-                            print(f"Error removing collection {collection_name}: {e}")
-                    else:
-                        print(f"Collection {collection_name} is empty but not deemed specific to {identifier}, not deleting.")
-                elif collection:
-                    print(f"Collection {collection_name} is not empty, not deleting.")
-
-        # 4. Remove the molecule from the manager's dictionary
-        if identifier in self.molecules:
-            del self.molecules[identifier]
-            print(f"Molecule {identifier} removed from manager.")
-
-        # Ensure UI updates if an operator calls this
-        # This might involve tagging areas for redraw or using a message bus
-        # For now, this function focuses on data cleanup.
-        # Operators calling this should handle their own UI refresh.
+    def clear(self):
+        """Clear all molecules from the manager."""
+        for identifier in list(self._molecules.keys()):
+            self.delete_molecule(identifier)
+        self._molecules.clear()
