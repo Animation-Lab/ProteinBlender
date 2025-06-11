@@ -42,8 +42,9 @@ class PROTEIN_PB_PT_import_protein(Panel):
         # Download from selected source
         button_row.operator("protein.import_protein", text="Download")
         # Import any local file (.pdb, .cif, .mmcif, etc.)
-        button_row.operator("protein.import_local", text="Import Local File")
+        button_row.operator("pb.import_protein_undoable", text="Import Local File")
         
+        '''
         box.separator(factor=0.5)
 
         col.label(text="Import from PDB:")
@@ -60,3 +61,4 @@ class PROTEIN_PB_PT_import_protein(Panel):
         col.label(text="Undoable Import:")
         row = col.row(align=True)
         row.operator(PB_OT_import_protein_undoable.bl_idname, text="Import Local File (Undoable)", icon='FILE_FOLDER')
+        '''
