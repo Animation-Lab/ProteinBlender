@@ -2,8 +2,8 @@ import bpy
 from bpy.props import PointerProperty, BoolProperty
 
 from .core import CLASSES as core_classes
-from .handlers import CLASSES as handler_classes
-from .operators import CLASSES as operator_classes
+from . import handlers
+from . import operators
 from .panels import CLASSES as panel_classes
 from .properties.protein_props import  register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props, CLASSES as molecule_classes
@@ -17,10 +17,11 @@ from .utils.molecularnodes.props import MolecularNodesObjectProperties
 # Track registered classes
 registered_classes = []
 
+# All classes that are not handled by a custom register() function
 all_pb_classes = (
     core_classes,
-    handler_classes,
-    operator_classes,
+    handlers.CLASSES,
+    # operator_classes are now handled by operators.register()
     panel_classes,
     session.CLASSES,
     molecule_classes,
@@ -49,9 +50,15 @@ def register():
         print(f"Unregister during startup failed: {e}")
         pass
     
-    # Register classes
-    for op in all_pb_classes:
-        for cls in op:
+    # Register handlers
+    handlers.register()
+    
+    # Register operators and their properties
+    operators.register()
+    
+    # Register remaining classes
+    for op_group in all_pb_classes:
+        for cls in op_group:
             try:
                 bpy.utils.register_class(cls)
                 registered_classes.append(cls)
@@ -101,6 +108,12 @@ def unregister():
     # handle scene removal via an `app.handlers.scene_pre` handler.
     from .utils.scene_manager import _scene_managers
     _scene_managers.clear()
+
+    # Unregister handlers
+    handlers.unregister()
+    
+    # Unregister operators and their properties
+    operators.unregister()
 
     # Unregister properties
     try:

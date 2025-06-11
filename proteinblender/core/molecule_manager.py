@@ -5,6 +5,7 @@ import numpy as np
 import colorsys
 import random
 from mathutils import Vector
+import biotite.structure as struc
 
 from ..utils.molecularnodes.entities import fetch, load_local
 from ..utils.molecularnodes.entities.molecule.molecule import Molecule
@@ -28,27 +29,77 @@ class MoleculeWrapper:
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
         
-        # Store the chain mapping if available
-        self.chain_mapping = {}
-        if hasattr(molecule.array, 'chain_mapping_str'):
-            self.chain_mapping = self._parse_chain_mapping(molecule.array.chain_mapping_str)
-        
-        # Initialize chain residue ranges
-        self.chain_residue_ranges = self._get_chain_residue_ranges()
-        
-        # Add after existing initialization
-        self.preview_nodes = None
-
-        #self._setup_preview_domain()
-        
-        # Dictionary to track domain mask nodes in the parent molecule's node group
+        # Initialize tracking dictionaries
         self.domain_mask_nodes = {}  # Maps domain_id to tuple(chain_select_node, res_select_node)
-        
-        # Reference to the join node for domain selections
         self.domain_join_node = None
+        self.preview_nodes = None
+        self.join_nodes = []
+        self.final_not = None
         
-        # Setup the protein domain infrastructure
-        self._setup_protein_domain_infrastructure()
+        # Handle reconstructed molecules (they may not have full biotite data)
+        if hasattr(molecule, 'array') and molecule.array is not None:
+            # Full molecule with biotite data - do full initialization
+            print(f"  - Initializing molecule '{identifier}' with full biotite data")
+            
+            # Import biotite.structure for AtomArrayStack checking
+            import biotite.structure as struc
+            import numpy as np
+            
+            # Follow MolecularNodes pattern: extract working array from stack if needed
+            working_array = self.molecule.array
+            is_stack = isinstance(working_array, struc.AtomArrayStack)
+            
+            if is_stack:
+                print(f"  - Detected AtomArrayStack with {working_array.stack_depth()} frames, using first frame")
+                working_array = working_array[0]  # Use first frame like MolecularNodes does
+            
+            # Ensure the working array has the necessary integer chain ID attribute
+            if not hasattr(working_array, "chain_id_int"):
+                working_array.add_annotation("chain_id_int", dtype=int)
+                unique_chain_ids, int_indices = np.unique(working_array.chain_id, return_inverse=True)
+                working_array.set_annotation("chain_id_int", int_indices)
+                print(f"DEBUG MoleWrap.__init__: Added 'chain_id_int' annotation. Unique chains processed: {len(unique_chain_ids)}")
+
+            # Handle chain mapping - check both original array and working array
+            raw_auth_map_str = ""
+            if hasattr(self.molecule.array, 'chain_mapping_str'):
+                raw_auth_map_str = self.molecule.array.chain_mapping_str
+            elif hasattr(working_array, 'chain_mapping_str'):
+                raw_auth_map_str = working_array.chain_mapping_str
+                
+            self.auth_chain_id_map: Dict[int, str] = {}
+            print(f"DEBUG MoleWrap.__init__: raw_auth_map from biotite = {raw_auth_map_str}")
+            
+            # Parse the string into a dictionary
+            raw_auth_map = self._parse_chain_mapping(raw_auth_map_str)
+            for int_key, auth_str in raw_auth_map.items():
+                self.auth_chain_id_map[int(int_key)] = str(auth_str)
+            else:
+                print(f"DEBUG MoleWrap.__init__: No chain_mapping_str() available, will use numeric chain IDs.")
+            
+            # Use working_array for chain mapping and residue ranges
+            self.chain_mapping = {}
+            if hasattr(working_array, 'chain_mapping_str'):
+                self.chain_mapping = self._parse_chain_mapping(working_array.chain_mapping_str)
+            elif hasattr(self.molecule.array, 'chain_mapping_str'):
+                self.chain_mapping = self._parse_chain_mapping(self.molecule.array.chain_mapping_str)
+            
+            # Store reference to working array for internal use
+            self._working_array = working_array
+            self.is_stack = is_stack
+            
+            self.chain_residue_ranges = self._get_chain_residue_ranges()
+            self._setup_protein_domain_infrastructure()
+            
+        else:
+            # Reconstructed molecule - minimal initialization
+            print(f"  - Reconstructed molecule '{identifier}' with minimal initialization")
+            self.auth_chain_id_map: Dict[int, str] = {}
+            self.chain_mapping = {}
+            self.chain_residue_ranges = {}
+            self._working_array = None
+            self.is_stack = False
+            # Don't call _setup_protein_domain_infrastructure for reconstructed molecules
         
     def _setup_protein_domain_infrastructure(self):
         """

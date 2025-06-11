@@ -47,61 +47,69 @@ from .pose_operators import (
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,
 )
+from . import undo
 
-# This list holds all operator classes that need to be registered.
-CLASSES = [
-    PROTEIN_OT_import_protein,
-    PROTEIN_OT_import_local,
-    MOLECULE_OT_select,
-    MOLECULE_OT_delete,
-    MOLECULE_OT_add_domain,
-    MOLECULE_OT_delete_domain,
-    MOLECULE_PB_OT_edit,
-    MOLECULE_PB_OT_update_identifier,
-    MOLECULE_PB_OT_change_style,
-    MOLECULE_PB_OT_select_protein_chain,
-    MOLECULE_PB_OT_move_protein_pivot,
-    MOLECULE_PB_OT_snap_protein_pivot_center,
-    MOLECULE_PB_OT_toggle_protein_pivot_edit,
-    MOLECULE_PB_OT_toggle_visibility,
-    MOLECULE_PB_OT_select_object,
-    MOLECULE_PB_OT_keyframe_protein,
-    MOLECULE_PB_OT_select_keyframe,
-    MOLECULE_PB_OT_delete_keyframe,
-    MOLECULE_PB_OT_edit_keyframe,
-    MOLECULE_PB_OT_update_domain,
-    MOLECULE_PB_OT_create_domain,
-    MOLECULE_PB_OT_toggle_domain_expanded,
-    MOLECULE_PB_OT_update_domain_ui_values,
-    MOLECULE_PB_OT_update_domain_color,
-    MOLECULE_PB_OT_update_domain_style,
-    MOLECULE_PB_OT_update_domain_name,
-    MOLECULE_PB_OT_update_domain_name_dialog,
-    MOLECULE_PB_OT_initialize_domain_temp_name,
-    MOLECULE_PB_OT_toggle_pivot_edit,
-    MOLECULE_PB_OT_set_parent_domain,
-    MOLECULE_PB_OT_update_parent_domain,
-    MOLECULE_PB_OT_reset_domain_transform,
-    MOLECULE_PB_OT_snap_pivot_to_residue,
-    MOLECULE_PB_OT_split_domain,
-    MOLECULE_PB_OT_create_pose,
-    MOLECULE_PB_OT_apply_pose,
-    MOLECULE_PB_OT_update_pose,
-    MOLECULE_PB_OT_delete_pose,
-    MOLECULE_PB_OT_rename_pose,
-]
+# Combine all operator classes into a single tuple for central registration.
+# This is the pattern expected by addon.py.
+CLASSES = (
+    (
+        PROTEIN_OT_import_protein,
+        PROTEIN_OT_import_local,
+        MOLECULE_OT_select,
+        MOLECULE_OT_delete,
+        MOLECULE_OT_add_domain,
+        MOLECULE_OT_delete_domain,
+        MOLECULE_PB_OT_edit,
+        MOLECULE_PB_OT_update_identifier,
+        MOLECULE_PB_OT_change_style,
+        MOLECULE_PB_OT_select_protein_chain,
+        MOLECULE_PB_OT_move_protein_pivot,
+        MOLECULE_PB_OT_snap_protein_pivot_center,
+        MOLECULE_PB_OT_toggle_protein_pivot_edit,
+        MOLECULE_PB_OT_toggle_visibility,
+        MOLECULE_PB_OT_select_object,
+        MOLECULE_PB_OT_keyframe_protein,
+        MOLECULE_PB_OT_select_keyframe,
+        MOLECULE_PB_OT_delete_keyframe,
+        MOLECULE_PB_OT_edit_keyframe,
+        MOLECULE_PB_OT_update_domain,
+        MOLECULE_PB_OT_create_domain,
+        MOLECULE_PB_OT_toggle_domain_expanded,
+        MOLECULE_PB_OT_update_domain_ui_values,
+        MOLECULE_PB_OT_update_domain_color,
+        MOLECULE_PB_OT_update_domain_style,
+        MOLECULE_PB_OT_update_domain_name,
+        MOLECULE_PB_OT_update_domain_name_dialog,
+        MOLECULE_PB_OT_initialize_domain_temp_name,
+        MOLECULE_PB_OT_toggle_pivot_edit,
+        MOLECULE_PB_OT_set_parent_domain,
+        MOLECULE_PB_OT_update_parent_domain,
+        MOLECULE_PB_OT_reset_domain_transform,
+        MOLECULE_PB_OT_snap_pivot_to_residue,
+        MOLECULE_PB_OT_split_domain,
+        MOLECULE_PB_OT_create_pose,
+        MOLECULE_PB_OT_apply_pose,
+        MOLECULE_PB_OT_update_pose,
+        MOLECULE_PB_OT_delete_pose,
+        MOLECULE_PB_OT_rename_pose,
+    )
+    + undo.CLASSES
+)
 
+# Define register/unregister functions that will be called by addon.py
+# This centralizes all registration logic.
 def register():
-    """Register all operators."""
-    print(f"OPERATORS __INIT__ DEBUG: Registering {len(CLASSES)} operators: {[cls.__name__ for cls in CLASSES]}")
+    # Register all classes collected in the `CLASSES` tuple
     for cls in CLASSES:
-        try:
-            bpy.utils.register_class(cls)
-            print(f"  Successfully registered: {cls.__name__}")
-        except Exception as e:
-            print(f"  Failed to register {cls.__name__}: {e}")
+        bpy.utils.register_class(cls)
+    
+    # Call the specific property registration function from the undo module
+    undo.register_properties()
 
 def unregister():
-    """Unregister all operators."""
+    # Unregister in reverse order to handle dependencies correctly
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
+
+    # Call the specific property unregistration function
+    undo.unregister_properties()

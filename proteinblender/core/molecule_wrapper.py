@@ -465,25 +465,31 @@ class MoleculeWrapper:
         """Parse chain mapping string (likely numeric_id_from_source_file -> auth_asym_id) into a dictionary"""
         mapping = {}
         if mapping_str:
-            for pair in mapping_str.split(\",\"):
-                if \":\" in pair:
+            for pair in mapping_str.split(","):
+                if ":" in pair:
                     try:
-                        k_str, v = pair.split(\":\")
+                        k_str, v = pair.split(":")
                         mapping[int(k_str)] = v
                     except ValueError:
                         print(f"Warning: Could not parse pair '{pair}' in chain_mapping_str '{mapping_str}'")
         return mapping
     
     def _get_chain_residue_ranges(self) -> Dict[str, Tuple[int, int]]:
-        """Computes the min and max residue numbers for each chain, keyed by label_asym_id."""
-        ranges: Dict[str, Tuple[int, int]] = {}
-        if not hasattr(self.molecule.array, 'res_id') or not hasattr(self.molecule.array, 'chain_id_int'):
+        ranges = {}
+        
+        # Use working array if available, otherwise skip (for reconstructed molecules)
+        working_array = getattr(self, '_working_array', None)
+        if not working_array:
+            print("Warning MoleWrap._get_chain_residue_ranges: No working array available (reconstructed molecule).")
+            return ranges
+            
+        if not hasattr(working_array, 'res_id') or not hasattr(working_array, 'chain_id_int'):
             print("Warning MoleWrap._get_chain_residue_ranges: Missing 'res_id' or 'chain_id_int' annotation. Cannot compute ranges.")
             return {}
 
-        res_ids = self.molecule.array.res_id
+        res_ids = working_array.res_id
         # Use 'chain_id_int' for grouping, as this is our reliable internal integer index (0, 1, 2...)
-        int_chain_indices = self.molecule.array.chain_id_int 
+        int_chain_indices = working_array.chain_id_int
 
         unique_int_chain_keys = np.unique(int_chain_indices)
         print(f"DEBUG MoleWrap._get_chain_residue_ranges: Unique integer chain keys found: {unique_int_chain_keys}")
@@ -507,10 +513,10 @@ class MoleculeWrapper:
                 chain_res_ids = res_ids[mask]
                 if chain_res_ids.size > 0:
                     ranges[label_asym_id_for_key] = (int(np.min(chain_res_ids)), int(np.max(chain_res_ids)))
-        else:
+                else:
                     print(f"Warning MoleWrap._get_chain_residue_ranges: No residues found for int_chain_key {int_chain_key} (mapped to {label_asym_id_for_key}) despite mask being non-empty.")
             else:
-                 print(f"Warning MoleWrap._get_chain_residue_ranges: No atoms found for int_chain_key {int_chain_key} (mask was empty).")
+                print(f"Warning MoleWrap._get_chain_residue_ranges: No atoms found for int_chain_key {int_chain_key} (mask was empty).")
             
         if not ranges:
             print("Warning MoleWrap._get_chain_residue_ranges: No residue ranges could be determined for any chain.")
@@ -1010,7 +1016,7 @@ class MoleculeWrapper:
         # Ensure there's a GN modifier
         if not domain.object.modifiers:
             gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
-            else:
+        else:
             gn_mod = domain.object.modifiers.get("ProteinBlender Domain Mask")
             if not gn_mod:
                 gn_mod = domain.object.modifiers.new(name="ProteinBlender Domain Mask", type='NODES')
@@ -1139,7 +1145,7 @@ class MoleculeWrapper:
                     # Ensure this is done efficiently for all points.
                     # For now, it will be black by default.
                     print(f"Created color attribute '{color_field_name}' on {mol_obj.name}")
-            else:
+                else:
                     attr = mol_obj.data.attributes[color_field_name]
                 
                 # Update the domain object's stored color
@@ -1151,9 +1157,9 @@ class MoleculeWrapper:
                 # or directly modifying a node input if the color is passed to the domain's GN tree.
                 # For now, we assume the main molecule's material/shader will read this attribute.
                 print(f"Stored color {color} for domain {domain_id} on its object and in attr '{color_field_name}'. Shader needs to use it.")
-                else:
-                print(f"Error: Molecule object not found for {self.identifier}")
             else:
+                print(f"Error: Molecule object not found for {self.identifier}")
+        else:
             print(f"Error: Domain or domain object not found for {domain_id}")
 
     def get_all_domains(self) -> List[DomainDefinition]:
@@ -1167,15 +1173,17 @@ class MoleculeWrapper:
 
     def get_unique_label_asym_ids(self) -> List[str]:
         """Returns a sorted list of unique label_asym_id strings present in the molecule."""
-        if hasattr(self.molecule.array, 'chain_id'): # This is label_asym_id
-            return sorted(list(np.unique(self.molecule.array.chain_id).astype(str)))
+        working_array = getattr(self, '_working_array', None)
+        if working_array and hasattr(working_array, 'chain_id'): # This is label_asym_id
+            return sorted(list(np.unique(working_array.chain_id).astype(str)))
         return []
 
     def get_chain_atoms_count(self) -> Dict[str, int]:
         """Returns a dictionary mapping label_asym_id to atom count for that chain."""
         counts = {}
-        if hasattr(self.molecule.array, 'chain_id'): # This is label_asym_id
-            chain_ids, atom_counts = np.unique(self.molecule.array.chain_id, return_counts=True)
+        working_array = getattr(self, '_working_array', None)
+        if working_array and hasattr(working_array, 'chain_id'): # This is label_asym_id
+            chain_ids, atom_counts = np.unique(working_array.chain_id, return_counts=True)
             for chain_id_val, count in zip(chain_ids, atom_counts):
                 counts[str(chain_id_val)] = int(count)
         return counts

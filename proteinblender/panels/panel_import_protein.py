@@ -1,5 +1,8 @@
 import bpy
 from bpy.types import Panel
+from ..operators.operator_import_local import PROTEIN_OT_import_local
+from ..operators.operator_import_protein import PROTEIN_OT_import_protein
+from ..operators.undo import PB_OT_import_protein_undoable
 
 class PROTEIN_PB_PT_import_protein(Panel):
     bl_space_type = 'PROPERTIES'
@@ -42,3 +45,18 @@ class PROTEIN_PB_PT_import_protein(Panel):
         button_row.operator("protein.import_local", text="Import Local File")
         
         box.separator(factor=0.5)
+
+        col.label(text="Import from PDB:")
+        row = col.row(align=True)
+        row.prop(props, "pdb_id", text="")
+        row.operator(PROTEIN_OT_import_protein.bl_idname, text="Import", icon='IMPORT')
+
+        col.separator()
+        col.label(text="Import from Local File:")
+        row = col.row(align=True)
+        row.operator(PROTEIN_OT_import_local.bl_idname, text="Browse", icon='FILE_FOLDER')
+        
+        col.separator()
+        col.label(text="Undoable Import:")
+        row = col.row(align=True)
+        row.operator(PB_OT_import_protein_undoable.bl_idname, text="Import Local File (Undoable)", icon='FILE_FOLDER')
