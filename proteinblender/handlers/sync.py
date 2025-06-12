@@ -78,8 +78,7 @@ def sync_manager_on_undo_redo(scene):
     for molecule_id, blender_obj in molecules_to_add:
         try:
             # Create a minimal Molecule wrapper that wraps the existing Blender object
-            reconstructed_molecule = ReconstructedMolecule(blender_obj)
-            wrapper = MoleculeWrapper(reconstructed_molecule, molecule_id)
+            wrapper = MoleculeWrapper(identifier=molecule_id, blender_object=blender_obj)
             scene_manager.molecules[molecule_id] = wrapper
             print(f"  - Reconstructed '{molecule_id}' and added to scene manager.")
             
@@ -109,15 +108,17 @@ def sync_manager_on_undo_redo(scene):
                 area.tag_redraw()
 
 
-class ReconstructedMolecule:
-    """
-    A minimal molecule wrapper that allows us to reconstruct MoleculeWrapper
-    from an existing Blender object after undo/redo operations.
-    """
-    def __init__(self, blender_object):
-        self.object = blender_object
-        # We don't have the original biotite array, but that's okay for basic functionality
-        self.array = None
+# The ReconstructedMolecule class is no longer needed as its logic
+# has been moved into the MoleculeWrapper's __init__ method.
+# class ReconstructedMolecule:
+#     """
+#     A minimal molecule wrapper that allows us to reconstruct MoleculeWrapper
+#     from an existing Blender object after undo/redo operations.
+#     """
+#     def __init__(self, blender_object):
+#         self.object = blender_object
+#         # We don't have the original biotite array, but that's okay for basic functionality
+#         self.array = None
 
 
 # Wrap the handler in 'persistent' decorator to ensure it's not removed on file reload

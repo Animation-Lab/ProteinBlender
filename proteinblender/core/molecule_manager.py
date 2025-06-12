@@ -1,30 +1,38 @@
 from typing import Optional, Dict, List
 import bpy
-from pathlib import Path
 import numpy as np
 import colorsys
-import random
 from mathutils import Vector
 import biotite.structure as struc
 
-from ..utils.molecularnodes.entities import fetch, load_local
-from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from ..utils.molecularnodes.blender import nodes
-from ..utils.molecularnodes.props import MolecularNodesSceneProperties
-from ..utils.molecularnodes.session import MNSession
-from ..utils.molecularnodes.addon import _test_register
-from .domain import Domain, DomainDefinition
-from ..core.domain import ensure_domain_properties_registered
-from databpy.object import LinkedObjectError
+from ..utils.molecularnodes.entities.molecule.molecule import Molecule
+from ..utils.molecularnodes import fetch, load_local
+from .domain import DomainDefinition, ensure_domain_properties_registered
+
 
 class MoleculeWrapper:
     """
     Wraps a MolecularNodes molecule and provides additional functionality
     and metadata specific to ProteinBlender
     """
-    def __init__(self, molecule: Molecule, identifier: str):
-        self.molecule = molecule
+    def __init__(self, identifier: str, molecule: Optional[Molecule] = None, blender_object: Optional[bpy.types.Object] = None):
+        if not molecule and not blender_object:
+            raise ValueError("MoleculeWrapper requires either a 'molecule' or a 'blender_object'.")
+
         self.identifier = identifier
+
+        if blender_object and not molecule:
+            # If we're reconstructing from a Blender object, create a mock molecule object
+            # This replaces the need for the `ReconstructedMolecule` class.
+            class MockMolecule:
+                def __init__(self, obj):
+                    self.object = obj
+                    self.array = None
+            self.molecule = MockMolecule(blender_object)
+        else:
+            self.molecule = molecule
+
         self.style = "surface"  # Default style
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
@@ -37,13 +45,9 @@ class MoleculeWrapper:
         self.final_not = None
         
         # Handle reconstructed molecules (they may not have full biotite data)
-        if hasattr(molecule, 'array') and molecule.array is not None:
+        if hasattr(self.molecule, 'array') and self.molecule.array is not None:
             # Full molecule with biotite data - do full initialization
             print(f"  - Initializing molecule '{identifier}' with full biotite data")
-            
-            # Import biotite.structure for AtomArrayStack checking
-            import biotite.structure as struc
-            import numpy as np
             
             # Follow MolecularNodes pattern: extract working array from stack if needed
             working_array = self.molecule.array
@@ -777,7 +781,6 @@ class MoleculeWrapper:
         finally:
             # Always restore cursor location
             context.scene.cursor.location = orig_cursor_loc
-    # --- End Moved Helper --- 
 
     def _create_additional_domains_to_span_context(self, chain_id: str, 
                                                current_domain_start: int, current_domain_end: int,
@@ -1882,9 +1885,8 @@ class MoleculeWrapper:
 
 class MoleculeManager:
     """
-    Manages the lifecycle of molecules in the scene.
-    This class is responsible for importing, deleting, and providing access to molecule wrappers.
-    Uses a simple instance-level dictionary that gets cleaned up properly.
+    Manages all the molecules in the scene.
+    It is responsible for creating, deleting, and providing access to MoleculeWrapper objects.
     """
     
     def __init__(self, scene):
@@ -1910,66 +1912,48 @@ class MoleculeManager:
             self._molecules[wrapper.identifier] = wrapper
 
     def import_from_pdb(self, pdb_id: str, molecule_id: str, style: str = "surface", **kwargs) -> 'MoleculeWrapper':
-        """Import a molecule from PDB"""
-        try:
-            # Use MolecularNodes fetch functionality
-            mol = fetch(
-                pdb_code=pdb_id,
-                style=style,
-                del_solvent=True,
-                build_assembly=False,
-                **kwargs
-            )
-            
-            # Store the identifier on the object for redo reconstruction
-            if mol.object:
-                mol.object["molecule_identifier"] = molecule_id
-            
-            # Create our wrapper object
-            wrapper = MoleculeWrapper(mol, molecule_id)
-            self.add_molecule(wrapper)
-            
-            return wrapper
-            
-        except Exception as e:
-            print(f"Error importing from PDB {pdb_id}: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
+        """
+        Imports a molecule from the PDB and creates a wrapper for it.
+        """
+        mol = fetch(
+            pdb_id,
+            style=style,
+            **kwargs
+        )
+        wrapper = MoleculeWrapper(identifier=molecule_id, molecule=mol)
+        self.add_molecule(wrapper)
+        return wrapper
+        
     def import_from_file(self, filepath: str, name: Optional[str] = None) -> 'MoleculeWrapper':
-        """Import a molecule from a file"""
-        # ... (implementation for file import)
-        try:
-            mol = load(
-                file_path=filepath,
-                style="surface",
-                # Other default settings
-            )
+        """
+        Imports a molecule from a file and creates a wrapper for it.
+        """
+        # Get the molecule name from the file name if not provided
+        if not name:
+            name = bpy.path.display_name_from_filepath(filepath)
+            
+        # Use a more robust way to get a unique identifier
+        molecule_id = name
+        counter = 1
+        while molecule_id in self.molecules:
+            molecule_id = f"{name}.{counter}"
+            counter += 1
 
-            # Generate a unique identifier
-            if not name:
-                name = bpy.path.display_name_from_filepath(filepath)
-            
-            # Ensure name is unique in the scene
-            unique_name = name
-            counter = 1
-            while unique_name in bpy.data.objects:
-                unique_name = f"{name}_{counter}"
-                counter += 1
-            mol.object.name = unique_name
-            
-            molecule_id = unique_name
-            mol.object["molecule_identifier"] = molecule_id
-            
-            wrapper = MoleculeWrapper(mol, molecule_id)
-            self.add_molecule(wrapper)
-            
-            return wrapper
-            
-        except Exception as e:
-            print(f"Error importing from file {filepath}: {e}")
-            return None
+        mol = load_local(
+            filepath,
+            style="cartoon" # TODO: allow style selection
+        )
+        
+        # Move the object to the active collection
+        bpy.context.collection.objects.link(mol.object)
+
+        # Set the molecule identifier as a custom property
+        mol.object['molecule_identifier'] = molecule_id
+        
+        wrapper = MoleculeWrapper(identifier=molecule_id, molecule=mol)
+        self.add_molecule(wrapper)
+        
+        return wrapper
 
     def get_molecule(self, identifier: str) -> Optional['MoleculeWrapper']:
         """Get a molecule by its identifier."""
