@@ -149,6 +149,9 @@ class ProteinBlenderScene:
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
         print(f"SCENE_MANAGER DEBUG: Finalizing import for molecule {molecule.identifier}")
         
+        # Add custom properties to main protein object for undo/redo tracking
+        self._add_main_protein_properties(molecule)
+        
         # Create domains for each chain
         print(f"SCENE_MANAGER DEBUG: Creating domains for {molecule.identifier}")
         self._create_domains_for_each_chain(molecule.identifier)
@@ -165,6 +168,21 @@ class ProteinBlenderScene:
         
         # Force UI refresh
         self._refresh_ui()
+    
+    def _add_main_protein_properties(self, wrapper):
+        """Add custom properties to main protein object for undo/redo tracking"""
+        if not wrapper.object:
+            return
+            
+        # Mark this as a ProteinBlender main protein object
+        wrapper.object["is_protein_blender_main"] = True
+        wrapper.object["molecule_identifier"] = wrapper.identifier
+        
+        # Store import metadata
+        wrapper.object["import_source"] = "local"  # Will be overridden for remote imports
+        wrapper.object["protein_style"] = wrapper.style
+        
+        print(f"Added main protein properties to {wrapper.identifier}")
 
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB', remote_format: str = 'pdb') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
@@ -196,6 +214,9 @@ class ProteinBlenderScene:
             # Store with unique identifier
             self.molecules[base_identifier] = molecule
             molecule.identifier = base_identifier  # Update the molecule's identifier
+            # Override import source for remote imports
+            if molecule.object:
+                molecule.object["import_source"] = "remote"
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True

@@ -9,6 +9,7 @@ class MOLECULE_OT_select(Operator):
     bl_idname = "molecule.select"
     bl_label = "Select Molecule"
     bl_description = "Select a molecule"
+    bl_options = {'REGISTER', 'UNDO'}
     
     molecule_id: bpy.props.StringProperty()
     
@@ -20,12 +21,39 @@ class MOLECULE_OT_delete(Operator):
     bl_idname = "molecule.delete"
     bl_label = "Delete Molecule"
     bl_description = "Delete a molecule"
+    bl_options = {'REGISTER', 'UNDO'}
     
     molecule_id: bpy.props.StringProperty()
     
     def execute(self, context):
-        scene_manager = get_protein_blender_scene(context)
-        scene_manager.remove_molecule(self.molecule_id)
+        # Find the main molecule object
+        main_obj = None
+        for obj in bpy.data.objects:
+            if (obj.get("molecule_identifier") == self.molecule_id and 
+                obj.get("is_protein_blender_main")):
+                main_obj = obj
+                break
+        
+        if not main_obj:
+            self.report({'WARNING'}, f"Molecule {self.molecule_id} not found")
+            return {'CANCELLED'}
+        
+        # Collect ALL objects to delete (protein + domains)
+        objects_to_delete = [main_obj]
+        
+        # Find all domain objects for this molecule
+        for obj in bpy.data.objects:
+            if (obj.get("molecule_identifier") == self.molecule_id and 
+                obj.get("is_protein_blender_domain")):
+                objects_to_delete.append(obj)
+        
+        # Delete all objects in one operation
+        # This creates a single undo step for the entire deletion
+        for obj in objects_to_delete:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        
+        self.report({'INFO'}, 
+                   f"Deleted molecule {self.molecule_id} and {len(objects_to_delete)-1} domains")
         return {'FINISHED'}
 
 class MOLECULE_OT_add_domain(Operator):
@@ -53,18 +81,30 @@ class MOLECULE_OT_delete_domain(Operator):
     domain_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        scene_manager = get_protein_blender_scene(context)
-        molecule = scene_manager.active_molecule
-        if molecule and self.domain_id:
-            molecule.delete_domain(self.domain_id)
-        else:
-            self.report({'WARNING'}, "No domain selected for deletion.")
+        # Find the domain object by its custom properties
+        domain_obj = None
+        for obj in bpy.data.objects:
+            if (obj.get("pb_domain_id") == self.domain_id and 
+                obj.get("is_protein_blender_domain")):
+                domain_obj = obj
+                break
+        
+        if not domain_obj:
+            self.report({'WARNING'}, f"Domain {self.domain_id} not found")
+            return {'CANCELLED'}
+        
+        # Delete the domain object
+        # The sync handler will clean up the UI after undo/redo
+        bpy.data.objects.remove(domain_obj, do_unlink=True)
+        
+        self.report({'INFO'}, f"Deleted domain {self.domain_id}")
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_edit(Operator):
     bl_idname = "molecule.edit"
     bl_label = "Edit Molecule"
     bl_description = "Edit this molecule"
+    bl_options = {'REGISTER', 'UNDO'}
     
     molecule_id: StringProperty()
     
@@ -132,7 +172,7 @@ class MOLECULE_PB_OT_select_protein_chain(Operator):
     bl_idname = "molecule.select_protein_chain"
     bl_label = "Select Chain"
     bl_description = "Selects the molecule's chain"
-
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         scene_manager = get_protein_blender_scene(context)
@@ -153,6 +193,7 @@ class MOLECULE_PB_OT_move_protein_pivot(bpy.types.Operator):
     bl_idname = "molecule.move_protein_pivot"
     bl_label = "Move Protein Pivot to 3D Cursor"
     bl_description = "Move the protein's origin to the 3D cursor location"
+    bl_options = {'REGISTER', 'UNDO'}
 
     molecule_id: bpy.props.StringProperty()
 
@@ -181,6 +222,7 @@ class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
     bl_idname = "molecule.snap_protein_pivot_center"
     bl_label = "Snap Protein Pivot to Center"
     bl_description = "Snap the protein's origin to its bounding box center"
+    bl_options = {'REGISTER', 'UNDO'}
 
     molecule_id: bpy.props.StringProperty()
 
@@ -205,6 +247,7 @@ class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
     bl_idname = "molecule.toggle_protein_pivot_edit"
     bl_label = "Move/Set Protein Pivot"
     bl_description = "Interactively move the protein's pivot using a helper object."
+    bl_options = {'REGISTER', 'UNDO'}
 
     _pivot_edit_active = dict()  # Class-level dict to track state per molecule
 

@@ -9,6 +9,7 @@ class PROTEIN_OT_import_local(Operator, ImportHelper):
     bl_idname = "protein.import_local"
     bl_label = "Import Local PDB File"
     bl_description = "Import a PDB file from your local filesystem"
+    bl_options = {'REGISTER', 'UNDO'}
     
     # File browser properties
     filename_ext = ".pdb"

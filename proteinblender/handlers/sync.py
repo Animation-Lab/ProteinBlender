@@ -6,106 +6,65 @@ from ..core.molecule_manager import MoleculeWrapper
 
 def sync_manager_on_undo_redo(scene):
     """
-    Synchronizes the MoleculeManager with Blender's data after an undo/redo.
-    This bidirectional sync both removes stale molecules and restores recreated ones.
+    Simplified sync handler that rebuilds addon state from Blender objects after undo/redo.
+    Uses custom properties to reconstruct protein-domain relationships.
     """
-    print("PB: Running undo/redo sync handler...")
+    print("PB: Running simplified undo/redo sync handler...")
 
-    scene_manager = get_protein_blender_scene(bpy.context)
-    if not scene_manager:
-        return
-
-    # Part 1: Find molecules to remove (objects that no longer exist)
-    molecules_to_remove = []
-    for molecule_id, molecule_wrapper in scene_manager.molecules.items():
-        object_exists = False
-        try:
-            # Search for an object with this molecule_id as custom property
-            for obj_name, obj in bpy.data.objects.items():
-                # CRITICAL FIX: Skip domain objects and only check main molecule objects
-                if (obj.get("molecule_identifier") == molecule_id and 
-                    not obj.get("is_protein_blender_domain") and  # Skip domains
-                    not obj.get("pb_domain_id")):  # Double-check for domains
-                    object_exists = True
-                    break
-        except:
-            object_exists = False
-        
-        if not object_exists:
-            print(f"  - Stale molecule found: '{molecule_id}'. Marking for removal.")
-            molecules_to_remove.append(molecule_id)
-
-    # Part 2: Find molecules to add (objects that exist but aren't in manager)
-    molecules_to_add = []
-    # IMPROVED: Remove silent error swallowing and add logging
-    try:
-        print("  - Scanning scene for orphaned molecules...")
-        for obj in bpy.data.objects:
-            # More detailed logging to see what the handler is evaluating
-            print(f"    - Scanning obj: {obj.name}, is_domain: {obj.get('is_protein_blender_domain')}, molecule_id: {obj.get('molecule_identifier')}")
-            
-            molecule_identifier = obj.get("molecule_identifier")
-            is_domain = obj.get("is_protein_blender_domain") or obj.get("pb_domain_id")
-
-            # CRITICAL FIX: Only process main molecule objects, not domains
-            if molecule_identifier and not is_domain:
-                if molecule_identifier not in scene_manager.molecules:
-                    print(f"  - Orphaned molecule found: '{molecule_identifier}' ({obj.name}). Marking for reconstruction.")
-                    # Ensure we don't add duplicates if multiple objects have the same ID
-                    if not any(m[0] == molecule_identifier for m in molecules_to_add):
-                        molecules_to_add.append((molecule_identifier, obj))
-    except Exception as e:
-        print(f"  - ERROR while scanning for orphaned molecules: {e}")
-
-    # Remove stale molecules
-    for molecule_id in molecules_to_remove:
-        if molecule_id in scene_manager.molecules:
-            # The blender object is already deleted by the undo operation.
-            # We must NOT call cleanup(), as it will try to access the deleted
-            # object and crash. We only need to remove our Python-side wrapper.
-            del scene_manager.molecules[molecule_id]
-            print(f"  - Removed stale wrapper '{molecule_id}' from the scene manager.")
-        
-        # Also remove from UI list
-        # We search and remove from the list safely.
-        for i, item in enumerate(scene.molecule_list_items):
-            if item.identifier == molecule_id:
-                scene.molecule_list_items.remove(i)
-                print(f"  - Removed '{molecule_id}' from UI list.")
-                break
-
-    # Reconstruct orphaned molecules
-    for molecule_id, blender_obj in molecules_to_add:
-        try:
-            # Create a minimal Molecule wrapper that wraps the existing Blender object
-            wrapper = MoleculeWrapper(identifier=molecule_id, blender_object=blender_obj)
-            scene_manager.molecules[molecule_id] = wrapper
-            print(f"  - Reconstructed '{molecule_id}' and added to scene manager.")
-            
-            # Add to UI list
-            item = scene.molecule_list_items.add()
-            item.identifier = molecule_id
-            print(f"  - Added '{molecule_id}' to UI list.")
-            
-        except Exception as e:
-            print(f"  - Failed to reconstruct '{molecule_id}': {e}")
-
-    # Update UI state
-    changes_made = molecules_to_remove or molecules_to_add
+    # Clear current UI state - it will be rebuilt from objects
+    scene.molecule_list_items.clear()
     
-    if molecules_to_remove and scene.selected_molecule_id in molecules_to_remove:
-        scene.selected_molecule_id = ""
-        print("  - Cleared active molecule selection as it was removed.")
-
-    if not changes_made:
-        print("  - No sync changes needed. Scene is in sync.")
-        return
-
-    # Force UI redraw
+    # Scan for molecule and domain objects 
+    found_molecules = {}
+    found_domains = {}
+    
+    for obj in bpy.data.objects:
+        mol_id = obj.get("molecule_identifier")
+        if not mol_id:
+            continue
+            
+        if obj.get("is_protein_blender_main"):
+            # This is a main protein object
+            found_molecules[mol_id] = obj
+            print(f"  Found main protein: {mol_id} ({obj.name})")
+            
+        elif obj.get("is_protein_blender_domain"):
+            # This is a domain object
+            domain_id = obj.get("pb_domain_id")
+            if domain_id:
+                if mol_id not in found_domains:
+                    found_domains[mol_id] = {}
+                found_domains[mol_id][domain_id] = obj
+                print(f"  Found domain: {domain_id} for molecule {mol_id}")
+    
+    # Rebuild UI list from found proteins
+    for mol_id, mol_obj in found_molecules.items():
+        item = scene.molecule_list_items.add()
+        item.identifier = mol_id
+        item.name = mol_obj.get("molecule_identifier", mol_obj.name)
+        
+        # Count domains for this molecule
+        domain_count = len(found_domains.get(mol_id, {}))
+        print(f"  Restored molecule '{mol_id}' with {domain_count} domains")
+    
+    # Validate and update selected molecule
+    if scene.selected_molecule_id:
+        if scene.selected_molecule_id not in found_molecules:
+            # Selected molecule no longer exists, clear selection
+            scene.selected_molecule_id = ""
+            print("  Cleared invalid selected molecule")
+        else:
+            print(f"  Maintained selection: {scene.selected_molecule_id}")
+    
+    # Force UI refresh
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:
             if area.type == 'PROPERTIES':
                 area.tag_redraw()
+                
+    molecules_count = len(found_molecules)
+    total_domains = sum(len(domains) for domains in found_domains.values())
+    print(f"PB: Sync complete. Found {molecules_count} molecules with {total_domains} total domains")
 
 
 # The ReconstructedMolecule class is no longer needed as its logic

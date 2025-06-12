@@ -7,8 +7,7 @@ class PROTEIN_OT_import_protein(Operator):
     bl_idname = "protein.import_protein"
     bl_label = "Import Protein"
     bl_description = "Import a protein from PDB or AlphaFold"
-    # No UNDO flag needed here anymore, as state is managed on the scene
-    bl_options = {'REGISTER'} 
+    bl_options = {'REGISTER', 'UNDO'} 
     
     def execute(self, context):
         scene = context.scene
@@ -51,11 +50,28 @@ class PROTEIN_OT_import_protein(Operator):
             wrapper = scene_manager.import_molecule(filepath=identifier)
 
         if wrapper:
+            # Add custom properties to main protein object for undo/redo tracking
+            self._add_main_protein_properties(wrapper)
             self.report({'INFO'}, f"Successfully imported {wrapper.identifier}")
             return {'FINISHED'}
         else:
             self.report({'ERROR'}, f"Failed to import {identifier}")
             return {'CANCELLED'}
+    
+    def _add_main_protein_properties(self, wrapper):
+        """Add custom properties to main protein object for undo/redo tracking"""
+        if not wrapper.object:
+            return
+            
+        # Mark this as a ProteinBlender main protein object
+        wrapper.object["is_protein_blender_main"] = True
+        wrapper.object["molecule_identifier"] = wrapper.identifier
+        
+        # Store import metadata
+        wrapper.object["import_source"] = "remote"  # vs "local"
+        wrapper.object["protein_style"] = wrapper.style
+        
+        print(f"Added main protein properties to {wrapper.identifier}")
 
 CLASSES = [
     PROTEIN_OT_import_protein,

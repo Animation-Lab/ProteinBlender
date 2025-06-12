@@ -154,6 +154,9 @@ class DomainDefinition:
             # Set up the parent inverse matrix to handle parent's transformation
             self.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
             
+            # ADD COMPREHENSIVE CUSTOM PROPERTIES FOR UNDO/REDO TRACKING
+            self._add_tracking_properties(parent_obj)
+            
             # Set up initial node group
             if not self._setup_node_group():
                 # Clean up if node group setup failed
@@ -169,6 +172,42 @@ class DomainDefinition:
                 bpy.data.objects.remove(self.object, do_unlink=True)
                 self.object = None
             return False
+
+    def _add_tracking_properties(self, parent_obj: bpy.types.Object):
+        """Add comprehensive custom properties for undo/redo tracking"""
+        if not self.object:
+            return
+            
+        # Get parent molecule identifier
+        parent_mol_id = parent_obj.get("molecule_identifier")
+        if not parent_mol_id:
+            # If parent doesn't have molecule_identifier, use parent_molecule_id
+            parent_mol_id = self.parent_molecule_id
+            
+        # Mark this as a ProteinBlender domain object
+        self.object["is_protein_blender_domain"] = True
+        self.object["pb_domain_id"] = self.domain_id
+        
+        # Link to parent molecule
+        self.object["molecule_identifier"] = parent_mol_id
+        self.object["parent_molecule"] = parent_mol_id
+        self.object["parent_molecule_id"] = self.parent_molecule_id
+        
+        # Store domain-specific data
+        self.object["domain_chain_id"] = self.chain_id
+        self.object["domain_start"] = self.start
+        self.object["domain_end"] = self.end
+        self.object["domain_name"] = self.name
+        
+        # Store relationships
+        if self.parent_domain_id:
+            self.object["parent_domain_id"] = self.parent_domain_id
+        
+        # Store metadata for reconstruction
+        self.object["domain_style"] = self.style
+        self.object["domain_expanded"] = False  # UI state
+        
+        print(f"Added tracking properties to domain {self.domain_id}")
 
     def _setup_node_group(self):
         """Set up the geometry nodes network for the domain by copying parent network"""
