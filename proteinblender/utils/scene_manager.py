@@ -16,8 +16,29 @@ class ProteinBlenderScene:
 
     @property
     def molecules(self) -> Dict[str, 'MoleculeWrapper']:
-        """Get the dictionary of all molecules in the scene."""
-        return self._molecule_manager.molecules
+        """Get the dictionary of all molecules in the scene using cached wrappers."""
+        # Use cached wrappers to preserve domain state
+        if not hasattr(self, '_cached_wrappers'):
+            self._cached_wrappers = {}
+            
+        # Update cache with any new molecules found in scene
+        current_molecules = {}
+        for obj in bpy.data.objects:
+            mol_id = obj.get("molecule_identifier")
+            if mol_id and obj.get("is_protein_blender_main"):
+                if mol_id in self._cached_wrappers:
+                    # Use cached wrapper to preserve domain state
+                    current_molecules[mol_id] = self._cached_wrappers[mol_id]
+                else:
+                    # Create new wrapper and cache it
+                    from ..core.molecule_manager import MoleculeWrapper
+                    wrapper = MoleculeWrapper(identifier=mol_id, blender_object=obj)
+                    self._cached_wrappers[mol_id] = wrapper
+                    current_molecules[mol_id] = wrapper
+        
+        # Update cache to reflect current state
+        self._cached_wrappers = current_molecules
+        return current_molecules
 
     @property
     def active_molecule(self) -> Optional['MoleculeWrapper']:
@@ -26,8 +47,10 @@ class ProteinBlenderScene:
         return self.get_molecule(active_id) if active_id else None
 
     def get_molecule(self, identifier: str) -> Optional['MoleculeWrapper']:
-        """Get a molecule by its identifier."""
-        return self._molecule_manager.get_molecule(identifier)
+        """Get a molecule by its identifier using cached wrapper approach."""
+        # Use the cached molecules property to ensure we get the same wrapper instance
+        molecules = self.molecules
+        return molecules.get(identifier)
     
     def import_molecule(self, *args, **kwargs) -> Optional['MoleculeWrapper']:
         """Import a molecule using the molecule manager."""
@@ -76,74 +99,90 @@ class ProteinBlenderScene:
         })
 
     def _create_domains_for_each_chain(self, molecule_id: str):
+        """Create domain objects for each chain using the new DomainDefinition approach"""
         print(f"SCENE_MANAGER DEBUG: Starting domain creation for molecule {molecule_id}")
-        molecule = self._molecule_manager.get_molecule(molecule_id)
-        if not molecule:
-            print(f"Molecule {molecule_id} not found for domain creation.")
-            return
-
-        # Use the chain_residue_ranges from MoleculeWrapper, which should now be keyed by label_asym_id.
-        chain_ranges_from_wrapper = molecule.chain_residue_ranges
-        print(f"SCENE_MANAGER DEBUG: Chain ranges from wrapper: {chain_ranges_from_wrapper}")
-
-        if not chain_ranges_from_wrapper:
-            print(f"Warning SceneManager: No chain residue ranges found in molecule wrapper for {molecule_id}. Cannot create default domains.")
-            return
-
-        # Map each chain label to an integer index:
-        label_asym_id_to_idx_map: Dict[str, int] = {}
-        # 1) Use MoleculeWrapper.idx_to_label_asym_id_map if present
-        if hasattr(molecule, 'idx_to_label_asym_id_map') and molecule.idx_to_label_asym_id_map:
-            label_asym_id_to_idx_map = {v: k for k, v in molecule.idx_to_label_asym_id_map.items()}
-        # 2) Fallback: sequential indices over chain_ranges_from_wrapper keys
-        if not label_asym_id_to_idx_map:
-            for idx, label in enumerate(chain_ranges_from_wrapper.keys()):
-                label_asym_id_to_idx_map[label] = idx
-
-        created_domain_ids_for_molecule: List[List[str]] = []
-        # Keep track of processed label_asym_ids to avoid duplicates if chain_ranges_from_wrapper somehow has redundant entries
-        processed_label_asym_ids: Set[str] = set()
-
-        for label_asym_id_key, (min_res, max_res) in chain_ranges_from_wrapper.items():
-            if label_asym_id_key in processed_label_asym_ids:
-                print(f"DEBUG SceneManager: Label_asym_id '{label_asym_id_key}' already processed. Skipping.")
-                continue
-
-            current_min_res = min_res
-            if current_min_res == 0: # Adjusting 0-indexed min_res, though chain_residue_ranges should ideally be 1-indexed from wrapper
-                print(f"Warning SceneManager: Adjusting 0-indexed min_res to 1 for label_asym_id '{label_asym_id_key}'. Original range: ({min_res}-{max_res})")
-                current_min_res = 1
-            
-            # Get the corresponding integer chain index string for Blender attribute lookups
-            int_chain_idx = label_asym_id_to_idx_map.get(label_asym_id_key)
-            if int_chain_idx is None:
-                print(f"ERROR SceneManager: Could not find integer index for label_asym_id '{label_asym_id_key}' in label_asym_id_to_idx_map. Skipping domain creation for this chain.")
-                continue
-            chain_id_int_str_for_domain = str(int_chain_idx)
-
-            domain_name = f"Chain {label_asym_id_key}" # Default name
-
-            # Call using positional arguments: chain_id_int_str, start, end, name, auto_fill_chain, parent_domain_id
-            created_domain_ids = molecule._create_domain_with_params(
-                chain_id_int_str_for_domain,
-                current_min_res,
-                max_res,
-                domain_name,
-                False,  # auto_fill_chain
-                None    # parent_domain_id
-            )
-            
-            if created_domain_ids:
-                created_domain_ids_for_molecule.append(created_domain_ids)
-                processed_label_asym_ids.add(label_asym_id_key)
-            else:
-                 print(f"DEBUG SceneManager: Failed to create a valid domain for LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}). It may have been skipped or failed in MoleculeWrapper.")
         
-        if created_domain_ids_for_molecule:
-            # self.update_molecule_domain_list_in_ui(molecule_id) # Assuming a method to refresh UI if needed
-            print(f"SceneManager: Finished creating default domains for {molecule_id}. Created IDs: {created_domain_ids_for_molecule}")
-        else:
+        # Use our new property-based molecule lookup
+        molecule = self.get_molecule(molecule_id)
+        if not molecule:
+            print(f"ERROR SceneManager: Molecule {molecule_id} not found for domain creation")
+            return
+
+        if not molecule.object:
+            print(f"ERROR SceneManager: Molecule {molecule_id} has no object for domain creation")
+            return
+            
+        print(f"SCENE_MANAGER DEBUG: Found molecule object: {molecule.object.name}")
+        
+        # Get chain ranges from the wrapper
+        chain_ranges = molecule._get_chain_residue_ranges()
+        print(f"SCENE_MANAGER DEBUG: Chain ranges from wrapper: {chain_ranges}")
+        
+        if not chain_ranges:
+            print(f"WARNING SceneManager: No chain ranges found for {molecule_id}")
+            return
+        
+        # Verify the parent object has the required modifier
+        parent_modifier = molecule.object.modifiers.get("MolecularNodes")
+        if not parent_modifier:
+            print(f"ERROR SceneManager: Parent molecule {molecule_id} has no MolecularNodes modifier")
+            return
+        
+        print(f"SCENE_MANAGER DEBUG: Parent has modifier: {parent_modifier.name}")
+        
+        # Import the DomainDefinition class
+        from ..core.domain import DomainDefinition
+        
+        domains_created = 0
+        
+        # Create one domain per chain using our new simplified approach
+        for idx, (label_asym_id, (start_res, end_res)) in enumerate(chain_ranges.items()):
+            print(f"SCENE_MANAGER DEBUG: Creating domain {idx+1}/{len(chain_ranges)} for chain {label_asym_id}")
+            
+            # Create domain using the simplified DomainDefinition system
+            domain_name = f"{molecule_id}_{label_asym_id}_{start_res}_{end_res}_Chain_{label_asym_id}"
+            
+            try:
+                domain_def = DomainDefinition(
+                    chain_id=label_asym_id,
+                    start=start_res,
+                    end=end_res,
+                    name=domain_name
+                )
+                
+                # Set parent molecule reference
+                domain_def.parent_molecule_id = molecule_id
+                
+                print(f"SCENE_MANAGER DEBUG: Attempting to create object for domain {domain_name}")
+                
+                # Try to create the domain object
+                success = domain_def.create_object_from_parent(molecule.object)
+                
+                if success and domain_def.object:
+                    # Generate domain ID for this domain
+                    domain_id = f"{molecule_id}_{label_asym_id}_{start_res}_{end_res}"
+                    domain_def.domain_id = domain_id
+                    
+                    # Update the custom property with the final domain ID
+                    domain_def.object["pb_domain_id"] = domain_id
+                    
+                    # Add domain to the molecule wrapper
+                    molecule.add_domain(label_asym_id, domain_def)
+                    
+                    domains_created += 1
+                    print(f"SUCCESS: Created domain for chain {label_asym_id} (ID: {domain_id})")
+                else:
+                    print(f"FAILED: Could not create domain object for {domain_name}")
+                    
+            except Exception as e:
+                print(f"EXCEPTION during domain creation for {label_asym_id}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        if domains_created == 0:
             print(f"SceneManager: No domains were created for {molecule_id} during default domain creation.")
+        else:
+            print(f"SceneManager: Successfully created {domains_created} domains for {molecule_id}")
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
@@ -151,6 +190,12 @@ class ProteinBlenderScene:
         
         # Add custom properties to main protein object for undo/redo tracking
         self._add_main_protein_properties(molecule)
+        
+        # Cache the molecule wrapper so domains persist
+        if not hasattr(self, '_cached_wrappers'):
+            self._cached_wrappers = {}
+        self._cached_wrappers[molecule.identifier] = molecule
+        print(f"SCENE_MANAGER DEBUG: Cached molecule wrapper for {molecule.identifier}")
         
         # Create domains for each chain
         print(f"SCENE_MANAGER DEBUG: Creating domains for {molecule.identifier}")

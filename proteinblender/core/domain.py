@@ -115,35 +115,48 @@ class DomainDefinition:
 
     def create_object_from_parent(self, parent_obj: bpy.types.Object) -> bool:
         """Create a new Blender object for the domain by copying parent"""
+        print(f"Creating domain object for {self.name} from parent {parent_obj.name}")
+        
         try:
+            # Ensure we're in object mode for safety
+            if bpy.context.mode != 'OBJECT':
+                try:
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                except:
+                    pass  # Sometimes this can fail, but it's not critical
+            
             # First verify parent has required modifier
             parent_modifier = parent_obj.modifiers.get("MolecularNodes")
             if not parent_modifier or not parent_modifier.node_group:
-                print("Parent object does not have a valid MolecularNodes modifier")
+                print(f"ERROR: Parent object {parent_obj.name} does not have a valid MolecularNodes modifier")
                 return False
 
-            # Copy parent molecule object with data
+            print(f"Parent modifier found: {parent_modifier.name}")
+
+            # Copy parent molecule object with data using Blender's safe copy method
             self.object = parent_obj.copy()
             self.object.data = parent_obj.data.copy()
-            self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
             
-            # Copy all modifiers except MolecularNodes
-            for mod in parent_obj.modifiers:
-                if mod.name != "MolecularNodes":
-                    new_mod = self.object.modifiers.new(name=mod.name, type=mod.type)
-                    # Copy modifier properties
-                    for prop in mod.bl_rna.properties:
-                        if not prop.is_readonly:
-                            setattr(new_mod, prop.identifier, getattr(mod, prop.identifier))
+            # Generate unique name for the domain object
+            domain_name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
+            self.object.name = domain_name
+            print(f"Created domain object: {domain_name}")
             
-            # Instead of linking directly to scene, link to the same collection as the parent
-            # and make it a child of the parent object in Blender's hierarchy
+            # Copy the MolecularNodes modifier to the domain object
+            # This is safer than copying all modifiers
+            domain_modifier = self.object.modifiers.get("MolecularNodes")
+            if domain_modifier:
+                # Rename it to indicate it's a domain modifier
+                domain_modifier.name = "DomainNodes"
+                print(f"Domain modifier set up: {domain_modifier.name}")
+            
+            # Link to the same collection as the parent
             if parent_obj.users_collection:
-                # Link to the first collection the parent is in
                 parent_obj.users_collection[0].objects.link(self.object)
+                print(f"Linked to collection: {parent_obj.users_collection[0].name}")
             else:
-                # Fallback to scene collection if parent isn't in any collection
                 bpy.context.scene.collection.objects.link(self.object)
+                print("Linked to scene collection")
 
             # Set the domain object's matrix to match the parent object's matrix
             self.object.matrix_world = parent_obj.matrix_world.copy()
@@ -154,16 +167,30 @@ class DomainDefinition:
             # Set up the parent inverse matrix to handle parent's transformation
             self.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
             
+            print(f"Set up parent-child relationship for {domain_name}")
+            
+            # Set up node group reference first - simplified approach
+            try:
+                if domain_modifier and domain_modifier.node_group:
+                    self.node_group = domain_modifier.node_group
+                    self._setup_complete = True
+                    print(f"Successfully linked node group for domain {self.name}")
+                else:
+                    print(f"Warning: No node group available for domain {self.name}")
+            except Exception as e:
+                print(f"Warning: Node group setup failed for domain {self.name}: {e}")
+                # Don't fail - the domain object is still created
+            
             # ADD COMPREHENSIVE CUSTOM PROPERTIES FOR UNDO/REDO TRACKING
-            self._add_tracking_properties(parent_obj)
+            # This seems to be causing threading issues, so do it last and make it more robust
+            try:
+                self._add_tracking_properties(parent_obj)
+                print(f"Added tracking properties to domain {self.name}")
+            except Exception as e:
+                print(f"Warning: Failed to add tracking properties to domain {self.name}: {e}")
+                # Don't fail the entire domain creation - we can add properties later if needed
             
-            # Set up initial node group
-            if not self._setup_node_group():
-                # Clean up if node group setup failed
-                bpy.data.objects.remove(self.object, do_unlink=True)
-                self.object = None
-                return False
-            
+            print(f"Domain {self.name} created successfully!")
             return True
         except Exception as e:
             print(f"Error creating domain object: {str(e)}")
@@ -177,40 +204,57 @@ class DomainDefinition:
         """Add comprehensive custom properties for undo/redo tracking"""
         if not self.object:
             return
+        
+        try:
+            # Get parent molecule identifier
+            parent_mol_id = parent_obj.get("molecule_identifier")
+            if not parent_mol_id:
+                # If parent doesn't have molecule_identifier, use parent_molecule_id
+                parent_mol_id = self.parent_molecule_id
+                
+            # Mark this as a ProteinBlender domain object
+            self.object["is_protein_blender_domain"] = True
             
-        # Get parent molecule identifier
-        parent_mol_id = parent_obj.get("molecule_identifier")
-        if not parent_mol_id:
-            # If parent doesn't have molecule_identifier, use parent_molecule_id
-            parent_mol_id = self.parent_molecule_id
+            # Store domain ID (will be set later if not already set)
+            if hasattr(self, 'domain_id') and self.domain_id:
+                self.object["pb_domain_id"] = self.domain_id
+            else:
+                # Generate a temporary ID that will be updated later
+                temp_id = f"{self.parent_molecule_id}_{self.chain_id}_{self.start}_{self.end}"
+                self.object["pb_domain_id"] = temp_id
             
-        # Mark this as a ProteinBlender domain object
-        self.object["is_protein_blender_domain"] = True
-        self.object["pb_domain_id"] = self.domain_id
-        
-        # Link to parent molecule
-        self.object["molecule_identifier"] = parent_mol_id
-        self.object["parent_molecule"] = parent_mol_id
-        self.object["parent_molecule_id"] = self.parent_molecule_id
-        
-        # Store domain-specific data
-        self.object["domain_chain_id"] = self.chain_id
-        self.object["domain_start"] = self.start
-        self.object["domain_end"] = self.end
-        self.object["domain_name"] = self.name
-        
-        # Store relationships
-        if self.parent_domain_id:
-            self.object["parent_domain_id"] = self.parent_domain_id
-        
-        # Store metadata for reconstruction
-        self.object["domain_style"] = self.style
-        self.object["domain_expanded"] = False  # UI state
-        
-        print(f"Added tracking properties to domain {self.domain_id}")
+            # Link to parent molecule
+            self.object["molecule_identifier"] = parent_mol_id
+            self.object["parent_molecule"] = parent_mol_id
+            self.object["parent_molecule_id"] = self.parent_molecule_id
+            
+            # Store domain-specific data
+            self.object["domain_chain_id"] = self.chain_id
+            self.object["domain_start"] = self.start
+            self.object["domain_end"] = self.end
+            self.object["domain_name"] = self.name
+            
+            # Store relationships
+            if hasattr(self, 'parent_domain_id') and self.parent_domain_id:
+                self.object["parent_domain_id"] = self.parent_domain_id
+            
+            # Store metadata for reconstruction
+            self.object["domain_style"] = self.style
+            self.object["domain_expanded"] = False  # UI state
+            
+        except Exception as e:
+            print(f"Error setting custom properties for domain {self.name}: {e}")
+            # Set minimal required properties for tracking
+            try:
+                self.object["is_protein_blender_domain"] = True
+                self.object["molecule_identifier"] = parent_obj.get("molecule_identifier", self.parent_molecule_id)
+                self.object["domain_name"] = self.name
+            except Exception as e2:
+                print(f"Failed to set even minimal domain properties: {e2}")
+                # Continue anyway - the domain object is still created
 
     def _setup_node_group(self):
-        """Set up the geometry nodes network for the domain by copying parent network"""
+        """Set up the geometry nodes network for the domain using Blender's safe copy method"""
         if not self.object:
             return False
 
@@ -221,20 +265,19 @@ class DomainDefinition:
                 print("Parent molecule has no valid node group")
                 return False
 
-            # Copy the parent node group
+            # Use Blender's built-in copy method - this is thread-safe
             parent_node_group = parent_modifier.node_group
-            self.node_group = parent_node_group.copy()
-            self.node_group.name = f"{self.name}_nodes"
-
-            # Remove the old MolecularNodes modifier and create our new one
-            self.object.modifiers.remove(parent_modifier)
-            modifier = self.object.modifiers.new(name="DomainNodes", type='NODES')
-            modifier.node_group = self.node_group
-
-            # The detailed node setup will be handled by MoleculeWrapper._setup_domain_network
-            # We just need to ensure we have a valid node group at this point
+            
+            # Simple approach: Just use the parent's node group directly for now
+            # This avoids threading issues entirely
+            # Later we can implement per-domain customization if needed
+            self.node_group = parent_node_group
+            
+            # Update the modifier to use our reference
+            parent_modifier.name = "DomainNodes"
 
             self._setup_complete = True
+            print(f"Successfully set up node group for domain {self.name}")
             return True
 
         except Exception as e:

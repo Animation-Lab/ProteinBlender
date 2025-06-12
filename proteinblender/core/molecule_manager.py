@@ -104,6 +104,9 @@ class MoleculeWrapper:
             self._working_array = None
             self.is_stack = False
             # Don't call _setup_protein_domain_infrastructure for reconstructed molecules
+            
+            # For reconstructed molecules, try to restore domains from scene objects
+            self._restore_domains_from_scene()
         
     def _setup_protein_domain_infrastructure(self):
         """
@@ -191,6 +194,57 @@ class MoleculeWrapper:
     def object(self) -> bpy.types.Object:
         """Get the Blender object"""
         return self.molecule.object
+    
+    def _restore_domains_from_scene(self):
+        """Restore domains from scene objects with custom properties"""
+        if not self.molecule.object:
+            return
+            
+        print(f"  - Restoring domains for {self.identifier}")
+        
+        # Find all domain objects for this molecule
+        for obj in bpy.data.objects:
+            if (obj.get("molecule_identifier") == self.identifier and 
+                obj.get("is_protein_blender_domain")):
+                
+                # Extract domain info from custom properties
+                domain_id = obj.get("pb_domain_id")
+                chain_id = obj.get("domain_chain_id")
+                start_res = obj.get("domain_start")
+                end_res = obj.get("domain_end")
+                domain_name = obj.get("domain_name")
+                
+                if all([domain_id, chain_id is not None, start_res, end_res, domain_name]):
+                    # Create domain definition and link to existing object
+                    from .domain import DomainDefinition
+                    domain_def = DomainDefinition(
+                        chain_id=str(chain_id),
+                        start=start_res,
+                        end=end_res,
+                        name=domain_name
+                    )
+                    domain_def.domain_id = domain_id
+                    domain_def.object = obj
+                    domain_def.parent_molecule_id = self.identifier
+                    domain_def._setup_complete = True
+                    
+                    # Add to domains dictionary
+                    self.domains[domain_id] = domain_def
+                    print(f"    - Restored domain: {domain_name} ({domain_id})")
+        
+        print(f"  - Restored {len(self.domains)} domains for {self.identifier}")
+    
+    def add_domain(self, chain_id: str, domain_def: 'DomainDefinition'):
+        """Add a domain to this molecule wrapper"""
+        if hasattr(domain_def, 'domain_id') and domain_def.domain_id:
+            self.domains[domain_def.domain_id] = domain_def
+            print(f"Added domain {domain_def.domain_id} to molecule {self.identifier}")
+        else:
+            # Generate domain ID if not set
+            domain_id = f"{self.identifier}_{chain_id}_{domain_def.start}_{domain_def.end}"
+            domain_def.domain_id = domain_id
+            self.domains[domain_id] = domain_def
+            print(f"Added domain {domain_id} to molecule {self.identifier}")
         
     def change_style(self, new_style: str) -> None:
         """Change the visualization style of the molecule"""

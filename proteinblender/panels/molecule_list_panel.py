@@ -103,7 +103,19 @@ class MOLECULE_PB_PT_list(Panel):
                 )
                 name_op.molecule_id = molecule_id
                 
-                if molecule.object:
+                # Check if the molecule object exists and is valid
+                molecule_obj_exists = False
+                is_hidden = False
+                try:
+                    if molecule.object:
+                        molecule_obj_exists = True
+                        is_hidden = molecule.object.hide_viewport
+                except:
+                    # Handle LinkedObjectError or other exceptions gracefully
+                    molecule_obj_exists = False
+                    is_hidden = False
+                
+                if molecule_obj_exists:
                     # Add select object button
                     select_op = row.operator(
                         "molecule.select_object",
@@ -120,7 +132,7 @@ class MOLECULE_PB_PT_list(Panel):
                         "molecule.toggle_visibility",
                         text="",
                         emboss=False,
-                        icon='HIDE_OFF' if not molecule.object.hide_viewport else 'HIDE_ON'
+                        icon='HIDE_OFF' if not is_hidden else 'HIDE_ON'
                     )
                     toggle_vis.molecule_id = molecule_id
                     
@@ -145,7 +157,14 @@ class MOLECULE_PB_PT_list(Panel):
                     style_row.prop(scene, "molecule_style", text="")
                     
                     # --- Protein Pivot Controls ---
-                    if molecule.object:
+                    # Check if molecule object is accessible before pivot controls
+                    pivot_obj_exists = False
+                    try:
+                        pivot_obj_exists = molecule.object is not None
+                    except:
+                        pivot_obj_exists = False
+                    
+                    if pivot_obj_exists:
                         pivot_box = settings_box.box()
                         pivot_box.label(text="Protein Pivot", icon='PIVOT_BOUNDBOX')
                         pivot_row = pivot_box.row(align=True)
