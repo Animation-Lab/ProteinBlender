@@ -1,4 +1,0 @@
-from .panel import CLASSES as PANEL_CLASSES
-from .node_menu import CLASSES as NODE_MENU_CLASSES
-
-CLASSES = PANEL_CLASSES + NODE_MENU_CLASSES
