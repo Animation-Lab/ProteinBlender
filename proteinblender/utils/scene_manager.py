@@ -170,28 +170,12 @@ class ProteinBlenderScene:
 
     def sync_molecule_list_after_undo(*args):
         """Synchronize the molecule list UI after undo/redo operations"""
-        print("Syncing molecule list after undo/redo")
-        # THIS FUNCTION WILL BE CALLED WHENEVER AN UNDO OR REDO IS DONE
-        '''
         scene_manager = ProteinBlenderScene.get_instance()
-        scene = bpy.context.scene
-        
-        # Clear existing list
-        scene.molecule_list_items.clear()
-        
-        # Rebuild list from current molecules
-        for identifier, molecule in scene_manager.molecules.items():
-            if molecule.object and molecule.object.name in bpy.data.objects:
-                item = scene.molecule_list_items.add()
-                item.identifier = identifier
-        
-        # Ensure active molecule is valid
-        if scene_manager.active_molecule not in scene_manager.molecules:
-            scene_manager.active_molecule = next(iter(scene_manager.molecules)) if scene_manager.molecules else None
-        
-        # Force UI refresh
-        scene_manager._refresh_ui()
-        '''
+        for molecule in scene_manager.molecules.values():
+            try:
+                molecule._load_domains_from_rna()
+            except Exception as e:
+                print(f"Failed to reload domains for {molecule.identifier}: {e}")
 
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""

@@ -312,6 +312,13 @@ def ensure_domain_properties_registered():
             default=""
         )
 
+    # Collection to store domain state in Blender data (persistent through undo)
+    if not hasattr(bpy.types.Object, 'pb_domains'):
+        bpy.types.Object.pb_domains = bpy.props.CollectionProperty(type=DomainProperties)
+
+    if not hasattr(bpy.types.Object, 'pb_domains_index'):
+        bpy.types.Object.pb_domains_index = bpy.props.IntProperty(default=0)
+
 def register():
     """Register property classes"""
     from bpy.utils import register_class
@@ -330,6 +337,11 @@ def unregister():
         bpy.utils.unregister_class(Domain)
     except:
         pass
+
+    if hasattr(bpy.types.Object, 'pb_domains'):
+        del bpy.types.Object.pb_domains
+    if hasattr(bpy.types.Object, 'pb_domains_index'):
+        del bpy.types.Object.pb_domains_index
 
 def domain_style_update(obj, context):
     """Callback when domain style is changed"""

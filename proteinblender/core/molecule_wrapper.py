@@ -83,9 +83,12 @@ class MoleculeWrapper:
         
         # Reference to the join node for domain selections
         self.domain_join_node = None
-        
+
         # Setup the protein domain infrastructure
         self._setup_protein_domain_infrastructure()
+
+        # Load any existing domains stored on the Blender object (for undo/redo)
+        self._load_domains_from_rna()
         
     def _setup_protein_domain_infrastructure(self):
         """
@@ -409,10 +412,11 @@ class MoleculeWrapper:
         
         # Create mask nodes in the parent molecule to hide this domain region
         self._create_domain_mask_nodes(domain_id, chain_id, start, end)
-        
+
         # Add the domain to our domain collection
         self.domains[domain_id] = domain
         created_domain_ids_list.append(domain_id) # Add primary domain to list
+        self._add_domain_to_rna(domain)
         
         # Check if we need to create additional domains to span the rest of the chain/context
         if auto_fill_chain:
@@ -1076,14 +1080,17 @@ class MoleculeWrapper:
                 self.domains[new_domain_id] = domain
                 if domain_id in self.domains: # Ensure old ID exists before attempting to delete
                     del self.domains[domain_id]
+                self._remove_domain_from_rna(domain_id)
+                self._add_domain_to_rna(domain)
                 # Normalization called by the caller of update_domain, or if ID does not change, see below.
                 # For now, let's assume caller handles normalization for the *returned* ID.
                 # However, if the ID changes, the *new* domain should be normalized.
-                self._normalize_domain_name(new_domain_id) 
+                self._normalize_domain_name(new_domain_id)
                 return new_domain_id
             
             # If domain ID didn't change, still normalize its name as its range or context might have.
             self._normalize_domain_name(domain_id)
+            self._add_domain_to_rna(domain)
             return domain_id
             
         except Exception as e:
@@ -2025,7 +2032,10 @@ class MoleculeWrapper:
         
         # Clean up domain object and node group
         self.domains[domain_id].cleanup()
-        
+
+        # Remove from RNA collection
+        self._remove_domain_from_rna(domain_id)
+
         # Remove from domains dictionary
         del self.domains[domain_id]
 
@@ -2061,3 +2071,46 @@ class MoleculeWrapper:
         # Fallback if no mapping was found
         print(f"WARN: Could not resolve '{chain_id}' to a known label_asym_id. Using it directly.")
         return chain_id
+
+    # ------------------------------------------------------------------
+    # RNA Synchronization Helpers
+    # ------------------------------------------------------------------
+
+    def _add_domain_to_rna(self, domain: DomainDefinition):
+        """Store domain info on the Blender object so undo/redo restores it."""
+        obj = self.molecule.object
+        if not obj or not hasattr(obj, 'pb_domains'):
+            return
+
+        # Remove any existing entry with the same ID
+        for i, props in enumerate(obj.pb_domains):
+            if props.domain_id == domain.domain_id:
+                obj.pb_domains.remove(i)
+                break
+
+        props = obj.pb_domains.add()
+        for key, value in domain.to_properties().items():
+            setattr(props, key, value)
+
+    def _remove_domain_from_rna(self, domain_id: str):
+        """Remove domain info from the Blender object's collection."""
+        obj = self.molecule.object
+        if not obj or not hasattr(obj, 'pb_domains'):
+            return
+
+        for i, props in enumerate(obj.pb_domains):
+            if props.domain_id == domain_id:
+                obj.pb_domains.remove(i)
+                break
+
+    def _load_domains_from_rna(self):
+        """Rebuild self.domains from RNA collection (used on undo/redo)."""
+        ensure_domain_properties_registered()
+        obj = self.molecule.object
+        if not obj or not hasattr(obj, 'pb_domains'):
+            return
+
+        self.domains.clear()
+        for props in obj.pb_domains:
+            domain = DomainDefinition.from_properties(props)
+            self.domains[domain.domain_id] = domain
