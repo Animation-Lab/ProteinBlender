@@ -265,16 +265,16 @@ class DomainDefinition:
                 print("Parent molecule has no valid node group")
                 return False
 
-            # Use Blender's built-in copy method - this is thread-safe
             parent_node_group = parent_modifier.node_group
-            
-            # Simple approach: Just use the parent's node group directly for now
-            # This avoids threading issues entirely
-            # Later we can implement per-domain customization if needed
-            self.node_group = parent_node_group
-            
-            # Update the modifier to use our reference
-            parent_modifier.name = "DomainNodes"
+
+            # Copy the parent's node group so this domain has its own tree
+            self.node_group = parent_node_group.copy()
+            self.node_group.name = f"{self.name}_nodes"
+
+            # Replace the MolecularNodes modifier with a new DomainNodes modifier
+            self.object.modifiers.remove(parent_modifier)
+            modifier = self.object.modifiers.new(name="DomainNodes", type='NODES')
+            modifier.node_group = self.node_group
 
             self._setup_complete = True
             print(f"Successfully set up node group for domain {self.name}")

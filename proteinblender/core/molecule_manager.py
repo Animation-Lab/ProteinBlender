@@ -340,11 +340,11 @@ class MoleculeWrapper:
         print("Could not find suitable section for domain creation")
         return None # Changed from [] to None to match original return type for this specific path
         
-    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, 
-                                   auto_fill_chain: bool = True, 
+    def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None,
+                                   auto_fill_chain: bool = True,
                                    parent_domain_id: Optional[str] = None,
                                    fill_boundaries_start: Optional[int] = None,
-                                   fill_boundaries_end: Optional[int] = None) -> List[str]: # Changed return type
+                                   fill_boundaries_end: Optional[int] = None) -> Optional[str]:
         """Internal method to create a domain with specific parameters
         
         Args:
@@ -357,9 +357,8 @@ class MoleculeWrapper:
             fill_boundaries_start: Optional start residue for the context to fill (used by auto_fill_chain).
             fill_boundaries_end: Optional end residue for the context to fill (used by auto_fill_chain).
         Returns:
-            A list of domain IDs created (the primary one, plus any auto-filled ones).
+            Optional[str]: The ID of the created domain, or None on failure.
         """
-        created_domain_ids_list = []
 
         # Adjust end value based on chain's residue range if needed
         chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
@@ -376,19 +375,8 @@ class MoleculeWrapper:
             # Default name format: "Chain <MappedChainID>: <start>-<end>"
             generated_name = f"Chain {mapped_chain}: {start}-{end}"
             
-        # Create domain ID - use a sanitized version of the name (original or generated) for more robust IDs
-        # This helps if names have spaces or special characters that might be problematic in IDs.
-        name_for_id = name if name is not None else generated_name
-        sanitized_name_part = "".join(c if c.isalnum() or c in '-_' else '_' for c in name_for_id)
-        domain_id = f"{self.identifier}_{mapped_chain}_{start}_{end}_{sanitized_name_part}"
-        
-        # Prevent duplicate domains more robustly: if this domain already exists, return its ID
-        idx = 0
-        base_domain_id = domain_id
-        while domain_id in self.domains:
-            idx += 1
-            domain_id = f"{base_domain_id}_{idx}"
-            print(f"Domain ID collision, trying {domain_id}")
+        # Create domain ID
+        domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
 
         # Create domain definition, using generated_name if original name was None
         domain = DomainDefinition(mapped_chain, start, end, name if name is not None else generated_name)
@@ -484,8 +472,7 @@ class MoleculeWrapper:
         
         # Add the domain to our domain collection
         self.domains[domain_id] = domain
-        created_domain_ids_list.append(domain_id) # Add primary domain to list
-        
+
         # Check if we need to create additional domains to span the rest of the chain/context
         if auto_fill_chain:
             # Determine the effective min/max residues for filling.
@@ -498,17 +485,15 @@ class MoleculeWrapper:
             if not (effective_min_res <= start <= effective_max_res and effective_min_res <= end <= effective_max_res):
                  print(f"Warning: Domain ({start}-{end}) is outside effective fill boundaries ({effective_min_res}-{effective_max_res}). Auto-fill might be skipped or incorrect.")
             
-            additional_created_ids = self._create_additional_domains_to_span_context(
-                chain_id=chain_id,                    # Original numeric chain ID for consistency
+            self._create_additional_domains_to_span_context(
+                chain_id=chain_id,
                 current_domain_start=start,
                 current_domain_end=end,
                 mapped_chain=mapped_chain,
                 context_min_res=effective_min_res,
                 context_max_res=effective_max_res,
-                # domain_id_of_current=domain_id, # Not strictly needed by the revised logic
                 parent_domain_id_for_fillers=parent_domain_id
             )
-            created_domain_ids_list.extend(additional_created_ids)
         
         # Normalization will be handled by the calling function (e.g., split_domain, update_domain)
         # after all related domains are created/updated.
@@ -517,7 +502,7 @@ class MoleculeWrapper:
         # else:
         #     print(f"Warning: Domain {domain_id} not in self.domains before normalization call.")
 
-        return created_domain_ids_list # Return list of all created IDs
+        return domain_id
 
     def _normalize_domain_name(self, domain_id_to_normalize: str):
         if domain_id_to_normalize not in self.domains:
@@ -666,25 +651,25 @@ class MoleculeWrapper:
         # --- Create the main specified segment --- 
         # Pass the original domain's boundaries as the fill_boundaries.
         # The `auto_fill_chain=True` will now respect these boundaries.
-        main_segment_ids = self._create_domain_with_params(
+        main_segment_id = self._create_domain_with_params(
             chain_id=original_numeric_chain_id,
             start=split_start,
             end=split_end,
             name=None, # Auto-generate name
-            auto_fill_chain=True, 
+            auto_fill_chain=True,
             parent_domain_id=original_parent_id,
             fill_boundaries_start=original_domain_actual_start, # Context for filling
             fill_boundaries_end=original_domain_actual_end      # Context for filling
         )
 
-        if main_segment_ids:
-            print(f"Successfully created main split segment(s): {main_segment_ids}")
-            all_newly_created_domain_ids.extend(main_segment_ids)
+        if main_segment_id:
+            print(f"Successfully created main split segment: {main_segment_id}")
+            all_newly_created_domain_ids.append(main_segment_id)
         else:
             print(f"Failed to create the main split domain segment. Attempting to restore original (this is a fallback and may not always work).")
             # Fallback: try to recreate the original domain if split failed badly.
             # This is a simplistic recovery.
-            restored_ids = self._create_domain_with_params(
+            restored_id = self._create_domain_with_params(
                 chain_id=original_numeric_chain_id,
                 start=original_domain_actual_start,
                 end=original_domain_actual_end,
@@ -692,9 +677,9 @@ class MoleculeWrapper:
                 auto_fill_chain=False, # Don't auto-fill if restoring
                 parent_domain_id=original_parent_id
             )
-            if restored_ids:
-                 print(f"Fallback: Recreated original-like domain(s): {restored_ids}")
-                 all_newly_created_domain_ids.extend(restored_ids) # Add to list for normalization
+            if restored_id:
+                 print(f"Fallback: Recreated original-like domain: {restored_id}")
+                 all_newly_created_domain_ids.append(restored_id) # Add to list for normalization
             else:
                  print(f"Fallback: Failed to recreate original domain.")
         
@@ -873,9 +858,8 @@ class MoleculeWrapper:
             if prefix_start <= prefix_end: # Ensure valid range
                 if not self._check_domain_overlap(mapped_chain, prefix_start, prefix_end):
                     print(f"Creating prefix filler domain for context: Chain {mapped_chain}, Range {prefix_start}-{prefix_end}")
-                    # _create_domain_with_params returns a list, so we extend
-                    prefix_ids = self._create_domain_with_params(
-                    chain_id=chain_id,
+                    prefix_id = self._create_domain_with_params(
+                        chain_id=chain_id,
                         start=prefix_start,
                         end=prefix_end,
                         name=None, # Auto-generate name
@@ -883,7 +867,8 @@ class MoleculeWrapper:
                         parent_domain_id=parent_domain_id_for_fillers,
                         # No fill_boundaries here, as these are the fillers themselves
                     )
-                    created_filler_ids.extend(prefix_ids)
+                    if prefix_id:
+                        created_filler_ids.append(prefix_id)
                     
                     # Color sync (already handled within _create_domain_with_params via its setup calls)
             else:
@@ -897,16 +882,16 @@ class MoleculeWrapper:
             if suffix_start <= suffix_end: # Ensure valid range
                 if not self._check_domain_overlap(mapped_chain, suffix_start, suffix_end):
                     print(f"Creating suffix filler domain for context: Chain {mapped_chain}, Range {suffix_start}-{suffix_end}")
-                    # _create_domain_with_params returns a list, so we extend
-                    suffix_ids = self._create_domain_with_params(
-                    chain_id=chain_id,
+                    suffix_id = self._create_domain_with_params(
+                        chain_id=chain_id,
                         start=suffix_start,
                         end=suffix_end,
                         name=None, # Auto-generate name
-                    auto_fill_chain=False,  # Prevent recursion
+                        auto_fill_chain=False,  # Prevent recursion
                         parent_domain_id=parent_domain_id_for_fillers,
                     )
-                    created_filler_ids.extend(suffix_ids)
+                    if suffix_id:
+                        created_filler_ids.append(suffix_id)
                     # Color sync handled by _create_domain_with_params
             else:
                     print(f"Skipping creation of suffix filler domain ({suffix_start}-{suffix_end}) due to overlap.")
@@ -1505,9 +1490,9 @@ class MoleculeWrapper:
                 # Create chain selection node if not found - but don't use nodes.add_selection
                 # as it automatically connects to the style node
                 chain_select_group = nodes.custom_iswitch(
-                    name="selection", 
-                    iter_list=list(self.chain_residue_ranges.keys()) or [str(chain_id)], 
-                    field="chain_id", 
+                    name="selection",
+                    iter_list=self.chain_mapping.values() or [str(chain_id)],
+                    field="chain_id",
                     dtype="BOOLEAN"
                 )
                 
@@ -1756,9 +1741,9 @@ class MoleculeWrapper:
                 # Create chain selection node - but don't use nodes.add_selection directly
                 # as it automatically connects to the style node
                 chain_select_group = nodes.custom_iswitch(
-                    name="selection", 
-                    iter_list=list(self.chain_residue_ranges.keys()) or [str(chain_id)], 
-                    field="chain_id", 
+                    name="selection",
+                    iter_list=self.chain_mapping.values() or [str(chain_id)],
+                    field="chain_id",
                     dtype="BOOLEAN"
                 )
                 
