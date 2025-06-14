@@ -314,13 +314,26 @@ def _refresh_molecule_ui(scene_manager, scene):
 
 
 def sync_molecule_list_after_undo(*args):
-    """Restore missing molecules after undo operations"""
+    """Sync molecule state after undo/redo operations"""
     print("Syncing molecule list after undo/redo")
     
     scene_manager = ProteinBlenderScene.get_instance()
     scene = bpy.context.scene
     
-    # Find molecules that should exist but are missing/invalid
+    # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
+    molecules_to_remove = []
+    for molecule_id, molecule in list(scene_manager.molecules.items()):
+        if not _is_object_valid(molecule.object):
+            # Object no longer exists - this molecule should be removed
+            molecules_to_remove.append(molecule_id)
+    
+    for molecule_id in molecules_to_remove:
+        print(f"Removing invalid molecule from scene manager: {molecule_id}")
+        del scene_manager.molecules[molecule_id]
+        if molecule_id in scene_manager.molecule_manager.molecules:
+            del scene_manager.molecule_manager.molecules[molecule_id]
+    
+    # Step 2: Find molecules that should be restored (e.g., after undoing a delete)
     molecules_to_restore = []
     
     for molecule_id, saved_state in scene_manager._saved_states.items():
@@ -333,10 +346,13 @@ def sync_molecule_list_after_undo(*args):
             _has_invalid_domains(current_molecule)
         )
         
-        if needs_restore:
-            molecules_to_restore.append((molecule_id, saved_state))
+        # Only restore if the object actually exists in Blender (was restored by undo)
+        if needs_restore and saved_state.molecule_data.get('object_name'):
+            restored_obj = bpy.data.objects.get(saved_state.molecule_data['object_name'])
+            if restored_obj:  # Object exists, so this should be restored
+                molecules_to_restore.append((molecule_id, saved_state))
     
-    # Restore missing molecules
+    # Step 3: Restore missing molecules
     for molecule_id, saved_state in molecules_to_restore:
         print(f"Restoring molecule: {molecule_id}")
         try:
@@ -346,5 +362,5 @@ def sync_molecule_list_after_undo(*args):
             import traceback
             traceback.print_exc()
     
-    # Update UI
+    # Step 4: Update UI
     _refresh_molecule_ui(scene_manager, scene) 

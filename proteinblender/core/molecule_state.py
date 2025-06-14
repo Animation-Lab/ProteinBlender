@@ -20,6 +20,9 @@ class MoleculeState:
             'style': molecule.style,
             'object_name': molecule.object.name if molecule.object else None,
             'object_transform': molecule.object.matrix_world.copy() if molecule.object else None,
+            'object_location': molecule.object.location.copy() if molecule.object else None,
+            'object_rotation': molecule.object.rotation_euler.copy() if molecule.object else None,
+            'object_scale': molecule.object.scale.copy() if molecule.object else None,
             'chain_mapping': getattr(molecule, 'chain_mapping', {}),
             'auth_chain_id_map': getattr(molecule, 'auth_chain_id_map', {}),
             'idx_to_label_asym_id_map': getattr(molecule, 'idx_to_label_asym_id_map', {}),
@@ -57,6 +60,8 @@ class MoleculeState:
             if domain.object:
                 domain_data['parent_object'] = domain.object.parent.name if domain.object.parent else None
                 domain_data['matrix_parent_inverse'] = domain.object.matrix_parent_inverse.copy()
+                # Store local transform (relative to parent) instead of world transform
+                domain_data['matrix_local'] = domain.object.matrix_local.copy()
                 
                 # Store collection information
                 if domain.object.users_collection:
@@ -158,6 +163,9 @@ class MoleculeState:
             scene_manager.molecules[self.identifier] = wrapper
             scene_manager.molecule_manager.molecules[self.identifier] = wrapper
             
+            # Don't restore transforms - the undo operation should have restored the object
+            # to its correct position already. Overriding transforms can break movability.
+            
             print(f"Successfully restored molecule wrapper for {self.identifier}")
             return True
             
@@ -223,18 +231,20 @@ class MoleculeState:
             
             # Restore object relationships if object exists
             if domain_obj:
-                # Restore parent relationship
+                # Check if parent relationship needs to be restored
                 parent_name = domain_data.get('parent_object')
                 if parent_name:
                     parent_obj = bpy.data.objects.get(parent_name)
-                    if parent_obj:
+                    if parent_obj and domain_obj.parent != parent_obj:
+                        # Only set parent if it's not already correct
+                        # Store current world transform to maintain position
+                        world_matrix = domain_obj.matrix_world.copy()
                         domain_obj.parent = parent_obj
-                        if 'matrix_parent_inverse' in domain_data:
-                            domain_obj.matrix_parent_inverse = domain_data['matrix_parent_inverse']
-                            
-                # Restore transform
-                if 'object_transform' in domain_data and domain_data['object_transform']:
-                    domain_obj.matrix_world = domain_data['object_transform']
+                        # Restore the world position after parenting
+                        domain_obj.matrix_world = world_matrix
+                        
+                # Don't override transforms if the objects are already in correct positions after undo
+                # The undo operation should have restored them correctly
                     
             # Add domain to molecule
             molecule.domains[domain_id] = domain
