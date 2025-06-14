@@ -284,9 +284,22 @@ def _is_object_valid(obj):
         return False
 
 
+def _is_molecule_valid(molecule):
+    """Check if molecule wrapper has a valid object reference"""
+    try:
+        return molecule and molecule.object and molecule.object.name in bpy.data.objects
+    except Exception as e:
+        # Handle MolecularNodes databpy LinkedObjectError and other exceptions
+        return False
+
+
 def _has_invalid_domains(molecule):
     """Check if any domains have invalid object references"""
     try:
+        # First check if we can access the molecule at all
+        if not _is_molecule_valid(molecule):
+            return True
+            
         for domain in molecule.domains.values():
             if domain.object and not _is_object_valid(domain.object):
                 return True
@@ -323,7 +336,7 @@ def sync_molecule_list_after_undo(*args):
     # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
     molecules_to_remove = []
     for molecule_id, molecule in list(scene_manager.molecules.items()):
-        if not _is_object_valid(molecule.object):
+        if not _is_molecule_valid(molecule):
             # Object no longer exists - this molecule should be removed
             molecules_to_remove.append(molecule_id)
     
@@ -342,7 +355,7 @@ def sync_molecule_list_after_undo(*args):
         # Check if molecule exists and is valid
         needs_restore = (
             current_molecule is None or 
-            not _is_object_valid(current_molecule.object) or
+            not _is_molecule_valid(current_molecule) or
             _has_invalid_domains(current_molecule)
         )
         
