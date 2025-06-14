@@ -21,11 +21,18 @@ class ProteinBlenderScene:
         self.molecule_manager = MoleculeManager()
         self.active_molecule: Optional[str] = None
         self.display_settings = {}
-
+        self._saved_states = {}  # molecule_id -> MoleculeState
 
     @property
     def molecules(self) -> Dict[str, MoleculeWrapper]:
         return self.molecule_manager.molecules
+
+    def _capture_molecule_state(self, molecule_id):
+        """Store complete state before destructive operations"""
+        if molecule_id in self.molecules:
+            from ..core.molecule_state import MoleculeState
+            self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
+            print(f"Captured state for molecule: {molecule_id}")
 
     def set_active_molecule(self, molecule_id):
         """Set the active molecule."""
@@ -168,33 +175,13 @@ class ProteinBlenderScene:
             print(f"Error creating molecule: {str(e)}")
             return False
 
-    def sync_molecule_list_after_undo(*args):
-        """Synchronize the molecule list UI after undo/redo operations"""
-        print("Syncing molecule list after undo/redo")
-        # THIS FUNCTION WILL BE CALLED WHENEVER AN UNDO OR REDO IS DONE
-        '''
-        scene_manager = ProteinBlenderScene.get_instance()
-        scene = bpy.context.scene
-        
-        # Clear existing list
-        scene.molecule_list_items.clear()
-        
-        # Rebuild list from current molecules
-        for identifier, molecule in scene_manager.molecules.items():
-            if molecule.object and molecule.object.name in bpy.data.objects:
-                item = scene.molecule_list_items.add()
-                item.identifier = identifier
-        
-        # Ensure active molecule is valid
-        if scene_manager.active_molecule not in scene_manager.molecules:
-            scene_manager.active_molecule = next(iter(scene_manager.molecules)) if scene_manager.molecules else None
-        
-        # Force UI refresh
-        scene_manager._refresh_ui()
-        '''
+
 
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
+        # Capture state before deletion
+        self._capture_molecule_state(identifier)
+        
         # Check if the molecule exists via the manager, which holds the actual MoleculeWrapper objects
         if self.molecule_manager.get_molecule(identifier):
             # Call the MoleculeManager's delete_molecule method
@@ -286,4 +273,78 @@ class ProteinBlenderScene:
         self.active_molecule = identifier
         
         # Force UI refresh
-        self._refresh_ui() 
+        self._refresh_ui()
+
+
+def _is_object_valid(obj):
+    """Check if Blender object reference is still valid"""
+    try:
+        return obj and obj.name in bpy.data.objects
+    except:
+        return False
+
+
+def _has_invalid_domains(molecule):
+    """Check if any domains have invalid object references"""
+    try:
+        for domain in molecule.domains.values():
+            if domain.object and not _is_object_valid(domain.object):
+                return True
+        return False
+    except:
+        return True
+
+
+def _refresh_molecule_ui(scene_manager, scene):
+    """Refresh the UI to match current state"""
+    # Clear and rebuild molecule list
+    scene.molecule_list_items.clear()
+    
+    for identifier, molecule in scene_manager.molecules.items():
+        if _is_object_valid(molecule.object):
+            item = scene.molecule_list_items.add()
+            item.identifier = identifier
+    
+    # Update active molecule
+    if scene_manager.active_molecule not in scene_manager.molecules:
+        scene_manager.active_molecule = next(iter(scene_manager.molecules), None)
+    
+    # Force UI refresh
+    scene_manager._refresh_ui()
+
+
+def sync_molecule_list_after_undo(*args):
+    """Restore missing molecules after undo operations"""
+    print("Syncing molecule list after undo/redo")
+    
+    scene_manager = ProteinBlenderScene.get_instance()
+    scene = bpy.context.scene
+    
+    # Find molecules that should exist but are missing/invalid
+    molecules_to_restore = []
+    
+    for molecule_id, saved_state in scene_manager._saved_states.items():
+        current_molecule = scene_manager.molecules.get(molecule_id)
+        
+        # Check if molecule exists and is valid
+        needs_restore = (
+            current_molecule is None or 
+            not _is_object_valid(current_molecule.object) or
+            _has_invalid_domains(current_molecule)
+        )
+        
+        if needs_restore:
+            molecules_to_restore.append((molecule_id, saved_state))
+    
+    # Restore missing molecules
+    for molecule_id, saved_state in molecules_to_restore:
+        print(f"Restoring molecule: {molecule_id}")
+        try:
+            saved_state.restore_to_scene(scene_manager)
+        except Exception as e:
+            print(f"Failed to restore molecule {molecule_id}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    # Update UI
+    _refresh_molecule_ui(scene_manager, scene) 
