@@ -21,6 +21,9 @@ class ProteinBlenderScene:
         self.molecule_manager = MoleculeManager()
         self.active_molecule: Optional[str] = None
         self.display_settings = {}
+        # Store wrappers of molecules that have been deleted so they can be
+        # restored if the user performs an undo operation.
+        self.deleted_molecules: Dict[str, MoleculeWrapper] = {}
 
 
     @property
@@ -171,20 +174,35 @@ class ProteinBlenderScene:
     def sync_molecule_list_after_undo(*args):
         """Synchronize the molecule list UI after undo/redo operations"""
         scene_manager = ProteinBlenderScene.get_instance()
+
+        # Reload domain information for existing molecules
         for molecule in scene_manager.molecules.values():
             try:
                 molecule._load_domains_from_rna()
             except Exception as e:
                 print(f"Failed to reload domains for {molecule.identifier}: {e}")
 
+        # Check if any previously deleted molecules reappeared after undo
+        for identifier, wrapper in list(scene_manager.deleted_molecules.items()):
+            obj = bpy.data.objects.get(identifier)
+            if obj:
+                # Restore pointer to Blender object and rebuild state
+                wrapper.molecule.object = obj
+                wrapper._setup_protein_domain_infrastructure()
+                wrapper._load_domains_from_rna()
+                scene_manager.molecule_manager.molecules[identifier] = wrapper
+                scene_manager._add_molecule_to_list(identifier)
+                del scene_manager.deleted_molecules[identifier]
+
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
         # Check if the molecule exists via the manager, which holds the actual MoleculeWrapper objects
         if self.molecule_manager.get_molecule(identifier):
-            # Call the MoleculeManager's delete_molecule method
-            # This method now handles the core cleanup of the molecule wrapper, 
-            # its Blender object, and potentially its collection.
-            self.molecule_manager.delete_molecule(identifier)
+            # Call the MoleculeManager's delete_molecule method and keep the
+            # wrapper around so it can be restored on undo.
+            wrapper = self.molecule_manager.delete_molecule(identifier)
+            if wrapper:
+                self.deleted_molecules[identifier] = wrapper
             
             # Update UI list - this part is for the ProteinBlenderScene's own UI management
             scene = bpy.context.scene

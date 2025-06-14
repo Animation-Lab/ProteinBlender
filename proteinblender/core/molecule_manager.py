@@ -76,13 +76,13 @@ class MoleculeManager:
         """Get a molecule by its identifier (PDB ID or name)"""
         return self.molecules.get(identifier) 
 
-    def delete_molecule(self, identifier: str):
-        """Deletes a molecule and all its associated Blender objects and data."""
+    def delete_molecule(self, identifier: str) -> Optional[MoleculeWrapper]:
+        """Delete a molecule and return the removed wrapper."""
         print(f"Attempting to delete molecule: {identifier}")
         molecule_wrapper = self.get_molecule(identifier)
         if not molecule_wrapper:
             print(f"Molecule {identifier} not found in manager.")
-            return
+            return None
 
         # 1. Call cleanup on the MoleculeWrapper to remove domains and their objects/nodes
         print(f"Cleaning up domains for molecule {identifier}...")
@@ -117,4 +117,6 @@ class MoleculeManager:
         # 4. Remove the molecule from the manager's dictionary
         if identifier in self.molecules:
             del self.molecules[identifier]
-            print(f"Molecule {identifier} removed from manager.") 
+            print(f"Molecule {identifier} removed from manager.")
+
+        return molecule_wrapper
