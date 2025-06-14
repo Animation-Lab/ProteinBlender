@@ -22,7 +22,8 @@ class ProteinBlenderScene:
         self.active_molecule: Optional[str] = None
         self.display_settings = {}
         # Store wrappers of molecules that have been deleted so they can be
-        # restored if the user performs an undo operation.
+        # restored if the user performs an undo operation. Each wrapper keeps
+        # the Blender object name that was removed for easy lookup on undo.
         self.deleted_molecules: Dict[str, MoleculeWrapper] = {}
 
 
@@ -184,11 +185,11 @@ class ProteinBlenderScene:
 
         # Check if any previously deleted molecules reappeared after undo
         for identifier, wrapper in list(scene_manager.deleted_molecules.items()):
-            obj = bpy.data.objects.get(identifier)
+            obj_name = getattr(wrapper, "deleted_object_name", identifier)
+            obj = bpy.data.objects.get(obj_name)
             if obj:
                 # Restore pointer to Blender object and rebuild state
                 wrapper.molecule.object = obj
-                wrapper._setup_protein_domain_infrastructure()
                 wrapper._load_domains_from_rna()
                 scene_manager.molecule_manager.molecules[identifier] = wrapper
                 scene_manager._add_molecule_to_list(identifier)

@@ -92,7 +92,12 @@ class MoleculeManager:
         if molecule_wrapper.molecule and molecule_wrapper.molecule.object:
             main_mol_object = molecule_wrapper.molecule.object
             object_name = main_mol_object.name
-            collection_name = main_mol_object.users_collection[0].name if main_mol_object.users_collection else None
+            molecule_wrapper.deleted_object_name = object_name
+            collection_name = (
+                main_mol_object.users_collection[0].name
+                if main_mol_object.users_collection
+                else None
+            )
             print(f"Deleting main molecule object: {object_name}")
             try:
                 bpy.data.objects.remove(main_mol_object, do_unlink=True)
@@ -118,5 +123,9 @@ class MoleculeManager:
         if identifier in self.molecules:
             del self.molecules[identifier]
             print(f"Molecule {identifier} removed from manager.")
+
+        # Clear reference to Blender object so we know it's deleted
+        if molecule_wrapper.molecule:
+            molecule_wrapper.molecule.object = None
 
         return molecule_wrapper

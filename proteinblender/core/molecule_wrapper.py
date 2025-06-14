@@ -84,6 +84,9 @@ class MoleculeWrapper:
         # Reference to the join node for domain selections
         self.domain_join_node = None
 
+        # Store the Blender object name when deleted for undo restoration
+        self.deleted_object_name: Optional[str] = None
+
         # Setup the protein domain infrastructure
         self._setup_protein_domain_infrastructure()
 
