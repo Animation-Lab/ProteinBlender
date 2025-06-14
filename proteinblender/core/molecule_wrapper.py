@@ -699,7 +699,7 @@ class MoleculeWrapper:
                          search_ids.append(int_chain_id)
                          search_ids.append(str(int_chain_id))
                      except Exception: pass
-                 return list(set(filter(None.__ne__, search_ids)))
+                 return list(set(filter(lambda x: x is not None, search_ids)))
             # --- End helper --- 
 
             search_chain_ids = get_possible_chain_ids(domain_chain_id)
@@ -718,8 +718,41 @@ class MoleculeWrapper:
             res_nums_data = attrs[residue_attr_name].data
             positions_data = attrs["position"].data
 
-            # Prepare string versions of possible chain IDs for comparison
+            # Get custom chain mapping if available
+            obj_chain_ids_list = None
+            if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
+                obj_chain_ids_list = mol_obj["chain_ids"]
+                print(f"DEBUG: Found custom chain mapping: {obj_chain_ids_list}")
+            
+            # **FIX: Create reverse mapping for better chain matching**
+            # If we have custom mapping, we need to find which numeric indices correspond to our target chain
+            target_chain_indices = []
+            
+            if obj_chain_ids_list is not None:
+                # Search for all indices that map to our target chain
+                for idx, mapped_chain in enumerate(obj_chain_ids_list):
+                    if str(mapped_chain) == str(domain_chain_id):
+                        target_chain_indices.append(idx)
+                        print(f"DEBUG: Chain '{domain_chain_id}' maps to index {idx}")
+                
+                # Also add the mathematical conversions
+                for search_id in search_chain_ids:
+                    if isinstance(search_id, int) and 0 <= search_id < len(obj_chain_ids_list):
+                        if search_id not in target_chain_indices:
+                            target_chain_indices.append(search_id)
+                            print(f"DEBUG: Adding mathematical conversion index {search_id} for chain '{domain_chain_id}'")
+            else:
+                # No custom mapping, use the mathematical conversion
+                target_chain_indices = [idx for idx in search_chain_ids if isinstance(idx, int)]
+                print(f"DEBUG: No custom mapping found, using mathematical conversion: {target_chain_indices}")
+            
+            # Convert to strings for comparison
             search_chain_ids_str = [str(s) for s in search_chain_ids]
+            target_chain_indices_str = [str(idx) for idx in target_chain_indices]
+            
+            print(f"DEBUG: Searching for chain '{domain_chain_id}' using:")
+            print(f"  - Search chain IDs: {search_chain_ids} -> {search_chain_ids_str}")
+            print(f"  - Target chain indices: {target_chain_indices} -> {target_chain_indices_str}")
 
             is_alpha_carbon_data = None
             is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
@@ -744,31 +777,51 @@ class MoleculeWrapper:
                 print(f"Error: Invalid residue_target '{residue_target}'")
                 return None
 
-            # Map geometry node chain_id attribute to actual chain IDs via object custom property
-            obj_chain_ids_list = None
-            if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
-                obj_chain_ids_list = mol_obj["chain_ids"]
-
             # --- Search for the first CA encountered in the specified range order ---
             for target_res_num in residue_search_range:
+                print(f"DEBUG: Searching residue {target_res_num} for alpha carbon...")
+                atoms_in_residue = 0
+                atoms_in_target_chain = 0
+                
                 for atom_idx in range(len(positions_data)):
                     try:
                         atom_res_num = res_nums_data[atom_idx].value
                         if atom_res_num != target_res_num:
                             continue 
                         
-                        # Determine actual chain ID for this atom using custom mapping
+                        atoms_in_residue += 1
+                        
+                        # Get the chain ID value for this atom
                         chain_id_val = chain_ids_data[atom_idx].value
-                        if obj_chain_ids_list is not None:
+                        
+                        # **FIX: Use both custom mapping and direct comparison**
+                        atom_matches_target_chain = False
+                        
+                        # Method 1: Check if atom's chain index is in our target indices
+                        if str(chain_id_val) in target_chain_indices_str:
+                            atom_matches_target_chain = True
+                            print(f"DEBUG: Atom {atom_idx} matches target chain via index {chain_id_val}")
+                        
+                        # Method 2: If we have custom mapping, check the mapped value
+                        if obj_chain_ids_list is not None and not atom_matches_target_chain:
                             try:
                                 actual_chain_id = obj_chain_ids_list[chain_id_val]
+                                if str(actual_chain_id) in search_chain_ids_str:
+                                    atom_matches_target_chain = True
+                                    print(f"DEBUG: Atom {atom_idx} matches target chain via mapping {chain_id_val} -> '{actual_chain_id}'")
                             except (IndexError, TypeError):
-                                actual_chain_id = chain_id_val
-                        else:
-                            actual_chain_id = chain_id_val
-                        # Skip atoms not in the target chain(s)
-                        if str(actual_chain_id) not in search_chain_ids_str:
-                            continue 
+                                pass
+                        
+                        # Method 3: Direct comparison (fallback)
+                        if not atom_matches_target_chain:
+                            if str(chain_id_val) in search_chain_ids_str:
+                                atom_matches_target_chain = True
+                                print(f"DEBUG: Atom {atom_idx} matches target chain via direct comparison {chain_id_val}")
+                        
+                        if not atom_matches_target_chain:
+                            continue
+                        
+                        atoms_in_target_chain += 1
                         
                         # --- Check using the preferred method (is_alpha_carbon) --- 
                         is_ca = False
@@ -797,10 +850,15 @@ class MoleculeWrapper:
                     except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
                         continue # Skip malformed atom data
                 
-                print(f"No Cα found in residue {target_res_num}.")
+                print(f"DEBUG: Residue {target_res_num} - {atoms_in_residue} atoms total, {atoms_in_target_chain} in target chain, 0 alpha carbons")
 
             # If we finish the loop without finding any CA in the entire range
             print(f"Error: No Alpha Carbon (CA) found within range {start_res}-{end_res} for chain {domain_chain_id}.")
+            print(f"DEBUG: Search completed. Check if:")
+            print(f"  1. The protein actually contains chain '{domain_chain_id}'")
+            print(f"  2. The custom chain mapping is correct: {obj_chain_ids_list}")
+            print(f"  3. The residue range {start_res}-{end_res} is valid")
+            print(f"  4. The is_alpha_carbon attribute is working correctly")
             return None
 
         except Exception as e:
