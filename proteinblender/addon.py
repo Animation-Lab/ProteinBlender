@@ -15,7 +15,7 @@ from .utils.molecularnodes.props import MolecularNodesObjectProperties
 # from .utils.scene_manager import ProteinBlenderScene, sync_molecule_list_after_undo
 
 # Track registered classes
-registered_classes = set()
+registered_classes = []
 
 all_pb_classes = (
     core_classes,
@@ -53,7 +53,7 @@ def register():
         for cls in op:
             try:
                 bpy.utils.register_class(cls)
-                registered_classes.add(cls)
+                registered_classes.append(cls)
             except Exception as e:
                 print(f"Failed to register {cls.__name__}: {e}")
                 pass
@@ -73,6 +73,7 @@ def register():
     # Register MolecularNodes object properties
     try:
         bpy.utils.register_class(MolecularNodesObjectProperties)
+        registered_classes.append(MolecularNodesObjectProperties)
     except Exception as e:
         print(f"Failed to register MolecularNodesObjectProperties: {e}")
         pass
@@ -129,19 +130,18 @@ def unregister():
         del bpy.types.Object.mn
     
     # Unregister MolecularNodesObjectProperties
-    try:
-        bpy.utils.unregister_class(MolecularNodesObjectProperties)
-    except Exception as e:
-        print(f"Failed to unregister MolecularNodesObjectProperties: {e}")
-        pass
+    # This is now handled by the main unregister loop
+    # try:
+    #     bpy.utils.unregister_class(MolecularNodesObjectProperties)
+    # except Exception as e:
+    #     print(f"Failed to unregister MolecularNodesObjectProperties: {e}")
+    #     pass
 
     # Unregister classes
-    for op in reversed(all_pb_classes):
-        for cls in reversed(op):
-            try:
-                bpy.utils.unregister_class(cls)
-                if cls in registered_classes:
-                    registered_classes.remove(cls)
-            except Exception as e:
-                print(f"Failed to unregister {cls.__name__}: {e}")
-                pass
+    for cls in reversed(registered_classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception as e:
+            print(f"Failed to unregister {cls.__name__}: {e}")
+            pass
+    registered_classes.clear()
