@@ -1650,7 +1650,7 @@ class MoleculeWrapper:
                 available_chains = list(self.idx_to_label_asym_id_map.values()) or [str(chain_id)]
                 
                 chain_select_group = nodes.custom_iswitch(
-                    name="selection", 
+                    name=f"selection_{self.identifier}", 
                     iter_list=available_chains, 
                     field="chain_id", 
                     dtype="BOOLEAN"
@@ -1903,7 +1903,7 @@ class MoleculeWrapper:
                 print(f"DEBUG: Creating chain select with available_chains: {available_chains}")
                 
                 chain_select_group = nodes.custom_iswitch(
-                    name="selection", 
+                    name=f"selection_{self.identifier}", 
                     iter_list=available_chains, 
                     field="chain_id", 
                     dtype="BOOLEAN"
