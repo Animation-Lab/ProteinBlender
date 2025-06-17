@@ -280,17 +280,54 @@ def _is_object_valid(obj):
     """Check if Blender object reference is still valid"""
     try:
         return obj and obj.name in bpy.data.objects
-    except:
+    except ReferenceError:
+        return False
+    except Exception:
         return False
 
 
 def _is_molecule_valid(molecule):
     """Check if molecule wrapper has a valid object reference"""
     try:
-        return molecule and molecule.object and molecule.object.name in bpy.data.objects
-    except Exception as e:
-        # Handle MolecularNodes databpy LinkedObjectError and other exceptions
-        return False
+        if not molecule:
+            return False
+        obj = molecule.object
+        if obj and obj.name in bpy.data.objects:
+            return True
+    except ReferenceError:
+        pass
+    except Exception:
+        pass
+
+    obj_name = getattr(molecule, 'object_name', None)
+    if obj_name and obj_name in bpy.data.objects:
+        try:
+            molecule.molecule.object = bpy.data.objects[obj_name]
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def _is_domain_valid(domain):
+    """Check if domain object reference is still valid and restore if possible"""
+    try:
+        obj = domain.object
+        if obj and obj.name in bpy.data.objects:
+            return True
+    except ReferenceError:
+        pass
+    except Exception:
+        pass
+
+    obj_name = getattr(domain, 'object_name', None)
+    if obj_name and obj_name in bpy.data.objects:
+        try:
+            domain.object = bpy.data.objects[obj_name]
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def _has_invalid_domains(molecule):
@@ -299,9 +336,9 @@ def _has_invalid_domains(molecule):
         # First check if we can access the molecule at all
         if not _is_molecule_valid(molecule):
             return True
-            
+
         for domain in molecule.domains.values():
-            if domain.object and not _is_object_valid(domain.object):
+            if not _is_domain_valid(domain):
                 return True
         return False
     except:
@@ -314,7 +351,7 @@ def _refresh_molecule_ui(scene_manager, scene):
     scene.molecule_list_items.clear()
     
     for identifier, molecule in scene_manager.molecules.items():
-        if _is_object_valid(molecule.object):
+        if _is_molecule_valid(molecule):
             item = scene.molecule_list_items.add()
             item.identifier = identifier
     

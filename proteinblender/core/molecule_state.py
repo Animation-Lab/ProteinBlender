@@ -146,6 +146,7 @@ class MoleculeState:
             wrapper.style = self.molecule_data.get('style', 'surface')
             wrapper.domains = {}
             wrapper.residue_assignments = {}
+            wrapper.object_name = molecule_obj.name
             
             # Restore wrapper mapping attributes
             wrapper.chain_mapping = self.molecule_data.get('chain_mapping', {})
@@ -226,6 +227,7 @@ class MoleculeState:
             domain.parent_molecule_id = domain_data.get('parent_molecule_id')
             domain.parent_domain_id = domain_data.get('parent_domain_id')
             domain.object = domain_obj
+            domain.object_name = domain_data.get('object_name')
             domain.node_group = node_group
             domain._setup_complete = domain_data.get('setup_complete', False)
             
@@ -260,7 +262,9 @@ def _is_object_valid(obj):
     """Check if Blender object reference is still valid"""
     try:
         return obj and obj.name in bpy.data.objects
-    except:
+    except ReferenceError:
+        return False
+    except Exception:
         return False
 
 
@@ -268,8 +272,8 @@ def _has_invalid_domains(molecule):
     """Check if any domains have invalid object references"""
     try:
         for domain in molecule.domains.values():
-            if domain.object and not _is_object_valid(domain.object):
+            if not _is_object_valid(domain.object):
                 return True
         return False
     except:
-        return True 
+        return True

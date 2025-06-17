@@ -26,6 +26,9 @@ class MoleculeWrapper:
         self.style = "surface"  # Default style
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
+        # Store the name of the main Blender object to help re-establish
+        # references after undo/redo operations
+        self.object_name = molecule.object.name if molecule.object else None
         
         # Handle both AtomArrayStack (multi-model) and AtomArray (single model)
         import biotite.structure as struc
@@ -351,7 +354,10 @@ class MoleculeWrapper:
         if not domain.create_object_from_parent(self.molecule.object):
             print(f"Failed to create domain object for {domain_id}")
             return None
-        
+        # Store object name for safe lookups after undo
+        if domain.object:
+            domain.object_name = domain.object.name
+
         # Add domain expanded property to object
         domain.object["domain_expanded"] = False
         domain.object["domain_id"] = domain_id

@@ -62,6 +62,8 @@ class DomainDefinition:
         self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
         self.domain_id = f"{chain_id}_{start}_{end}"
         self.style = "ribbon"  # Default style
+        # Store the object name so lost references after undo can be restored
+        self.object_name: Optional[str] = None
 
     def to_properties(self) -> Dict:
         """Convert domain definition to property dictionary for storing in PropertyGroup"""
@@ -126,6 +128,8 @@ class DomainDefinition:
             self.object = parent_obj.copy()
             self.object.data = parent_obj.data.copy()
             self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
+            # Record the object name so references can be restored after undo
+            self.object_name = self.object.name
             
             # Copy all modifiers except MolecularNodes
             for mod in parent_obj.modifiers:
