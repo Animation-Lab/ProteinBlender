@@ -426,7 +426,7 @@ def sync_molecule_list_after_undo(*args):
         # Collect names of saved molecules yet to restore
         pending = [s.molecule_data.get('object_name') for s in scene_manager._saved_states.values() if s.molecule_data.get('object_name')]
         # Check if any of these objects exist in Blender data
-        if not scene_manager.molecules and any(name in bpy.data.objects for name in pending):
+        if pending and any(name in bpy.data.objects for name in pending):
             print("Sync: Pending molecule objects detected, scheduling retry...")
             bpy.app.timers.register(lambda: sync_molecule_list_after_undo(), first_interval=0.2)
     except Exception:

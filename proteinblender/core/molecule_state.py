@@ -98,6 +98,10 @@ class MoleculeState:
                 
             # Restore all domains
             if not self._restore_domains(scene_manager):
+                if self.identifier in scene_manager.molecules:
+                    del scene_manager.molecules[self.identifier]
+                if self.identifier in scene_manager.molecule_manager.molecules:
+                    del scene_manager.molecule_manager.molecules[self.identifier]
                 return False
                 
             # Add to UI list if not already present
@@ -196,13 +200,14 @@ class MoleculeState:
             # Clear existing domains
             molecule.domains.clear()
             
-            # Restore each domain
+            # Restore each domain and ensure all required objects exist
+            all_restored = True
             for domain_id, domain_data in self.domains_data.items():
                 if not self._restore_single_domain(molecule, domain_id, domain_data):
                     print(f"Failed to restore domain {domain_id}")
-                    continue
-                    
-            return True
+                    all_restored = False
+
+            return all_restored
             
         except Exception as e:
             print(f"Error restoring domains: {str(e)}")
@@ -215,6 +220,11 @@ class MoleculeState:
             domain_obj = None
             if domain_data.get('object_name'):
                 domain_obj = bpy.data.objects.get(domain_data['object_name'])
+
+            # If the Blender object hasn't been restored yet, abort so we retry later
+            if not domain_obj:
+                print(f"Domain object missing for {domain_id}")
+                return False
                 
             # Find the restored node group
             node_group = None
