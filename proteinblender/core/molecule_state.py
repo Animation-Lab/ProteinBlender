@@ -15,18 +15,21 @@ class MoleculeState:
         
     def _capture_molecule_data(self, molecule):
         """Store basic molecule info needed for recreation"""
+        is_valid = _is_object_valid(getattr(molecule, 'object', None))
+        obj_name = molecule.object.name if is_valid else getattr(molecule, 'object_name', None)
+
         data = {
             'identifier': molecule.identifier,
             'style': molecule.style,
-            'object_name': molecule.object.name if molecule.object else None,
-            'object_transform': molecule.object.matrix_world.copy() if molecule.object else None,
-            'object_location': molecule.object.location.copy() if molecule.object else None,
-            'object_rotation': molecule.object.rotation_euler.copy() if molecule.object else None,
-            'object_scale': molecule.object.scale.copy() if molecule.object else None,
+            'object_name': obj_name,
+            'object_transform': molecule.object.matrix_world.copy() if is_valid else None,
+            'object_location': molecule.object.location.copy() if is_valid else None,
+            'object_rotation': molecule.object.rotation_euler.copy() if is_valid else None,
+            'object_scale': molecule.object.scale.copy() if is_valid else None,
             'chain_mapping': getattr(molecule, 'chain_mapping', {}),
             'auth_chain_id_map': getattr(molecule, 'auth_chain_id_map', {}),
             'idx_to_label_asym_id_map': getattr(molecule, 'idx_to_label_asym_id_map', {}),
-            'chain_residue_ranges': getattr(molecule, 'chain_residue_ranges', {})
+            'chain_residue_ranges': getattr(molecule, 'chain_residue_ranges', {}),
         }
         
         # Store material information if available
@@ -51,8 +54,8 @@ class MoleculeState:
                     'style': getattr(domain, 'style', 'ribbon'),
                     'parent_molecule_id': domain.parent_molecule_id,
                     'parent_domain_id': domain.parent_domain_id,
-                    'object_name': domain.object.name if domain.object else None,
-                    'object_transform': domain.object.matrix_world.copy() if domain.object else None,
+                    'object_name': domain.object.name if _is_object_valid(domain.object) else getattr(domain, 'object_name', None),
+                    'object_transform': domain.object.matrix_world.copy() if _is_object_valid(domain.object) else None,
                     'node_group_name': domain.node_group.name if domain.node_group else None,
                     'setup_complete': getattr(domain, '_setup_complete', False)
                 }
@@ -108,6 +111,8 @@ class MoleculeState:
             if not found:
                 item = scene.molecule_list_items.add()
                 item.identifier = self.identifier
+                item.object_ptr = molecule_obj
+                scene.molecule_list_index = len(scene.molecule_list_items) - 1
                 print(f"Added molecule {self.identifier} to UI list")
                 
             print(f"Successfully restored molecule: {self.identifier}")

@@ -371,15 +371,18 @@ def sync_molecule_list_after_undo(*args):
     molecules_to_remove = []
     for molecule_id, molecule in list(scene_manager.molecules.items()):
         if not _is_molecule_valid(molecule):
-            # Object no longer exists - this molecule should be removed
+            scene_manager._capture_molecule_state(molecule_id)
             molecules_to_remove.append(molecule_id)
-    
+
     for molecule_id in molecules_to_remove:
         print(f"Removing invalid molecule from scene manager: {molecule_id}")
         del scene_manager.molecules[molecule_id]
         if molecule_id in scene_manager.molecule_manager.molecules:
             del scene_manager.molecule_manager.molecules[molecule_id]
-    
+        for i, item in enumerate(scene.molecule_list_items):
+            if item.identifier == molecule_id:
+                scene.molecule_list_items.remove(i)
+                break
     # Step 2: Find molecules that should be restored (e.g., after undoing a delete)
     molecules_to_restore = []
     
