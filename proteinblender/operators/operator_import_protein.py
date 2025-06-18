@@ -6,6 +6,7 @@ class PROTEIN_OT_import_protein(Operator):
     bl_idname = "protein.import_protein"
     bl_label = "Import Protein"
     bl_description = "Import a protein from PDB or AlphaFold"
+    bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         scene = context.scene

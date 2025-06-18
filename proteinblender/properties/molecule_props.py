@@ -101,6 +101,11 @@ class MoleculeListItem(PropertyGroup):
         description="PDB ID or filename of the molecule",
         default=""
     )
+    object_ptr: PointerProperty(
+        name="Object",
+        description="Pointer to the Blender object for this molecule",
+        type=bpy.types.Object,
+    )
     style: EnumProperty(
         name="Style",
         description="Visualization style for the molecule",

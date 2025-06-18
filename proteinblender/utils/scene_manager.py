@@ -133,6 +133,8 @@ class ProteinBlenderScene:
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()
         item.identifier = molecule.identifier
+        item.object_ptr = molecule.object
+        scene.molecule_list_index = len(scene.molecule_list_items) - 1
         # Set as active molecule
         self.active_molecule = molecule.identifier
         # Force UI refresh
@@ -268,6 +270,10 @@ class ProteinBlenderScene:
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()
         item.identifier = identifier
+        mol = self.molecules.get(identifier)
+        if mol and hasattr(mol, "object"):
+            item.object_ptr = mol.object
+        scene.molecule_list_index = len(scene.molecule_list_items) - 1
         
         # Set as active molecule
         self.active_molecule = identifier
@@ -317,6 +323,7 @@ def _refresh_molecule_ui(scene_manager, scene):
         if _is_object_valid(molecule.object):
             item = scene.molecule_list_items.add()
             item.identifier = identifier
+            item.object_ptr = molecule.object
     
     # Update active molecule
     if scene_manager.active_molecule not in scene_manager.molecules:
