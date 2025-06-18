@@ -246,7 +246,19 @@ class MoleculeState:
                         domain_obj.parent = parent_obj
                         # Restore the world position after parenting
                         domain_obj.matrix_world = world_matrix
-                        
+
+                # Restore parent inverse matrix and local transform if stored
+                if 'matrix_parent_inverse' in domain_data:
+                    try:
+                        domain_obj.matrix_parent_inverse = domain_data['matrix_parent_inverse'].copy()
+                    except Exception:
+                        pass
+                if 'matrix_local' in domain_data:
+                    try:
+                        domain_obj.matrix_local = domain_data['matrix_local'].copy()
+                    except Exception:
+                        pass
+
                 # Don't override transforms if the objects are already in correct positions after undo
                 # The undo operation should have restored them correctly
                     
