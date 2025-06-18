@@ -40,35 +40,39 @@ class MoleculeState:
         domains_data = {}
         
         for domain_id, domain in molecule.domains.items():
-            domain_data = {
-                'domain_id': domain_id,
-                'chain_id': domain.chain_id,
-                'start': domain.start,
-                'end': domain.end,
-                'name': domain.name,
-                'color': domain.color,
-                'style': getattr(domain, 'style', 'ribbon'),
-                'parent_molecule_id': domain.parent_molecule_id,
-                'parent_domain_id': domain.parent_domain_id,
-                'object_name': domain.object.name if domain.object else None,
-                'object_transform': domain.object.matrix_world.copy() if domain.object else None,
-                'node_group_name': domain.node_group.name if domain.node_group else None,
-                'setup_complete': getattr(domain, '_setup_complete', False)
-            }
-            
-            # Store parent-child relationships in Blender hierarchy
-            if domain.object:
-                domain_data['parent_object'] = domain.object.parent.name if domain.object.parent else None
-                domain_data['matrix_parent_inverse'] = domain.object.matrix_parent_inverse.copy()
-                # Store local transform (relative to parent) instead of world transform
-                domain_data['matrix_local'] = domain.object.matrix_local.copy()
+            try:
+                domain_data = {
+                    'domain_id': domain_id,
+                    'chain_id': domain.chain_id,
+                    'start': domain.start,
+                    'end': domain.end,
+                    'name': domain.name,
+                    'color': domain.color,
+                    'style': getattr(domain, 'style', 'ribbon'),
+                    'parent_molecule_id': domain.parent_molecule_id,
+                    'parent_domain_id': domain.parent_domain_id,
+                    'object_name': domain.object.name if domain.object else None,
+                    'object_transform': domain.object.matrix_world.copy() if domain.object else None,
+                    'node_group_name': domain.node_group.name if domain.node_group else None,
+                    'setup_complete': getattr(domain, '_setup_complete', False)
+                }
                 
-                # Store collection information
-                if domain.object.users_collection:
-                    domain_data['collections'] = [col.name for col in domain.object.users_collection]
-            
-            domains_data[domain_id] = domain_data
-            
+                # Store parent-child relationships in Blender hierarchy
+                if domain.object:
+                    domain_data['parent_object'] = domain.object.parent.name if domain.object.parent else None
+                    domain_data['matrix_parent_inverse'] = domain.object.matrix_parent_inverse.copy()
+                    # Store local transform (relative to parent) instead of world transform
+                    domain_data['matrix_local'] = domain.object.matrix_local.copy()
+                    
+                    # Store collection information
+                    if domain.object.users_collection:
+                        domain_data['collections'] = [col.name for col in domain.object.users_collection]
+                
+                domains_data[domain_id] = domain_data
+            except ReferenceError:
+                print(f"Warning: Skipping capture for domain {domain_id} – Blender object is invalid")
+                continue
+        
         return domains_data
         
     def restore_to_scene(self, scene_manager):

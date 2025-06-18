@@ -85,7 +85,7 @@ def register():
     # Schedule workspace creation after 0.5 seconds
     bpy.app.timers.register(create_workspace_callback, first_interval=0.25)
 
-    # Register undo handler if not already registered
+    # Register undo_post handler to sync and restore molecules after undo
     from .utils.scene_manager import sync_molecule_list_after_undo
     if sync_molecule_list_after_undo not in bpy.app.handlers.undo_post:
         bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
@@ -95,13 +95,13 @@ def unregister():
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)
 
-    # Unregister undo handler
+    # Unregister undo_post handler
     try:
         from .utils.scene_manager import sync_molecule_list_after_undo
         if sync_molecule_list_after_undo in bpy.app.handlers.undo_post:
             bpy.app.handlers.undo_post.remove(sync_molecule_list_after_undo)
     except Exception as e:
-        print(f"Failed to unregister undo handler: {e}")
+        print(f"Failed to unregister undo_post handler: {e}")
         pass
 
     # Unregister properties

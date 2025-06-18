@@ -119,6 +119,12 @@ class MOLECULE_PB_OT_delete(Operator):
     
     def execute(self, context):
         scene_manager = ProteinBlenderScene.get_instance()
+        # Capture current state for potential undo restoration
+        try:
+            scene_manager._capture_molecule_state(self.molecule_id)
+        except Exception:
+            pass
+        # Perform deletion
         scene_manager.delete_molecule(self.molecule_id)
         return {'FINISHED'}
 

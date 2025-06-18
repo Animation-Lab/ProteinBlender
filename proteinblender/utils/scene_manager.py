@@ -369,11 +369,28 @@ def sync_molecule_list_after_undo(*args):
     for molecule_id, saved_state in molecules_to_restore:
         print(f"Restoring molecule: {molecule_id}")
         try:
-            saved_state.restore_to_scene(scene_manager)
+            restored = saved_state.restore_to_scene(scene_manager)
+            # Once restored, clear its saved state
+            if restored and molecule_id in scene_manager._saved_states:
+                del scene_manager._saved_states[molecule_id]
         except Exception as e:
             print(f"Failed to restore molecule {molecule_id}: {str(e)}")
             import traceback
             traceback.print_exc()
+    # If we restored any molecules, mark the last one as selected
+    if molecules_to_restore:
+        last_id = molecules_to_restore[-1][0]
+        scene.selected_molecule_id = last_id
     
     # Step 4: Update UI
-    _refresh_molecule_ui(scene_manager, scene) 
+    _refresh_molecule_ui(scene_manager, scene)
+    # If some saved states still refer to real objects, retry once
+    try:
+        # Collect names of saved molecules yet to restore
+        pending = [s.molecule_data.get('object_name') for s in scene_manager._saved_states.values() if s.molecule_data.get('object_name')]
+        # Check if any of these objects exist in Blender data
+        if not scene_manager.molecules and any(name in bpy.data.objects for name in pending):
+            print("Sync: Pending molecule objects detected, scheduling retry...")
+            bpy.app.timers.register(lambda: sync_molecule_list_after_undo(), first_interval=0.2)
+    except Exception:
+        pass 

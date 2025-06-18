@@ -25,18 +25,26 @@ class MOLECULE_PB_PT_list(Panel):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
+        # (Removed early sync hack; rely on undo_post handler for restoration)
+        
         # Create box for list
         box = layout.box()
-        
-        if not scene_manager.molecules:
+        # Gather valid molecule entries (object still exists)
+        valid_molecules = []
+        for molecule_id, molecule in scene_manager.molecules.items():
+            try:
+                obj = molecule.object
+                if obj and obj.name in bpy.data.objects:
+                    valid_molecules.append((molecule_id, molecule))
+            except ReferenceError:
+                continue
+        # If none, show message
+        if not valid_molecules:
             box.label(text="No molecules in scene", icon='INFO')
             return
-            
-        # Create column for molecule entries
+        # Create column for valid molecule entries
         col = box.column()
-        
-        # Draw each molecule entry
-        for molecule_id, molecule in scene_manager.molecules.items():
+        for molecule_id, molecule in valid_molecules:
             row = col.row(align=True)
             
             # Create clickable operator for selection
@@ -255,16 +263,26 @@ class MOLECULE_PB_PT_list(Panel):
                         key=lambda x: (x[1].chain_id, x[1].start)
                     )
                 
-                # --- DEBUG PRINTS --- 
-                print(f"PANEL DEBUG: Molecule ID: {molecule_id}")
-                print(f"PANEL DEBUG: molecule.domains raw: {molecule.domains}")
-                # Use domain_items_list for debug prints
-                print(f"PANEL DEBUG: domain_items_list count: {len(domain_items_list)}")
-                for did, dmn in domain_items_list:
-                    obj_status = "VALID" if dmn.object and hasattr(dmn.object, 'name') else "INVALID or None"
-                    parent_id_val = getattr(dmn, 'parent_domain_id', 'N/A')
-                    print(f"PANEL DEBUG: Domain ID: {did}, Name: {dmn.name}, Obj: {obj_status}, ParentID: {parent_id_val}")
-                # --- END DEBUG PRINTS --- 
+                # --- DEBUG PRINTS ---
+                try:
+                    print(f"PANEL DEBUG: Molecule ID: {molecule_id}")
+                    print(f"PANEL DEBUG: molecule.domains raw: {molecule.domains}")
+                    print(f"PANEL DEBUG: domain_items_list count: {len(domain_items_list)}")
+                    for did, dmn in domain_items_list:
+                        try:
+                            obj = dmn.object
+                            # Check if object still exists in Blender data
+                            obj_status = "VALID" if (obj and obj.name in bpy.data.objects) else "INVALID or None"
+                        except ReferenceError:
+                            obj_status = "INVALID or None"
+                        except Exception as e:
+                            obj_status = f"ERROR: {e}"
+                        parent_id_val = getattr(dmn, 'parent_domain_id', 'N/A')
+                        name_val = getattr(dmn, 'name', 'N/A')
+                        print(f"PANEL DEBUG: Domain ID: {did}, Name: {name_val}, Obj: {obj_status}, ParentID: {parent_id_val}")
+                except Exception as debug_e:
+                    print(f"PANEL DEBUG: Error during domain debug printing: {debug_e}")
+                # --- END DEBUG PRINTS ---
                 
                 # Create a hierarchical representation of domains
                 top_level_domains = []
