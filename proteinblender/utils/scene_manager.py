@@ -324,6 +324,12 @@ def _has_invalid_domains(molecule):
                     domain.object = bpy.data.objects[name]
                 else:
                     return True
+            if not domain.node_group:
+                ng_name = getattr(domain, 'node_group_name', '')
+                if ng_name and ng_name in bpy.data.node_groups:
+                    domain.node_group = bpy.data.node_groups[ng_name]
+                elif ng_name:
+                    return True
         return False
     except:
         return True
@@ -348,6 +354,10 @@ def _refresh_molecule_ui(scene_manager, scene):
                     name = getattr(domain, 'object_name', '')
                     if name and name in bpy.data.objects:
                         domain.object = bpy.data.objects[name]
+                if not domain.node_group:
+                    ng_name = getattr(domain, 'node_group_name', '')
+                    if ng_name and ng_name in bpy.data.node_groups:
+                        domain.node_group = bpy.data.node_groups[ng_name]
             item = scene.molecule_list_items.add()
             item.identifier = identifier
             item.object_ptr = molecule.object

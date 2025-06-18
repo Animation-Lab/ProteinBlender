@@ -1155,7 +1155,7 @@ class MoleculeWrapper:
         """Delete mask nodes for a domain in the parent molecule's node group"""
         if domain_id not in self.domain_mask_nodes:
             return
-            
+
         nodes_to_remove = self.domain_mask_nodes[domain_id]
         
         # Get the parent molecule's node group
@@ -1168,14 +1168,20 @@ class MoleculeWrapper:
         # Remove only the links connected to these specific nodes
         for link in list(parent_node_group.links):
             for node in nodes_to_remove:
-                if link.from_node == node or link.to_node == node:
-                    parent_node_group.links.remove(link)
-                    break
-        
-        # Remove the nodes
+                try:
+                    if node and (link.from_node == node or link.to_node == node):
+                        parent_node_group.links.remove(link)
+                        break
+                except ReferenceError:
+                    continue
+
+        # Remove the nodes safely
         for node in nodes_to_remove:
-            if node:
-                parent_node_group.nodes.remove(node)
+            try:
+                if node and node in parent_node_group.nodes:
+                    parent_node_group.nodes.remove(node)
+            except ReferenceError:
+                pass
             
         # Remove from tracking dictionary
         del self.domain_mask_nodes[domain_id]
