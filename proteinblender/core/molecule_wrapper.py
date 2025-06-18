@@ -1178,9 +1178,12 @@ class MoleculeWrapper:
         # Remove the nodes safely
         for node in nodes_to_remove:
             try:
-                if node and node in parent_node_group.nodes:
-                    parent_node_group.nodes.remove(node)
+                if node:
+                    # membership check on name avoids TypeError when node is invalid
+                    if node.name in parent_node_group.nodes:
+                        parent_node_group.nodes.remove(parent_node_group.nodes[node.name])
             except ReferenceError:
+                # Node might already be freed; ignore
                 pass
             
         # Remove from tracking dictionary
