@@ -293,7 +293,18 @@ def _is_object_valid(obj):
 def _is_molecule_valid(molecule):
     """Check if molecule wrapper has a valid object reference"""
     try:
-        return molecule and molecule.object and molecule.object.name in bpy.data.objects
+        if not molecule:
+            return False
+        obj = getattr(molecule, 'object', None)
+        if not _is_object_valid(obj):
+            name = getattr(molecule, 'object_name', '')
+            if name and name in bpy.data.objects:
+                if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+                    molecule.molecule.object = bpy.data.objects[name]
+                molecule.object = bpy.data.objects[name]
+                return True
+            return False
+        return True
     except Exception as e:
         # Handle MolecularNodes databpy LinkedObjectError and other exceptions
         return False
@@ -305,10 +316,14 @@ def _has_invalid_domains(molecule):
         # First check if we can access the molecule at all
         if not _is_molecule_valid(molecule):
             return True
-            
+
         for domain in molecule.domains.values():
-            if domain.object and not _is_object_valid(domain.object):
-                return True
+            if not _is_object_valid(domain.object):
+                name = getattr(domain, 'object_name', '')
+                if name and name in bpy.data.objects:
+                    domain.object = bpy.data.objects[name]
+                else:
+                    return True
         return False
     except:
         return True
@@ -318,9 +333,21 @@ def _refresh_molecule_ui(scene_manager, scene):
     """Refresh the UI to match current state"""
     # Clear and rebuild molecule list
     scene.molecule_list_items.clear()
-    
+
     for identifier, molecule in scene_manager.molecules.items():
+        if not _is_object_valid(molecule.object):
+            name = getattr(molecule, 'object_name', '')
+            if name and name in bpy.data.objects:
+                molecule.object = bpy.data.objects[name]
+                if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+                    molecule.molecule.object = molecule.object
         if _is_object_valid(molecule.object):
+            # Restore domain pointers if needed
+            for domain in molecule.domains.values():
+                if not _is_object_valid(domain.object):
+                    name = getattr(domain, 'object_name', '')
+                    if name and name in bpy.data.objects:
+                        domain.object = bpy.data.objects[name]
             item = scene.molecule_list_items.add()
             item.identifier = identifier
             item.object_ptr = molecule.object

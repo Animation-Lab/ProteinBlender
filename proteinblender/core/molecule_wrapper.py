@@ -26,6 +26,7 @@ class MoleculeWrapper:
         self.style = "surface"  # Default style
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
+        self.object_name = self.molecule.object.name if self.molecule and self.molecule.object else ""
         
         # Handle both AtomArrayStack (multi-model) and AtomArray (single model)
         import biotite.structure as struc

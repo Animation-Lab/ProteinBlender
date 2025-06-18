@@ -58,6 +58,8 @@ class DomainDefinition:
         self.parent_domain_id = None  # Link to parent domain
         self.object = None  # Blender object reference
         self.node_group = None  # Geometry nodes network
+        self.object_name = ""  # Track object name for undo restoration
+        self.node_group_name = ""  # Track node group name for undo restoration
         self._setup_complete = False
         self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
         self.domain_id = f"{chain_id}_{start}_{end}"
@@ -97,9 +99,11 @@ class DomainDefinition:
         # Find object and node group by name
         if props.object_name and props.object_name in bpy.data.objects:
             domain.object = bpy.data.objects[props.object_name]
-        
+            domain.object_name = props.object_name
+
         if props.node_group_name and props.node_group_name in bpy.data.node_groups:
             domain.node_group = bpy.data.node_groups[props.node_group_name]
+            domain.node_group_name = props.node_group_name
             
         # Set color
         domain.color = props.color
@@ -126,6 +130,8 @@ class DomainDefinition:
             self.object = parent_obj.copy()
             self.object.data = parent_obj.data.copy()
             self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
+            # Store name for later restoration
+            self.object_name = self.object.name
             
             # Copy all modifiers except MolecularNodes
             for mod in parent_obj.modifiers:
@@ -159,6 +165,7 @@ class DomainDefinition:
                 # Clean up if node group setup failed
                 bpy.data.objects.remove(self.object, do_unlink=True)
                 self.object = None
+                self.object_name = ""
                 return False
             
             return True
@@ -168,6 +175,7 @@ class DomainDefinition:
             if self.object:
                 bpy.data.objects.remove(self.object, do_unlink=True)
                 self.object = None
+                self.object_name = ""
             return False
 
     def _setup_node_group(self):
@@ -186,6 +194,7 @@ class DomainDefinition:
             parent_node_group = parent_modifier.node_group
             self.node_group = parent_node_group.copy()
             self.node_group.name = f"{self.name}_nodes"
+            self.node_group_name = self.node_group.name
 
             # Remove the old MolecularNodes modifier and create our new one
             self.object.modifiers.remove(parent_modifier)
@@ -246,6 +255,7 @@ class DomainDefinition:
                     # Node group already removed, skip
                     pass
                 self.node_group = None
+                self.node_group_name = ""
             
             # Clean up any custom node trees
             for node_group in list(bpy.data.node_groups):  # Create a copy of the list to avoid modification during iteration
@@ -259,6 +269,8 @@ class DomainDefinition:
             # Reset properties
             self._setup_complete = False
             self.color = (0.8, 0.1, 0.8, 1.0)  # Reset to default color
+            self.object_name = ""
+            self.node_group_name = ""
             
         except Exception as e:
             print(f"Error during domain cleanup: {str(e)}")

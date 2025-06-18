@@ -162,6 +162,7 @@ class MoleculeState:
             wrapper.preview_nodes = None
             wrapper.domain_mask_nodes = {}
             wrapper.domain_join_node = None
+            wrapper.object_name = molecule_obj.name
             
             # Store in scene manager
             scene_manager.molecules[self.identifier] = wrapper
@@ -231,6 +232,8 @@ class MoleculeState:
             domain.parent_domain_id = domain_data.get('parent_domain_id')
             domain.object = domain_obj
             domain.node_group = node_group
+            domain.object_name = domain_data.get('object_name', '') or ''
+            domain.node_group_name = domain_data.get('node_group_name', '') or ''
             domain._setup_complete = domain_data.get('setup_complete', False)
             
             # Restore object relationships if object exists
