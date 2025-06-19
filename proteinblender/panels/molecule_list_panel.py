@@ -263,26 +263,7 @@ class MOLECULE_PB_PT_list(Panel):
                         key=lambda x: (x[1].chain_id, x[1].start)
                     )
                 
-                # --- DEBUG PRINTS ---
-                try:
-                    print(f"PANEL DEBUG: Molecule ID: {molecule_id}")
-                    print(f"PANEL DEBUG: molecule.domains raw: {molecule.domains}")
-                    print(f"PANEL DEBUG: domain_items_list count: {len(domain_items_list)}")
-                    for did, dmn in domain_items_list:
-                        try:
-                            obj = dmn.object
-                            # Check if object still exists in Blender data
-                            obj_status = "VALID" if (obj and obj.name in bpy.data.objects) else "INVALID or None"
-                        except ReferenceError:
-                            obj_status = "INVALID or None"
-                        except Exception as e:
-                            obj_status = f"ERROR: {e}"
-                        parent_id_val = getattr(dmn, 'parent_domain_id', 'N/A')
-                        name_val = getattr(dmn, 'name', 'N/A')
-                        print(f"PANEL DEBUG: Domain ID: {did}, Name: {name_val}, Obj: {obj_status}, ParentID: {parent_id_val}")
-                except Exception as debug_e:
-                    print(f"PANEL DEBUG: Error during domain debug printing: {debug_e}")
-                # --- END DEBUG PRINTS ---
+
                 
                 # Create a hierarchical representation of domains
                 top_level_domains = []
@@ -555,7 +536,6 @@ class MOLECULE_PB_PT_list(Panel):
                             if move_pivot_op:
                                 move_pivot_op.domain_id = domain_id
                         except Exception as e:
-                            print(f"Error creating move pivot button: {str(e)}")
                             pivot_row.label(text="Move Pivot", icon='ERROR') # Fallback label on error
 
                         # Button 2: Snap to Start AA
@@ -621,8 +601,6 @@ class MOLECULE_PB_PT_list(Panel):
                 if not domain_items_list: # Check the list
                     domain_box.label(text="No domains defined for this molecule.", icon='INFO')
                 else:
-                    # Add a debug print for top_level_domains count
-                    print(f"PANEL DEBUG: top_level_domains count: {len(top_level_domains)}")
                     if not top_level_domains and domain_items_list: # If no top-level but domains exist
                          domain_box.label(text="Domains exist but none are top-level. Check parenting.", icon='ERROR')
                     
@@ -632,7 +610,6 @@ class MOLECULE_PB_PT_list(Panel):
                             # and recursively draw its children.
                             draw_domain_hierarchy(domain_id, domain_obj_ref, indent_level=0)
                         except ReferenceError: # Should ideally not happen if list is clean
-                            print(f"Warning: Stale reference to domain {domain_id} during UI draw.")
                             continue
                 # End of the domain drawing section
 

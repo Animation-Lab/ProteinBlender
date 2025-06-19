@@ -723,7 +723,6 @@ class MoleculeWrapper:
             obj_chain_ids_list = None
             if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
                 obj_chain_ids_list = mol_obj["chain_ids"]
-                print(f"DEBUG: Found custom chain mapping: {obj_chain_ids_list}")
             
             # **FIX: Create reverse mapping for better chain matching**
             # If we have custom mapping, we need to find which numeric indices correspond to our target chain
@@ -734,26 +733,19 @@ class MoleculeWrapper:
                 for idx, mapped_chain in enumerate(obj_chain_ids_list):
                     if str(mapped_chain) == str(domain_chain_id):
                         target_chain_indices.append(idx)
-                        print(f"DEBUG: Chain '{domain_chain_id}' maps to index {idx}")
                 
                 # Also add the mathematical conversions
                 for search_id in search_chain_ids:
                     if isinstance(search_id, int) and 0 <= search_id < len(obj_chain_ids_list):
                         if search_id not in target_chain_indices:
                             target_chain_indices.append(search_id)
-                            print(f"DEBUG: Adding mathematical conversion index {search_id} for chain '{domain_chain_id}'")
             else:
                 # No custom mapping, use the mathematical conversion
                 target_chain_indices = [idx for idx in search_chain_ids if isinstance(idx, int)]
-                print(f"DEBUG: No custom mapping found, using mathematical conversion: {target_chain_indices}")
             
             # Convert to strings for comparison
             search_chain_ids_str = [str(s) for s in search_chain_ids]
             target_chain_indices_str = [str(idx) for idx in target_chain_indices]
-            
-            print(f"DEBUG: Searching for chain '{domain_chain_id}' using:")
-            print(f"  - Search chain IDs: {search_chain_ids} -> {search_chain_ids_str}")
-            print(f"  - Target chain indices: {target_chain_indices} -> {target_chain_indices_str}")
 
             is_alpha_carbon_data = None
             is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
@@ -780,7 +772,6 @@ class MoleculeWrapper:
 
             # --- Search for the first CA encountered in the specified range order ---
             for target_res_num in residue_search_range:
-                print(f"DEBUG: Searching residue {target_res_num} for alpha carbon...")
                 atoms_in_residue = 0
                 atoms_in_target_chain = 0
                 
@@ -801,7 +792,6 @@ class MoleculeWrapper:
                         # Method 1: Check if atom's chain index is in our target indices
                         if str(chain_id_val) in target_chain_indices_str:
                             atom_matches_target_chain = True
-                            print(f"DEBUG: Atom {atom_idx} matches target chain via index {chain_id_val}")
                         
                         # Method 2: If we have custom mapping, check the mapped value
                         if obj_chain_ids_list is not None and not atom_matches_target_chain:
@@ -809,7 +799,6 @@ class MoleculeWrapper:
                                 actual_chain_id = obj_chain_ids_list[chain_id_val]
                                 if str(actual_chain_id) in search_chain_ids_str:
                                     atom_matches_target_chain = True
-                                    print(f"DEBUG: Atom {atom_idx} matches target chain via mapping {chain_id_val} -> '{actual_chain_id}'")
                             except (IndexError, TypeError):
                                 pass
                         
@@ -817,7 +806,6 @@ class MoleculeWrapper:
                         if not atom_matches_target_chain:
                             if str(chain_id_val) in search_chain_ids_str:
                                 atom_matches_target_chain = True
-                                print(f"DEBUG: Atom {atom_idx} matches target chain via direct comparison {chain_id_val}")
                         
                         if not atom_matches_target_chain:
                             continue
@@ -841,29 +829,15 @@ class MoleculeWrapper:
                             # We need to apply the parent protein's transformation to get the correct world position
                             world_pos = mol_obj.matrix_world @ local_pos
                             
-                            print(f"Found Cα for target '{residue_target}' in residue {target_res_num} at index {atom_idx}")
-                            print(f"  Local position: {local_pos}")
-                            print(f"  World position: {world_pos}")
-                            print(f"  Parent protein position: {mol_obj.location}")
-                            
                             return world_pos  # Return the world position, not local position
                             
                     except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
                         continue # Skip malformed atom data
-                
-                print(f"DEBUG: Residue {target_res_num} - {atoms_in_residue} atoms total, {atoms_in_target_chain} in target chain, 0 alpha carbons")
 
             # If we finish the loop without finding any CA in the entire range
-            print(f"Error: No Alpha Carbon (CA) found within range {start_res}-{end_res} for chain {domain_chain_id}.")
-            print(f"DEBUG: Search completed. Check if:")
-            print(f"  1. The protein actually contains chain '{domain_chain_id}'")
-            print(f"  2. The custom chain mapping is correct: {obj_chain_ids_list}")
-            print(f"  3. The residue range {start_res}-{end_res} is valid")
-            print(f"  4. The is_alpha_carbon attribute is working correctly")
             return None
 
         except Exception as e:
-            print(f"Error in _find_residue_alpha_carbon_pos: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -883,7 +857,6 @@ class MoleculeWrapper:
             bool: True if successful, False otherwise
         """
         if not domain or not domain.object or target_pos is None:
-            print("Error: Invalid domain, object, or target position for setting origin.")
             return False
         
         # Store the original cursor location
@@ -910,7 +883,6 @@ class MoleculeWrapper:
             return True
             
         except Exception as e:
-            print(f"Error in _set_domain_origin_and_update_matrix: {e}")
             import traceback
             traceback.print_exc()
             
@@ -1088,29 +1060,23 @@ class MoleculeWrapper:
         Returns:
             str: The new domain ID (which may be different if range changed)
         """
-        print(f"DEBUG: update_domain called for ID: {domain_id}, New Range: {chain_id} ({start}-{end})") # DEBUG
         if domain_id not in self.domains:
-            print(f"DEBUG: update_domain - Domain ID {domain_id} not found.") # DEBUG
             return domain_id
             
         try:
             domain = self.domains[domain_id]
-            print(f"DEBUG: update_domain - Found domain object: {domain.name if domain else 'None'}") # DEBUG
             
             # Check for overlaps with other domains
             if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
-                print(f"Domain overlap detected for chain {chain_id} ({start}-{end})")
                 return domain_id
                 
             # Update domain definition
-            print(f"DEBUG: update_domain - Updating domain definition {domain.name} properties.") # DEBUG
             domain.chain_id = chain_id
             domain.start = start
             domain.end = end
             
             # Generate new domain ID
             new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
-            print(f"DEBUG: update_domain - New potential domain ID: {new_domain_id}") # DEBUG
             
             # Update domain object name
             if domain.object:
@@ -1118,11 +1084,9 @@ class MoleculeWrapper:
                 domain.object["domain_id"] = new_domain_id
             
             # Update domain node network
-            print(f"DEBUG: update_domain - Calling _setup_domain_network for {new_domain_id}") # DEBUG
             self._setup_domain_network(domain, chain_id, start, end)
             
             # Update domain mask nodes
-            print(f"DEBUG: update_domain - Calling _delete/_create_domain_mask_nodes for {domain_id} -> {new_domain_id}") # DEBUG
             self._delete_domain_mask_nodes(domain_id) # Delete old mask
             self._create_domain_mask_nodes(new_domain_id, chain_id, start, end) # Create new mask
             
@@ -1131,7 +1095,6 @@ class MoleculeWrapper:
             
             # If the domain ID has changed, update the dictionary
             if domain_id != new_domain_id:
-                print(f"DEBUG: update_domain - Domain ID changed from {domain_id} to {new_domain_id}. Updating dictionary.") # DEBUG
                 self.domains[new_domain_id] = domain
                 if domain_id in self.domains: # Ensure old ID exists before attempting to delete
                     del self.domains[domain_id]
@@ -1146,7 +1109,6 @@ class MoleculeWrapper:
             return domain_id
             
         except Exception as e:
-            print(f"Error updating domain: {str(e)}")
             import traceback
             traceback.print_exc()
             return domain_id
@@ -1393,7 +1355,6 @@ class MoleculeWrapper:
         # If no valid parent domain, use original protein as parent
         if parent_obj is None:
             parent_obj = self.molecule.object
-            print(f"Using original protein as parent for domain {domain.name}")
         
         # Update parent domain ID in data structure
         domain.parent_domain_id = parent_domain_id
@@ -1410,7 +1371,7 @@ class MoleculeWrapper:
                 # Restore the original world transform
                 domain.object.matrix_world = world_mat
             except Exception as e:
-                print(f"Error updating parent for {domain.name}: {str(e)}")
+                pass
 
     def cleanup(self):
         """Remove all domains and clean up resources"""
@@ -1535,7 +1496,6 @@ class MoleculeWrapper:
         # Check if required annotations exist using get_annotation_categories()
         existing_categories = working_array.get_annotation_categories()
         if 'res_id' not in existing_categories or 'chain_id_int' not in existing_categories:
-            print("Warning MoleculeWrapper._get_chain_residue_ranges: Missing 'res_id' or 'chain_id_int' annotation. Cannot compute ranges.")
             return {}
 
         res_ids = working_array.res_id
@@ -1543,41 +1503,29 @@ class MoleculeWrapper:
         int_chain_indices = working_array.chain_id_int 
 
         unique_int_chain_keys = np.unique(int_chain_indices)
-        print(f"DEBUG MoleculeWrapper._get_chain_residue_ranges: Unique integer chain keys found: {unique_int_chain_keys}")
 
         for int_chain_key in unique_int_chain_keys:
             # Convert integer chain key to label_asym_id for the ranges dictionary key
             label_asym_id_for_key = self.idx_to_label_asym_id_map.get(int(int_chain_key))
             
             if not label_asym_id_for_key:
-                print(f"Warning MoleculeWrapper._get_chain_residue_ranges: Integer chain_id {int_chain_key} not in idx_to_label_asym_id_map. Trying auth_chain_id_map or skipping.")
                 # Fallback attempt using auth_chain_id_map if it has this integer key
                 label_asym_id_for_key = self.auth_chain_id_map.get(int(int_chain_key))
                 if not label_asym_id_for_key:
-                    print(f"Warning MoleculeWrapper._get_chain_residue_ranges: Still no mapping for int_chain_key {int_chain_key}. Using str({int_chain_key}) as fallback key.")
                     label_asym_id_for_key = str(int_chain_key) # Last resort, use the int as string
-            
-            print(f"DEBUG MoleculeWrapper._get_chain_residue_ranges: Processing int_chain_key: {int_chain_key}, resolved label_asym_id_for_key: {label_asym_id_for_key}")
 
             mask = (int_chain_indices == int_chain_key)
             if np.any(mask):
                 chain_res_ids = res_ids[mask]
                 if chain_res_ids.size > 0:
                     ranges[label_asym_id_for_key] = (int(np.min(chain_res_ids)), int(np.max(chain_res_ids)))
-                else:
-                    print(f"Warning MoleculeWrapper._get_chain_residue_ranges: No residues found for int_chain_key {int_chain_key} (mapped to {label_asym_id_for_key}) despite mask being non-empty.")
-            else:
-                print(f"Warning MoleculeWrapper._get_chain_residue_ranges: No atoms found for int_chain_key {int_chain_key} (mask was empty).")
             
         if not ranges:
-            print("Warning MoleculeWrapper._get_chain_residue_ranges: No residue ranges could be determined for any chain.")
             # As a last resort, if idx_to_label_asym_id_map exists, create default (e.g., 1-100) ranges for all known label_asym_ids
             if self.idx_to_label_asym_id_map:
-                print("Creating default (1-100) ranges for all chains known from idx_to_label_asym_id_map as a final fallback.")
                 for label_asym_id_val in self.idx_to_label_asym_id_map.values():
                     ranges[label_asym_id_val] = (1, 100) # Default placeholder range
 
-        print(f"DEBUG MoleculeWrapper._get_chain_residue_ranges: Final 'ranges' to be returned: {ranges}")
         return ranges
 
     def get_author_chain_id(self, numeric_chain_id: int) -> str:
@@ -1628,7 +1576,6 @@ class MoleculeWrapper:
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
         if not domain.object or not domain.node_group:
-            print("DEBUG: _setup_domain_network - Domain object or node group is missing") # DEBUG
             return False
             
         try:
@@ -1637,7 +1584,6 @@ class MoleculeWrapper:
             output_node = nodes.get_output(domain.node_group)
             
             if not (input_node and output_node):
-                print("DEBUG: _setup_domain_network - Could not find input/output nodes in domain node group") # DEBUG
                 return False
                 
             # Find or create nodes - reuse existing when possible
@@ -1837,7 +1783,6 @@ class MoleculeWrapper:
             return True
             
         except Exception as e:
-            print(f"DEBUG: Error in _setup_domain_network: {str(e)}") # DEBUG
             return False
 
     def _clean_unused_nodes(self, node_group):
@@ -1870,17 +1815,13 @@ class MoleculeWrapper:
 
     def _create_domain_mask_nodes(self, domain_id: str, chain_id: str, start: int, end: int):
         """Create nodes in the parent molecule to mask out the domain region"""
-        print(f"DEBUG: _create_domain_mask_nodes called for ID: {domain_id}, Range: {chain_id} ({start}-{end})")
-        print(f"DEBUG: auth_chain_id_map: {self.auth_chain_id_map}")
-        print(f"DEBUG: idx_to_label_asym_id_map: {self.idx_to_label_asym_id_map}")
-        print(f"DEBUG: chain_residue_ranges: {self.chain_residue_ranges}")
+
         if not self.molecule.object:
             return
         
         # Get the parent molecule's node group
         parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
         if not parent_modifier or not parent_modifier.node_group:
-            print("DEBUG: _create_domain_mask_nodes - Parent molecule has no valid node group") # DEBUG
             return
             
         parent_node_group = parent_modifier.node_group
@@ -1889,12 +1830,10 @@ class MoleculeWrapper:
             # Find main style node
             main_style_node = self.get_main_style_node()
             if not main_style_node:
-                print("DEBUG: _create_domain_mask_nodes - Could not find main style node in parent molecule") # DEBUG
                 return
             
             # Check if domain infrastructure is set up
             if self.domain_join_node is None:
-                print("DEBUG: _create_domain_mask_nodes - Domain infrastructure not set up. Call _setup_protein_domain_infrastructure first.") # DEBUG
                 return
                 
             # Step 1: Create and configure chain selection node
@@ -1910,7 +1849,6 @@ class MoleculeWrapper:
                 # as it automatically connects to the style node
                 # Use the label_asym_id values for the geometry node chain selection
                 available_chains = list(self.idx_to_label_asym_id_map.values()) or [str(chain_id)]
-                print(f"DEBUG: Creating chain select with available_chains: {available_chains}")
                 
                 chain_select_group = nodes.custom_iswitch(
                     name=f"selection_{self.identifier}", 
@@ -1931,7 +1869,6 @@ class MoleculeWrapper:
             
             # Step 2: Configure chain selection
             blender_chain_id = self.get_blender_chain_id(chain_id)
-            print(f"DEBUG: Final resolved blender_chain_id for node selection: '{blender_chain_id}'")
             
             for input_socket in chain_select.inputs:
                 if input_socket.type != 'BOOLEAN':
@@ -1939,7 +1876,6 @@ class MoleculeWrapper:
                 
                 if input_socket.name == blender_chain_id:
                     input_socket.default_value = True
-                    print(f"DEBUG: SET CHECKBOX: {input_socket.name} = True")
                 else:
                     input_socket.default_value = False
             
@@ -2053,9 +1989,7 @@ class MoleculeWrapper:
         Returns:
             bool: True if successful, False otherwise
         """
-        print(f"Updating domain color for {domain_id}")
         if domain_id not in self.domains or not self.domains[domain_id].node_group:
-            print(f"Domain {domain_id} not found")
             return False
             
         domain = self.domains[domain_id]
@@ -2065,13 +1999,11 @@ class MoleculeWrapper:
             
             for node in domain.node_group.nodes:
                 if node.name == "Color Common":
-                    # Use the tuple values directly instead of trying to access attributes
-                    print(f"Setting color to {color[0]}, {color[1]}, {color[2]}, {color[3]}")
                     # Set the default_value directly with the color tuple
                     node.inputs["Carbon"].default_value = color
                     return True
         except Exception as e:
-            print(f"Error updating domain color: {str(e)}")
+            pass
         return False
         
     def get_sorted_domains(self) -> Dict[str, DomainDefinition]:
@@ -2109,23 +2041,19 @@ class MoleculeWrapper:
 
         # Case 1: Is it already a valid label_asym_id?
         if chain_id in self.idx_to_label_asym_id_map.values():
-            print(f"DEBUG: Resolved '{chain_id}' as a direct label_asym_id.")
             return chain_id
 
         # Case 2: Is it an author_asym_id that needs mapping to a label_asym_id?
         elif chain_id in auth_id_to_idx_map:
             numeric_idx = auth_id_to_idx_map[chain_id]
             blender_chain_id = self.idx_to_label_asym_id_map.get(numeric_idx)
-            print(f"DEBUG: Resolved '{chain_id}' as author_id -> idx {numeric_idx} -> label '{blender_chain_id}'.")
             return blender_chain_id
 
         # Case 3: Is it a numeric index string?
         elif chain_id.isdigit():
             numeric_idx = int(chain_id)
             blender_chain_id = self.idx_to_label_asym_id_map.get(numeric_idx)
-            print(f"DEBUG: Resolved '{chain_id}' as numeric_idx -> label '{blender_chain_id}'.")
             return blender_chain_id
 
         # Fallback if no mapping was found
-        print(f"WARN: Could not resolve '{chain_id}' to a known label_asym_id. Using it directly.")
         return chain_id

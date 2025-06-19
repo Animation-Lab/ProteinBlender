@@ -280,12 +280,9 @@ def update_domain_color(self, context):
     
     # Get scene manager and find which domain this object belongs to
     scene_manager = ProteinBlenderScene.get_instance()
-    print(f"Updating domain color for domain: {domain_id} in molecule: {parent_molecule_id}")
     # Find which molecule and domain this object belongs to
     for molecule_id, molecule in scene_manager.molecules.items():
-        print(f"Checking molecule: {molecule_id}")
         if parent_molecule_id.startswith(molecule_id):
-            print(f"Updating domain color for domain: {domain_id} in molecule: {molecule_id}")
             molecule.update_domain_color(domain_id, self.domain_color)
             return
 
@@ -570,9 +567,7 @@ def update_domain_color(self, context):
     print(f"Updating domain color for domain: {domain_id} in molecule: {parent_molecule_id}")
     # Find which molecule and domain this object belongs to
     for molecule_id, molecule in scene_manager.molecules.items():
-        print(f"Checking molecule: {molecule_id}")
         if parent_molecule_id.startswith(molecule_id):
-            print(f"Updating domain color for domain: {domain_id} in molecule: {molecule_id}")
             molecule.update_domain_color(domain_id, self.domain_color)
             return
 
@@ -589,7 +584,7 @@ def update_molecule_style(self, context):
                 try:
                     domain.object.domain_style = style
                 except Exception as e:
-                    print(f"Failed to update style for domain {getattr(domain, 'name', '?')}: {e}")
+                    pass
 
 def register():
     """Register molecule properties"""

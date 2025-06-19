@@ -81,15 +81,12 @@ class MoleculeState:
     def restore_to_scene(self, scene_manager):
         """Recreate the molecule and all domains with proper relationships"""
         try:
-            print(f"Restoring molecule state: {self.identifier}")
-            
             # Find the restored Blender object by name
             molecule_obj = None
             if self.molecule_data['object_name']:
                 molecule_obj = bpy.data.objects.get(self.molecule_data['object_name'])
                 
             if not molecule_obj:
-                print(f"Could not find restored object for molecule {self.identifier}")
                 return False
                 
             # Recreate molecule using molecule manager
@@ -117,13 +114,10 @@ class MoleculeState:
                 item.identifier = self.identifier
                 item.object_ptr = molecule_obj
                 scene.molecule_list_index = len(scene.molecule_list_items) - 1
-                print(f"Added molecule {self.identifier} to UI list")
                 
-            print(f"Successfully restored molecule: {self.identifier}")
             return True
             
         except Exception as e:
-            print(f"Error restoring molecule {self.identifier}: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -131,8 +125,6 @@ class MoleculeState:
     def _restore_molecule(self, scene_manager, molecule_obj):
         """Restore the main molecule wrapper"""
         try:
-            print(f"Restoring molecule wrapper for object: {molecule_obj.name}")
-            
             # Create a minimal Molecule-like object to wrap the restored Blender object
             # We don't need to recreate the full MolecularNodes Molecule since the object already exists
             class MinimalMolecule:
@@ -180,11 +172,9 @@ class MoleculeState:
             # Don't restore transforms - the undo operation should have restored the object
             # to its correct position already. Overriding transforms can break movability.
             
-            print(f"Successfully restored molecule wrapper for {self.identifier}")
             return True
             
         except Exception as e:
-            print(f"Error restoring molecule object: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -194,7 +184,6 @@ class MoleculeState:
         try:
             molecule = scene_manager.molecules.get(self.identifier)
             if not molecule:
-                print(f"Could not find molecule {self.identifier} for domain restoration")
                 return False
                 
             # Clear existing domains
@@ -204,13 +193,11 @@ class MoleculeState:
             all_restored = True
             for domain_id, domain_data in self.domains_data.items():
                 if not self._restore_single_domain(molecule, domain_id, domain_data):
-                    print(f"Failed to restore domain {domain_id}")
                     all_restored = False
 
             return all_restored
             
         except Exception as e:
-            print(f"Error restoring domains: {str(e)}")
             return False
             
     def _restore_single_domain(self, molecule, domain_id, domain_data):
@@ -223,7 +210,6 @@ class MoleculeState:
 
             # If the Blender object hasn't been restored yet, abort so we retry later
             if not domain_obj:
-                print(f"Domain object missing for {domain_id}")
                 return False
                 
             # Find the restored node group
@@ -286,7 +272,6 @@ class MoleculeState:
             return True
             
         except Exception as e:
-            print(f"Error restoring single domain {domain_id}: {str(e)}")
             return False
 
 

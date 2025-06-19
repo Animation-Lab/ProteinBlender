@@ -32,7 +32,6 @@ class ProteinBlenderScene:
         if molecule_id in self.molecules:
             from ..core.molecule_state import MoleculeState
             self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
-            print(f"Captured state for molecule: {molecule_id}")
 
     def set_active_molecule(self, molecule_id):
         """Set the active molecule."""
@@ -60,14 +59,12 @@ class ProteinBlenderScene:
     def _create_domains_for_each_chain(self, molecule_id: str):
         molecule = self.molecule_manager.get_molecule(molecule_id)
         if not molecule:
-            print(f"Molecule {molecule_id} not found for domain creation.")
             return
 
         # Use the chain_residue_ranges from MoleculeWrapper, which should now be keyed by label_asym_id.
         chain_ranges_from_wrapper = molecule.chain_residue_ranges
 
         if not chain_ranges_from_wrapper:
-            print(f"Warning SceneManager: No chain residue ranges found in molecule wrapper for {molecule_id}. Cannot create default domains.")
             return
 
         # Map each chain label to an integer index:
@@ -86,18 +83,15 @@ class ProteinBlenderScene:
 
         for label_asym_id_key, (min_res, max_res) in chain_ranges_from_wrapper.items():
             if label_asym_id_key in processed_label_asym_ids:
-                print(f"DEBUG SceneManager: Label_asym_id '{label_asym_id_key}' already processed. Skipping.")
                 continue
 
             current_min_res = min_res
             if current_min_res == 0: # Adjusting 0-indexed min_res, though chain_residue_ranges should ideally be 1-indexed from wrapper
-                print(f"Warning SceneManager: Adjusting 0-indexed min_res to 1 for label_asym_id '{label_asym_id_key}'. Original range: ({min_res}-{max_res})")
                 current_min_res = 1
             
             # Get the corresponding integer chain index string for Blender attribute lookups
             int_chain_idx = label_asym_id_to_idx_map.get(label_asym_id_key)
             if int_chain_idx is None:
-                print(f"ERROR SceneManager: Could not find integer index for label_asym_id '{label_asym_id_key}' in label_asym_id_to_idx_map. Skipping domain creation for this chain.")
                 continue
             chain_id_int_str_for_domain = str(int_chain_idx)
 
@@ -116,14 +110,6 @@ class ProteinBlenderScene:
             if created_domain_ids:
                 created_domain_ids_for_molecule.append(created_domain_ids)
                 processed_label_asym_ids.add(label_asym_id_key)
-            else:
-                 print(f"DEBUG SceneManager: Failed to create a valid domain for LabelAsymID '{label_asym_id_key}' (IntChainIdxStr: {chain_id_int_str_for_domain}). It may have been skipped or failed in MoleculeWrapper.")
-        
-        if created_domain_ids_for_molecule:
-            # self.update_molecule_domain_list_in_ui(molecule_id) # Assuming a method to refresh UI if needed
-            print(f"SceneManager: Finished creating default domains for {molecule_id}. Created IDs: {created_domain_ids_for_molecule}")
-        else:
-            print(f"SceneManager: No domains were created for {molecule_id} during default domain creation.")
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
@@ -174,7 +160,6 @@ class ProteinBlenderScene:
             self._finalize_imported_molecule(molecule)
             return True
         except Exception as e:
-            print(f"Error creating molecule: {str(e)}")
             return False
 
 
@@ -254,13 +239,11 @@ class ProteinBlenderScene:
             # Import the molecule using MoleculeManager
             molecule = self.molecule_manager.import_from_file(filepath, identifier)
             if not molecule:
-                print(f"Failed to create molecule from file: {filepath}")
                 return False
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True
         except Exception as e:
-            print(f"Error creating molecule from file {filepath}: {str(e)}")
             import traceback
             traceback.print_exc()
             return False 
@@ -372,8 +355,6 @@ def _refresh_molecule_ui(scene_manager, scene):
 
 def sync_molecule_list_after_undo(*args):
     """Sync molecule state after undo/redo operations"""
-    print("Syncing molecule list after undo/redo")
-    
     scene_manager = ProteinBlenderScene.get_instance()
     scene = bpy.context.scene
     
@@ -385,7 +366,6 @@ def sync_molecule_list_after_undo(*args):
             molecules_to_remove.append(molecule_id)
 
     for molecule_id in molecules_to_remove:
-        print(f"Removing invalid molecule from scene manager: {molecule_id}")
         del scene_manager.molecules[molecule_id]
         if molecule_id in scene_manager.molecule_manager.molecules:
             del scene_manager.molecule_manager.molecules[molecule_id]
@@ -414,14 +394,12 @@ def sync_molecule_list_after_undo(*args):
     
     # Step 3: Restore missing molecules
     for molecule_id, saved_state in molecules_to_restore:
-        print(f"Restoring molecule: {molecule_id}")
         try:
             restored = saved_state.restore_to_scene(scene_manager)
             # Once restored, clear its saved state
             if restored and molecule_id in scene_manager._saved_states:
                 del scene_manager._saved_states[molecule_id]
         except Exception as e:
-            print(f"Failed to restore molecule {molecule_id}: {str(e)}")
             import traceback
             traceback.print_exc()
     # If we restored any molecules, mark the last one as selected
@@ -437,7 +415,6 @@ def sync_molecule_list_after_undo(*args):
         pending = [s.molecule_data.get('object_name') for s in scene_manager._saved_states.values() if s.molecule_data.get('object_name')]
         # Check if any of these objects exist in Blender data
         if pending and any(name in bpy.data.objects for name in pending):
-            print("Sync: Pending molecule objects detected, scheduling retry...")
             bpy.app.timers.register(lambda: sync_molecule_list_after_undo(), first_interval=0.2)
     except Exception:
         pass 
