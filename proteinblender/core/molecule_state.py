@@ -261,6 +261,14 @@ class MoleculeState:
                 name=domain_data['name']
             )
             
+            # If the Blender domain object is missing, invoke DomainDefinition.create_object_from_parent
+            # against the molecule.object to re-generate the domain object and its node group
+            if not domain_obj and molecule.object:
+                print(f"Domain object missing for {domain_id}, recreating from parent")
+                if domain.create_object_from_parent(molecule.object):
+                    domain_obj = domain.object
+                    node_group = domain.node_group
+            
             # Restore domain attributes
             domain.domain_id = domain_id
             domain.color = domain_data.get('color', (0.8, 0.1, 0.8, 1.0))

@@ -27,9 +27,26 @@ class ProteinBlenderScene:
     def molecules(self) -> Dict[str, MoleculeWrapper]:
         return self.molecule_manager.molecules
 
+    def _refresh_domain_object_references(self, molecule):
+        """Refresh domain object references after undo/redo operations"""
+        for domain_id, domain in molecule.domains.items():
+            # Refresh object reference by name
+            if hasattr(domain, 'object_name') and domain.object_name:
+                fresh_obj = bpy.data.objects.get(domain.object_name)
+                if fresh_obj:
+                    domain.object = fresh_obj
+            
+            # Refresh node group reference by name
+            if hasattr(domain, 'node_group_name') and domain.node_group_name:
+                fresh_ng = bpy.data.node_groups.get(domain.node_group_name)
+                if fresh_ng:
+                    domain.node_group = fresh_ng
+
     def _capture_molecule_state(self, molecule_id):
         """Store complete state before destructive operations"""
         if molecule_id in self.molecules:
+            # Refresh domain object references to avoid stale references after undo/redo
+            self._refresh_domain_object_references(self.molecules[molecule_id])
             from ..core.molecule_state import MoleculeState
             self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
 
@@ -365,6 +382,9 @@ def sync_molecule_list_after_undo(*args):
             print(f"----------- Molecule {molecule_id} is invalid, removing ------------")
             scene_manager._capture_molecule_state(molecule_id)
             molecules_to_remove.append(molecule_id)
+        else:
+            # Refresh domain object references for valid molecules after undo/redo
+            scene_manager._refresh_domain_object_references(molecule)
 
     for molecule_id in molecules_to_remove:
         del scene_manager.molecules[molecule_id]
