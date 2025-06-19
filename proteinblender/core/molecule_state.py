@@ -15,27 +15,55 @@ class MoleculeState:
         
     def _capture_molecule_data(self, molecule):
         """Store basic molecule info needed for recreation"""
-        is_valid = _is_object_valid(getattr(molecule, 'object', None))
-        obj_name = molecule.object.name if is_valid else getattr(molecule, 'object_name', None)
+        # Safely capture molecule object and its properties to avoid exceptions if object reference is invalid
+        try:
+            obj = molecule.object
+        except Exception:
+            obj = None
+
+        # Prepare object-related data
+        object_name = None
+        object_transform = None
+        object_location = None
+        object_rotation = None
+        object_scale = None
+        # Attempt to extract attributes only if the object is fully valid
+        if obj:
+            try:
+                object_name = obj.name
+                object_transform = obj.matrix_world.copy()
+                object_location = obj.location.copy()
+                object_rotation = obj.rotation_euler.copy()
+                object_scale = obj.scale.copy()
+            except Exception:
+                # Object has been removed or is invalid; skip capturing its data
+                object_name = None
+                object_transform = None
+                object_location = None
+                object_rotation = None
+                object_scale = None
 
         data = {
             'identifier': molecule.identifier,
             'style': molecule.style,
-            'object_name': obj_name,
-            'object_transform': molecule.object.matrix_world.copy() if is_valid else None,
-            'object_location': molecule.object.location.copy() if is_valid else None,
-            'object_rotation': molecule.object.rotation_euler.copy() if is_valid else None,
-            'object_scale': molecule.object.scale.copy() if is_valid else None,
+            'object_name': object_name,
+            'object_transform': object_transform,
+            'object_location': object_location,
+            'object_rotation': object_rotation,
+            'object_scale': object_scale,
             'chain_mapping': getattr(molecule, 'chain_mapping', {}),
             'auth_chain_id_map': getattr(molecule, 'auth_chain_id_map', {}),
             'idx_to_label_asym_id_map': getattr(molecule, 'idx_to_label_asym_id_map', {}),
-            'chain_residue_ranges': getattr(molecule, 'chain_residue_ranges', {}),
+            'chain_residue_ranges': getattr(molecule, 'chain_residue_ranges', {})
         }
-        
-        # Store material information if available
-        if molecule.object and molecule.object.data and molecule.object.data.materials:
-            data['materials'] = [mat.name for mat in molecule.object.data.materials if mat]
-        
+
+        # Store material information if available, safely
+        try:
+            if obj and hasattr(obj, 'data') and getattr(obj.data, 'materials', None):
+                data['materials'] = [mat.name for mat in obj.data.materials if mat]
+        except Exception:
+            pass
+
         return data
         
     def _capture_domains_data(self, molecule):
@@ -43,50 +71,57 @@ class MoleculeState:
         domains_data = {}
         
         for domain_id, domain in molecule.domains.items():
+            # Always record stored names so we can reattach objects/node groups even if pointers die
+            obj_name = getattr(domain, 'object_name', None)
+            ng_name = getattr(domain, 'node_group_name', None)
+            # Safely capture world transform if possible
             try:
-                domain_data = {
-                    'domain_id': domain_id,
-                    'chain_id': domain.chain_id,
-                    'start': domain.start,
-                    'end': domain.end,
-                    'name': domain.name,
-                    'color': domain.color,
-                    'style': getattr(domain, 'style', 'ribbon'),
-                    'parent_molecule_id': domain.parent_molecule_id,
-                    'parent_domain_id': domain.parent_domain_id,
-                    'object_name': domain.object.name if _is_object_valid(domain.object) else getattr(domain, 'object_name', None),
-                    'object_transform': domain.object.matrix_world.copy() if _is_object_valid(domain.object) else None,
-                    'node_group_name': domain.node_group.name if domain.node_group else None,
-                    'setup_complete': getattr(domain, '_setup_complete', False)
-                }
+                obj_transform = domain.object.matrix_world.copy() if domain.object else None
+            except Exception:
+                obj_transform = None
+            domain_data = {
+                'domain_id': domain_id,
+                'chain_id': domain.chain_id,
+                'start': domain.start,
+                'end': domain.end,
+                'name': domain.name,
+                'color': domain.color,
+                'style': getattr(domain, 'style', 'ribbon'),
+                'parent_molecule_id': domain.parent_molecule_id,
+                'parent_domain_id': domain.parent_domain_id,
+                'object_name': obj_name,
+                'object_transform': obj_transform,
+                'node_group_name': ng_name,
+                'setup_complete': getattr(domain, '_setup_complete', False)
+            }
+            
+            # Store parent-child relationships in Blender hierarchy
+            if domain.object:
+                domain_data['parent_object'] = domain.object.parent.name if domain.object.parent else None
+                domain_data['matrix_parent_inverse'] = domain.object.matrix_parent_inverse.copy()
+                # Store local transform (relative to parent) instead of world transform
+                domain_data['matrix_local'] = domain.object.matrix_local.copy()
                 
-                # Store parent-child relationships in Blender hierarchy
-                if domain.object:
-                    domain_data['parent_object'] = domain.object.parent.name if domain.object.parent else None
-                    domain_data['matrix_parent_inverse'] = domain.object.matrix_parent_inverse.copy()
-                    # Store local transform (relative to parent) instead of world transform
-                    domain_data['matrix_local'] = domain.object.matrix_local.copy()
-                    
-                    # Store collection information
-                    if domain.object.users_collection:
-                        domain_data['collections'] = [col.name for col in domain.object.users_collection]
-                
-                domains_data[domain_id] = domain_data
-            except ReferenceError:
-                print(f"Warning: Skipping capture for domain {domain_id} – Blender object is invalid")
-                continue
-        
+                # Store collection information
+                if domain.object.users_collection:
+                    domain_data['collections'] = [col.name for col in domain.object.users_collection]
+            
+            domains_data[domain_id] = domain_data
+            
         return domains_data
         
     def restore_to_scene(self, scene_manager):
         """Recreate the molecule and all domains with proper relationships"""
         try:
+            #print(f"Restoring molecule state: {self.identifier}")
+            
             # Find the restored Blender object by name
             molecule_obj = None
             if self.molecule_data['object_name']:
                 molecule_obj = bpy.data.objects.get(self.molecule_data['object_name'])
                 
             if not molecule_obj:
+                #print(f"Could not find restored object for molecule {self.identifier}")
                 return False
                 
             # Recreate molecule using molecule manager
@@ -95,10 +130,6 @@ class MoleculeState:
                 
             # Restore all domains
             if not self._restore_domains(scene_manager):
-                if self.identifier in scene_manager.molecules:
-                    del scene_manager.molecules[self.identifier]
-                if self.identifier in scene_manager.molecule_manager.molecules:
-                    del scene_manager.molecule_manager.molecules[self.identifier]
                 return False
                 
             # Add to UI list if not already present
@@ -112,12 +143,13 @@ class MoleculeState:
             if not found:
                 item = scene.molecule_list_items.add()
                 item.identifier = self.identifier
-                item.object_ptr = molecule_obj
-                scene.molecule_list_index = len(scene.molecule_list_items) - 1
+                #print(f"Added molecule {self.identifier} to UI list")
                 
+            #print(f"Successfully restored molecule: {self.identifier}")
             return True
             
         except Exception as e:
+            print(f"Error restoring molecule {self.identifier}: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -125,6 +157,8 @@ class MoleculeState:
     def _restore_molecule(self, scene_manager, molecule_obj):
         """Restore the main molecule wrapper"""
         try:
+            print(f"Restoring molecule wrapper for object: {molecule_obj.name}")
+            
             # Create a minimal Molecule-like object to wrap the restored Blender object
             # We don't need to recreate the full MolecularNodes Molecule since the object already exists
             class MinimalMolecule:
@@ -146,10 +180,10 @@ class MoleculeState:
             wrapper = object.__new__(MoleculeWrapper)
             
             # Set basic attributes
-            wrapper.molecule = mol
-            wrapper.identifier = self.identifier
-            wrapper.style = self.molecule_data.get('style', 'surface')
-            wrapper.domains = {}
+            wrapper.molecule      = mol
+            wrapper.identifier    = self.identifier
+            wrapper.style         = self.molecule_data.get('style', 'surface')
+            wrapper.domains       = {}
             wrapper.residue_assignments = {}
             
             # Restore wrapper mapping attributes
@@ -163,6 +197,8 @@ class MoleculeState:
             wrapper.preview_nodes = None
             wrapper.domain_mask_nodes = {}
             wrapper.domain_join_node = None
+            
+            # Set object name
             wrapper.object_name = molecule_obj.name
             
             # Store in scene manager
@@ -172,9 +208,11 @@ class MoleculeState:
             # Don't restore transforms - the undo operation should have restored the object
             # to its correct position already. Overriding transforms can break movability.
             
+            #print(f"Successfully restored molecule wrapper for {self.identifier}")
             return True
             
         except Exception as e:
+            print(f"Error restoring molecule object: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -184,20 +222,22 @@ class MoleculeState:
         try:
             molecule = scene_manager.molecules.get(self.identifier)
             if not molecule:
+                #print(f"Could not find molecule {self.identifier} for domain restoration")
                 return False
                 
             # Clear existing domains
             molecule.domains.clear()
             
-            # Restore each domain and ensure all required objects exist
-            all_restored = True
+            # Restore each domain
             for domain_id, domain_data in self.domains_data.items():
                 if not self._restore_single_domain(molecule, domain_id, domain_data):
-                    all_restored = False
-
-            return all_restored
+                    #print(f"Failed to restore domain {domain_id}")
+                    continue
+                    
+            return True
             
         except Exception as e:
+            print(f"Error restoring domains: {str(e)}")
             return False
             
     def _restore_single_domain(self, molecule, domain_id, domain_data):
@@ -207,10 +247,6 @@ class MoleculeState:
             domain_obj = None
             if domain_data.get('object_name'):
                 domain_obj = bpy.data.objects.get(domain_data['object_name'])
-
-            # If the Blender object hasn't been restored yet, abort so we retry later
-            if not domain_obj:
-                return False
                 
             # Find the restored node group
             node_group = None
@@ -233,9 +269,10 @@ class MoleculeState:
             domain.parent_domain_id = domain_data.get('parent_domain_id')
             domain.object = domain_obj
             domain.node_group = node_group
-            domain.object_name = domain_data.get('object_name', '') or ''
-            domain.node_group_name = domain_data.get('node_group_name', '') or ''
             domain._setup_complete = domain_data.get('setup_complete', False)
+            # Restore stored names for future pointer healing
+            domain.object_name     = domain_data.get('object_name')
+            domain.node_group_name = domain_data.get('node_group_name')
             
             # Restore object relationships if object exists
             if domain_obj:
@@ -250,19 +287,7 @@ class MoleculeState:
                         domain_obj.parent = parent_obj
                         # Restore the world position after parenting
                         domain_obj.matrix_world = world_matrix
-
-                # Restore parent inverse matrix and local transform if stored
-                if 'matrix_parent_inverse' in domain_data:
-                    try:
-                        domain_obj.matrix_parent_inverse = domain_data['matrix_parent_inverse'].copy()
-                    except Exception:
-                        pass
-                if 'matrix_local' in domain_data:
-                    try:
-                        domain_obj.matrix_local = domain_data['matrix_local'].copy()
-                    except Exception:
-                        pass
-
+                        
                 # Don't override transforms if the objects are already in correct positions after undo
                 # The undo operation should have restored them correctly
                     
@@ -272,6 +297,7 @@ class MoleculeState:
             return True
             
         except Exception as e:
+            print(f"Error restoring single domain {domain_id}: {str(e)}")
             return False
 
 

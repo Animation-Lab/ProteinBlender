@@ -21,6 +21,12 @@ class MOLECULE_PB_PT_list(Panel):
         return True
     
     def draw(self, context):
+        # Ensure molecule list is synced on undo/redo, including transform undos
+        try:
+            from ..utils.scene_manager import sync_molecule_list_after_undo
+            sync_molecule_list_after_undo()
+        except Exception:
+            pass
         layout = self.layout
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()

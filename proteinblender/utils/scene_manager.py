@@ -362,6 +362,7 @@ def sync_molecule_list_after_undo(*args):
     molecules_to_remove = []
     for molecule_id, molecule in list(scene_manager.molecules.items()):
         if not _is_molecule_valid(molecule):
+            print(f"----------- Molecule {molecule_id} is invalid, removing ------------")
             scene_manager._capture_molecule_state(molecule_id)
             molecules_to_remove.append(molecule_id)
 
