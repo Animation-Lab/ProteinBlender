@@ -45,10 +45,14 @@ class ProteinBlenderScene:
     def _capture_molecule_state(self, molecule_id):
         """Store complete state before destructive operations"""
         if molecule_id in self.molecules:
-            # Refresh domain object references to avoid stale references after undo/redo
-            self._refresh_domain_object_references(self.molecules[molecule_id])
-            from ..core.molecule_state import MoleculeState
-            self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
+            try:
+                # Refresh domain object references to avoid stale references after undo/redo
+                self._refresh_domain_object_references(self.molecules[molecule_id])
+                from ..core.molecule_state import MoleculeState
+                self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
+            except Exception as e:
+                print(f"Warning: Failed to capture state for molecule {molecule_id}: {e}")
+                # Don't let state capture failures block other operations
 
     def set_active_molecule(self, molecule_id):
         """Set the active molecule."""
@@ -337,6 +341,24 @@ def _has_invalid_domains(molecule):
 
 def _refresh_molecule_ui(scene_manager, scene):
     """Refresh the UI to match current state"""
+    # Preserve existing keyframes before clearing the list
+    existing_keyframes = {}
+    for item in scene.molecule_list_items:
+        if item.identifier and len(item.keyframes) > 0:
+            existing_keyframes[item.identifier] = []
+            for kf in item.keyframes:
+                # Store keyframe data
+                kf_data = {
+                    'name': kf.name,
+                    'frame': kf.frame,
+                    'use_brownian_motion': kf.use_brownian_motion,
+                    'intensity': kf.intensity,
+                    'frequency': kf.frequency,
+                    'seed': kf.seed,
+                    'resolution': kf.resolution
+                }
+                existing_keyframes[item.identifier].append(kf_data)
+    
     # Clear and rebuild molecule list
     scene.molecule_list_items.clear()
 
@@ -361,6 +383,18 @@ def _refresh_molecule_ui(scene_manager, scene):
             item = scene.molecule_list_items.add()
             item.identifier = identifier
             item.object_ptr = molecule.object
+            
+            # Restore keyframes for this molecule if they existed
+            if identifier in existing_keyframes:
+                for kf_data in existing_keyframes[identifier]:
+                    new_kf = item.keyframes.add()
+                    new_kf.name = kf_data['name']
+                    new_kf.frame = kf_data['frame']
+                    new_kf.use_brownian_motion = kf_data['use_brownian_motion']
+                    new_kf.intensity = kf_data['intensity']
+                    new_kf.frequency = kf_data['frequency']
+                    new_kf.seed = kf_data['seed']
+                    new_kf.resolution = kf_data['resolution']
     
     # Update active molecule
     if scene_manager.active_molecule not in scene_manager.molecules:
@@ -370,72 +404,107 @@ def _refresh_molecule_ui(scene_manager, scene):
     scene_manager._refresh_ui()
 
 
+def _refresh_object_references_only(scene_manager, scene):
+    """Refresh object references without rebuilding the entire UI list"""
+    for identifier, molecule in scene_manager.molecules.items():
+        # Refresh molecule object reference
+        if not _is_object_valid(molecule.object):
+            name = getattr(molecule, 'object_name', '')
+            if name and name in bpy.data.objects:
+                molecule.object = bpy.data.objects[name]
+                if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+                    molecule.molecule.object = molecule.object
+        
+        # Refresh domain object references
+        for domain in molecule.domains.values():
+            if not _is_object_valid(domain.object):
+                name = getattr(domain, 'object_name', '')
+                if name and name in bpy.data.objects:
+                    domain.object = bpy.data.objects[name]
+            if not domain.node_group:
+                ng_name = getattr(domain, 'node_group_name', '')
+                if ng_name and ng_name in bpy.data.node_groups:
+                    domain.node_group = bpy.data.node_groups[ng_name]
+    
+    # Force UI refresh without rebuilding
+    scene_manager._refresh_ui()
+
+
 def sync_molecule_list_after_undo(*args):
     """Sync molecule state after undo/redo operations"""
-    scene_manager = ProteinBlenderScene.get_instance()
-    scene = bpy.context.scene
-    
-    # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
-    molecules_to_remove = []
-    for molecule_id, molecule in list(scene_manager.molecules.items()):
-        if not _is_molecule_valid(molecule):
-            print(f"----------- Molecule {molecule_id} is invalid, removing ------------")
-            scene_manager._capture_molecule_state(molecule_id)
-            molecules_to_remove.append(molecule_id)
-        else:
-            # Refresh domain object references for valid molecules after undo/redo
-            scene_manager._refresh_domain_object_references(molecule)
-
-    for molecule_id in molecules_to_remove:
-        del scene_manager.molecules[molecule_id]
-        if molecule_id in scene_manager.molecule_manager.molecules:
-            del scene_manager.molecule_manager.molecules[molecule_id]
-        for i, item in enumerate(scene.molecule_list_items):
-            if item.identifier == molecule_id:
-                scene.molecule_list_items.remove(i)
-                break
-    # Step 2: Find molecules that should be restored (e.g., after undoing a delete)
-    molecules_to_restore = []
-    
-    for molecule_id, saved_state in scene_manager._saved_states.items():
-        current_molecule = scene_manager.molecules.get(molecule_id)
-        
-        # Check if molecule exists and is valid
-        needs_restore = (
-            current_molecule is None or 
-            not _is_molecule_valid(current_molecule) or
-            _has_invalid_domains(current_molecule)
-        )
-        
-        # Only restore if the object actually exists in Blender (was restored by undo)
-        if needs_restore and saved_state.molecule_data.get('object_name'):
-            restored_obj = bpy.data.objects.get(saved_state.molecule_data['object_name'])
-            if restored_obj:  # Object exists, so this should be restored
-                molecules_to_restore.append((molecule_id, saved_state))
-    
-    # Step 3: Restore missing molecules
-    for molecule_id, saved_state in molecules_to_restore:
-        try:
-            restored = saved_state.restore_to_scene(scene_manager)
-            # Once restored, clear its saved state
-            if restored and molecule_id in scene_manager._saved_states:
-                del scene_manager._saved_states[molecule_id]
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-    # If we restored any molecules, mark the last one as selected
-    if molecules_to_restore:
-        last_id = molecules_to_restore[-1][0]
-        scene.selected_molecule_id = last_id
-    
-    # Step 4: Update UI
-    _refresh_molecule_ui(scene_manager, scene)
-    # If some saved states still refer to real objects, retry once
     try:
-        # Collect names of saved molecules yet to restore
-        pending = [s.molecule_data.get('object_name') for s in scene_manager._saved_states.values() if s.molecule_data.get('object_name')]
-        # Check if any of these objects exist in Blender data
-        if pending and any(name in bpy.data.objects for name in pending):
-            bpy.app.timers.register(lambda: sync_molecule_list_after_undo(), first_interval=0.2)
-    except Exception:
-        pass 
+        scene_manager = ProteinBlenderScene.get_instance()
+        scene = bpy.context.scene
+        
+        # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
+        molecules_to_remove = []
+        for molecule_id, molecule in list(scene_manager.molecules.items()):
+            if not _is_molecule_valid(molecule):
+                print(f"----------- Molecule {molecule_id} is invalid, removing ------------")
+                # Don't try to capture state of invalid molecules - this causes errors
+                molecules_to_remove.append(molecule_id)
+            else:
+                # Refresh domain object references for valid molecules after undo/redo
+                try:
+                    scene_manager._refresh_domain_object_references(molecule)
+                except Exception as e:
+                    print(f"Warning: Failed to refresh domain references for {molecule_id}: {e}")
+
+        for molecule_id in molecules_to_remove:
+            # Safely remove invalid molecules
+            if molecule_id in scene_manager.molecules:
+                del scene_manager.molecules[molecule_id]
+            if molecule_id in scene_manager.molecule_manager.molecules:
+                del scene_manager.molecule_manager.molecules[molecule_id]
+            # Remove from UI list
+            for i, item in enumerate(scene.molecule_list_items):
+                if item.identifier == molecule_id:
+                    scene.molecule_list_items.remove(i)
+                    break
+        
+        # Step 2: Find molecules that should be restored (e.g., after undoing a delete)
+        molecules_to_restore = []
+        
+        for molecule_id, saved_state in list(scene_manager._saved_states.items()):
+            current_molecule = scene_manager.molecules.get(molecule_id)
+            
+            # Check if molecule exists and is valid
+            needs_restore = (
+                current_molecule is None or 
+                not _is_molecule_valid(current_molecule) or
+                _has_invalid_domains(current_molecule)
+            )
+            
+            # Only restore if the object actually exists in Blender (was restored by undo)
+            if needs_restore and saved_state.molecule_data.get('object_name'):
+                restored_obj = bpy.data.objects.get(saved_state.molecule_data['object_name'])
+                if restored_obj:  # Object exists, so this should be restored
+                    molecules_to_restore.append((molecule_id, saved_state))
+        
+        # Step 3: Restore missing molecules
+        for molecule_id, saved_state in molecules_to_restore:
+            try:
+                restored = saved_state.restore_to_scene(scene_manager)
+                # Once restored, clear its saved state
+                if restored and molecule_id in scene_manager._saved_states:
+                    del scene_manager._saved_states[molecule_id]
+            except Exception as e:
+                print(f"Warning: Failed to restore molecule {molecule_id}: {e}")
+        
+        # If we restored any molecules, mark the last one as selected
+        if molecules_to_restore:
+            last_id = molecules_to_restore[-1][0]
+            scene.selected_molecule_id = last_id
+        
+        # Step 4: Update UI - but be more careful about when to rebuild
+        # Only rebuild UI if we actually removed or restored molecules
+        if molecules_to_remove or molecules_to_restore:
+            _refresh_molecule_ui(scene_manager, scene)
+        else:
+            # Just refresh object references without rebuilding the entire UI
+            _refresh_object_references_only(scene_manager, scene)
+        
+    except Exception as e:
+        print(f"Error in undo handler: {e}")
+        import traceback
+        traceback.print_exc() 

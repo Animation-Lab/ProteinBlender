@@ -245,6 +245,20 @@ class MOLECULE_PB_PT_list(Panel):
                                 icon='X'
                             )
                             delete_op.keyframe_index = idx
+                            
+                            # Show brownian motion checkbox for keyframes after the first one
+                            if idx > 0:
+                                brownian_row = kf_box.row()
+                                brownian_row.alignment = 'LEFT'
+                                brownian_row.scale_y = 0.9
+                                # Use different icons and text based on state
+                                if kf.use_brownian_motion:
+                                    icon = 'PHYSICS'
+                                    brownian_text = "Brownian Motion"
+                                else:
+                                    icon = 'IPO_LINEAR'
+                                    brownian_text = "Linear Motion"
+                                brownian_row.prop(kf, "use_brownian_motion", text=brownian_text, icon=icon)
 
                 # Domain Creation Section
                 settings_box.separator()

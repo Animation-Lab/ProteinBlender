@@ -88,11 +88,86 @@ class MoleculeKeyframe(PropertyGroup):
     """Group of properties representing a saved keyframe for a molecule"""
     name: StringProperty(name="Keyframe Name", description="Name of this keyframe", default="")
     frame: IntProperty(name="Frame Number", description="Frame number of the keyframe", default=0)
+    # Brownian motion toggle
+    use_brownian_motion: BoolProperty(
+        name="Use Brownian Motion", 
+        description="Use Brownian motion for animation to this keyframe from the previous keyframe",
+        default=True,
+        update=lambda self, context: self.recompute_brownian_motion(context)
+    )
     # Brownian motion parameters
     intensity: FloatProperty(name="Intensity", description="Max random offset magnitude", default=0.1, min=0.0)
     frequency: FloatProperty(name="Frequency", description="Frequency of motion", default=1.0, min=0.0)
     seed: IntProperty(name="Seed", description="Random seed for reproducibility", default=0, min=0)
     resolution: IntProperty(name="Resolution", description="Frame step for Brownian bake", default=1, min=1)
+    
+    def recompute_brownian_motion(self, context):
+        """Recompute the animation path when brownian motion setting changes"""
+        # Find the molecule and keyframe index
+        scene = context.scene
+        scene_manager = get_protein_blender_scene()
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        
+        if not molecule:
+            return
+            
+        # Find this keyframe in the molecule's keyframe list
+        for item in scene.molecule_list_items:
+            if item.identifier == scene.selected_molecule_id:
+                current_idx = -1
+                for idx, kf in enumerate(item.keyframes):
+                    if kf == self:  # Found the current keyframe
+                        current_idx = idx
+                        break
+                
+                if current_idx <= 0:  # First keyframe doesn't have a previous segment
+                    return
+                    
+                # Get the previous keyframe
+                prev_kf = item.keyframes[current_idx - 1]
+                
+                # Clear existing intermediate keyframes between prev and current
+                self._clear_intermediate_keyframes(molecule, prev_kf.frame, self.frame)
+                
+                if self.use_brownian_motion:
+                    # Re-bake brownian motion
+                    from ..operators.domain_operators import bake_brownian
+                    bake_brownian(
+                        None, context, molecule,
+                        prev_kf.frame, self.frame,
+                        self.intensity, self.frequency,
+                        self.seed, self.resolution
+                    )
+                else:
+                    # Just use linear interpolation (Blender's default)
+                    # Set keyframes at both ends to ensure smooth interpolation
+                    obj = molecule.object
+                    context.scene.frame_set(prev_kf.frame)
+                    obj.keyframe_insert(data_path="location", frame=prev_kf.frame)
+                    obj.keyframe_insert(data_path="rotation_euler", frame=prev_kf.frame)
+                    obj.keyframe_insert(data_path="scale", frame=prev_kf.frame)
+                    
+                    context.scene.frame_set(self.frame)
+                    obj.keyframe_insert(data_path="location", frame=self.frame)
+                    obj.keyframe_insert(data_path="rotation_euler", frame=self.frame)
+                    obj.keyframe_insert(data_path="scale", frame=self.frame)
+                break
+    
+    def _clear_intermediate_keyframes(self, molecule, start_frame, end_frame):
+        """Clear intermediate keyframes between two frames"""
+        obj = molecule.object
+        if not obj.animation_data or not obj.animation_data.action:
+            return
+            
+        # Remove keyframes in the range (exclusive of endpoints)
+        for fcurve in obj.animation_data.action.fcurves:
+            keyframes_to_remove = []
+            for kf in fcurve.keyframe_points:
+                if start_frame < kf.co.x < end_frame:
+                    keyframes_to_remove.append(kf)
+            
+            for kf in keyframes_to_remove:
+                fcurve.keyframe_points.remove(kf)
 
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""

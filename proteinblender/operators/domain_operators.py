@@ -265,6 +265,11 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
         default=1,
         min=1
     )
+    use_brownian_motion: BoolProperty(
+        name="Use Brownian Motion",
+        description="Use Brownian motion for animation to this keyframe from the previous keyframe",
+        default=True
+    )
     intensity: FloatProperty(
         name="Intensity",
         description="Max random offset magnitude",
@@ -316,12 +321,27 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
         layout = self.layout
         layout.prop(self, "keyframe_name")
         layout.prop(self, "frame_number")
-        # Brownian motion parameters
-        col = layout.column()
-        col.prop(self, "intensity")
-        col.prop(self, "frequency")
-        col.prop(self, "seed")
-        col.prop(self, "resolution")
+        
+        # Show Brownian motion toggle only for keyframes after the first one
+        sel_id = context.scene.selected_molecule_id
+        has_previous_keyframe = False
+        for item in context.scene.molecule_list_items:
+            if item.identifier == sel_id and len(item.keyframes) > 0:
+                has_previous_keyframe = True
+                break
+        
+        if has_previous_keyframe:
+            layout.separator()
+            layout.prop(self, "use_brownian_motion")
+        
+        # Brownian motion parameters (only show if enabled)
+        if not has_previous_keyframe or self.use_brownian_motion:
+            col = layout.column()
+            col.enabled = not has_previous_keyframe or self.use_brownian_motion
+            col.prop(self, "intensity")
+            col.prop(self, "frequency")
+            col.prop(self, "seed")
+            col.prop(self, "resolution")
 
     def execute(self, context):
         scene = context.scene
@@ -357,14 +377,15 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
                 new_kf = item.keyframes.add()
                 new_kf.frame = frame_to_use
                 new_kf.name = name_to_use
+                new_kf.use_brownian_motion = self.use_brownian_motion
                 new_kf.intensity = self.intensity
                 new_kf.frequency = self.frequency
                 new_kf.seed = self.seed
                 new_kf.resolution = self.resolution
                 item.active_keyframe_index = len(item.keyframes) - 1
-                # Bake Brownian motion if there's a previous keyframe
+                # Bake Brownian motion if there's a previous keyframe and brownian motion is enabled
                 prev_idx = item.active_keyframe_index - 1
-                if prev_idx >= 0:
+                if prev_idx >= 0 and new_kf.use_brownian_motion:
                     prev_kf = item.keyframes[prev_idx]
                     bake_brownian(
                         self, context, molecule,
@@ -374,8 +395,26 @@ class MOLECULE_PB_OT_keyframe_protein(Operator):
                     )
                 break
         
+        # Force timeline refresh to show new keyframes
+        self._refresh_timeline()
+        
         self.report({'INFO'}, f"Added keyframes for protein and {keyframed_domains} domains at frame {frame_to_use}")
         return {'FINISHED'}
+    
+    def _refresh_timeline(self):
+        """Force refresh of Blender's timeline and UI"""
+        import bpy
+        # Update the scene to refresh the timeline
+        bpy.context.view_layer.update()
+        # Force redraw of timeline and other areas
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type in ['TIMELINE', 'DOPESHEET_EDITOR', 'GRAPH_EDITOR', 'VIEW_3D', 'PROPERTIES']:
+                    area.tag_redraw()
+        
+        # Also update the scene frame to trigger refresh
+        current_frame = bpy.context.scene.frame_current
+        bpy.context.scene.frame_set(current_frame)
 
 # Operator to select and jump to a saved keyframe
 class MOLECULE_PB_OT_select_keyframe(Operator):
@@ -410,121 +449,163 @@ class MOLECULE_PB_OT_delete_keyframe(Operator):
         if not molecule:
             self.report({'ERROR'}, "No molecule selected")
             return {'CANCELLED'}
-            
-        print(f"DEBUG: Deleting keyframe at index {self.keyframe_index}")
         
-        # Find and delete both UI entry and timeline keyframes
-        for item in scene.molecule_list_items:
-            if item.identifier == scene.selected_molecule_id:
-                idx = self.keyframe_index
-                if idx < 0 or idx >= len(item.keyframes):
-                    self.report({'ERROR'}, f"Invalid keyframe index: {idx}")
-                    return {'CANCELLED'}
+        try:
+            # Find and delete both UI entry and timeline keyframes
+            for item in scene.molecule_list_items:
+                if item.identifier == scene.selected_molecule_id:
+                    idx = self.keyframe_index
+                    if idx < 0 or idx >= len(item.keyframes):
+                        self.report({'ERROR'}, f"Invalid keyframe index: {idx}")
+                        return {'CANCELLED'}
                     
-                print(f"DEBUG: Found {len(item.keyframes)} keyframes")
-                
-                # Get surrounding keyframes before removing the current one
-                prev_kf = item.keyframes[idx-1] if idx > 0 else None
-                next_kf = item.keyframes[idx+1] if idx < len(item.keyframes) - 1 else None
-                
-                print(f"DEBUG: Previous keyframe: {prev_kf.frame if prev_kf else 'None'}")
-                print(f"DEBUG: Next keyframe: {next_kf.frame if next_kf else 'None'}")
-                
-                # Store the frame number of the keyframe we're deleting
-                deleted_frame = item.keyframes[idx].frame
-                
-                # Remove the deleted anchor
-                item.keyframes.remove(idx)
-                print(f"DEBUG: Removed keyframe at frame {deleted_frame}")
-                
-                # Get objects to clean up
-                objs = [molecule.object] + list(molecule.object.children_recursive)
-                print(f"DEBUG: Cleaning up {len(objs)} objects")
-                
-                # If we have both surrounding keyframes, we need to:
-                # 1. Clean up all baked frames between them
-                # 2. Re-bake the Brownian motion between them
-                if prev_kf and next_kf:
-                    print(f"DEBUG: Cleaning up frames between {prev_kf.frame} and {next_kf.frame}")
-                    # Remove all baked frames between prev and next
-                    res = prev_kf.resolution
-                    for f in range(prev_kf.frame + res, next_kf.frame, res):
-                        for obj in objs:
-                            try:
-                                obj.keyframe_delete(data_path="location", frame=f)
-                                obj.keyframe_delete(data_path="rotation_euler", frame=f)
-                                obj.keyframe_delete(data_path="scale", frame=f)
-                            except Exception as e:
-                                print(f"DEBUG: Error deleting keyframe at frame {f}: {str(e)}")
+                    # Get surrounding keyframes before removing the current one
+                    prev_kf = item.keyframes[idx-1] if idx > 0 else None
+                    next_kf = item.keyframes[idx+1] if idx < len(item.keyframes) - 1 else None
                     
-                    print(f"DEBUG: Re-baking Brownian motion between frames {prev_kf.frame} and {next_kf.frame}")
-                    # Re-bake Brownian motion between prev and next
-                    bake_brownian(
-                        self, context, molecule,
-                        prev_kf.frame, next_kf.frame,
-                        next_kf.intensity, next_kf.frequency,
-                        next_kf.seed, next_kf.resolution
-                    )
-                # If we only have a previous keyframe, clean up all frames after it
-                elif prev_kf:
-                    print(f"DEBUG: Cleaning up frames after {prev_kf.frame}")
-                    # Remove all baked frames after prev
-                    res = prev_kf.resolution
-                    for f in range(prev_kf.frame + res, scene.frame_end + 1, res):
-                        for obj in objs:
-                            try:
-                                obj.keyframe_delete(data_path="location", frame=f)
-                                obj.keyframe_delete(data_path="rotation_euler", frame=f)
-                                obj.keyframe_delete(data_path="scale", frame=f)
-                            except Exception as e:
-                                print(f"DEBUG: Error deleting keyframe at frame {f}: {str(e)}")
-                # If we only have a next keyframe, clean up all frames before it
-                elif next_kf:
-                    print(f"DEBUG: Cleaning up frames before {next_kf.frame}")
-                    # Remove all baked frames before next
-                    res = next_kf.resolution
-                    for f in range(1, next_kf.frame, res):
-                        for obj in objs:
-                            try:
-                                obj.keyframe_delete(data_path="location", frame=f)
-                                obj.keyframe_delete(data_path="rotation_euler", frame=f)
-                                obj.keyframe_delete(data_path="scale", frame=f)
-                            except Exception as e:
-                                print(f"DEBUG: Error deleting keyframe at frame {f}: {str(e)}")
+                    # Store the frame number of the keyframe we're deleting
+                    deleted_frame = item.keyframes[idx].frame
+                    
+                    # Remove the deleted anchor
+                    item.keyframes.remove(idx)
+                    
+                    # Get objects to clean up - only include objects with animation data
+                    objs = [molecule.object] + list(molecule.object.children_recursive)
+                    objs_with_anim = [obj for obj in objs if obj and obj.animation_data and obj.animation_data.action]
+                    
+                    # If we have both surrounding keyframes, we need to:
+                    # 1. Clean up all baked frames between them
+                    # 2. Re-bake the Brownian motion between them (if enabled)
+                    if prev_kf and next_kf:
+                        # Remove all baked frames between prev and next
+                        res = prev_kf.resolution
+                        self._safe_delete_keyframes_in_range(objs_with_anim, prev_kf.frame + res, next_kf.frame, res)
+                        
+                        # Re-bake Brownian motion between prev and next (if next keyframe has brownian enabled)
+                        if next_kf.use_brownian_motion:
+                            bake_brownian(
+                                self, context, molecule,
+                                prev_kf.frame, next_kf.frame,
+                                next_kf.intensity, next_kf.frequency,
+                                next_kf.seed, next_kf.resolution
+                            )
+                    # If we only have a previous keyframe, clean up all frames after it
+                    elif prev_kf:
+                        # Remove all baked frames after prev
+                        res = prev_kf.resolution
+                        self._safe_delete_keyframes_in_range(objs_with_anim, prev_kf.frame + res, scene.frame_end + 1, res)
+                    # If we only have a next keyframe, clean up all frames before it
+                    elif next_kf:
+                        # Remove all baked frames before next
+                        res = next_kf.resolution
+                        self._safe_delete_keyframes_in_range(objs_with_anim, 1, next_kf.frame, res)
+                    
+                    # Also delete the keyframe at the deleted frame
+                    self._safe_delete_keyframes_at_frame(objs_with_anim, deleted_frame)
+                    
+                    # Clean up any remaining intermediate keyframes that might be leftover
+                    self._cleanup_orphaned_keyframes(objs_with_anim, item.keyframes)
+                    
+                    # After deletion, we need to re-bake any remaining segments with brownian motion enabled
+                    remaining_kfs = list(item.keyframes)
+                    if len(remaining_kfs) >= 2:
+                        for i in range(len(remaining_kfs) - 1):
+                            start_kf = remaining_kfs[i]
+                            end_kf = remaining_kfs[i + 1]
+                            if end_kf.use_brownian_motion:
+                                bake_brownian(
+                                    self, context, molecule,
+                                    start_kf.frame, end_kf.frame,
+                                    end_kf.intensity, end_kf.frequency,
+                                    end_kf.seed, end_kf.resolution
+                                )
+                    
+                    # Adjust active index after deletion
+                    if item.active_keyframe_index >= len(item.keyframes):
+                        item.active_keyframe_index = max(len(item.keyframes) - 1, 0)
+                    
+                    # Final timeline refresh
+                    self._refresh_timeline()
+                    break
+            
+            self.report({'INFO'}, f"Deleted keyframe at frame {deleted_frame}")
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to delete keyframe: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+    
+    def _safe_delete_keyframes_in_range(self, objects, start_frame, end_frame, step):
+        """Safely delete keyframes in a frame range, skipping objects without animation data"""
+        for f in range(start_frame, end_frame, step):
+            self._safe_delete_keyframes_at_frame(objects, f)
+    
+    def _safe_delete_keyframes_at_frame(self, objects, frame):
+        """Safely delete keyframes at a specific frame, skipping objects without animation data"""
+        for obj in objects:
+            if not (obj and obj.animation_data and obj.animation_data.action):
+                continue
+            try:
+                # Delete keyframes for all transform properties
+                obj.keyframe_delete(data_path="location", frame=frame)
+                obj.keyframe_delete(data_path="rotation_euler", frame=frame)
+                obj.keyframe_delete(data_path="scale", frame=frame)
                 
-                # Also delete the keyframe at the deleted frame
-                for obj in objs:
-                    try:
-                        obj.keyframe_delete(data_path="location", frame=deleted_frame)
-                        obj.keyframe_delete(data_path="rotation_euler", frame=deleted_frame)
-                        obj.keyframe_delete(data_path="scale", frame=deleted_frame)
-                    except Exception as e:
-                        print(f"DEBUG: Error deleting keyframe at frame {deleted_frame}: {str(e)}")
+                # Also try deleting quaternion rotation if it exists
+                try:
+                    obj.keyframe_delete(data_path="rotation_quaternion", frame=frame)
+                except RuntimeError:
+                    pass  # Quaternion rotation not used
+                    
+            except RuntimeError:
+                # Keyframe doesn't exist at this frame - this is expected and not an error
+                pass
+            except Exception as e:
+                # Log unexpected errors but don't flood the console
+                print(f"Unexpected error deleting keyframe at frame {frame} for object {obj.name}: {str(e)}")
+        
+        # Force timeline refresh
+        self._refresh_timeline()
+    
+    def _cleanup_orphaned_keyframes(self, objects, remaining_keyframes):
+        """Clean up any keyframes that don't belong to the remaining keyframe list"""
+        # Get all frame numbers that should exist (main keyframes only)
+        valid_frames = {kf.frame for kf in remaining_keyframes}
+        
+        for obj in objects:
+            if not (obj and obj.animation_data and obj.animation_data.action):
+                continue
                 
-                # After deletion, we need to re-bake any remaining segments
-                # Get all remaining keyframes
-                remaining_kfs = list(item.keyframes)
-                if len(remaining_kfs) >= 2:
-                    print(f"DEBUG: Re-baking {len(remaining_kfs)-1} remaining segments")
-                    for i in range(len(remaining_kfs) - 1):
-                        start_kf = remaining_kfs[i]
-                        end_kf = remaining_kfs[i + 1]
-                        print(f"DEBUG: Re-baking segment {i+1}: frames {start_kf.frame} to {end_kf.frame}")
-                        bake_brownian(
-                            self, context, molecule,
-                            start_kf.frame, end_kf.frame,
-                            end_kf.intensity, end_kf.frequency,
-                            end_kf.seed, end_kf.resolution
-                        )
-                
-                # Adjust active index after deletion
-                if item.active_keyframe_index >= len(item.keyframes):
-                    item.active_keyframe_index = max(len(item.keyframes) - 1, 0)
-                print(f"DEBUG: New active keyframe index: {item.active_keyframe_index}")
-                break
-                
-        self.report({'INFO'}, f"Deleted keyframe at frame {deleted_frame}")
-        return {'FINISHED'}
+            action = obj.animation_data.action
+            # Check all fcurves for keyframes that shouldn't exist
+            for fcurve in action.fcurves:
+                if fcurve.data_path in ["location", "rotation_euler", "rotation_quaternion", "scale"]:
+                    keyframes_to_remove = []
+                    for kf in fcurve.keyframe_points:
+                        frame = int(kf.co.x)
+                        if frame not in valid_frames:
+                            keyframes_to_remove.append(kf)
+                    
+                    # Remove the orphaned keyframes
+                    for kf in keyframes_to_remove:
+                        fcurve.keyframe_points.remove(kf)
+    
+    def _refresh_timeline(self):
+        """Force refresh of Blender's timeline and UI"""
+        import bpy
+        # Update the scene to refresh the timeline
+        bpy.context.view_layer.update()
+        # Force redraw of timeline and other areas
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type in ['TIMELINE', 'DOPESHEET_EDITOR', 'GRAPH_EDITOR', 'VIEW_3D', 'PROPERTIES']:
+                    area.tag_redraw()
+        
+        # Also update the scene frame to trigger refresh
+        current_frame = bpy.context.scene.frame_current
+        bpy.context.scene.frame_set(current_frame)
 
 class MOLECULE_PB_OT_edit_keyframe(Operator):
     bl_idname = "molecule.edit_keyframe"
@@ -534,6 +615,7 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
     keyframe_index: IntProperty()
     keyframe_name: StringProperty(name="Name")
     frame_number: IntProperty(name="Frame", min=1)
+    use_brownian_motion: BoolProperty(name="Use Brownian Motion")
     intensity: FloatProperty(name="Intensity", min=0.0)
     frequency: FloatProperty(name="Frequency", min=0.0)
     seed: IntProperty(name="Seed", min=0)
@@ -547,6 +629,7 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
                 kf = item.keyframes[self.keyframe_index]
                 self.keyframe_name = kf.name
                 self.frame_number = kf.frame
+                self.use_brownian_motion = kf.use_brownian_motion
                 self.intensity = kf.intensity
                 self.frequency = kf.frequency
                 self.seed = kf.seed
@@ -557,11 +640,20 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
         layout = self.layout
         layout.prop(self, "keyframe_name")
         layout.prop(self, "frame_number")
-        col = layout.column()
-        col.prop(self, "intensity")
-        col.prop(self, "frequency")
-        col.prop(self, "seed")
-        col.prop(self, "resolution")
+        
+        # Show Brownian motion toggle only for keyframes that aren't the first one
+        if self.keyframe_index > 0:
+            layout.separator()
+            layout.prop(self, "use_brownian_motion")
+        
+        # Brownian motion parameters (only show if enabled)
+        if self.keyframe_index == 0 or self.use_brownian_motion:
+            col = layout.column()
+            col.enabled = self.keyframe_index == 0 or self.use_brownian_motion
+            col.prop(self, "intensity")
+            col.prop(self, "frequency")
+            col.prop(self, "seed")
+            col.prop(self, "resolution")
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
@@ -586,29 +678,41 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
                 # Update properties
                 kf.name = self.keyframe_name
                 kf.frame = self.frame_number
+                kf.use_brownian_motion = self.use_brownian_motion
                 kf.intensity = self.intensity
                 kf.frequency = self.frequency
                 kf.seed = self.seed
                 kf.resolution = self.resolution
-                # Re-bake Brownian before and after this keyframe
+                
+                # Clear intermediate keyframes for segments that will be re-baked
                 prev_idx = self.keyframe_index - 1
                 next_idx = self.keyframe_index + 1
+                
+                # Re-bake Brownian before this keyframe (if enabled)
                 if prev_idx >= 0:
                     prev_kf = item.keyframes[prev_idx]
-                    bake_brownian(
-                        self, context, molecule,
-                        prev_kf.frame, kf.frame,
-                        kf.intensity, kf.frequency,
-                        kf.seed, kf.resolution
-                    )
+                    # Clear intermediate keyframes
+                    kf._clear_intermediate_keyframes(molecule, prev_kf.frame, kf.frame)
+                    if kf.use_brownian_motion:
+                        bake_brownian(
+                            self, context, molecule,
+                            prev_kf.frame, kf.frame,
+                            kf.intensity, kf.frequency,
+                            kf.seed, kf.resolution
+                        )
+                
+                # Re-bake Brownian after this keyframe (if next keyframe has brownian enabled)
                 if next_idx < len(item.keyframes):
                     next_kf = item.keyframes[next_idx]
-                    bake_brownian(
-                        self, context, molecule,
-                        kf.frame, next_kf.frame,
-                        kf.intensity, kf.frequency,
-                        kf.seed, kf.resolution
-                    )
+                    # Clear intermediate keyframes
+                    next_kf._clear_intermediate_keyframes(molecule, kf.frame, next_kf.frame)
+                    if next_kf.use_brownian_motion:
+                        bake_brownian(
+                            self, context, molecule,
+                            kf.frame, next_kf.frame,
+                            next_kf.intensity, next_kf.frequency,
+                            next_kf.seed, next_kf.resolution
+                        )
                 break
         return {'FINISHED'}
 
