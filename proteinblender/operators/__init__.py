@@ -39,6 +39,7 @@ from .domain_operators import (
 from .pose_operators import (
     MOLECULE_PB_OT_create_pose,
     MOLECULE_PB_OT_apply_pose,
+    MOLECULE_PB_OT_apply_pose_and_keyframe,
     MOLECULE_PB_OT_update_pose,
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,
@@ -79,6 +80,7 @@ CLASSES = (
     MOLECULE_PB_OT_split_domain,
     MOLECULE_PB_OT_create_pose,
     MOLECULE_PB_OT_apply_pose,
+    MOLECULE_PB_OT_apply_pose_and_keyframe,
     MOLECULE_PB_OT_update_pose,
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,

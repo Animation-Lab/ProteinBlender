@@ -79,6 +79,16 @@ class MOLECULE_PB_PT_poses(Panel):
                 action_row.operator("molecule.rename_pose", text="", icon='GREASEPENCIL')
                 action_row.operator("molecule.delete_pose", text="", icon='X')
                 
+                # Add "Apply and Keyframe" button
+                keyframe_row = pose_box.row()
+                keyframe_row.scale_y = 1.1
+                keyframe_op = keyframe_row.operator(
+                    "molecule.apply_pose_and_keyframe", 
+                    text="Apply Pose and Keyframe", 
+                    icon='KEYFRAME'
+                )
+                keyframe_op.pose_index = str(idx)
+                
                 # Show domain transforms count
                 info_row = pose_box.row()
                 info_row.label(text=f"Contains transforms for {len(pose.domain_transforms)} domains")

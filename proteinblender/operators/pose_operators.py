@@ -7,6 +7,7 @@ class MOLECULE_PB_OT_create_pose(Operator):
     bl_idname = "molecule.create_pose"
     bl_label = "Create Pose"
     bl_description = "Save current domain positions as a new pose"
+    bl_options = {'REGISTER', 'UNDO'}
     
     pose_name: StringProperty(
         name="Pose Name",
@@ -89,6 +90,7 @@ class MOLECULE_PB_OT_apply_pose(Operator):
     bl_idname = "molecule.apply_pose"
     bl_label = "Apply Pose"
     bl_description = "Apply the selected pose to the molecule"
+    bl_options = {'REGISTER', 'UNDO'}
     
     pose_index: StringProperty(
         name="Pose Index",
@@ -191,6 +193,7 @@ class MOLECULE_PB_OT_delete_pose(Operator):
     bl_idname = "molecule.delete_pose"
     bl_label = "Delete Pose"
     bl_description = "Delete the selected pose"
+    bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         scene = context.scene
@@ -236,6 +239,7 @@ class MOLECULE_PB_OT_rename_pose(Operator):
     bl_idname = "molecule.rename_pose"
     bl_label = "Rename Pose"
     bl_description = "Rename the selected pose"
+    bl_options = {'REGISTER', 'UNDO'}
     
     new_name: StringProperty(
         name="New Name",
@@ -318,6 +322,7 @@ class MOLECULE_PB_OT_update_pose(Operator):
     bl_idname = "molecule.update_pose"
     bl_label = "Update Pose"
     bl_description = "Update the pose with current domain positions, overwriting the existing pose"
+    bl_options = {'REGISTER', 'UNDO'}
     
     pose_index: StringProperty(
         name="Pose Index",
@@ -384,10 +389,107 @@ class MOLECULE_PB_OT_update_pose(Operator):
         self.report({'INFO'}, f"Updated pose '{pose_name}' with {len(pose.domain_transforms)} domains")
         return {'FINISHED'}
 
+class MOLECULE_PB_OT_apply_pose_and_keyframe(Operator):
+    bl_idname = "molecule.apply_pose_and_keyframe"
+    bl_label = "Apply Pose and Keyframe"
+    bl_description = "Apply the selected pose and create a keyframe at the current frame"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    pose_index: StringProperty(
+        name="Pose Index",
+        description="Index of the pose to apply",
+        default=""
+    )
+    keyframe_name: StringProperty(
+        name="Keyframe Name",
+        description="Name for the keyframe",
+        default=""
+    )
+    
+    def invoke(self, context, event):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        
+        if not molecule:
+            self.report({'ERROR'}, "No molecule selected")
+            return {'CANCELLED'}
+            
+        # Get molecule item
+        molecule_item = None
+        for item in scene.molecule_list_items:
+            if item.identifier == molecule.identifier:
+                molecule_item = item
+                break
+        
+        if not molecule_item:
+            self.report({'ERROR'}, "Could not find molecule in scene list")
+            return {'CANCELLED'}
+        
+        # Get pose index - either from parameter or active index
+        pose_idx = -1
+        if self.pose_index and self.pose_index.isdigit():
+            pose_idx = int(self.pose_index)
+        else:
+            pose_idx = molecule_item.active_pose_index
+        
+        # Check if pose exists
+        if pose_idx < 0 or pose_idx >= len(molecule_item.poses):
+            self.report({'ERROR'}, f"Invalid pose index: {pose_idx}")
+            return {'CANCELLED'}
+        
+        pose = molecule_item.poses[pose_idx]
+        
+        # Set default keyframe name
+        if not self.keyframe_name:
+            current_frame = scene.frame_current
+            self.keyframe_name = f"{pose.name} - Frame {current_frame}"
+        
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "keyframe_name")
+        
+        # Show which pose will be applied
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        
+        if molecule:
+            for item in scene.molecule_list_items:
+                if item.identifier == molecule.identifier:
+                    pose_idx = int(self.pose_index) if self.pose_index.isdigit() else item.active_pose_index
+                    if 0 <= pose_idx < len(item.poses):
+                        pose_name = item.poses[pose_idx].name
+                        layout.label(text=f"Applying pose: {pose_name}")
+                    break
+    
+    def execute(self, context):
+        # First apply the pose
+        apply_result = bpy.ops.molecule.apply_pose(pose_index=self.pose_index)
+        if apply_result != {'FINISHED'}:
+            self.report({'ERROR'}, "Failed to apply pose")
+            return {'CANCELLED'}
+        
+        # Then create a keyframe
+        keyframe_result = bpy.ops.molecule.keyframe_protein(
+            keyframe_name=self.keyframe_name,
+            frame_number=context.scene.frame_current,
+            use_brownian_motion=False  # Default to no Brownian motion for pose keyframes
+        )
+        if keyframe_result != {'FINISHED'}:
+            self.report({'WARNING'}, "Pose applied but keyframing failed")
+            return {'FINISHED'}
+        
+        self.report({'INFO'}, f"Applied pose and created keyframe '{self.keyframe_name}' at frame {context.scene.frame_current}")
+        return {'FINISHED'}
+
 # List of operator classes to be registered
 CLASSES = [
     MOLECULE_PB_OT_create_pose,
     MOLECULE_PB_OT_apply_pose,
+    MOLECULE_PB_OT_apply_pose_and_keyframe,
     MOLECULE_PB_OT_update_pose,
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,

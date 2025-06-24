@@ -141,33 +141,55 @@ class MoleculeKeyframe(PropertyGroup):
                 else:
                     # Just use linear interpolation (Blender's default)
                     # Set keyframes at both ends to ensure smooth interpolation
-                    obj = molecule.object
-                    context.scene.frame_set(prev_kf.frame)
-                    obj.keyframe_insert(data_path="location", frame=prev_kf.frame)
-                    obj.keyframe_insert(data_path="rotation_euler", frame=prev_kf.frame)
-                    obj.keyframe_insert(data_path="scale", frame=prev_kf.frame)
+                    # Collect all objects to keyframe: protein + all domain objects
+                    objects_to_keyframe = []
+                    if molecule.object:
+                        objects_to_keyframe.append(molecule.object)
                     
-                    context.scene.frame_set(self.frame)
-                    obj.keyframe_insert(data_path="location", frame=self.frame)
-                    obj.keyframe_insert(data_path="rotation_euler", frame=self.frame)
-                    obj.keyframe_insert(data_path="scale", frame=self.frame)
+                    # Add all domain objects
+                    for domain_id, domain in molecule.domains.items():
+                        if domain.object:
+                            objects_to_keyframe.append(domain.object)
+                    
+                    # Keyframe all objects at both frames
+                    for obj in objects_to_keyframe:
+                        context.scene.frame_set(prev_kf.frame)
+                        obj.keyframe_insert(data_path="location", frame=prev_kf.frame)
+                        obj.keyframe_insert(data_path="rotation_euler", frame=prev_kf.frame)
+                        obj.keyframe_insert(data_path="scale", frame=prev_kf.frame)
+                        
+                        context.scene.frame_set(self.frame)
+                        obj.keyframe_insert(data_path="location", frame=self.frame)
+                        obj.keyframe_insert(data_path="rotation_euler", frame=self.frame)
+                        obj.keyframe_insert(data_path="scale", frame=self.frame)
                 break
     
     def _clear_intermediate_keyframes(self, molecule, start_frame, end_frame):
         """Clear intermediate keyframes between two frames"""
-        obj = molecule.object
-        if not obj.animation_data or not obj.animation_data.action:
-            return
-            
-        # Remove keyframes in the range (exclusive of endpoints)
-        for fcurve in obj.animation_data.action.fcurves:
-            keyframes_to_remove = []
-            for kf in fcurve.keyframe_points:
-                if start_frame < kf.co.x < end_frame:
-                    keyframes_to_remove.append(kf)
-            
-            for kf in keyframes_to_remove:
-                fcurve.keyframe_points.remove(kf)
+        # Collect all objects to clear keyframes from: protein + all domain objects
+        objects_to_clear = []
+        if molecule.object:
+            objects_to_clear.append(molecule.object)
+        
+        # Add all domain objects
+        for domain_id, domain in molecule.domains.items():
+            if domain.object:
+                objects_to_clear.append(domain.object)
+        
+        # Clear keyframes for all objects
+        for obj in objects_to_clear:
+            if not obj.animation_data or not obj.animation_data.action:
+                continue
+                
+            # Remove keyframes in the range (exclusive of endpoints)
+            for fcurve in obj.animation_data.action.fcurves:
+                keyframes_to_remove = []
+                for kf in fcurve.keyframe_points:
+                    if start_frame < kf.co.x < end_frame:
+                        keyframes_to_remove.append(kf)
+                
+                for kf in keyframes_to_remove:
+                    fcurve.keyframe_points.remove(kf)
 
 class MoleculeListItem(PropertyGroup):
     """Group of properties representing a molecule in the UI list."""

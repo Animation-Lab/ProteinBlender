@@ -341,23 +341,51 @@ def _has_invalid_domains(molecule):
 
 def _refresh_molecule_ui(scene_manager, scene):
     """Refresh the UI to match current state"""
-    # Preserve existing keyframes before clearing the list
+    # Preserve existing keyframes and poses before clearing the list
     existing_keyframes = {}
+    existing_poses = {}
+    
     for item in scene.molecule_list_items:
-        if item.identifier and len(item.keyframes) > 0:
-            existing_keyframes[item.identifier] = []
-            for kf in item.keyframes:
-                # Store keyframe data
-                kf_data = {
-                    'name': kf.name,
-                    'frame': kf.frame,
-                    'use_brownian_motion': kf.use_brownian_motion,
-                    'intensity': kf.intensity,
-                    'frequency': kf.frequency,
-                    'seed': kf.seed,
-                    'resolution': kf.resolution
-                }
-                existing_keyframes[item.identifier].append(kf_data)
+        if item.identifier:
+            # Preserve keyframes
+            if len(item.keyframes) > 0:
+                existing_keyframes[item.identifier] = []
+                for kf in item.keyframes:
+                    # Store keyframe data
+                    kf_data = {
+                        'name': kf.name,
+                        'frame': kf.frame,
+                        'use_brownian_motion': kf.use_brownian_motion,
+                        'intensity': kf.intensity,
+                        'frequency': kf.frequency,
+                        'seed': kf.seed,
+                        'resolution': kf.resolution
+                    }
+                    existing_keyframes[item.identifier].append(kf_data)
+            
+            # Preserve poses
+            if len(item.poses) > 0:
+                existing_poses[item.identifier] = []
+                for pose in item.poses:
+                    # Store pose data
+                    pose_data = {
+                        'name': pose.name,
+                        'has_protein_transform': pose.has_protein_transform,
+                        'protein_location': list(pose.protein_location),
+                        'protein_rotation': list(pose.protein_rotation),
+                        'protein_scale': list(pose.protein_scale),
+                        'domain_transforms': []
+                    }
+                    # Store domain transforms
+                    for domain_transform in pose.domain_transforms:
+                        domain_data = {
+                            'domain_id': domain_transform.domain_id,
+                            'location': list(domain_transform.location),
+                            'rotation': list(domain_transform.rotation),
+                            'scale': list(domain_transform.scale)
+                        }
+                        pose_data['domain_transforms'].append(domain_data)
+                    existing_poses[item.identifier].append(pose_data)
     
     # Clear and rebuild molecule list
     scene.molecule_list_items.clear()
@@ -395,6 +423,24 @@ def _refresh_molecule_ui(scene_manager, scene):
                     new_kf.frequency = kf_data['frequency']
                     new_kf.seed = kf_data['seed']
                     new_kf.resolution = kf_data['resolution']
+            
+            # Restore poses for this molecule if they existed
+            if identifier in existing_poses:
+                for pose_data in existing_poses[identifier]:
+                    new_pose = item.poses.add()
+                    new_pose.name = pose_data['name']
+                    new_pose.has_protein_transform = pose_data['has_protein_transform']
+                    new_pose.protein_location = pose_data['protein_location']
+                    new_pose.protein_rotation = pose_data['protein_rotation']
+                    new_pose.protein_scale = pose_data['protein_scale']
+                    
+                    # Restore domain transforms
+                    for domain_data in pose_data['domain_transforms']:
+                        new_domain_transform = new_pose.domain_transforms.add()
+                        new_domain_transform.domain_id = domain_data['domain_id']
+                        new_domain_transform.location = domain_data['location']
+                        new_domain_transform.rotation = domain_data['rotation']
+                        new_domain_transform.scale = domain_data['scale']
     
     # Update active molecule
     if scene_manager.active_molecule not in scene_manager.molecules:
