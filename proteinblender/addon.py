@@ -5,6 +5,7 @@ from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
 from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes
+from .layout import CLASSES as layout_classes
 from .properties.protein_props import  register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .utils import scene_manager
@@ -22,6 +23,7 @@ all_pb_classes = (
     handler_classes,
     operator_classes,
     panel_classes,
+    layout_classes,
     session.CLASSES,
 )
 
