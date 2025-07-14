@@ -37,8 +37,8 @@ class PROTEIN_PB_PT_import_protein(Panel):
         button_row = box.row(align=True)
         button_row.scale_y = 1.2
         # Download from selected source
-        button_row.operator("protein.import_protein", text="Download")
+        button_row.operator("molecule.import_protein", text="Download")
         # Import any local file (.pdb, .cif, .mmcif, etc.)
-        button_row.operator("protein.import_local", text="Import Local File")
+        button_row.operator("molecule.import_local", text="Import Local File")
         
         box.separator(factor=0.5)

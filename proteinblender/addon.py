@@ -1,23 +1,36 @@
+"""ProteinBlender addon registration module.
+
+This module handles the registration and unregistration of all addon components
+including operators, panels, properties, and handlers.
+"""
+
 import bpy
 from bpy.props import PointerProperty, BoolProperty
+import logging
+from typing import List, Type
 
 from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
 from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes
-from .properties.protein_props import  register as register_protein_props, unregister as unregister_protein_props
+from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .utils import scene_manager
 from .layout.workspace_setup import ProteinWorkspaceManager
-
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
-# from .utils.scene_manager import ProteinBlenderScene, sync_molecule_list_after_undo
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Constants
+WORKSPACE_TIMER_INTERVAL = 0.25  # seconds
 
 # Track registered classes
-registered_classes = []
+registered_classes: List[Type] = []
 
-all_pb_classes = (
+# All ProteinBlender classes to register
+ALL_PB_CLASSES = (
     core_classes,
     handler_classes,
     operator_classes,
@@ -25,42 +38,59 @@ all_pb_classes = (
     session.CLASSES,
 )
 
-def _test_register():
+def _test_register() -> None:
+    """Test registration by unregistering and re-registering the addon.
+    
+    This is useful for development and debugging.
+    """
     try:
         register()
     except Exception as e:
-        print(e)
+        logger.error(f"Error during test registration: {e}")
         unregister()
         register()
 
-def create_workspace_callback():
-    workspace_manager = ProteinWorkspaceManager()
-    workspace_manager.create_custom_workspace()
-    workspace_manager.add_panels_to_workspace()
-    workspace_manager.set_properties_context()
+def create_workspace_callback() -> None:
+    """Create custom workspace for ProteinBlender.
+    
+    This is called via a timer to ensure Blender is fully initialized.
+    
+    Returns:
+        None to remove the timer.
+    """
+    try:
+        workspace_manager = ProteinWorkspaceManager()
+        workspace_manager.create_custom_workspace()
+        workspace_manager.add_panels_to_workspace()
+        workspace_manager.set_properties_context()
+    except Exception as e:
+        logger.error(f"Failed to create workspace: {e}")
     return None  # Remove the timer
 
-def register():
+def register() -> None:
+    """Register the ProteinBlender addon.
+    
+    This function registers all classes, properties, and handlers needed
+    for the addon to function properly.
+    """
     # Try unregistering first to clean up any previous state
     try:
         unregister()
     except Exception as e:
-        print(f"Unregister during startup failed: {e}")
-        pass
+        logger.debug(f"Unregister during startup: {e}")
     
     # Register classes
-    for op in all_pb_classes:
-        for cls in op:
+    for class_group in ALL_PB_CLASSES:
+        for cls in class_group:
             try:
                 bpy.utils.register_class(cls)
                 registered_classes.append(cls)
             except Exception as e:
-                print(f"Failed to register {cls.__name__}: {e}")
-                pass
+                logger.error(f"Failed to register {cls.__name__}: {e}")
     
     # Register MolecularNodes session
     if not hasattr(bpy.types.Scene, "MNSession"):
-        bpy.types.Scene.MNSession = session.MNSession()  # type: ignore
+        bpy.types.Scene.MNSession = session.MNSession()
     
     # Register properties
     register_protein_props()
@@ -75,15 +105,14 @@ def register():
         bpy.utils.register_class(MolecularNodesObjectProperties)
         registered_classes.append(MolecularNodesObjectProperties)
     except Exception as e:
-        print(f"Failed to register MolecularNodesObjectProperties: {e}")
-        pass
+        logger.error(f"Failed to register MolecularNodesObjectProperties: {e}")
     
     # Register object properties if not already registered
     if not hasattr(bpy.types.Object, "mn"):
         bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
     
-    # Schedule workspace creation after 0.5 seconds
-    bpy.app.timers.register(create_workspace_callback, first_interval=0.25)
+    # Schedule workspace creation after a short delay
+    bpy.app.timers.register(create_workspace_callback, first_interval=WORKSPACE_TIMER_INTERVAL)
 
     # Register undo/redo handlers to sync and restore molecules
     from .utils.scene_manager import sync_molecule_list_after_undo
@@ -92,8 +121,13 @@ def register():
     if sync_molecule_list_after_undo not in bpy.app.handlers.redo_post:
         bpy.app.handlers.redo_post.append(sync_molecule_list_after_undo)
 
-def unregister():
-    # Clear any pending timers to prevent creation of new workspace during unregistration
+def unregister() -> None:
+    """Unregister the ProteinBlender addon.
+    
+    This function unregisters all classes, properties, and handlers,
+    cleaning up the addon state.
+    """
+    # Clear any pending timers
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)
 
@@ -105,21 +139,18 @@ def unregister():
         if sync_molecule_list_after_undo in bpy.app.handlers.redo_post:
             bpy.app.handlers.redo_post.remove(sync_molecule_list_after_undo)
     except Exception as e:
-        print(f"Failed to unregister undo/redo handler: {e}")
-        pass
+        logger.debug(f"Failed to unregister undo/redo handler: {e}")
 
     # Unregister properties
     try:
         unregister_protein_props()
     except Exception as e:
-        print(f"Failed to unregister protein props: {e}")
-        pass
+        logger.debug(f"Failed to unregister protein props: {e}")
     
     try:
         unregister_molecule_props()
     except Exception as e:
-        print(f"Failed to unregister molecule props: {e}")
-        pass
+        logger.debug(f"Failed to unregister molecule props: {e}")
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):
@@ -133,19 +164,11 @@ def unregister():
     if hasattr(bpy.types.Object, "mn"):
         del bpy.types.Object.mn
     
-    # Unregister MolecularNodesObjectProperties
-    # This is now handled by the main unregister loop
-    # try:
-    #     bpy.utils.unregister_class(MolecularNodesObjectProperties)
-    # except Exception as e:
-    #     print(f"Failed to unregister MolecularNodesObjectProperties: {e}")
-    #     pass
 
     # Unregister classes
     for cls in reversed(registered_classes):
         try:
             bpy.utils.unregister_class(cls)
         except Exception as e:
-            print(f"Failed to unregister {cls.__name__}: {e}")
-            pass
+            logger.debug(f"Failed to unregister {cls.__name__}: {e}")
     registered_classes.clear()
