@@ -16,7 +16,6 @@ from .panels import CLASSES as panel_classes
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .utils import scene_manager
-from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
 
@@ -49,23 +48,6 @@ def _test_register() -> None:
         logger.error(f"Error during test registration: {e}")
         unregister()
         register()
-
-def create_workspace_callback() -> None:
-    """Create custom workspace for ProteinBlender.
-    
-    This is called via a timer to ensure Blender is fully initialized.
-    
-    Returns:
-        None to remove the timer.
-    """
-    try:
-        workspace_manager = ProteinWorkspaceManager()
-        workspace_manager.create_custom_workspace()
-        workspace_manager.add_panels_to_workspace()
-        workspace_manager.set_properties_context()
-    except Exception as e:
-        logger.error(f"Failed to create workspace: {e}")
-    return None  # Remove the timer
 
 def register() -> None:
     """Register the ProteinBlender addon.
@@ -111,9 +93,6 @@ def register() -> None:
     if not hasattr(bpy.types.Object, "mn"):
         bpy.types.Object.mn = PointerProperty(type=MolecularNodesObjectProperties)
     
-    # Schedule workspace creation after a short delay
-    bpy.app.timers.register(create_workspace_callback, first_interval=WORKSPACE_TIMER_INTERVAL)
-
     # Register undo/redo handlers to sync and restore molecules
     from .utils.scene_manager import sync_molecule_list_after_undo
     if sync_molecule_list_after_undo not in bpy.app.handlers.undo_post:
@@ -127,10 +106,6 @@ def unregister() -> None:
     This function unregisters all classes, properties, and handlers,
     cleaning up the addon state.
     """
-    # Clear any pending timers
-    if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
-        bpy.app.timers.unregister(create_workspace_callback)
-
     # Unregister undo/redo handlers
     try:
         from .utils.scene_manager import sync_molecule_list_after_undo
