@@ -146,6 +146,15 @@ class ProteinBlenderScene:
         self.active_molecule = molecule.identifier
         # Force UI refresh
         self._refresh_ui()
+        
+        # Populate outliner with imported molecule
+        self._populate_outliner_from_import(molecule)
+
+    def _populate_outliner_from_import(self, molecule):
+        """Populate the outliner with data from a newly imported molecule."""
+        scene = bpy.context.scene
+        from ..handlers.outliner_handler import populate_outliner_from_molecules
+        populate_outliner_from_molecules(scene)
 
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB', remote_format: str = 'pdb') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
@@ -182,8 +191,6 @@ class ProteinBlenderScene:
             return True
         except Exception as e:
             return False
-
-
 
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""

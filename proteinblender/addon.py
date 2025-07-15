@@ -10,11 +10,10 @@ import logging
 from typing import List, Type
 
 from .core import CLASSES as core_classes
-from .handlers import CLASSES as handler_classes
+from .handlers import CLASSES as handler_classes, register as register_handlers, unregister as unregister_handlers
 from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes
-from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
-from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
+from .properties import register as register_properties, unregister as unregister_properties
 from .utils import scene_manager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -75,8 +74,10 @@ def register() -> None:
         bpy.types.Scene.MNSession = session.MNSession()
     
     # Register properties
-    register_protein_props()
-    register_molecule_props()
+    register_properties()
+    
+    # Register handlers
+    register_handlers()
     
     # Register domain expanded property if not already registered
     if not hasattr(bpy.types.Object, "domain_expanded"):
@@ -116,16 +117,17 @@ def unregister() -> None:
     except Exception as e:
         logger.debug(f"Failed to unregister undo/redo handler: {e}")
 
+    # Unregister handlers
+    try:
+        unregister_handlers()
+    except Exception as e:
+        logger.debug(f"Failed to unregister handlers: {e}")
+
     # Unregister properties
     try:
-        unregister_protein_props()
+        unregister_properties()
     except Exception as e:
-        logger.debug(f"Failed to unregister protein props: {e}")
-    
-    try:
-        unregister_molecule_props()
-    except Exception as e:
-        logger.debug(f"Failed to unregister molecule props: {e}")
+        logger.debug(f"Failed to unregister properties: {e}")
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):
