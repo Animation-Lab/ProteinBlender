@@ -49,6 +49,7 @@ from .pose_operators import (
 )
 from .outliner_operators import (
     PROTEIN_PB_OT_rename_outliner_item,
+    PROTEIN_PB_OT_manage_domains,
 )
 
 CLASSES = (
@@ -91,4 +92,5 @@ CLASSES = (
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,
     PROTEIN_PB_OT_rename_outliner_item,
+    PROTEIN_PB_OT_manage_domains,
 )

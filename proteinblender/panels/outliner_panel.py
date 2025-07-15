@@ -31,6 +31,10 @@ class PROTEIN_PB_PT_outliner(Panel):
             rename_op = row.operator("protein_pb.rename_outliner_item", text="", icon='GREASEPENCIL', emboss=False)
             rename_op.item_index = i
             
+            # Manage Domains button (small icon next to name)
+            manage_op = row.operator("protein_pb.manage_domains", text="", icon='MOD_BUILD', emboss=False)
+            manage_op.item_index = i
+            
             # Push buttons to the right
             row.separator()
             
