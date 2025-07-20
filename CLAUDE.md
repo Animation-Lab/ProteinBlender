@@ -9,9 +9,11 @@ ProteinBlender is a Blender addon for visualizing and animating protein structur
 ## Development Setup
 
 ### Prerequisites
-- Blender 4.0 or higher
+- Blender 4.4 or higher
 - Python 3.11 (matching Blender's Python version)
+- You must use Blender's Python environment to test and build code
 - VS Code (recommended) with Blender extension
+- For development user Windows PowerShell when running commands
 
 ### Environment Variables
 - `BLENDER_PATH`: Path to Blender executable (required for build.py)
@@ -53,6 +55,9 @@ blender --python dev_register.py
 - `panels/panel_property.py`: Primary UI for molecule management
 - `utilities/molnodes/`: Embedded MolecularNodes functionality
 
+### MCP Access
+- `blender-api`: Provides Blender API documentation assistance - A full description of the MCP can be found in documentation/MCP_DESCRIPTION.md
+
 ## Common Development Tasks
 
 ### Adding New Operators
@@ -80,15 +85,9 @@ blender --python dev_register.py
   - `poses`: Saved configurations
   - `keyframes`: Animation keyframes
 
-### Chain Mapping
-- Recent focus on chain mapping issues (see recent commits)
-- Handles multi-chain proteins and domain selections
-- Critical for proper visualization and animation
-
-### Animation System
-- Poses: Save current molecule state
-- Keyframes: Animate between poses over time
-- Uses Blender's native animation system
+## UI - Current Development
+- Focussing on a UI redesign
+  - `reference image`: A reference image with descriptions can be found in ui-development/proteinblender-proposed-layout.png
 
 ## Debugging Tips
 
@@ -101,5 +100,4 @@ blender --python dev_register.py
 
 - Undo/redo functionality improvements
 - Chain mapping fixes for multi-chain proteins
-- Keyframe animation stability
 - Property synchronization across Blender contexts
