@@ -153,11 +153,16 @@ class PROTEINBLENDER_PT_group_maker(Panel):
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
+    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 4  # After domain maker
     
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        
+        # Add panel title
+        layout.label(text="Group Maker", icon='GROUP')
+        layout.separator()
         
         # Check for existing groups
         groups = [item for item in scene.outliner_items if item.item_type == 'GROUP']

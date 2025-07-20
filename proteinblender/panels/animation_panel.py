@@ -11,10 +11,15 @@ class PROTEINBLENDER_PT_animation(Panel):
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
+    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 6  # After pose library
     
     def draw(self, context):
         layout = self.layout
+        
+        # Add panel title
+        layout.label(text="Animate Scene", icon='PLAY')
+        layout.separator()
         
         # Placeholder content
         col = layout.column(align=True)

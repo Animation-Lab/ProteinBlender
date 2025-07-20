@@ -209,20 +209,30 @@ class PROTEINBLENDER_PT_outliner(Panel):
         layout = self.layout
         scene = context.scene
         
+        # Create a box for the entire panel content
+        box = layout.box()
+        
+        # Add panel title inside the box
+        box.label(text="Protein Outliner", icon='OUTLINER')
+        box.separator()
+        
         # Check if outliner items exist
         if len(scene.outliner_items) == 0:
-            layout.label(text="No proteins loaded", icon='INFO')
-            layout.operator("proteinblender.refresh_outliner", text="Refresh", icon='FILE_REFRESH')
+            box.label(text="No proteins loaded", icon='INFO')
+            box.operator("proteinblender.refresh_outliner", text="Refresh", icon='FILE_REFRESH')
             return
         
-        # UIList
-        layout.template_list(
+        # UIList inside the box
+        box.template_list(
             "PROTEINBLENDER_UL_outliner", "",
             scene, "outliner_items",
             scene, "outliner_index",
             rows=10,
             maxrows=20
         )
+        
+        # Add bottom spacing
+        layout.separator()
 
 
 # Operator and panel classes to register

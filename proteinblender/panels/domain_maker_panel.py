@@ -13,6 +13,7 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
+    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 3  # After visual setup
     
     @classmethod
@@ -31,6 +32,10 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        
+        # Add panel title
+        layout.label(text="Domain Maker", icon='MESH_DATA')
+        layout.separator()
         scene_manager = ProteinBlenderScene.get_instance()
         
         # Get the selected item

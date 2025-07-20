@@ -136,11 +136,16 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
+    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 2  # After outliner
     
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        
+        # Add panel title
+        layout.label(text="Visual Set-up", icon='SHADING_RENDERED')
+        layout.separator()
         
         # Check if anything is selected
         selected_items = [item for item in scene.outliner_items if item.is_selected]
