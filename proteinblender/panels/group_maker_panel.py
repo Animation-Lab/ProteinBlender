@@ -223,6 +223,9 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         else:
             info_col.label(text="Select items to group", icon='INFO')
             info_col.label(text="Proteins, chains, or domains")
+        
+        # Add bottom spacing
+        layout.separator()
 
 
 

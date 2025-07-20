@@ -1,4 +1,11 @@
-from MDAnalysis import Universe
+try:
+    from MDAnalysis import Universe
+except ImportError as e:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to import MDAnalysis: {e}")
+    Universe = None
+    
 from .ops import TrajectoryImportOperator
 from ... import color
 from ...blender import coll, nodes

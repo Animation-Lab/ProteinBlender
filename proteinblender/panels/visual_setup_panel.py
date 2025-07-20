@@ -143,20 +143,24 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         layout = self.layout
         scene = context.scene
         
-        # Add panel title
-        layout.label(text="Visual Set-up", icon='SHADING_RENDERED')
-        layout.separator()
+        # Create a box for the entire panel content
+        box = layout.box()
+        
+        # Add panel title inside the box
+        box.label(text="Visual Set-up", icon='SHADING_RENDERED')
+        box.separator()
         
         # Check if anything is selected
         selected_items = [item for item in scene.outliner_items if item.is_selected]
         
         if not selected_items:
-            layout.label(text="Select items to apply visual settings", icon='INFO')
+            box.label(text="Select items to apply visual settings", icon='INFO')
+            layout.separator()  # Add bottom spacing
             return
         
         # Show what will be affected
-        box = layout.box()
-        col = box.column(align=True)
+        info_box = box.box()
+        col = info_box.column(align=True)
         
         # Count selection types
         proteins = sum(1 for item in selected_items if item.item_type == 'PROTEIN')
@@ -170,10 +174,10 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         if domains > 0:
             col.label(text=f"{domains} domain(s) selected", icon='GROUP_VERTEX')
         
-        layout.separator()
+        box.separator()
         
         # Color section
-        col = layout.column(align=True)
+        col = box.column(align=True)
         col.label(text="Color", icon='COLOR')
         
         # Color picker row
@@ -193,10 +197,10 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         op = row.operator("proteinblender.apply_color", text="Apply")
         op.color = scene.visual_setup_color
         
-        layout.separator()
+        box.separator()
         
         # Representation section
-        col = layout.column(align=True)
+        col = box.column(align=True)
         col.label(text="Representation", icon='MESH_UVSPHERE')
         
         # Style selector
@@ -223,6 +227,9 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         row.scale_x = 0.8
         for style_id, style_name, _ in styles:
             row.label(text=style_name[:4])  # Abbreviated names
+        
+        # Add bottom spacing
+        layout.separator()
 
 
 # Register color property

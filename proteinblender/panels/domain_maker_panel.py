@@ -33,9 +33,12 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         layout = self.layout
         scene = context.scene
         
-        # Add panel title
-        layout.label(text="Domain Maker", icon='MESH_DATA')
-        layout.separator()
+        # Create a box for the entire panel content
+        main_box = layout.box()
+        
+        # Add panel title inside the box
+        main_box.label(text="Domain Maker", icon='MESH_DATA')
+        main_box.separator()
         scene_manager = ProteinBlenderScene.get_instance()
         
         # Get the selected item
@@ -46,10 +49,12 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
                 break
         
         if not selected_item:
+            main_box.label(text="Select a chain or domain", icon='INFO')
+            layout.separator()  # Add bottom spacing
             return
         
         # Show what's selected
-        box = layout.box()
+        box = main_box.box()
         col = box.column(align=True)
         
         if selected_item.item_type == 'CHAIN':
@@ -68,11 +73,11 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
             col.label(text=f"Domain: {selected_item.name}", icon='GROUP_VERTEX')
             col.label(text=f"Residues: {selected_item.domain_start}-{selected_item.domain_end}")
         
-        layout.separator()
+        main_box.separator()
         
         # Split Chain button
         if selected_item.item_type == 'CHAIN':
-            col = layout.column(align=True)
+            col = main_box.column(align=True)
             col.label(text="Create Domain", icon='MESH_PLANE')
             
             # Input fields for domain range
@@ -108,7 +113,7 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
             
         # Domain operations
         elif selected_item.item_type == 'DOMAIN':
-            col = layout.column(align=True)
+            col = main_box.column(align=True)
             
             # Rename domain
             row = col.row(align=True)
@@ -134,6 +139,9 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
             row.scale_y = 1.2
             row.operator("proteinblender.merge_domains", text="Merge", icon='AUTOMERGE_ON')
             row.operator("proteinblender.delete_domain", text="Delete", icon='X')
+        
+        # Add bottom spacing
+        layout.separator()
 
 
 # Register properties

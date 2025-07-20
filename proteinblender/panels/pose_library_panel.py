@@ -17,12 +17,15 @@ class PROTEINBLENDER_PT_pose_library(Panel):
     def draw(self, context):
         layout = self.layout
         
-        # Add panel title
-        layout.label(text="Protein Pose Library", icon='ARMATURE_DATA')
-        layout.separator()
+        # Create a box for the entire panel content
+        main_box = layout.box()
+        
+        # Add panel title inside the box
+        main_box.label(text="Protein Pose Library", icon='ARMATURE_DATA')
+        main_box.separator()
         
         # Placeholder content
-        col = layout.column(align=True)
+        col = main_box.column(align=True)
         
         # Coming soon message
         box = col.box()
@@ -62,6 +65,9 @@ class PROTEINBLENDER_PT_pose_library(Panel):
         
         # Placeholder for pose visualization
         box.template_icon(icon_value=0, scale=5.0)
+        
+        # Add bottom spacing
+        layout.separator()
 
 
 # Placeholder operator for disabled buttons

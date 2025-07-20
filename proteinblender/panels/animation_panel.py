@@ -17,12 +17,15 @@ class PROTEINBLENDER_PT_animation(Panel):
     def draw(self, context):
         layout = self.layout
         
-        # Add panel title
-        layout.label(text="Animate Scene", icon='PLAY')
-        layout.separator()
+        # Create a box for the entire panel content
+        main_box = layout.box()
+        
+        # Add panel title inside the box
+        main_box.label(text="Animate Scene", icon='PLAY')
+        main_box.separator()
         
         # Placeholder content
-        col = layout.column(align=True)
+        col = main_box.column(align=True)
         
         # Coming soon message
         box = col.box()
@@ -32,6 +35,9 @@ class PROTEINBLENDER_PT_animation(Panel):
         box_col.label(text="Animation features will")
         box_col.label(text="be available in a")
         box_col.label(text="future update.")
+        
+        # Add bottom spacing
+        layout.separator()
         
         col.separator()
         
