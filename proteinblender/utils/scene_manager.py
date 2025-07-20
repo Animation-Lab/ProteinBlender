@@ -135,7 +135,7 @@ class ProteinBlenderScene:
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
         # Create domains for each chain
-        # self._create_domains_for_each_chain(molecule.identifier)
+        self._create_domains_for_each_chain(molecule.identifier)
         # Add to UI list
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()

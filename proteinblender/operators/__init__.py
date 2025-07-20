@@ -51,6 +51,9 @@ from .outliner_operators import (
     PROTEIN_PB_OT_rename_outliner_item,
     PROTEIN_PB_OT_manage_domains,
 )
+from .workspace_operators import (
+    PROTEIN_PB_OT_create_workspace,
+)
 
 CLASSES = (
     MOLECULE_PB_OT_select,
@@ -93,4 +96,5 @@ CLASSES = (
     MOLECULE_PB_OT_rename_pose,
     PROTEIN_PB_OT_rename_outliner_item,
     PROTEIN_PB_OT_manage_domains,
+    PROTEIN_PB_OT_create_workspace,
 )

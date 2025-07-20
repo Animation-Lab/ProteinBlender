@@ -194,26 +194,19 @@ def register():
     
     # Register message bus subscriptions for better selection detection
     try:
-        # Subscribe to object selection changes for all objects
-        bpy.msgbus.subscribe_rna(
-            key=(bpy.types.Object, "select"),
-            owner=outliner_sync_handler,  # Use the handler function as owner
-            notify=msgbus_selection_callback,
-        )
+        # Note: Object selection state cannot be subscribed to directly
+        # We rely on depsgraph updates and timer for selection sync
         
         # Subscribe to active object changes
         bpy.msgbus.subscribe_rna(
             key=(bpy.types.LayerObjects, "active"),
             owner=outliner_sync_handler,
+            args=(bpy.context,),
             notify=msgbus_selection_callback,
         )
         
-        # Subscribe to view layer changes 
-        bpy.msgbus.subscribe_rna(
-            key=(bpy.types.ViewLayer, "objects"),
-            owner=outliner_sync_handler,
-            notify=msgbus_selection_callback,
-        )
+        # We don't subscribe to other properties as they may not be available
+        # The depsgraph update handler will catch most changes
         
     except Exception as e:
         print(f"Failed to register message bus subscriptions: {e}")

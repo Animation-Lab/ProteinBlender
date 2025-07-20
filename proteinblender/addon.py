@@ -76,6 +76,13 @@ def register() -> None:
     # Register properties
     register_properties()
     
+    # Register brownian motion property directly here instead of through ui_panels
+    if not hasattr(bpy.types.Scene, "pb_brownian_motion"):
+        bpy.types.Scene.pb_brownian_motion = BoolProperty(
+            name="Brownian Motion",
+            default=False,
+        )
+    
     # Register handlers
     register_handlers()
     
@@ -100,6 +107,21 @@ def register() -> None:
         bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
     if sync_molecule_list_after_undo not in bpy.app.handlers.redo_post:
         bpy.app.handlers.redo_post.append(sync_molecule_list_after_undo)
+    
+    # Create and activate ProteinBlender workspace
+    def create_workspace_deferred():
+        """Create workspace after Blender is fully initialized"""
+        try:
+            # Check if we're in a valid context
+            if bpy.context.window:
+                bpy.ops.pb.create_workspace()
+                logger.info("ProteinBlender workspace created")
+        except Exception as e:
+            logger.error(f"Failed to create workspace: {e}")
+        return None  # Remove timer
+    
+    # Use a timer to defer workspace creation until Blender is ready
+    bpy.app.timers.register(create_workspace_deferred, first_interval=0.1)
 
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
@@ -128,6 +150,10 @@ def unregister() -> None:
         unregister_properties()
     except Exception as e:
         logger.debug(f"Failed to unregister properties: {e}")
+    
+    # Unregister brownian motion property
+    if hasattr(bpy.types.Scene, "pb_brownian_motion"):
+        del bpy.types.Scene.pb_brownian_motion
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):
