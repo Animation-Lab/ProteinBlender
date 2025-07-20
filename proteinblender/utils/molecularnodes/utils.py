@@ -4,7 +4,6 @@ import numpy as np
 import json
 
 from pathlib import Path
-from math import floor
 from mathutils import Matrix
 
 ADDON_DIR = Path(__file__).resolve().parent

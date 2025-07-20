@@ -2,7 +2,6 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.molecularnodes.style import STYLE_ITEMS
 
 class MOLECULE_PB_OT_select(Operator):
     bl_idname = "molecule.select"

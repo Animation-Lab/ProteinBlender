@@ -79,7 +79,7 @@ class MOLECULE_PB_OT_analyze_chain_composition(Operator):
                 
                 # Get domain coverage summary
                 summary = molecule_wrapper.get_domain_composition_summary()
-                print(f"\n=== Domain Coverage Summary ===")
+                print("\n=== Domain Coverage Summary ===")
                 print(f"Total domains: {summary['total_domains']}")
                 print(f"By type: {summary['by_type']}")
                 print(f"Missing chains: {summary['missing_chains']}")

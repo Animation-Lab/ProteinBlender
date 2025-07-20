@@ -7,7 +7,6 @@ from MDAnalysis.core.topologyattrs import (
     ChainIDs,
     Resids,
     Resnames,
-    Resnums,
 )
 
 
@@ -33,9 +32,6 @@ class OXDNAParser(TopologyReaderBase):
         res_name_list = []
         chain_id_list = []
         for i, line in enumerate(lines[1:]):
-            is_rna = "type=RNA" in line
-            is_dna = not is_rna
-
             line_split = line.split()
             bases = line_split[0]
 

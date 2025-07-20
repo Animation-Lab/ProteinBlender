@@ -8,7 +8,6 @@ from pathlib import Path
 import bpy
 
 from ..utils.molecularnodes.entities import fetch, load_local
-from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from .molecule_wrapper import MoleculeWrapper
 
 

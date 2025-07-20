@@ -1,10 +1,7 @@
-from .file_io import get_protein_file
 import json
 import bpy
 from typing import Dict, Optional, List, Set
-from .molecularnodes.entities import fetch, load_local
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
-from bpy.app.handlers import undo_post, undo_pre
 
 class ProteinBlenderScene:
     _instance = None
@@ -144,6 +141,8 @@ class ProteinBlenderScene:
         scene.molecule_list_index = len(scene.molecule_list_items) - 1
         # Set as active molecule
         self.active_molecule = molecule.identifier
+        # Build outliner hierarchy
+        build_outliner_hierarchy(bpy.context)
         # Force UI refresh
         self._refresh_ui()
 
@@ -180,7 +179,7 @@ class ProteinBlenderScene:
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True
-        except Exception as e:
+        except Exception:
             return False
 
 
@@ -247,7 +246,7 @@ class ProteinBlenderScene:
         data = json.loads(json_str)
         scene = cls()
         scene.molecule_manager.molecules = {
-            id: Molecule.from_json(molecule_json) 
+            id: MoleculeWrapper.from_json(molecule_json) 
             for id, molecule_json in data['molecules'].items()
         }
         scene.active_molecule = data['active_molecule']
@@ -264,7 +263,7 @@ class ProteinBlenderScene:
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             return False 
@@ -290,7 +289,7 @@ def _is_object_valid(obj):
     """Check if Blender object reference is still valid"""
     try:
         return obj and obj.name in bpy.data.objects
-    except:
+    except Exception:
         return False
 
 
@@ -309,7 +308,7 @@ def _is_molecule_valid(molecule):
                 return True
             return False
         return True
-    except Exception as e:
+    except Exception:
         # Handle MolecularNodes databpy LinkedObjectError and other exceptions
         return False
 
@@ -335,7 +334,7 @@ def _has_invalid_domains(molecule):
                 elif ng_name:
                     return True
         return False
-    except:
+    except Exception:
         return True
 
 
@@ -554,3 +553,113 @@ def sync_molecule_list_after_undo(*args):
         print(f"Error in undo handler: {e}")
         import traceback
         traceback.print_exc() 
+
+
+def build_outliner_hierarchy(context=None):
+    """Build or rebuild the outliner hierarchy from current molecule data"""
+    if context is None:
+        context = bpy.context
+    
+    scene = context.scene
+    scene_manager = ProteinBlenderScene.get_instance()
+    
+    # Clear existing outliner items
+    scene.outliner_items.clear()
+    
+    # Import counter for unique IDs
+    
+    # Add molecules
+    for molecule_id, molecule in scene_manager.molecules.items():
+        # Add protein item
+        protein_item = scene.outliner_items.add()
+        protein_item.item_type = 'PROTEIN'
+        protein_item.item_id = molecule_id
+        protein_item.parent_id = ""
+        protein_item.name = molecule.name
+        protein_item.object_name = molecule.object.name if molecule.object else ""
+        protein_item.indent_level = 0
+        protein_item.icon = 'MESH_DATA'
+        protein_item.is_visible = not molecule.object.hide_viewport if molecule.object else True
+        
+        # Get chains from the molecule
+        if molecule.object and "chain_id" in molecule.object.data.attributes:
+            chain_attr = molecule.object.data.attributes["chain_id"]
+            chain_ids = sorted({value.value for value in chain_attr.data})
+            
+            # Add chain items
+            for chain_id in chain_ids:
+                chain_item = scene.outliner_items.add()
+                chain_item.item_type = 'CHAIN'
+                chain_item.item_id = f"{molecule_id}_chain_{chain_id}"
+                chain_item.parent_id = molecule_id
+                
+                # Use chain mapping if available
+                if molecule.chain_mapping:
+                    chain_name = molecule.chain_mapping.get(chain_id, chr(65 + chain_id))
+                else:
+                    chain_name = chr(65 + chain_id)
+                
+                chain_item.name = f"Chain {chain_name}"
+                chain_item.chain_id = str(chain_id)
+                chain_item.indent_level = 1
+                chain_item.icon = 'LINKED'
+                
+                # Add domains for this chain
+                for domain_id, domain in molecule.domains.items():
+                    # Check if domain belongs to this chain
+                    # For now, add all domains under the first chain (will be improved later)
+                    if chain_id == chain_ids[0]:  # Temporary logic
+                        domain_item = scene.outliner_items.add()
+                        domain_item.item_type = 'DOMAIN'
+                        domain_item.item_id = f"{molecule_id}_{domain_id}"
+                        domain_item.parent_id = chain_item.item_id
+                        domain_item.name = domain.name
+                        domain_item.object_name = domain.object.name if domain.object else ""
+                        domain_item.domain_start = domain.start
+                        domain_item.domain_end = domain.end
+                        domain_item.indent_level = 2
+                        domain_item.icon = 'GROUP_VERTEX'
+                        domain_item.is_visible = not domain.object.hide_viewport if domain.object else True
+    
+    # TODO: Add groups support when group functionality is implemented
+    
+    # Update outliner display
+    if context.area:
+        context.area.tag_redraw()
+
+
+def update_outliner_visibility(item_id, visible):
+    """Update visibility for an outliner item and its corresponding objects"""
+    scene = bpy.context.scene
+    scene_manager = ProteinBlenderScene.get_instance()
+    
+    # Find the item
+    item = None
+    for outliner_item in scene.outliner_items:
+        if outliner_item.item_id == item_id:
+            item = outliner_item
+            break
+    
+    if not item:
+        return
+    
+    # Update item visibility state
+    item.is_visible = visible
+    
+    # Update object visibility based on item type
+    if item.item_type == 'PROTEIN':
+        # Update protein and all its domains
+        molecule = scene_manager.molecules.get(item_id)
+        if molecule and molecule.object:
+            molecule.object.hide_viewport = not visible
+            # Update all domains
+            for domain in molecule.domains.values():
+                if domain.object:
+                    domain.object.hide_viewport = not visible
+                    
+    elif item.item_type == 'DOMAIN':
+        # Update just the domain
+        if item.object_name:
+            obj = bpy.data.objects.get(item.object_name)
+            if obj:
+                obj.hide_viewport = not visible

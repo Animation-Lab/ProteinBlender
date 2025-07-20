@@ -4,3 +4,5 @@ from .ui import load
 from .trajectory import Trajectory
 
 CLASSES = ui.CLASSES
+
+__all__ = ['selections', 'ui', 'load', 'Trajectory', 'CLASSES']

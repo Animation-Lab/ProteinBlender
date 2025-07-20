@@ -8,12 +8,10 @@ import bpy
 from bpy.props import (BoolProperty, StringProperty, CollectionProperty, 
                       IntProperty, EnumProperty, FloatVectorProperty, FloatProperty, PointerProperty)
 from bpy.types import PropertyGroup
-from typing import Dict, List, Tuple, Optional
 
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.scene_manager import ProteinBlenderScene
 from ..core.domain import Domain
-from ..utils.molecularnodes.blender import nodes
 
 # Constants
 DEFAULT_DOMAIN_COLOR = (0.8, 0.1, 0.8, 1.0)  # Purple
@@ -363,9 +361,6 @@ def update_domain_preview(self, context):
                 context.scene.domain_end
             )
 
-def get_max_residue_for_chain(context):
-    return 888
-
 def update_new_domain_range(self, context):
     """Update new domain range when chain is changed"""
     # Get the current molecule
@@ -383,18 +378,6 @@ def update_new_domain_range(self, context):
             if self.new_domain_end == DEFAULT_DOMAIN_END or self.new_domain_end > max_res:
                 self.new_domain_end = max_res
 
-# Update callback function to connect color picker to material nodes
-def update_domain_color(self, context):
-    domain_id = self["domain_id"]
-    parent_molecule_id = self["parent_molecule_id"]
-    
-    # Get scene manager and find which domain this object belongs to
-    scene_manager = ProteinBlenderScene.get_instance()
-    # Find which molecule and domain this object belongs to
-    for molecule_id, molecule in scene_manager.molecules.items():
-        if parent_molecule_id.startswith(molecule_id):
-            molecule.update_domain_color(domain_id, self.domain_color)
-            return
 
 def register():
     """Register molecule properties"""
@@ -668,5 +651,5 @@ def update_molecule_style(self, context):
             if hasattr(domain, 'object') and domain.object:
                 try:
                     domain.object.domain_style = style
-                except Exception as e:
+                except Exception:
                     pass

@@ -1,4 +1,3 @@
-import bpy
 from bpy.types import Panel
 from ..utils.scene_manager import ProteinBlenderScene
 

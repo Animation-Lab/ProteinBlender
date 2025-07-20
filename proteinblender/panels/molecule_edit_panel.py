@@ -1,4 +1,3 @@
-import bpy
 from bpy.types import Panel
 
 class MOLECULE_PB_PT_edit(Panel):

@@ -21,9 +21,9 @@ class Lab:
     T2 = 0.12841855
     T3 = 0.008856452
 
-    def __init__(self, l=0.1, a=0.0, b=0.0):
-        self.lab = [l, a, b]
-        self.l = l
+    def __init__(self, lightness=0.1, a=0.0, b=0.0):
+        self.lab = [lightness, a, b]
+        self.l = lightness
         self.a = a
         self.b = b
 
@@ -62,8 +62,8 @@ class Lab:
     def from_color(color):
         r, g, b, a = color * 255
         x, y, z = Lab.rgbToXyz(r, g, b)
-        l = 116 * y - 16
-        return Lab(l if l >= 0 else 0, 500 * (x - y), 200 * (y - z))
+        lightness = 116 * y - 16
+        return Lab(lightness if lightness >= 0 else 0, 500 * (x - y), 200 * (y - z))
 
     @staticmethod
     def to_color(lab):

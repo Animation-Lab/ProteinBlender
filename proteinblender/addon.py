@@ -15,7 +15,6 @@ from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
-from .utils import scene_manager
 from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -120,6 +119,10 @@ def register() -> None:
         bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
     if sync_molecule_list_after_undo not in bpy.app.handlers.redo_post:
         bpy.app.handlers.redo_post.append(sync_molecule_list_after_undo)
+    
+    # Register selection sync handlers
+    from .handlers import selection_sync
+    selection_sync.register()
 
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
@@ -140,6 +143,13 @@ def unregister() -> None:
             bpy.app.handlers.redo_post.remove(sync_molecule_list_after_undo)
     except Exception as e:
         logger.debug(f"Failed to unregister undo/redo handler: {e}")
+    
+    # Unregister selection sync handlers
+    try:
+        from .handlers import selection_sync
+        selection_sync.unregister()
+    except Exception as e:
+        logger.debug(f"Failed to unregister selection sync handler: {e}")
 
     # Unregister properties
     try:

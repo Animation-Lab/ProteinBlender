@@ -10,7 +10,7 @@ import os
 import importlib
 import site
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -52,7 +52,6 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
 
     import importlib.util
     import glob
-    import pathlib
 
     # Find the wheels directory relative to this file
     wheels_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "wheels"))

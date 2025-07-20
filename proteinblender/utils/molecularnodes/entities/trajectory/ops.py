@@ -1,5 +1,5 @@
 from bpy.types import Operator
-from bpy.props import StringProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, EnumProperty
 
 from ...style import STYLE_ITEMS
 

@@ -1,6 +1,4 @@
-from typing import Dict, List, Tuple, Optional, Any
 import bpy
-from mathutils import Vector, Matrix
 from .domain import DomainDefinition
 
 
@@ -313,7 +311,7 @@ def _is_object_valid(obj):
     """Check if Blender object reference is still valid"""
     try:
         return obj and obj.name in bpy.data.objects
-    except:
+    except Exception:
         return False
 
 
@@ -324,5 +322,5 @@ def _has_invalid_domains(molecule):
             if domain.object and not _is_object_valid(domain.object):
                 return True
         return False
-    except:
+    except Exception:
         return True 

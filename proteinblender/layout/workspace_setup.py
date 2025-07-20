@@ -7,9 +7,8 @@ class ProteinWorkspaceManager:
         self.screen = None
         self.window = None
         self.main_area = None
-        self.left_area = None
-        self.right_area = None
-        self.bottom_area = None
+        self.panel_area = None  # Right-side panel area (was right_area)
+        self.timeline_area = None  # Bottom timeline (was bottom_area)
 
     def create_custom_workspace(self):
         # Check if workspace already exists
@@ -66,14 +65,11 @@ class ProteinWorkspaceManager:
         if not self.main_area:
             return
 
-        # Add the left area
-        self.left_area = self._split_area(self.main_area, 'VERTICAL', 0.25, 'PROPERTIES')
+        # Split vertically: viewport (70%) | panel area (30%)
+        self.panel_area = self._split_area(self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
 
-        # Add the right area
-        self.right_area = self._split_area(self.main_area, 'VERTICAL', 0.66, 'PROPERTIES')
-
-        # Add the bottom area, geometry nodes editor
-        self.bottom_area = self._split_area(self.main_area, 'HORIZONTAL', 0.25, 'NODE_EDITOR')
+        # Split the viewport horizontally: viewport (80%) | timeline (20%)
+        self.timeline_area = self._split_area(self.main_area, 'HORIZONTAL', 0.8, 'DOPESHEET_EDITOR')
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type
@@ -96,27 +92,16 @@ class ProteinWorkspaceManager:
         return new_area
 
     def set_properties_context(self):
-        # Set left area to properties and object context
-        if self.left_area:
+        # Set panel area to scene context (all panels in one area)
+        if self.panel_area:
             override = {
                 'window': self.window,
                 'screen': self.screen,
-                'area': self.left_area,
+                'area': self.panel_area,
             }
             with bpy.context.temp_override(**override):
-                self.left_area.type = 'PROPERTIES'
-                self.left_area.spaces[0].context = 'COLLECTION'
-
-        # Set right area to scene context
-        if self.right_area:
-            override = {
-                'window': self.window,
-                'screen': self.screen,
-                'area': self.right_area,
-            }
-            with bpy.context.temp_override(**override):
-                self.right_area.type = 'PROPERTIES'
-                self.right_area.spaces[0].context = 'SCENE'
+                self.panel_area.type = 'PROPERTIES'
+                self.panel_area.spaces[0].context = 'SCENE'
 
     def _remove_default_objects(self):
         # Only proceed if there are exactly 3 objects
@@ -152,6 +137,7 @@ class ProteinWorkspaceManager:
 # manager = ProteinWorkspaceManager("Protein Blender")
 # manager.create_custom_workspace()
 # manager.add_panels_to_workspace()
+# manager.set_properties_context()
 #
 # After this, you have `manager.workspace`, `manager.screen`, `manager.main_area`,
-# `manager.left_area`, `manager.right_area`, and `manager.bottom_area` all stored.
+# `manager.panel_area`, and `manager.timeline_area` all stored.

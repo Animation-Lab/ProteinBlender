@@ -51,7 +51,7 @@ class CellPackReader(PDBX):
         self.file_path = file_path
         self.file: pdbx.BinaryCIFFile | pdbx.CIFFile = self._read()
         self.n_molecules: int = pdbx.get_model_count(self.file)
-        self.molecules: dict[str, stuc.AtomArray] = {}
+        self.molecules: dict[str, struc.AtomArray] = {}
 
     @property
     def mol_ids(self) -> np.ndarray:

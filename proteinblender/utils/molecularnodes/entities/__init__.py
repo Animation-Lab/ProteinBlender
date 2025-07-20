@@ -10,6 +10,12 @@ from .molecule.sdf import SDF
 from .molecule.ui import fetch, load_local, parse
 from .trajectory.trajectory import Trajectory
 
+__all__ = [
+    'molecule', 'trajectory', 'MN_OT_Import_Map', 'MN_OT_Import_OxDNA_Trajectory',
+    'CellPack', 'StarFile', 'MN_OT_Import_Cell_Pack', 'MN_OT_Import_Star_File',
+    'PDB', 'BCIF', 'CIF', 'SDF', 'fetch', 'load_local', 'parse', 'Trajectory', 'CLASSES'
+]
+
 CLASSES = (
     [
         MN_OT_Import_Cell_Pack,

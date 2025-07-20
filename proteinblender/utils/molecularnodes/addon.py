@@ -48,7 +48,7 @@ def register():
     for op in all_classes:
         try:
             bpy.utils.register_class(op)
-        except Exception as e:
+        except Exception:
             # print(e)
             pass
     add_current_module_to_path()
@@ -74,7 +74,7 @@ def unregister():
     for op in all_classes:
         try:
             bpy.utils.unregister_class(op)
-        except Exception as e:
+        except Exception:
             # print(e)
             pass
 

@@ -2,5 +2,7 @@
 from .molecule_wrapper import MoleculeWrapper
 from .molecule_manager import MoleculeManager
 
+__all__ = ['MoleculeWrapper', 'MoleculeManager']
+
 CLASSES = (
 )

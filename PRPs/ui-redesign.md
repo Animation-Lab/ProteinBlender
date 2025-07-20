@@ -268,6 +268,17 @@ def register():
 - **Material UIList Demo**: https://gist.github.com/p2or/30b8b30c89871b8ae5c97803107fd494
 - **Collapsible Subpanels**: https://gist.github.com/SuddenDevelopment/9eca499bc3916e8fdb41d9d6c442c365
 
+### Role of the MCP Server
+
+Throughout development, the `blender-api` MCP Server will be used to:
+
+- Perform semantic search for Blender UI classes (`Panel`, `UIList`, `Operator`)
+- Validate usage of `bpy.types`, `bpy.props`, and `bpy.ops`
+- Discover appropriate inheritance and registration patterns for Blender UI
+- Retrieve example code snippets for panel creation, list rendering, and message bus subscriptions
+
+This ensures that all code aligns with Blender 4.4+ best practices and reduces API misuse.
+
 ### Key Gotchas
 1. **UIList Index Updates**: The index property update callback is called during undo/redo - must handle gracefully
 2. **Message Bus Lifetime**: Subscriptions are cleared on file load - must re-register in load_post handler

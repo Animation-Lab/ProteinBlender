@@ -208,7 +208,7 @@ class MOLECULE_PB_OT_update_domain(Operator):
                         self.chain_id, min_res, max_res,
                         exclude_domain_id=self.domain_id
                     ):
-                        self.report({'ERROR'}, f"Cannot change chain - would overlap with existing domain")
+                        self.report({'ERROR'}, "Cannot change chain - would overlap with existing domain")
                         return {'CANCELLED'}
                     
                     # Proceed with update
@@ -741,7 +741,7 @@ class MOLECULE_PB_OT_edit_keyframe(Operator):
                         obj.keyframe_delete(data_path="location", frame=old_frame)
                         obj.keyframe_delete(data_path="rotation_euler", frame=old_frame)
                         obj.keyframe_delete(data_path="scale", frame=old_frame)
-                    except:
+                    except Exception:
                         pass
                 # Update properties
                 kf.name = self.keyframe_name

@@ -60,7 +60,7 @@ class CellPack(Ensemble):
     def _file_type(self):
         return Path(self.file_path).suffix.strip(".")
 
-    def _assign_colors(self, obj: bpy.types.Object, array: AtomArray):
+    def _assign_colors(self, obj: bpy.types.Object, array: AtomArray, chain_name: str):
         # random color per chain
         # could also do by entity, + chain-lighten + atom-lighten
 
@@ -94,7 +94,7 @@ class CellPack(Ensemble):
             )
 
             if len(self.color_entity) > 0:
-                self._assign_colors(obj, array)
+                self._assign_colors(obj, array, chain_name)
 
             if node_setup:
                 bl.nodes.create_starting_node_tree(

@@ -48,7 +48,6 @@ chosen_panel = {
 
 
 def pt_object_context(self, context):
-    layout = self.layout
     return None
 
 

@@ -1,9 +1,8 @@
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict
 import bpy
 from bpy.types import PropertyGroup
 from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty, 
-                      FloatVectorProperty, FloatProperty, EnumProperty)
-from ..utils.molecularnodes.blender import nodes
+                      FloatVectorProperty, EnumProperty)
 from ..utils.molecularnodes.style import STYLE_ITEMS
 
 class DomainProperties(PropertyGroup):
@@ -336,11 +335,11 @@ def register():
 def unregister():
     try:
         bpy.utils.unregister_class(DomainProperties)
-    except:
+    except Exception:
         pass
     try:
         bpy.utils.unregister_class(Domain)
-    except:
+    except Exception:
         pass
 
 def domain_style_update(obj, context):

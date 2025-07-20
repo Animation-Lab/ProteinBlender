@@ -9,7 +9,6 @@ import bpy
 import MDAnalysis as mda
 
 from ... import blender as bl
-from ...session import MNSession
 from .trajectory import Trajectory
 from . import dna
 from bpy.props import StringProperty
@@ -63,7 +62,6 @@ class MN_OT_Reload_Trajectory(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
-        session: MNSession = context.scene.MNSession
         topo = obj.mn.filepath_topology
         traj = obj.mn.filepath_trajectory
 

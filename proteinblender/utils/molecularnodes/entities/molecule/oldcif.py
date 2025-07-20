@@ -1,5 +1,4 @@
 import itertools
-import warnings
 
 import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx

@@ -1,13 +1,10 @@
 from MDAnalysis import Universe
-import bpy
-from bpy.props import StringProperty
 from .ops import TrajectoryImportOperator
 from ... import color
 from ...blender import coll, nodes
 import databpy
 from databpy import AttributeTypes
 
-from enum import Enum
 
 from ..entity import EntityType
 

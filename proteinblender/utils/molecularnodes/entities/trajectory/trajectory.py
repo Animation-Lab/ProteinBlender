@@ -4,9 +4,7 @@ import bpy
 import MDAnalysis as mda
 import numpy as np
 import numpy.typing as npt
-from math import floor, remainder
 
-from enum import Enum
 
 from ... import data
 from ..entity import MolecularEntity, EntityType

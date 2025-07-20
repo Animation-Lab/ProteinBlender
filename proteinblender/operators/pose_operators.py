@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, FloatVectorProperty
+from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
 class MOLECULE_PB_OT_create_pose(Operator):

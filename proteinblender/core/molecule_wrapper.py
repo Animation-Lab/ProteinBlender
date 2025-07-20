@@ -1,18 +1,12 @@
 from typing import Optional, Dict, List, Tuple
 import bpy
-from pathlib import Path
 import numpy as np
 import colorsys
-import random
 from mathutils import Vector
 
-from ..utils.molecularnodes.entities import fetch, load_local
 from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from ..utils.molecularnodes.blender import nodes
-from ..utils.molecularnodes.props import MolecularNodesSceneProperties
-from ..utils.molecularnodes.session import MNSession
-from ..utils.molecularnodes.addon import _test_register
-from .domain import Domain, DomainDefinition
+from .domain import DomainDefinition
 from ..core.domain import ensure_domain_properties_registered
 
 class MoleculeWrapper:
@@ -35,7 +29,7 @@ class MoleculeWrapper:
         working_array = molecule.array
         if isinstance(molecule.array, struc.AtomArrayStack):
             working_array = molecule.array[0]
-            print(f"DEBUG MoleculeWrapper.__init__: Detected AtomArrayStack, using first model for chain mapping")
+            print("DEBUG MoleculeWrapper.__init__: Detected AtomArrayStack, using first model for chain mapping")
         
         # Ensure the working array has the necessary integer chain ID attribute
         existing_categories = working_array.get_annotation_categories()
@@ -567,7 +561,7 @@ class MoleculeWrapper:
             bpy.ops.wm.call_message_box(message=f"Split range {split_start}-{split_end} must be within the domain's current range ({original_domain_actual_start}-{original_domain_actual_end}).", title="Invalid Split Range", icon='ERROR')
             return []
         if split_start == original_domain_actual_start and split_end == original_domain_actual_end:
-            print(f"Warning: Split range matches original domain range. No actual split performed.")
+            print("Warning: Split range matches original domain range. No actual split performed.")
             # bpy.ops.wm.call_message_box(message="Split range matches the domain's current range. No change made.", title="Split Matches Domain", icon='INFO')
             return [original_domain_id] # No split, return original
 
@@ -610,7 +604,7 @@ class MoleculeWrapper:
             print(f"Successfully created main split segment(s): {main_segment_ids}")
             all_newly_created_domain_ids.extend(main_segment_ids)
         else:
-            print(f"Failed to create the main split domain segment. Attempting to restore original (this is a fallback and may not always work).")
+            print("Failed to create the main split domain segment. Attempting to restore original (this is a fallback and may not always work).")
             # Fallback: try to recreate the original domain if split failed badly.
             # This is a simplistic recovery.
             restored_ids = self._create_domain_with_params(
@@ -625,7 +619,7 @@ class MoleculeWrapper:
                  print(f"Fallback: Recreated original-like domain(s): {restored_ids}")
                  all_newly_created_domain_ids.extend(restored_ids) # Add to list for normalization
             else:
-                 print(f"Fallback: Failed to recreate original domain.")
+                 print("Fallback: Failed to recreate original domain.")
         
         # Normalize names for ALL newly created domains from this operation
         for new_id in all_newly_created_domain_ids:
@@ -691,7 +685,8 @@ class MoleculeWrapper:
                      try:
                          numeric_chain = ord(chain_id.upper()) - ord('A')
                          search_ids.append(numeric_chain)
-                     except Exception: pass
+                     except Exception:
+                         pass
                  elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
                      try:
                          int_chain_id = int(chain_id)
@@ -699,7 +694,8 @@ class MoleculeWrapper:
                          search_ids.append(alpha_chain)
                          search_ids.append(int_chain_id)
                          search_ids.append(str(int_chain_id))
-                     except Exception: pass
+                     except Exception:
+                         pass
                  return list(set(filter(lambda x: x is not None, search_ids)))
             # --- End helper --- 
 
@@ -831,13 +827,13 @@ class MoleculeWrapper:
                             
                             return world_pos  # Return the world position, not local position
                             
-                    except (AttributeError, IndexError, ValueError, TypeError) as e_inner:
+                    except (AttributeError, IndexError, ValueError, TypeError):
                         continue # Skip malformed atom data
 
             # If we finish the loop without finding any CA in the entire range
             return None
 
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             return None
@@ -882,7 +878,7 @@ class MoleculeWrapper:
             
             return True
             
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             
@@ -1035,7 +1031,6 @@ class MoleculeWrapper:
         
         # Convert to strings and apply mapping if available
         for chain_id in numeric_chain_ids:
-            mapped_chain = self.get_author_chain_id(chain_id)
             # Use numeric ID as string if no mapping
             available_chains.append(str(chain_id))
             
@@ -1108,7 +1103,7 @@ class MoleculeWrapper:
             self._normalize_domain_name(domain_id)
             return domain_id
             
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             return domain_id
@@ -1334,7 +1329,7 @@ class MoleculeWrapper:
                         grandchild = self.domains[grandchild_id]
                         self._set_domain_parent(grandchild, child_id)
         
-        print(f"Reparenting complete")
+        print("Reparenting complete")
 
     def _set_domain_parent(self, domain: DomainDefinition, parent_domain_id: Optional[str]):
         """Set a domain's parent, handling both data structure and Blender object parenting.
@@ -1370,7 +1365,7 @@ class MoleculeWrapper:
                 domain.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
                 # Restore the original world transform
                 domain.object.matrix_world = world_mat
-            except Exception as e:
+            except Exception:
                 pass
 
     def cleanup(self):
@@ -1429,8 +1424,10 @@ class MoleculeWrapper:
                 
                 # Reset internal trackers for these nodes
                 self.domain_join_node = None # This was the primary one, typically the first in self.join_nodes
-                if hasattr(self, 'join_nodes'): self.join_nodes = []
-                if hasattr(self, 'final_not'): self.final_not = None
+                if hasattr(self, 'join_nodes'):
+                    self.join_nodes = []
+                if hasattr(self, 'final_not'):
+                    self.final_not = None
         
         # Clear all domain-related dictionaries
         self.domains.clear()
@@ -1452,7 +1449,7 @@ class MoleculeWrapper:
         # Find style node
         try:
             return nodes.style_node(parent_node_group)
-        except:
+        except Exception:
             # Fallback to manual search
             for node in parent_node_group.nodes:
                 if (node.bl_idname == 'GeometryNodeGroup' and 
@@ -1782,7 +1779,7 @@ class MoleculeWrapper:
             
             return True
             
-        except Exception as e:
+        except Exception:
             return False
 
     def _clean_unused_nodes(self, node_group):
@@ -1957,7 +1954,7 @@ class MoleculeWrapper:
                     link.to_socket.name == "Selection"):
                     parent_node_group.links.remove(link)
             
-        except Exception as e:
+        except Exception:
             # Error in mask node creation suppressed to reduce log noise
             import traceback
             traceback.print_exc()
@@ -2002,7 +1999,7 @@ class MoleculeWrapper:
                     # Set the default_value directly with the color tuple
                     node.inputs["Carbon"].default_value = color
                     return True
-        except Exception as e:
+        except Exception:
             pass
         return False
         

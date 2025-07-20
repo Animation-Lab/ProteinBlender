@@ -2,7 +2,6 @@ import bpy
 from bpy.types import Panel, Operator
 from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
-from ..operators.domain_operators import MOLECULE_PB_OT_toggle_pivot_edit
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
@@ -13,8 +12,8 @@ class MOLECULE_PB_PT_list(Panel):
     bl_idname = "MOLECULE_PB_PT_list"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
-    bl_context = "collection"
-    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
+    bl_context = "scene"
+    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND', 'DEFAULT_CLOSED'}
     
     @classmethod
     def poll(cls, context):
@@ -189,14 +188,14 @@ class MOLECULE_PB_PT_list(Panel):
                             update_btn.pose_index = str(idx)
                             
                             # Rename button
-                            rename_op = btn_row.operator(
+                            btn_row.operator(
                                 "molecule.rename_pose", 
                                 text="Rename",
                                 icon='GREASEPENCIL'
                             )
                             
                             # Delete button
-                            delete_op = btn_row.operator(
+                            btn_row.operator(
                                 "molecule.delete_pose", 
                                 text="Delete",
                                 icon='X'
@@ -555,7 +554,7 @@ class MOLECULE_PB_PT_list(Panel):
                             )
                             if move_pivot_op:
                                 move_pivot_op.domain_id = domain_id
-                        except Exception as e:
+                        except Exception:
                             pivot_row.label(text="Move Pivot", icon='ERROR') # Fallback label on error
 
                         # Button 2: Snap to Start AA
