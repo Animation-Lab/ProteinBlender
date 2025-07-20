@@ -160,15 +160,18 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         layout = self.layout
         scene = context.scene
         
-        # Add panel title
-        layout.label(text="Group Maker", icon='GROUP')
-        layout.separator()
+        # Create a box for the entire panel content
+        box = layout.box()
+        
+        # Add panel title inside the box
+        box.label(text="Group Maker", icon='GROUP')
+        box.separator()
         
         # Check for existing groups
         groups = [item for item in scene.outliner_items if item.item_type == 'GROUP']
         
         # Create New Group button
-        col = layout.column(align=True)
+        col = box.column(align=True)
         row = col.row()
         row.scale_y = 1.5
         row.operator("proteinblender.create_group", text="Create New Group", icon='GROUP')
@@ -208,8 +211,8 @@ class PROTEINBLENDER_PT_group_maker(Panel):
                     op.action = 'DELETE'
         
         # Info section
-        layout.separator()
-        info_box = layout.box()
+        box.separator()
+        info_box = box.box()
         info_col = info_box.column(align=True)
         info_col.scale_y = 0.8
         
