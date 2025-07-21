@@ -187,10 +187,7 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         # Get current color from first selected item
         current_color = (0.8, 0.1, 0.8, 1.0)  # Default purple
         
-        # Use a property to show color picker
-        if not hasattr(scene, "visual_setup_color"):
-            scene.visual_setup_color = current_color
-        
+        # Use the registered property to show color picker
         row.prop(scene, "visual_setup_color", text="")
         
         # Apply color button

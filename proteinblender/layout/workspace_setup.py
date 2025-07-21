@@ -68,8 +68,8 @@ class ProteinWorkspaceManager:
         # Split vertically: viewport (70%) | panel area (30%)
         self.panel_area = self._split_area(self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
 
-        # Split the viewport horizontally: viewport (80%) | timeline (20%)
-        self.timeline_area = self._split_area(self.main_area, 'HORIZONTAL', 0.8, 'DOPESHEET_EDITOR')
+        # Split the viewport horizontally: timeline (20%) at top | viewport (80%) at bottom
+        self.timeline_area = self._split_area(self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type
