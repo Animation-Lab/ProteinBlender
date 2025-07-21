@@ -471,12 +471,18 @@ def apply_color_to_object(obj, color):
     obj.data.update()
     if hasattr(obj.data, 'update_tag'):
         obj.data.update_tag()
+    
+    # Ensure object stays selected
+    obj.select_set(True)
 
 
 def update_color(self, context):
     """Live update callback for color property"""
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
+    
+    # Store current active object
+    active_obj = context.view_layer.objects.active
     
     # Find selected items in outliner
     selected_items = [item for item in scene.outliner_items if item.is_selected]
@@ -492,6 +498,10 @@ def update_color(self, context):
             apply_chain_color_direct(scene_manager, item, scene.visual_setup_color)
         elif item.item_type == 'DOMAIN':
             apply_domain_color_direct(scene_manager, item, scene.visual_setup_color)
+    
+    # Restore active object
+    if active_obj:
+        context.view_layer.objects.active = active_obj
     
     # Update viewport
     for area in context.screen.areas:
@@ -624,6 +634,9 @@ def apply_style_to_object(obj, style):
     obj.data.update()
     if hasattr(obj.data, 'update_tag'):
         obj.data.update_tag()
+    
+    # Ensure object stays selected
+    obj.select_set(True)
 
 
 def update_style(self, context):
@@ -634,6 +647,9 @@ def update_style(self, context):
     # Skip if empty value (multiple selections)
     if not scene.visual_setup_style:
         return
+    
+    # Store current active object
+    active_obj = context.view_layer.objects.active
     
     # Find selected items in outliner
     selected_items = [item for item in scene.outliner_items if item.is_selected]
@@ -649,6 +665,10 @@ def update_style(self, context):
             apply_chain_style_direct(scene_manager, item, scene.visual_setup_style)
         elif item.item_type == 'DOMAIN':
             apply_domain_style_direct(scene_manager, item, scene.visual_setup_style)
+    
+    # Restore active object
+    if active_obj:
+        context.view_layer.objects.active = active_obj
     
     # Update viewport
     for area in context.screen.areas:
