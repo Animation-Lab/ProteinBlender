@@ -7,7 +7,6 @@ from .protein_outliner_panel import (
     PROTEINBLENDER_OT_toggle_expand,
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
-    PROTEINBLENDER_OT_refresh_outliner,
     PROTEINBLENDER_PT_outliner
 )
 from .visual_setup_panel import (
@@ -45,7 +44,6 @@ __all__ = [
     'PROTEINBLENDER_OT_toggle_expand',
     'PROTEINBLENDER_OT_outliner_select', 
     'PROTEINBLENDER_OT_toggle_visibility',
-    'PROTEINBLENDER_OT_refresh_outliner',
     'PROTEINBLENDER_PT_outliner',
     'PROTEINBLENDER_OT_apply_color',
     'PROTEINBLENDER_OT_apply_representation',
@@ -69,7 +67,6 @@ CLASSES = [
     PROTEINBLENDER_OT_toggle_expand,
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
-    PROTEINBLENDER_OT_refresh_outliner,
     PROTEINBLENDER_OT_apply_color,
     PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_OT_create_group,

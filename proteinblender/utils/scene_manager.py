@@ -586,7 +586,7 @@ def build_outliner_hierarchy(context=None):
         protein_item.object_name = mol_object.name if mol_object else ""
         protein_item.indent_level = 0
         protein_item.icon = 'MESH_DATA'
-        protein_item.is_visible = not mol_object.hide_viewport if mol_object else True
+        protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True
         
         # Get chains from the molecule
         if mol_object and "chain_id" in mol_object.data.attributes:
@@ -688,7 +688,7 @@ def build_outliner_hierarchy(context=None):
                         domain_item.domain_end = getattr(domain, 'end', 0)
                         domain_item.indent_level = 2
                         domain_item.icon = 'GROUP_VERTEX'
-                        domain_item.is_visible = not domain.object.hide_viewport if domain.object else True
+                        domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
     
     # TODO: Add groups support when group functionality is implemented
     
@@ -701,6 +701,7 @@ def update_outliner_visibility(item_id, visible):
     """Update visibility for an outliner item and its corresponding objects"""
     scene = bpy.context.scene
     scene_manager = ProteinBlenderScene.get_instance()
+    view_layer = bpy.context.view_layer
     
     # Find the item
     item = None
@@ -720,11 +721,11 @@ def update_outliner_visibility(item_id, visible):
         # Update protein and all its domains
         molecule = scene_manager.molecules.get(item_id)
         if molecule and molecule.object:
-            molecule.object.hide_viewport = not visible
+            molecule.object.hide_set(not visible, view_layer=view_layer)
             # Update all domains
             for domain in molecule.domains.values():
                 if domain.object:
-                    domain.object.hide_viewport = not visible
+                    domain.object.hide_set(not visible, view_layer=view_layer)
                     
     elif item.item_type == 'CHAIN':
         # Update all domains belonging to this chain
@@ -761,11 +762,11 @@ def update_outliner_visibility(item_id, visible):
                     
                     if domain_chain_str == chain_str or domain_chain_id == chain_id:
                         if domain.object:
-                            domain.object.hide_viewport = not visible
+                            domain.object.hide_set(not visible, view_layer=view_layer)
                     
     elif item.item_type == 'DOMAIN':
         # Update just the domain
         if item.object_name:
             obj = bpy.data.objects.get(item.object_name)
             if obj:
-                obj.hide_viewport = not visible
+                obj.hide_set(not visible, view_layer=view_layer)

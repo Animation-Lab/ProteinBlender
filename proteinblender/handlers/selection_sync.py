@@ -73,26 +73,53 @@ def update_outliner_from_blender_selection():
     
     # Update outliner selection state
     for item in scene.outliner_items:
-        # Check if this item's object is selected
+        # For items with direct objects, check if selected
         if item.object_name and item.object_name in selected_names:
             item.is_selected = True
         else:
-            item.is_selected = False
-        
-        # For protein items, check if any of their domains are selected
-        if item.item_type == 'PROTEIN':
-            molecule = scene_manager.molecules.get(item.item_id)
-            if molecule:
-                # Check if any domain is selected
-                any_domain_selected = False
-                for domain in molecule.domains.values():
-                    if domain.object and domain.object.name in selected_names:
-                        any_domain_selected = True
-                        break
+            # For chain items, check if any of their domains are selected
+            if item.item_type == 'CHAIN':
+                # Extract chain info
+                chain_id_str = item.item_id.split('_chain_')[-1]
+                try:
+                    chain_id = int(chain_id_str)
+                except:
+                    chain_id = chain_id_str
                 
-                # If any domain is selected, select the protein too
-                if any_domain_selected:
-                    item.is_selected = True
+                # Get parent molecule
+                parent_molecule = scene_manager.molecules.get(item.parent_id)
+                if parent_molecule:
+                    # Check if any domain of this chain is selected
+                    chain_has_selection = False
+                    for domain in parent_molecule.domains.values():
+                        if domain.object and domain.object.name in selected_names:
+                            # Check if domain belongs to this chain
+                            domain_chain_id = getattr(domain, 'chain_id', None)
+                            
+                            # Extract chain from domain name if needed
+                            if domain_chain_id is None and hasattr(domain, 'name'):
+                                import re
+                                match = re.search(r'Chain_([A-Z])', domain.name)
+                                if match:
+                                    domain_chain_id = match.group(1)
+                                elif '_' in domain.name:
+                                    match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                                    if match2:
+                                        domain_chain_id = int(match2.group(1))
+                            
+                            # Check if this domain belongs to the chain
+                            if domain_chain_id is not None:
+                                domain_chain_str = str(domain_chain_id)
+                                chain_str = str(chain_id)
+                                
+                                if domain_chain_str == chain_str or domain_chain_id == chain_id:
+                                    chain_has_selection = True
+                                    break
+                    
+                    item.is_selected = chain_has_selection
+            else:
+                # For other items without objects, deselect
+                item.is_selected = False
     
     # Update UI
     for area in bpy.context.screen.areas:

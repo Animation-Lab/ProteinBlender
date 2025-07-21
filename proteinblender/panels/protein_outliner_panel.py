@@ -7,13 +7,45 @@ from ..utils.scene_manager import build_outliner_hierarchy, update_outliner_visi
 class PROTEINBLENDER_UL_outliner(UIList):
     """Custom UIList for hierarchical protein display"""
     
+    def filter_items(self, context, data, propname):
+        """Filter items based on parent expansion state"""
+        items = getattr(data, propname)
+        
+        # Initialize with all items visible
+        flt_flags = [self.bitflag_filter_item] * len(items)
+        flt_neworder = list(range(len(items)))
+        
+        # Hide items whose parents are collapsed
+        for idx, item in enumerate(items):
+            if not self._should_show_item_by_parent(items, idx):
+                flt_flags[idx] = 0
+        
+        return flt_flags, flt_neworder
+    
+    def _should_show_item_by_parent(self, items, item_idx):
+        """Check if item should be shown based on parent expansion state"""
+        item = items[item_idx]
+        
+        # Top-level items are always shown
+        if item.indent_level == 0:
+            return True
+        
+        # Check if parent is expanded
+        if item.parent_id:
+            # Find parent item
+            for parent_idx, parent_item in enumerate(items):
+                if parent_item.item_id == item.parent_id:
+                    # If parent is not expanded, hide this item
+                    if not parent_item.is_expanded:
+                        return False
+                    # Recursively check parent's visibility
+                    return self._should_show_item_by_parent(items, parent_idx)
+        
+        return True
+    
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         # Visual hierarchy through indentation
         row = layout.row(align=True)
-        
-        # Only show items that should be visible based on parent expansion
-        if not self.should_show_item(context, item):
-            return
         
         # Indentation based on hierarchy level
         for i in range(item.indent_level):
@@ -53,23 +85,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
         op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
         op.item_id = item.item_id
     
-    def should_show_item(self, context, item):
-        """Check if item should be displayed based on parent expansion state"""
-        if item.indent_level == 0:
-            return True  # Always show top-level items
-        
-        # Check if parent is expanded
-        parent_id = item.parent_id
-        if parent_id:
-            for parent_item in context.scene.outliner_items:
-                if parent_item.item_id == parent_id:
-                    # If parent is not expanded, don't show this item
-                    if not parent_item.is_expanded:
-                        return False
-                    # Check parent's parent recursively
-                    return self.should_show_item(context, parent_item)
-        
-        return True
 
 
 class PROTEINBLENDER_OT_toggle_expand(Operator):
@@ -124,9 +139,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         if clicked_item.item_type == 'PROTEIN':
             # Select/deselect all children (chains and domains)
             self.select_children(scene, clicked_item.item_id, clicked_item.is_selected)
-        elif clicked_item.item_type == 'CHAIN':
-            # Select/deselect all domains under this chain
-            self.select_children(scene, clicked_item.item_id, clicked_item.is_selected)
+        # Note: We don't automatically select/deselect children for chains anymore
+        # This allows independent chain selection without affecting parent
         
         # Sync to Blender selection
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
@@ -170,9 +184,10 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         new_visibility = not item.is_visible
         update_outliner_visibility(self.item_id, new_visibility)
         
-        # If this is a parent item, update children visibility too
-        if item.item_type in ['PROTEIN', 'CHAIN']:
+        # If this is a protein, update all children visibility too
+        if item.item_type == 'PROTEIN':
             self.update_children_visibility(scene, self.item_id, new_visibility)
+        # Note: Chains don't automatically update children visibility
         
         # Update UI
         context.area.tag_redraw()
@@ -185,17 +200,6 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                 update_outliner_visibility(item.item_id, visibility)
                 # Recursively update children
                 self.update_children_visibility(scene, item.item_id, visibility)
-
-
-class PROTEINBLENDER_OT_refresh_outliner(Operator):
-    """Refresh the protein outliner"""
-    bl_idname = "proteinblender.refresh_outliner"
-    bl_label = "Refresh Outliner"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        build_outliner_hierarchy(context)
-        return {'FINISHED'}
 
 
 class PROTEINBLENDER_PT_outliner(Panel):
@@ -218,9 +222,6 @@ class PROTEINBLENDER_PT_outliner(Panel):
         # Add panel title inside the box
         box.label(text="Protein Outliner", icon='OUTLINER')
         box.separator()
-        
-        # Always show refresh button for debugging
-        box.operator("proteinblender.refresh_outliner", text="Refresh", icon='FILE_REFRESH')
         
         # Check if outliner items exist
         if len(scene.outliner_items) == 0:
@@ -246,7 +247,6 @@ CLASSES = [
     PROTEINBLENDER_OT_toggle_expand,
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
-    PROTEINBLENDER_OT_refresh_outliner,
     PROTEINBLENDER_PT_outliner,
 ]
 
