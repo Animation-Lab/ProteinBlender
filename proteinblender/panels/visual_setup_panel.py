@@ -257,26 +257,28 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         
         box.separator()
         
-        # Color section
-        col = box.column(align=True)
-        col.label(text="Color", icon='COLOR')
+        # Create a 2x2 grid layout
+        # First row - labels
+        row = box.row(align=True)
+        row.alignment = 'CENTER'
         
-        # Color picker row
-        row = col.row(align=True)
+        col_left = row.column(align=True)
+        col_left.label(text="Color", icon='COLOR')
+        
+        col_right = row.column(align=True)
+        col_right.label(text="Representation", icon='MESH_UVSPHERE')
+        
+        # Second row - controls
+        row = box.row(align=True)
         row.scale_y = 1.5
         
-        # Use the registered property to show color picker with live update
-        row.prop(scene, "visual_setup_color", text="")
+        # Color picker on the left
+        col_left = row.column(align=True)
+        col_left.prop(scene, "visual_setup_color", text="")
         
-        box.separator()
-        
-        # Representation section
-        col = box.column(align=True)
-        row = col.row(align=True)
-        row.label(text="Representation", icon='MESH_UVSPHERE')
-        
-        # Add dropdown for style selection
-        row.prop(scene, "visual_setup_style", text="")
+        # Style dropdown on the right
+        col_right = row.column(align=True)
+        col_right.prop(scene, "visual_setup_style", text="")
         
         # Add bottom spacing
         layout.separator()
