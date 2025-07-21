@@ -152,20 +152,45 @@ def sync_outliner_to_blender_selection(context, item_id):
                         
         elif item.item_type == 'CHAIN':
             # Select all domains belonging to this chain
-            # First, find the parent protein
-            parent_molecule = None
-            for outliner_item in scene.outliner_items:
-                if outliner_item.item_id == item.parent_id:
-                    parent_molecule = scene_manager.molecules.get(outliner_item.item_id)
-                    break
+            parent_molecule = scene_manager.molecules.get(item.parent_id)
             
             if parent_molecule:
-                # For now, select the main protein object
-                # TODO: Implement proper chain-to-domain mapping
-                if parent_molecule.object:
-                    parent_molecule.object.select_set(item.is_selected)
-                    if item.is_selected:
-                        context.view_layer.objects.active = parent_molecule.object
+                # Extract chain identifier from item_id (format: "molecule_id_chain_X")
+                chain_id_str = item.item_id.split('_chain_')[-1]
+                try:
+                    chain_id = int(chain_id_str)
+                except:
+                    chain_id = chain_id_str
+                
+                # Select/deselect all domains of this chain
+                active_set = False
+                for domain_id, domain in parent_molecule.domains.items():
+                    # Check if domain belongs to this chain
+                    domain_chain_id = getattr(domain, 'chain_id', None)
+                    
+                    # Extract chain from domain name if needed
+                    if domain_chain_id is None and hasattr(domain, 'name'):
+                        import re
+                        match = re.search(r'Chain_([A-Z])', domain.name)
+                        if match:
+                            domain_chain_id = match.group(1)
+                        elif '_' in domain.name:
+                            match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                            if match2:
+                                domain_chain_id = int(match2.group(1))
+                    
+                    # Check if this domain belongs to the chain
+                    if domain_chain_id is not None:
+                        domain_chain_str = str(domain_chain_id)
+                        chain_str = str(chain_id)
+                        
+                        if domain_chain_str == chain_str or domain_chain_id == chain_id:
+                            if domain.object:
+                                domain.object.select_set(item.is_selected)
+                                # Set the first selected domain as active
+                                if item.is_selected and not active_set:
+                                    context.view_layer.objects.active = domain.object
+                                    active_set = True
     
     finally:
         _selection_update_in_progress = False

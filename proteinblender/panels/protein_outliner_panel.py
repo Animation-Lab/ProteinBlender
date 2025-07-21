@@ -30,6 +30,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
         else:
             row.label(text="", icon='BLANK1')  # Spacing
             
+        # Item label with appropriate icon
+        row.label(text=item.name, icon=item.icon)
+        
+        # Add some space before the controls
+        row.separator()
+        
         # Selection toggle (unlabeled checkbox in mockup)
         if item.is_selected:
             selection_icon = 'CHECKBOX_HLT'
@@ -38,9 +44,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
         
         op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
         op.item_id = item.item_id
-        
-        # Item label with appropriate icon
-        row.label(text=item.name, icon=item.icon)
         
         # Visibility toggle
         if item.is_visible:
@@ -216,10 +219,12 @@ class PROTEINBLENDER_PT_outliner(Panel):
         box.label(text="Protein Outliner", icon='OUTLINER')
         box.separator()
         
+        # Always show refresh button for debugging
+        box.operator("proteinblender.refresh_outliner", text="Refresh", icon='FILE_REFRESH')
+        
         # Check if outliner items exist
         if len(scene.outliner_items) == 0:
             box.label(text="No proteins loaded", icon='INFO')
-            box.operator("proteinblender.refresh_outliner", text="Refresh", icon='FILE_REFRESH')
             return
         
         # UIList inside the box

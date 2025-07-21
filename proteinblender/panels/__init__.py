@@ -13,9 +13,15 @@ from .protein_outliner_panel import (
 from .visual_setup_panel import (
     PROTEINBLENDER_OT_apply_color,
     PROTEINBLENDER_OT_apply_representation,
-    PROTEINBLENDER_PT_visual_setup
+    PROTEINBLENDER_PT_visual_setup,
+    register_props as visual_setup_register_props,
+    unregister_props as visual_setup_unregister_props
 )
-from .domain_maker_panel import PROTEINBLENDER_PT_domain_maker
+from .domain_maker_panel import (
+    PROTEINBLENDER_PT_domain_maker,
+    register_props as domain_maker_register_props,
+    unregister_props as domain_maker_unregister_props
+)
 from .group_maker_panel import (
     PROTEINBLENDER_OT_create_group,
     PROTEINBLENDER_OT_edit_group,
@@ -51,7 +57,9 @@ __all__ = [
     'PROTEINBLENDER_PT_pose_library',
     'PROTEINBLENDER_OT_placeholder',
     'PROTEINBLENDER_PT_animation',
-    'CLASSES'
+    'CLASSES',
+    'register',
+    'unregister'
 ]
 
 # All classes in correct registration order
@@ -77,3 +85,13 @@ CLASSES = [
     PROTEINBLENDER_PT_pose_library,    # 5: Pose Library
     PROTEINBLENDER_PT_animation,       # 6: Animation
 ]
+
+def register():
+    """Register all panel properties"""
+    visual_setup_register_props()
+    domain_maker_register_props()
+
+def unregister():
+    """Unregister all panel properties"""
+    visual_setup_unregister_props()
+    domain_maker_unregister_props()

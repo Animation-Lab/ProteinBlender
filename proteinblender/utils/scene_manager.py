@@ -575,16 +575,27 @@ def build_outliner_hierarchy(context=None):
         protein_item.item_type = 'PROTEIN'
         protein_item.item_id = molecule_id
         protein_item.parent_id = ""
-        protein_item.name = molecule.name
-        protein_item.object_name = molecule.object.name if molecule.object else ""
+        protein_item.name = getattr(molecule, 'name', molecule.identifier)
+        # Get the object - it might be molecule.object or molecule.molecule.object
+        mol_object = None
+        if hasattr(molecule, 'object') and molecule.object:
+            mol_object = molecule.object
+        elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+            mol_object = molecule.molecule.object
+        
+        protein_item.object_name = mol_object.name if mol_object else ""
         protein_item.indent_level = 0
         protein_item.icon = 'MESH_DATA'
-        protein_item.is_visible = not molecule.object.hide_viewport if molecule.object else True
+        protein_item.is_visible = not mol_object.hide_viewport if mol_object else True
         
         # Get chains from the molecule
-        if molecule.object and "chain_id" in molecule.object.data.attributes:
-            chain_attr = molecule.object.data.attributes["chain_id"]
+        if mol_object and "chain_id" in mol_object.data.attributes:
+            chain_attr = mol_object.data.attributes["chain_id"]
             chain_ids = sorted({value.value for value in chain_attr.data})
+            
+            # Debug output (commented out for production)
+            # print(f"Molecule {getattr(molecule, 'name', molecule.identifier)} has chains: {chain_ids}")
+            # print(f"Chain mapping: {getattr(molecule, 'chain_mapping', getattr(molecule, 'idx_to_label_asym_id_map', 'None'))}")
             
             # Add chain items
             for chain_id in chain_ids:
@@ -594,8 +605,14 @@ def build_outliner_hierarchy(context=None):
                 chain_item.parent_id = molecule_id
                 
                 # Use chain mapping if available
-                if molecule.chain_mapping:
-                    chain_name = molecule.chain_mapping.get(chain_id, chr(65 + chain_id))
+                chain_mapping = None
+                if hasattr(molecule, 'chain_mapping'):
+                    chain_mapping = molecule.chain_mapping
+                elif hasattr(molecule, 'idx_to_label_asym_id_map'):
+                    chain_mapping = molecule.idx_to_label_asym_id_map
+                
+                if chain_mapping:
+                    chain_name = chain_mapping.get(chain_id, chr(65 + chain_id))
                 else:
                     chain_name = chr(65 + chain_id)
                 
@@ -604,19 +621,71 @@ def build_outliner_hierarchy(context=None):
                 chain_item.indent_level = 1
                 chain_item.icon = 'LINKED'
                 
-                # Add domains for this chain
+                # Debug output (commented out for production)
+                # print(f"\nProcessing chain {chain_name} (id={chain_id}):")
+                # print(f"Available domains in molecule: {list(molecule.domains.keys())}")
+                
+                # Collect domains for this chain
+                chain_domains = []
                 for domain_id, domain in molecule.domains.items():
                     # Check if domain belongs to this chain
-                    # For now, add all domains under the first chain (will be improved later)
-                    if chain_id == chain_ids[0]:  # Temporary logic
+                    domain_chain_id = getattr(domain, 'chain_id', None)
+                    
+                    # If no chain_id on domain, try to extract from name
+                    if domain_chain_id is None and hasattr(domain, 'name'):
+                        # Try to extract chain from domain name pattern like "3b75_001_0_1_197_Chain_A"
+                        import re
+                        match = re.search(r'Chain_([A-Z])', domain.name)
+                        if match:
+                            domain_chain_id = match.group(1)
+                        
+                        # Also try to extract chain index from pattern like "3b75_001_0_1_197"
+                        if domain_chain_id is None:
+                            match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                            if match2:
+                                domain_chain_id = int(match2.group(1))
+                    
+                    if domain_chain_id is not None:
+                        # Check if this domain belongs to the current chain
+                        domain_chain_str = str(domain_chain_id)
+                        chain_str = str(chain_id)
+                        
+                        match_found = (domain_chain_str == chain_str or 
+                                     domain_chain_str == chain_name or 
+                                     (isinstance(domain_chain_id, int) and domain_chain_id == chain_id))
+                        
+                        if match_found:
+                            chain_domains.append((domain_id, domain))
+                
+                # Only add domains if there's more than one for this chain
+                # OR if the domain doesn't span the entire chain
+                if len(chain_domains) > 1:
+                    for domain_id, domain in chain_domains:
                         domain_item = scene.outliner_items.add()
                         domain_item.item_type = 'DOMAIN'
                         domain_item.item_id = f"{molecule_id}_{domain_id}"
                         domain_item.parent_id = chain_item.item_id
-                        domain_item.name = domain.name
+                        
+                        # Extract meaningful domain name
+                        # From "3b75_001_0_1_197_Chain_A" extract "1-197"
+                        domain_display_name = domain.name
+                        if hasattr(domain, 'start') and hasattr(domain, 'end'):
+                            domain_display_name = f"Residues {domain.start}-{domain.end}"
+                        elif '_' in domain.name:
+                            # Try to extract range from name
+                            parts = domain.name.split('_')
+                            if len(parts) >= 5:
+                                try:
+                                    start = int(parts[3])
+                                    end = int(parts[4])
+                                    domain_display_name = f"Residues {start}-{end}"
+                                except:
+                                    pass
+                        
+                        domain_item.name = domain_display_name
                         domain_item.object_name = domain.object.name if domain.object else ""
-                        domain_item.domain_start = domain.start
-                        domain_item.domain_end = domain.end
+                        domain_item.domain_start = getattr(domain, 'start', 0)
+                        domain_item.domain_end = getattr(domain, 'end', 0)
                         domain_item.indent_level = 2
                         domain_item.icon = 'GROUP_VERTEX'
                         domain_item.is_visible = not domain.object.hide_viewport if domain.object else True
@@ -656,6 +725,43 @@ def update_outliner_visibility(item_id, visible):
             for domain in molecule.domains.values():
                 if domain.object:
                     domain.object.hide_viewport = not visible
+                    
+    elif item.item_type == 'CHAIN':
+        # Update all domains belonging to this chain
+        # Extract molecule_id from chain's parent
+        molecule = scene_manager.molecules.get(item.parent_id)
+        if molecule:
+            # Extract chain identifier from item_id (format: "molecule_id_chain_X")
+            chain_id_str = item.item_id.split('_chain_')[-1]
+            try:
+                chain_id = int(chain_id_str)
+            except:
+                chain_id = chain_id_str
+            
+            # Update visibility for all domains of this chain
+            for domain_id, domain in molecule.domains.items():
+                # Check if domain belongs to this chain (similar logic as in build_outliner_hierarchy)
+                domain_chain_id = getattr(domain, 'chain_id', None)
+                
+                # Extract chain from domain name if needed
+                if domain_chain_id is None and hasattr(domain, 'name'):
+                    import re
+                    match = re.search(r'Chain_([A-Z])', domain.name)
+                    if match:
+                        domain_chain_id = match.group(1)
+                    elif '_' in domain.name:
+                        match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                        if match2:
+                            domain_chain_id = int(match2.group(1))
+                
+                # Check if this domain belongs to the chain
+                if domain_chain_id is not None:
+                    domain_chain_str = str(domain_chain_id)
+                    chain_str = str(chain_id)
+                    
+                    if domain_chain_str == chain_str or domain_chain_id == chain_id:
+                        if domain.object:
+                            domain.object.hide_viewport = not visible
                     
     elif item.item_type == 'DOMAIN':
         # Update just the domain

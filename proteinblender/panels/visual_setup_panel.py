@@ -206,11 +206,12 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         
         # Create style buttons
         styles = [
-            ('surface', "Surface", 'MESH_UVSPHERE'),
-            ('ribbon', "Ribbon", 'CURVE_BEZCURVE'),
+            ('spheres', "Spheres", 'MESH_UVSPHERE'),
             ('cartoon', "Cartoon", 'OUTLINER_OB_CURVE'),
+            ('surface', "Surface", 'SURFACE_DATA'),
+            ('ribbon', "Ribbon", 'CURVE_BEZCURVE'),
+            ('sticks', "Sticks", 'RIGID_BODY_CONSTRAINT'),
             ('ball_and_stick', "Ball & Stick", 'RIGID_BODY'),
-            ('stick', "Stick", 'RIGID_BODY_CONSTRAINT'),
         ]
         
         for style_id, style_name, style_icon in styles:
@@ -221,9 +222,18 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         
         # Show style names
         row = col.row(align=True)
-        row.scale_x = 0.8
+        row.scale_x = 0.7  # Smaller scale for 6 items
         for style_id, style_name, _ in styles:
-            row.label(text=style_name[:4])  # Abbreviated names
+            # Custom abbreviations for clarity
+            abbreviations = {
+                'Spheres': 'Sph',
+                'Cartoon': 'Toon',
+                'Surface': 'Surf',
+                'Ribbon': 'Rib',
+                'Sticks': 'Stk',
+                'Ball & Stick': 'B&S'
+            }
+            row.label(text=abbreviations.get(style_name, style_name[:3]))
         
         # Add bottom spacing
         layout.separator()
