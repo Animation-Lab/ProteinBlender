@@ -121,6 +121,15 @@ def update_outliner_from_blender_selection():
                 # For other items without objects, deselect
                 item.is_selected = False
     
+    # Update all reference items to match their originals
+    for item in scene.outliner_items:
+        if "_ref_" in item.item_id and item.group_memberships:
+            # Find the original item
+            for orig_item in scene.outliner_items:
+                if orig_item.item_id == item.group_memberships:
+                    item.is_selected = orig_item.is_selected
+                    break
+    
     # Update UI
     for area in bpy.context.screen.areas:
         if area.type == 'PROPERTIES':
@@ -140,10 +149,19 @@ def sync_outliner_to_blender_selection(context, item_id):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
+        # Check if this is a reference item and get the actual item ID
+        actual_item_id = item_id
+        if "_ref_" in item_id:
+            # Find the reference item to get the actual ID
+            for ref_item in scene.outliner_items:
+                if ref_item.item_id == item_id and ref_item.group_memberships:
+                    actual_item_id = ref_item.group_memberships
+                    break
+        
         # Find the item
         item = None
         for outliner_item in scene.outliner_items:
-            if outliner_item.item_id == item_id:
+            if outliner_item.item_id == actual_item_id:
                 item = outliner_item
                 break
         
@@ -218,6 +236,29 @@ def sync_outliner_to_blender_selection(context, item_id):
                                 if item.is_selected and not active_set:
                                     context.view_layer.objects.active = domain.object
                                     active_set = True
+        
+        elif item.item_type == 'GROUP':
+            # Select all members of the group
+            member_ids = item.group_memberships.split(',') if item.group_memberships else []
+            active_set = False
+            
+            for member_id in member_ids:
+                # Find the member item
+                member_item = None
+                for outliner_item in scene.outliner_items:
+                    if outliner_item.item_id == member_id:
+                        member_item = outliner_item
+                        break
+                
+                if member_item:
+                    # Update the member's selection state to match the group
+                    member_item.is_selected = item.is_selected
+                    # Update all references to this member
+                    for ref_item in scene.outliner_items:
+                        if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
+                            ref_item.is_selected = item.is_selected
+                    # Recursively sync the member
+                    sync_outliner_to_blender_selection(context, member_id)
     
     finally:
         _selection_update_in_progress = False

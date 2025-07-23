@@ -563,6 +563,22 @@ def build_outliner_hierarchy(context=None):
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
     
+    # Store existing groups and their memberships before clearing
+    existing_groups = {}
+    item_memberships = {}  # Store which groups each item belongs to
+    
+    for item in scene.outliner_items:
+        if item.item_type == 'GROUP':
+            existing_groups[item.item_id] = {
+                'name': item.name,
+                'is_expanded': item.is_expanded,
+                'is_selected': item.is_selected,
+                'members': item.group_memberships.split(',') if item.group_memberships else []
+            }
+        elif item.group_memberships:
+            # Store item's group memberships
+            item_memberships[item.item_id] = item.group_memberships
+    
     # Clear existing outliner items
     scene.outliner_items.clear()
     
@@ -690,7 +706,65 @@ def build_outliner_hierarchy(context=None):
                         domain_item.icon = 'GROUP_VERTEX'
                         domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
     
-    # TODO: Add groups support when group functionality is implemented
+    # Restore group memberships to items
+    for item in scene.outliner_items:
+        if item.item_id in item_memberships:
+            item.group_memberships = item_memberships[item.item_id]
+    
+    # Add existing groups at the end
+    # First, create a mapping of item_id to item for easy lookup
+    item_map = {}
+    for item in scene.outliner_items:
+        item_map[item.item_id] = item
+    
+    # Add separator if there are groups
+    if existing_groups:
+        # Add a visual separator (could be a label or empty item)
+        separator = scene.outliner_items.add()
+        separator.item_type = 'GROUP'  # Use GROUP type but make it non-interactive
+        separator.item_id = "groups_separator"
+        separator.name = "─── Groups ───"
+        separator.parent_id = ""
+        separator.indent_level = 0
+        separator.icon = 'NONE'
+        separator.is_expanded = False
+        separator.is_visible = True
+    
+    # Process each existing group
+    for group_id, group_info in existing_groups.items():
+        # Add group item
+        group_item = scene.outliner_items.add()
+        group_item.item_type = 'GROUP'
+        group_item.item_id = group_id
+        group_item.parent_id = ""
+        group_item.name = group_info['name']
+        group_item.indent_level = 0
+        group_item.icon = 'GROUP'
+        group_item.is_expanded = group_info.get('is_expanded', True)
+        group_item.is_selected = group_info.get('is_selected', False)
+        group_item.group_memberships = ','.join(group_info.get('members', []))
+        
+        # Add group members as references (not moving them from original location)
+        if group_item.is_expanded:
+            for member_id in group_info.get('members', []):
+                if member_id in item_map:
+                    original_item = item_map[member_id]
+                    # Create a reference item under the group
+                    ref_item = scene.outliner_items.add()
+                    ref_item.item_type = original_item.item_type
+                    ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
+                    ref_item.parent_id = group_id
+                    ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
+                    ref_item.object_name = original_item.object_name
+                    ref_item.indent_level = 1
+                    ref_item.icon = original_item.icon
+                    ref_item.is_visible = original_item.is_visible
+                    ref_item.is_selected = original_item.is_selected
+                    ref_item.chain_id = original_item.chain_id
+                    ref_item.domain_start = original_item.domain_start
+                    ref_item.domain_end = original_item.domain_end
+                    # Store the original item ID for reference
+                    ref_item.group_memberships = member_id  # Store original ID
     
     # Update outliner display
     if context.area:
@@ -770,3 +844,13 @@ def update_outliner_visibility(item_id, visible):
             obj = bpy.data.objects.get(item.object_name)
             if obj:
                 obj.hide_set(not visible, view_layer=view_layer)
+                
+    elif item.item_type == 'GROUP':
+        # Update all items that are members of this group
+        member_ids = item.group_memberships.split(',') if item.group_memberships else []
+        for member_id in member_ids:
+            # Find the actual member item
+            for member_item in scene.outliner_items:
+                if member_item.item_id == member_id:
+                    update_outliner_visibility(member_id, visible)
+                    break

@@ -97,6 +97,13 @@ class ProteinOutlinerItem(PropertyGroup):
         name="Domain End",
         description="For domain items, end residue"
     )
+    
+    # Group memberships (items can belong to multiple groups)
+    group_memberships: StringProperty(
+        name="Group Memberships",
+        description="Comma-separated list of group IDs this item belongs to",
+        default=""
+    )
 
 class ProteinProperties(bpy.types.PropertyGroup):
     import_method: EnumProperty(

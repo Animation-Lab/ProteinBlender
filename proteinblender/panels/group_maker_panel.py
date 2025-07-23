@@ -3,7 +3,7 @@
 import bpy
 from bpy.types import Panel, Operator
 from bpy.props import StringProperty, EnumProperty
-from ..utils.scene_manager import build_outliner_hierarchy
+from ..utils.scene_manager import build_outliner_hierarchy, ProteinBlenderScene
 
 
 class PROTEINBLENDER_OT_create_group(Operator):
@@ -49,24 +49,55 @@ class PROTEINBLENDER_OT_create_group(Operator):
         if not selected_items:
             return {'CANCELLED'}
         
-        # Create group item
+        # Create group ID
         import uuid
+        group_id = f"group_{uuid.uuid4().hex[:8]}"
+        
+        # Filter items that can be grouped (exclude groups themselves)
+        items_to_group = []
+        for item in selected_items:
+            if item.item_type != 'GROUP':
+                items_to_group.append(item)
+        
+        if not items_to_group:
+            self.report({'WARNING'}, "No valid items to group")
+            return {'CANCELLED'}
+        
+        # Add group membership to selected items
+        for item in items_to_group:
+            # Get current memberships
+            current_groups = item.group_memberships.split(',') if item.group_memberships else []
+            # Add new group if not already a member
+            if group_id not in current_groups:
+                current_groups.append(group_id)
+                item.group_memberships = ','.join(filter(None, current_groups))
+            item.is_selected = False  # Deselect grouped items
+        
+        # Create the group item
         group_item = scene.outliner_items.add()
         group_item.item_type = 'GROUP'
-        group_item.item_id = f"group_{uuid.uuid4().hex[:8]}"
+        group_item.item_id = group_id
         group_item.name = self.group_name
         group_item.parent_id = ""
         group_item.indent_level = 0
         group_item.icon = 'GROUP'
         group_item.is_expanded = True
+        group_item.is_selected = True
         
-        # Move selected items under the group
-        # (In a real implementation, this would update parent relationships)
+        # Store member IDs in the group's memberships field for easy access
+        member_ids = [item.item_id for item in items_to_group]
+        group_item.group_memberships = ','.join(member_ids)
         
-        # Rebuild outliner
+        # Rebuild the outliner to reflect the new group
         build_outliner_hierarchy(context)
         
-        self.report({'INFO'}, f"Created group: {self.group_name}")
+        # Make sure the new group is selected
+        for item in scene.outliner_items:
+            if item.item_id == group_id:
+                item.is_selected = True
+                break
+        
+        self.report({'INFO'}, f"Created group: {self.group_name} with {len(items_to_group)} items")
         return {'FINISHED'}
 
 
@@ -79,6 +110,7 @@ class PROTEINBLENDER_OT_edit_group(Operator):
     action: EnumProperty(
         name="Action",
         items=[
+            ('EDIT', "Edit Group", "Edit group name and members"),
             ('ADD', "Add to Group", "Add selected items to group"),
             ('REMOVE', "Remove from Group", "Remove selected items from group"),
             ('RENAME', "Rename Group", "Rename the group"),
@@ -86,13 +118,69 @@ class PROTEINBLENDER_OT_edit_group(Operator):
         ]
     )
     
+    group_id: StringProperty(
+        name="Group ID",
+        description="ID of the group to edit"
+    )
+    
     new_name: StringProperty(
-        name="New Name",
-        description="New name for the group"
+        name="Group Name",
+        description="Name for the group"
+    )
+    
+    # Properties to track item selection in edit dialog
+    item_selections: bpy.props.CollectionProperty(
+        type=bpy.types.PropertyGroup
     )
     
     def invoke(self, context, event):
-        if self.action == 'RENAME':
+        if self.action == 'EDIT':
+            # Find the group
+            group_item = None
+            for item in context.scene.outliner_items:
+                if item.item_id == self.group_id and item.item_type == 'GROUP':
+                    group_item = item
+                    self.new_name = item.name
+                    break
+            
+            if not group_item:
+                self.report({'ERROR'}, "Group not found")
+                return {'CANCELLED'}
+            
+            # Clear and populate item selections
+            self.item_selections.clear()
+            
+            # Get current group members
+            current_members = set(group_item.group_memberships.split(',')) if group_item.group_memberships else set()
+            
+            # Add all selectable items
+            scene_manager = ProteinBlenderScene.get_instance()
+            for mol_id, molecule in scene_manager.molecules.items():
+                # Add domains
+                for domain_id, domain in molecule.domains.items():
+                    if domain.object:
+                        item_sel = self.item_selections.add()
+                        item_sel.name = f"{domain.object.name}_{domain_id}"
+                        item_sel['item_id'] = f"{mol_id}_{domain_id}"
+                        item_sel['display_name'] = domain.name if hasattr(domain, 'name') else domain.object.name
+                        item_sel['is_selected'] = f"{mol_id}_{domain_id}" in current_members
+                        item_sel['item_type'] = 'DOMAIN'
+                        item_sel['parent_name'] = getattr(molecule, 'name', molecule.identifier)
+                
+                # Add chains
+                for chain_item in context.scene.outliner_items:
+                    if chain_item.item_type == 'CHAIN' and chain_item.parent_id == mol_id:
+                        item_sel = self.item_selections.add()
+                        item_sel.name = f"{chain_item.name}_{chain_item.item_id}"
+                        item_sel['item_id'] = chain_item.item_id
+                        item_sel['display_name'] = chain_item.name
+                        item_sel['is_selected'] = chain_item.item_id in current_members
+                        item_sel['item_type'] = 'CHAIN'
+                        item_sel['parent_name'] = getattr(molecule, 'name', molecule.identifier)
+            
+            return context.window_manager.invoke_props_dialog(self, width=400)
+            
+        elif self.action == 'RENAME':
             # Get selected group name
             for item in context.scene.outliner_items:
                 if item.is_selected and item.item_type == 'GROUP':
@@ -102,44 +190,129 @@ class PROTEINBLENDER_OT_edit_group(Operator):
         return self.execute(context)
     
     def draw(self, context):
-        if self.action == 'RENAME':
-            layout = self.layout
+        layout = self.layout
+        
+        if self.action == 'EDIT':
+            # Group name
+            layout.prop(self, "new_name")
+            layout.separator()
+            
+            # Create scrollable list of items
+            box = layout.box()
+            box.label(text="Group Members:", icon='GROUP')
+            
+            # Group items by parent
+            items_by_parent = {}
+            for item in self.item_selections:
+                parent = item.get('parent_name', 'Unknown')
+                if parent not in items_by_parent:
+                    items_by_parent[parent] = []
+                items_by_parent[parent].append(item)
+            
+            # Display hierarchically
+            for parent_name, items in items_by_parent.items():
+                col = box.column(align=True)
+                col.label(text=parent_name, icon='MESH_DATA')
+                
+                for item in items:
+                    row = col.row(align=True)
+                    row.prop(item, '["is_selected"]', text=item.get('display_name', item.name))
+                    
+                col.separator()
+                
+        elif self.action == 'RENAME':
             layout.prop(self, "new_name")
     
     def execute(self, context):
         scene = context.scene
         
-        # Find selected group
-        selected_group = None
-        for item in scene.outliner_items:
-            if item.is_selected and item.item_type == 'GROUP':
-                selected_group = item
-                break
-        
-        if not selected_group and self.action != 'ADD':
-            self.report({'WARNING'}, "Select a group first")
-            return {'CANCELLED'}
-        
-        if self.action == 'ADD':
-            # Add selected items to group
-            # TODO: Implement adding logic
-            self.report({'INFO'}, "Would add items to group")
+        if self.action == 'EDIT':
+            # Find the group to edit
+            group_item = None
+            for item in scene.outliner_items:
+                if item.item_id == self.group_id and item.item_type == 'GROUP':
+                    group_item = item
+                    break
             
-        elif self.action == 'REMOVE':
-            # Remove selected items from group
-            # TODO: Implement removal logic
-            self.report({'INFO'}, "Would remove items from group")
+            if not group_item:
+                self.report({'ERROR'}, "Group not found")
+                return {'CANCELLED'}
+            
+            # Update group name
+            group_item.name = self.new_name
+            
+            # Update group members
+            new_members = []
+            for item_sel in self.item_selections:
+                if item_sel.get('is_selected', False):
+                    new_members.append(item_sel.get('item_id', ''))
+            
+            # Update group membership
+            group_item.group_memberships = ','.join(filter(None, new_members))
+            
+            # Update item memberships
+            # First, remove this group from all items
+            for item in scene.outliner_items:
+                if item.group_memberships:
+                    groups = item.group_memberships.split(',')
+                    if self.group_id in groups:
+                        groups.remove(self.group_id)
+                        item.group_memberships = ','.join(groups)
+            
+            # Then add group to selected items
+            for member_id in new_members:
+                for item in scene.outliner_items:
+                    if item.item_id == member_id:
+                        groups = item.group_memberships.split(',') if item.group_memberships else []
+                        if self.group_id not in groups:
+                            groups.append(self.group_id)
+                            item.group_memberships = ','.join(filter(None, groups))
+                        break
+            
+            # Rebuild outliner
+            build_outliner_hierarchy(context)
+            self.report({'INFO'}, f"Updated group: {self.new_name}")
+            
+        elif self.action == 'DELETE':
+            # Find and remove the group
+            group_item = None
+            group_index = -1
+            for i, item in enumerate(scene.outliner_items):
+                if item.item_id == self.group_id and item.item_type == 'GROUP':
+                    group_item = item
+                    group_index = i
+                    break
+            
+            if not group_item:
+                self.report({'ERROR'}, "Group not found")
+                return {'CANCELLED'}
+            
+            # Remove group membership from all items
+            for item in scene.outliner_items:
+                if item.group_memberships:
+                    groups = item.group_memberships.split(',')
+                    if self.group_id in groups:
+                        groups.remove(self.group_id)
+                        item.group_memberships = ','.join(groups)
+            
+            # Remove the group item
+            scene.outliner_items.remove(group_index)
+            
+            # Rebuild outliner
+            build_outliner_hierarchy(context)
+            self.report({'INFO'}, f"Deleted group: {group_item.name}")
             
         elif self.action == 'RENAME':
-            # Rename group
+            # Find selected group
+            selected_group = None
+            for item in scene.outliner_items:
+                if item.is_selected and item.item_type == 'GROUP':
+                    selected_group = item
+                    break
+            
             if selected_group:
                 selected_group.name = self.new_name
                 self.report({'INFO'}, f"Renamed group to: {self.new_name}")
-                
-        elif self.action == 'DELETE':
-            # Delete group
-            # TODO: Implement deletion logic
-            self.report({'INFO'}, "Would delete group")
         
         # Update UI
         context.area.tag_redraw()
