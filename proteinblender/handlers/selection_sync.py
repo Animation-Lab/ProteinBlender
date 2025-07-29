@@ -92,29 +92,36 @@ def update_outliner_from_blender_selection():
                     # Check if any domain of this chain is selected
                     chain_has_selection = False
                     for domain in parent_molecule.domains.values():
-                        if domain.object and domain.object.name in selected_names:
-                            # Check if domain belongs to this chain
-                            domain_chain_id = getattr(domain, 'chain_id', None)
-                            
-                            # Extract chain from domain name if needed
-                            if domain_chain_id is None and hasattr(domain, 'name'):
-                                import re
-                                match = re.search(r'Chain_([A-Z])', domain.name)
-                                if match:
-                                    domain_chain_id = match.group(1)
-                                elif '_' in domain.name:
-                                    match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                                    if match2:
-                                        domain_chain_id = int(match2.group(1))
-                            
-                            # Check if this domain belongs to the chain
-                            if domain_chain_id is not None:
-                                domain_chain_str = str(domain_chain_id)
-                                chain_str = str(chain_id)
-                                
-                                if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                                    chain_has_selection = True
-                                    break
+                        if domain.object:
+                            try:
+                                # Check if object is still valid before accessing it
+                                obj_name = domain.object.name
+                                if obj_name in selected_names:
+                                    # Check if domain belongs to this chain
+                                    domain_chain_id = getattr(domain, 'chain_id', None)
+                                    
+                                    # Extract chain from domain name if needed
+                                    if domain_chain_id is None and hasattr(domain, 'name'):
+                                        import re
+                                        match = re.search(r'Chain_([A-Z])', domain.name)
+                                        if match:
+                                            domain_chain_id = match.group(1)
+                                        elif '_' in domain.name:
+                                            match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                                            if match2:
+                                                domain_chain_id = int(match2.group(1))
+                                    
+                                    # Check if this domain belongs to the chain
+                                    if domain_chain_id is not None:
+                                        domain_chain_str = str(domain_chain_id)
+                                        chain_str = str(chain_id)
+                                        
+                                        if domain_chain_str == chain_str or domain_chain_id == chain_id:
+                                            chain_has_selection = True
+                                            break
+                            except ReferenceError:
+                                # Object has been removed, skip this domain
+                                pass
                     
                     item.is_selected = chain_has_selection
             else:
@@ -178,7 +185,17 @@ def sync_outliner_to_blender_selection(context, item_id):
                 # Update all domains
                 for domain in molecule.domains.values():
                     if domain.object:
-                        domain.object.select_set(item.is_selected)
+                        try:
+                            # Check if object is still valid before accessing it
+                            domain.object.name  # This will raise ReferenceError if invalid
+                            domain.object.select_set(item.is_selected)
+                        except ReferenceError:
+                            # Object has been removed, try to refresh from name
+                            if hasattr(domain, 'object_name') and domain.object_name:
+                                fresh_obj = bpy.data.objects.get(domain.object_name)
+                                if fresh_obj:
+                                    domain.object = fresh_obj
+                                    fresh_obj.select_set(item.is_selected)
                 
                 # Make protein the active object if selected
                 if item.is_selected:
@@ -231,11 +248,24 @@ def sync_outliner_to_blender_selection(context, item_id):
                         
                         if domain_chain_str == chain_str or domain_chain_id == chain_id:
                             if domain.object:
-                                domain.object.select_set(item.is_selected)
-                                # Set the first selected domain as active
-                                if item.is_selected and not active_set:
-                                    context.view_layer.objects.active = domain.object
-                                    active_set = True
+                                try:
+                                    # Check if object is still valid before accessing it
+                                    domain.object.name  # This will raise ReferenceError if invalid
+                                    domain.object.select_set(item.is_selected)
+                                    # Set the first selected domain as active
+                                    if item.is_selected and not active_set:
+                                        context.view_layer.objects.active = domain.object
+                                        active_set = True
+                                except ReferenceError:
+                                    # Object has been removed, try to refresh from name
+                                    if hasattr(domain, 'object_name') and domain.object_name:
+                                        fresh_obj = bpy.data.objects.get(domain.object_name)
+                                        if fresh_obj:
+                                            domain.object = fresh_obj
+                                            fresh_obj.select_set(item.is_selected)
+                                            if item.is_selected and not active_set:
+                                                context.view_layer.objects.active = fresh_obj
+                                                active_set = True
         
         elif item.item_type == 'GROUP':
             # Select all members of the group

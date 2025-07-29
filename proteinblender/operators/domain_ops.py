@@ -276,6 +276,9 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             self.report({'ERROR'}, "Molecule not found")
             return {'CANCELLED'}
         
+        # Capture molecule state before making changes (for undo/redo support)
+        scene_manager._capture_molecule_state(self.molecule_id)
+        
         # Log existing domains before split
         self.report({'INFO'}, f"Existing domains before split:")
         for domain_id, domain in molecule.domains.items():
@@ -497,6 +500,9 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         if not molecule:
             self.report({'ERROR'}, "Could not find parent molecule")
             return {'CANCELLED'}
+        
+        # Capture molecule state before making changes (for undo/redo support)
+        scene_manager._capture_molecule_state(molecule_id)
         
         # Calculate merged domain range
         merged_start = selected_domains[0].domain_start
