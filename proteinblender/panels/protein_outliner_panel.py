@@ -199,6 +199,11 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         if clicked_item.item_type == 'PROTEIN':
             # Select/deselect all children (chains and domains)
             self.select_children(scene, clicked_item.item_id, new_selection_state)
+        elif clicked_item.item_type == 'CHAIN':
+            # For chains, only select children if the chain is being selected
+            # Don't auto-deselect children when deselecting a chain
+            if new_selection_state:
+                self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'GROUP':
             # Select/deselect all references in the group
             for ref_item in scene.outliner_items:
@@ -216,13 +221,65 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         # Note: We don't automatically select/deselect children for chains anymore
         # This allows independent chain selection without affecting parent
         
+        # Update parent chain selection based on children
+        if clicked_item.item_type == 'DOMAIN':
+            # Check if all sibling domains are selected
+            parent_chain_id = clicked_item.parent_id
+            if parent_chain_id:
+                self.update_parent_chain_selection(scene, parent_chain_id)
+        
         # Sync to Blender selection
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
         sync_outliner_to_blender_selection(context, actual_item_id)
         
+        # Initialize domain maker values based on selection
+        if hasattr(scene, 'domain_maker_start'):
+            if clicked_item.item_type == 'CHAIN':
+                # Always update to the chain's range when selecting a chain
+                scene.domain_maker_start = clicked_item.chain_start
+                # Set end to a reasonable default within the chain
+                if clicked_item.chain_end > clicked_item.chain_start:
+                    scene.domain_maker_end = min(clicked_item.chain_start + 50, clicked_item.chain_end)
+                else:
+                    scene.domain_maker_end = clicked_item.chain_end
+            elif clicked_item.item_type == 'DOMAIN':
+                # Set to domain's current range
+                scene.domain_maker_start = clicked_item.domain_start
+                scene.domain_maker_end = clicked_item.domain_end
+        
         # Update UI
         context.area.tag_redraw()
         return {'FINISHED'}
+    
+    def update_parent_chain_selection(self, scene, chain_id):
+        """Update chain selection based on whether all its domains are selected"""
+        # Find the chain item
+        chain_item = None
+        for item in scene.outliner_items:
+            if item.item_id == chain_id and item.item_type == 'CHAIN':
+                chain_item = item
+                break
+        
+        if not chain_item:
+            return
+        
+        # Count selected vs total domains
+        total_domains = 0
+        selected_domains = 0
+        
+        for item in scene.outliner_items:
+            if item.parent_id == chain_id and item.item_type == 'DOMAIN':
+                total_domains += 1
+                if item.is_selected:
+                    selected_domains += 1
+        
+        # Chain is selected only if all its domains are selected
+        # and there's at least one domain
+        if total_domains > 0:
+            chain_item.is_selected = (selected_domains == total_domains)
+        else:
+            # If no domains, chain selection is independent
+            pass
     
     def select_children(self, scene, parent_id, select_state):
         """Recursively select/deselect all children of an item"""

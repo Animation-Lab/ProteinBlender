@@ -2,9 +2,187 @@
 
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, IntProperty
+from bpy.props import StringProperty, IntProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
-from ..core.domain import Domain
+
+
+class PROTEINBLENDER_OT_split_domain_popup(Operator):
+    """Split domain/chain with popup for range selection"""
+    bl_idname = "proteinblender.split_domain_popup"
+    bl_label = "Split Domain"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    item_id: StringProperty(
+        name="Item ID",
+        description="ID of the item to split"
+    )
+    
+    item_type: EnumProperty(
+        name="Item Type",
+        items=[
+            ('CHAIN', 'Chain', 'Split a chain'),
+            ('DOMAIN', 'Domain', 'Split a domain')
+        ]
+    )
+    
+    split_start: IntProperty(
+        name="Start",
+        description="Start residue for split",
+        min=1,
+        max=10000,
+        default=1
+    )
+    
+    split_end: IntProperty(
+        name="End", 
+        description="End residue for split",
+        min=1,
+        max=10000,
+        default=50
+    )
+    
+    def invoke(self, context, event):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Find the selected item
+        selected_item = None
+        for item in scene.outliner_items:
+            if item.item_id == self.item_id:
+                selected_item = item
+                break
+        
+        if not selected_item:
+            return {'CANCELLED'}
+        
+        # Get the range for this item - use the actual item type, not the passed property
+        actual_type = selected_item.item_type
+        if actual_type == 'CHAIN':
+            min_val = selected_item.chain_start
+            max_val = selected_item.chain_end
+        else:  # DOMAIN
+            min_val = selected_item.domain_start
+            max_val = selected_item.domain_end
+        
+        # Update our item_type to match the actual type
+        self.item_type = actual_type
+        
+        # Set default values to something reasonable within the valid range
+        self.split_start = min_val
+        # For the end value, try to set it to min + 50, but not beyond max
+        if max_val - min_val > 50:
+            self.split_end = min_val + 50
+        else:
+            # If range is small, set to midpoint
+            self.split_end = min_val + (max_val - min_val) // 2
+            if self.split_end == min_val:
+                self.split_end = min_val + 1  # Ensure end > start
+        
+        # Show popup
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        
+        # Find the selected item to get valid range
+        selected_item = None
+        for item in scene.outliner_items:
+            if item.item_id == self.item_id:
+                selected_item = item
+                break
+        
+        if selected_item:
+            # Use the actual item type from the item
+            actual_type = selected_item.item_type
+            if actual_type == 'CHAIN':
+                min_val = selected_item.chain_start
+                max_val = selected_item.chain_end
+            else:  # DOMAIN
+                min_val = selected_item.domain_start
+                max_val = selected_item.domain_end
+            
+            layout.label(text=f"Split {selected_item.name}")
+            layout.label(text=f"Valid range: {min_val}-{max_val}")
+            layout.separator()
+            
+            col = layout.column()
+            col.prop(self, "split_start")
+            col.prop(self, "split_end")
+            
+            # Validation warnings
+            if self.split_start < min_val or self.split_start > max_val:
+                layout.label(text=f"Start must be {min_val}-{max_val}", icon='ERROR')
+            if self.split_end < min_val or self.split_end > max_val:
+                layout.label(text=f"End must be {min_val}-{max_val}", icon='ERROR')
+            if self.split_start >= self.split_end:
+                layout.label(text="Start must be less than End", icon='ERROR')
+            if self.split_start == min_val and self.split_end == max_val:
+                layout.label(text="Range covers entire item", icon='ERROR')
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Find the item
+        selected_item = None
+        for item in scene.outliner_items:
+            if item.item_id == self.item_id:
+                selected_item = item
+                break
+        
+        if not selected_item:
+            return {'CANCELLED'}
+        
+        # Get the valid range for clamping - use actual item type
+        actual_type = selected_item.item_type
+        if actual_type == 'CHAIN':
+            min_val = selected_item.chain_start
+            max_val = selected_item.chain_end
+        else:  # DOMAIN
+            min_val = selected_item.domain_start
+            max_val = selected_item.domain_end
+        
+        # Clamp values to valid range
+        clamped_start = max(min_val, min(self.split_start, max_val))
+        clamped_end = max(min_val, min(self.split_end, max_val))
+        
+        # Validate clamped values
+        if clamped_start >= clamped_end:
+            self.report({'ERROR'}, "Invalid range: start must be less than end")
+            return {'CANCELLED'}
+        
+        if clamped_start == min_val and clamped_end == max_val:
+            self.report({'ERROR'}, "Cannot split: range covers entire item")
+            return {'CANCELLED'}
+        
+        # Get molecule and chain info - use actual item type
+        if actual_type == 'CHAIN':
+            molecule_id = selected_item.parent_id
+            chain_id = selected_item.chain_id
+        else:  # DOMAIN
+            # For domains, get parent chain
+            parent_chain = None
+            for item in scene.outliner_items:
+                if item.item_id == selected_item.parent_id:
+                    parent_chain = item
+                    break
+            if parent_chain:
+                molecule_id = parent_chain.parent_id
+                chain_id = parent_chain.chain_id
+            else:
+                self.report({'ERROR'}, "Could not find parent chain")
+                return {'CANCELLED'}
+        
+        # Call the split operator with clamped values
+        bpy.ops.proteinblender.split_domain(
+            chain_id=chain_id,
+            molecule_id=molecule_id,
+            split_start=clamped_start,
+            split_end=clamped_end
+        )
+        
+        return {'FINISHED'}
 
 
 class PROTEINBLENDER_OT_split_domain(Operator):
@@ -98,6 +276,12 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             self.report({'ERROR'}, "Molecule not found")
             return {'CANCELLED'}
         
+        # Log existing domains before split
+        self.report({'INFO'}, f"Existing domains before split:")
+        for domain_id, domain in molecule.domains.items():
+            if hasattr(domain, 'chain_id'):
+                self.report({'INFO'}, f"  Domain {domain_id}: chain={domain.chain_id}, range={domain.start}-{domain.end}, name={domain.name}")
+        
         # Validate range
         if not self.validate_split_range(molecule):
             return {'CANCELLED'}
@@ -105,27 +289,93 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # Auto-generate domains to cover full chain
         domains = self.auto_generate_domains(molecule)
         
-        # Create the domains
+        # Find and remove domains that are being split
+        # This includes both full-chain domains and partial domains that match our split range
+        domains_to_remove = []
+        chain_start, chain_end = self.get_chain_range(molecule)
+        
+        self.report({'INFO'}, f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
+        
+        for domain_id, domain in molecule.domains.items():
+            # Check if this domain belongs to our chain
+            if hasattr(domain, 'chain_id'):
+                self.report({'INFO'}, f"Checking domain {domain_id}: chain_id={domain.chain_id}, range={domain.start}-{domain.end}")
+                
+                # Compare chain IDs as strings to handle type mismatches
+                if str(domain.chain_id) == str(self.chain_id):
+                    # Remove domains that overlap with our split range
+                    # This includes:
+                    # 1. Domains that span our entire split range (the domain being split)
+                    # 2. Full-chain domains when splitting from chain level
+                    # 3. Any domain that would conflict with our new domains
+                    
+                    # Check if this domain contains or equals our split range
+                    if (domain.start <= self.split_start and domain.end >= self.split_end):
+                        domains_to_remove.append(domain_id)
+                        self.report({'INFO'}, f"Will remove domain that contains split range: {domain.name} ({domain.start}-{domain.end})")
+                    # Also check for any domains that would overlap with our split
+                    elif ((domain.start >= self.split_start and domain.start <= self.split_end) or
+                          (domain.end >= self.split_start and domain.end <= self.split_end)):
+                        domains_to_remove.append(domain_id)
+                        self.report({'INFO'}, f"Will remove overlapping domain: {domain.name} ({domain.start}-{domain.end})")
+        
+        # Remove the domains
+        self.report({'INFO'}, f"Removing {len(domains_to_remove)} domains")
+        for domain_id in domains_to_remove:
+            if domain_id in molecule.domains:
+                domain = molecule.domains[domain_id]
+                # Remove the domain's Blender object if it exists
+                if hasattr(domain, 'object') and domain.object:
+                    try:
+                        bpy.data.objects.remove(domain.object, do_unlink=True)
+                        self.report({'INFO'}, f"Removed Blender object for domain {domain_id}")
+                    except:
+                        self.report({'WARNING'}, f"Could not remove Blender object for domain {domain_id}")
+                # Remove from molecule's domains
+                del molecule.domains[domain_id]
+                self.report({'INFO'}, f"Removed domain {domain_id} from molecule")
+        
+        # Create the new domains
+        created_domains = []
         for i, (start, end) in enumerate(domains):
-            domain_name = f"Domain {self.chain_id}{chr(65 + i)}"  # A, B, C...
+            domain_name = f"Residues {start}-{end}"  # More descriptive name
             
-            # Create domain using existing domain creation logic
-            domain = Domain(
-                name=domain_name,
-                object=None,  # Will be created
-                start=start,
-                end=end
-            )
+            # Check if this exact domain already exists for this chain
+            domain_exists = False
+            for domain_id, domain in molecule.domains.items():
+                if (hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id) and
+                    domain.start == start and domain.end == end):
+                    domain_exists = True
+                    self.report({'INFO'}, f"Domain {domain_name} already exists, skipping creation")
+                    created_domains.append(domain_id)
+                    break
             
-            # Add to molecule
-            domain_id = f"domain_{self.chain_id}_{chr(65 + i).lower()}"
-            molecule.domains[domain_id] = domain
-            
-            # TODO: Create actual domain object using MolecularNodes
-            self.report({'INFO'}, f"Created {domain_name} (residues {start}-{end})")
+            if not domain_exists:
+                # Create domain using the molecule's create_domain method
+                # The method expects: chain_id_int_str, start, end, name, auto_fill_chain, parent_domain_id
+                created_domain_ids = molecule._create_domain_with_params(
+                    self.chain_id,  # chain_id_int_str
+                    start,          # start
+                    end,            # end
+                    domain_name,    # name
+                    False,          # auto_fill_chain
+                    None            # parent_domain_id
+                )
+                
+                if created_domain_ids:
+                    created_domains.extend(created_domain_ids)
+                    self.report({'INFO'}, f"Created {domain_name}")
+                else:
+                    self.report({'WARNING'}, f"Failed to create domain {start}-{end}")
         
         # Rebuild outliner to show new domains
         build_outliner_hierarchy(context)
+        
+        # Log final state
+        self.report({'INFO'}, f"Domains after split:")
+        for domain_id, domain in molecule.domains.items():
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id):
+                self.report({'INFO'}, f"  Domain {domain_id}: range={domain.start}-{domain.end}, name={domain.name}")
         
         return {'FINISHED'}
     
@@ -135,34 +385,62 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             self.report({'ERROR'}, "Start must be less than end")
             return False
         
-        # TODO: Validate against actual chain residue range
-        # For now, just check basic sanity
-        if self.split_start < 1:
-            self.report({'ERROR'}, "Start residue must be at least 1")
+        # Get actual chain range
+        chain_start, chain_end = self.get_chain_range(molecule)
+        
+        if self.split_start < chain_start:
+            self.report({'ERROR'}, f"Start residue must be at least {chain_start}")
+            return False
+            
+        if self.split_end > chain_end:
+            self.report({'ERROR'}, f"End residue must be at most {chain_end}")
             return False
         
         return True
     
+    def get_chain_range(self, molecule):
+        """Get the actual residue range for this chain"""
+        chain_start = 1
+        chain_end = 200  # Default fallback
+        
+        # Try to get the actual chain range
+        if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
+            # Try multiple ways to find the correct chain range
+            chain_id_int = int(self.chain_id) if self.chain_id.isdigit() else None
+            
+            # Method 1: Use idx_to_label_asym_id_map
+            if hasattr(molecule, 'idx_to_label_asym_id_map') and chain_id_int is not None:
+                if chain_id_int in molecule.idx_to_label_asym_id_map:
+                    label_asym_id = molecule.idx_to_label_asym_id_map[chain_id_int]
+                    if label_asym_id in molecule.chain_residue_ranges:
+                        chain_start, chain_end = molecule.chain_residue_ranges[label_asym_id]
+            
+            # Method 2: Try direct string lookup
+            if (chain_start, chain_end) == (1, 200) and self.chain_id in molecule.chain_residue_ranges:
+                chain_start, chain_end = molecule.chain_residue_ranges[self.chain_id]
+        
+        return chain_start, chain_end
+    
     def auto_generate_domains(self, molecule):
         """Generate domain ranges to cover the full chain"""
-        # For this example, assume chain goes from 1 to 200
-        # TODO: Get actual chain residue range from molecule data
-        chain_start = 1
-        chain_end = 200
+        # Get actual chain residue range from molecule data
+        chain_start, chain_end = self.get_chain_range(molecule)
         
         domains = []
         
-        # If split doesn't start at chain start, create preceding domain
+        # Always create the three domains for a split:
+        # 1. Before split (if exists)
         if self.split_start > chain_start:
             domains.append((chain_start, self.split_start - 1))
         
-        # Add the requested domain
+        # 2. The split domain itself
         domains.append((self.split_start, self.split_end))
         
-        # If split doesn't end at chain end, create following domain
+        # 3. After split (if exists)
         if self.split_end < chain_end:
             domains.append((self.split_end + 1, chain_end))
         
+        self.report({'INFO'}, f"Auto-generated domains: {domains}")
         return domains
 
 
@@ -174,6 +452,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
     
     def execute(self, context):
         scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
         
         # Find selected domains
         selected_domains = []
@@ -191,8 +470,77 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
             self.report({'WARNING'}, "Can only merge domains from the same chain")
             return {'CANCELLED'}
         
-        # TODO: Implement actual domain merging logic
-        self.report({'INFO'}, f"Would merge {len(selected_domains)} domains")
+        # Sort domains by start position
+        selected_domains.sort(key=lambda d: d.domain_start)
+        
+        # Check if they're adjacent
+        for i in range(len(selected_domains) - 1):
+            if selected_domains[i].domain_end + 1 != selected_domains[i+1].domain_start:
+                self.report({'WARNING'}, "Domains must be adjacent to merge")
+                return {'CANCELLED'}
+        
+        # Get parent chain and molecule
+        parent_chain_id = list(parent_chains)[0]
+        parent_chain = None
+        for item in scene.outliner_items:
+            if item.item_id == parent_chain_id:
+                parent_chain = item
+                break
+        
+        if not parent_chain:
+            self.report({'ERROR'}, "Could not find parent chain")
+            return {'CANCELLED'}
+        
+        molecule_id = parent_chain.parent_id
+        molecule = scene_manager.molecules.get(molecule_id)
+        
+        if not molecule:
+            self.report({'ERROR'}, "Could not find parent molecule")
+            return {'CANCELLED'}
+        
+        # Calculate merged domain range
+        merged_start = selected_domains[0].domain_start
+        merged_end = selected_domains[-1].domain_end
+        merged_name = f"Residues {merged_start}-{merged_end}"
+        
+        # Remove the old domains
+        for domain_item in selected_domains:
+            # Find the actual domain in molecule
+            domain_to_remove = None
+            for domain_id, domain in molecule.domains.items():
+                if (hasattr(domain, 'start') and hasattr(domain, 'end') and
+                    domain.start == domain_item.domain_start and 
+                    domain.end == domain_item.domain_end and
+                    str(domain.chain_id) == parent_chain.chain_id):
+                    domain_to_remove = domain_id
+                    break
+            
+            if domain_to_remove:
+                domain = molecule.domains[domain_to_remove]
+                # Remove the domain's Blender object if it exists
+                if hasattr(domain, 'object') and domain.object:
+                    bpy.data.objects.remove(domain.object, do_unlink=True)
+                # Remove from molecule's domains
+                del molecule.domains[domain_to_remove]
+                self.report({'INFO'}, f"Removed domain: {domain_item.name}")
+        
+        # Create the merged domain
+        created_domain_ids = molecule._create_domain_with_params(
+            parent_chain.chain_id,  # chain_id_int_str
+            merged_start,           # start
+            merged_end,             # end
+            merged_name,            # name
+            False,                  # auto_fill_chain
+            None                    # parent_domain_id
+        )
+        
+        if created_domain_ids:
+            self.report({'INFO'}, f"Created merged domain: {merged_name}")
+        else:
+            self.report({'ERROR'}, "Failed to create merged domain")
+        
+        # Rebuild outliner
+        build_outliner_hierarchy(context)
         
         return {'FINISHED'}
 
@@ -248,6 +596,7 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
 
 # Operator classes to register
 CLASSES = [
+    PROTEINBLENDER_OT_split_domain_popup,
     PROTEINBLENDER_OT_split_domain,
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,

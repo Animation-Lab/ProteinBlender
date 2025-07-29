@@ -48,6 +48,7 @@ from .pose_operators import (
     MOLECULE_PB_OT_rename_pose,
 )
 from .domain_ops import (
+    PROTEINBLENDER_OT_split_domain_popup,
     PROTEINBLENDER_OT_split_domain,
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
@@ -92,6 +93,7 @@ CLASSES = (
     MOLECULE_PB_OT_update_pose,
     MOLECULE_PB_OT_delete_pose,
     MOLECULE_PB_OT_rename_pose,
+    PROTEINBLENDER_OT_split_domain_popup,
     PROTEINBLENDER_OT_split_domain,
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,

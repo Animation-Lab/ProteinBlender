@@ -1,9 +1,62 @@
 """Domain Maker panel with conditional display"""
 
 import bpy
-from bpy.types import Panel
+from bpy.types import Panel, Operator
 from bpy.props import IntProperty
 from ..utils.scene_manager import ProteinBlenderScene
+
+
+def get_selected_item_range(context):
+    """Get the valid range for the currently selected item"""
+    scene = context.scene
+    for item in scene.outliner_items:
+        if item.is_selected and item.item_type in ['CHAIN', 'DOMAIN']:
+            if item.item_type == 'CHAIN':
+                # Check if we have valid chain ranges
+                if item.chain_start > 0 and item.chain_end > 0 and item.chain_end >= item.chain_start:
+                    return item.chain_start, item.chain_end
+                else:
+                    # Fallback to a reasonable default range
+                    return 1, 200
+            else:  # DOMAIN
+                return item.domain_start, item.domain_end
+    return 1, 200  # Default if nothing selected
+
+
+
+
+class PROTEINBLENDER_OT_validate_domain_range(Operator):
+    """Validate and clamp domain range values"""
+    bl_idname = "proteinblender.validate_domain_range"
+    bl_label = "Validate Domain Range"
+    bl_options = {'REGISTER', 'INTERNAL'}
+    
+    def execute(self, context):
+        scene = context.scene
+        min_val, max_val = get_selected_item_range(context)
+        
+        # Clamp values to valid range
+        if scene.domain_maker_start < min_val:
+            scene.domain_maker_start = min_val
+        elif scene.domain_maker_start > max_val:
+            scene.domain_maker_start = max_val
+            
+        if scene.domain_maker_end < min_val:
+            scene.domain_maker_end = min_val
+        elif scene.domain_maker_end > max_val:
+            scene.domain_maker_end = max_val
+            
+        # Ensure start < end
+        if scene.domain_maker_start >= scene.domain_maker_end:
+            if scene.domain_maker_end > min_val:
+                scene.domain_maker_start = scene.domain_maker_end - 1
+            else:
+                scene.domain_maker_end = scene.domain_maker_start + 1
+                if scene.domain_maker_end > max_val:
+                    scene.domain_maker_end = max_val
+                    scene.domain_maker_start = max_val - 1
+        
+        return {'FINISHED'}
 
 
 class PROTEINBLENDER_PT_domain_maker(Panel):
@@ -18,16 +71,45 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
     
     @classmethod
     def poll(cls, context):
-        """Only show panel when a single chain or domain is selected"""
+        """Show panel when chains or domains are selected"""
         scene = context.scene
         selected_items = [item for item in scene.outliner_items if item.is_selected]
         
-        # Must have exactly one selection
-        if len(selected_items) != 1:
+        # Must have at least one selection
+        if len(selected_items) == 0:
             return False
         
-        # Must be a chain or domain
-        return selected_items[0].item_type in ['CHAIN', 'DOMAIN']
+        # All selections must be chains or domains
+        for item in selected_items:
+            if item.item_type not in ['CHAIN', 'DOMAIN']:
+                return False
+        
+        return True
+    
+    def check_domains_adjacent(self, domains):
+        """Check if selected domains are adjacent and from same chain"""
+        if len(domains) < 2:
+            return False
+        
+        # Check all domains are from same parent chain
+        parent_chains = set()
+        for domain in domains:
+            # Get parent chain
+            parent_id = domain.parent_id
+            parent_chains.add(parent_id)
+        
+        if len(parent_chains) != 1:
+            return False
+        
+        # Sort domains by start position
+        sorted_domains = sorted(domains, key=lambda d: d.domain_start)
+        
+        # Check if they're adjacent (end of one is start-1 of next)
+        for i in range(len(sorted_domains) - 1):
+            if sorted_domains[i].domain_end + 1 != sorted_domains[i+1].domain_start:
+                return False
+        
+        return True
     
     def draw(self, context):
         layout = self.layout
@@ -41,12 +123,20 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         main_box.separator()
         scene_manager = ProteinBlenderScene.get_instance()
         
-        # Get the selected item
+        # Get the selected item - prioritize domains over chains
         selected_item = None
+        selected_chain = None
         for item in scene.outliner_items:
             if item.is_selected:
-                selected_item = item
-                break
+                if item.item_type == 'DOMAIN':
+                    selected_item = item
+                    break  # Domain takes priority
+                elif item.item_type == 'CHAIN' and selected_chain is None:
+                    selected_chain = item
+        
+        # If no domain selected, use the chain
+        if selected_item is None:
+            selected_item = selected_chain
         
         if not selected_item:
             main_box.label(text="Select a chain or domain", icon='INFO')
@@ -60,14 +150,31 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         if selected_item.item_type == 'CHAIN':
             col.label(text=f"Chain: {selected_item.name}", icon='LINKED')
             
-            # Get chain info
-            molecule_id = selected_item.parent_id
-            molecule = scene_manager.molecules.get(molecule_id)
-            
-            if molecule:
-                # Show chain residue range
-                # TODO: Get actual residue range from chain
-                col.label(text="Residue range: 1-200", icon='INFO')
+            # Show chain residue range
+            if selected_item.chain_start > 0 and selected_item.chain_end > 0 and selected_item.chain_end >= selected_item.chain_start:
+                col.label(text=f"Residue range: {selected_item.chain_start}-{selected_item.chain_end}", icon='INFO')
+            else:
+                # Try to get residue range from molecule if available
+                molecule_id = selected_item.parent_id
+                molecule = scene_manager.molecules.get(molecule_id)
+                if molecule and hasattr(molecule, 'chain_residue_ranges'):
+                    # Try to find the range for this chain
+                    found_range = False
+                    if hasattr(molecule, 'idx_to_label_asym_id_map'):
+                        try:
+                            chain_id_int = int(selected_item.chain_id)
+                            if chain_id_int in molecule.idx_to_label_asym_id_map:
+                                label_asym_id = molecule.idx_to_label_asym_id_map[chain_id_int]
+                                if label_asym_id in molecule.chain_residue_ranges:
+                                    start, end = molecule.chain_residue_ranges[label_asym_id]
+                                    col.label(text=f"Residue range: {start}-{end}", icon='INFO')
+                                    found_range = True
+                        except:
+                            pass
+                    if not found_range:
+                        col.label(text="Residue range: Unable to determine", icon='INFO')
+                else:
+                    col.label(text="Residue range: Unknown", icon='INFO')
                 
         elif selected_item.item_type == 'DOMAIN':
             col.label(text=f"Domain: {selected_item.name}", icon='GROUP_VERTEX')
@@ -75,41 +182,64 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         
         main_box.separator()
         
-        # Split Chain button
-        if selected_item.item_type == 'CHAIN':
+        # Smart button based on selection
+        if selected_item.item_type in ['CHAIN', 'DOMAIN']:
             col = main_box.column(align=True)
-            col.label(text="Create Domain", icon='MESH_PLANE')
             
-            # Input fields for domain range
-            row = col.row(align=True)
+            # Count selected items and check if they're adjacent
+            selected_items = [item for item in scene.outliner_items if item.is_selected]
+            domains_selected = [item for item in selected_items if item.item_type == 'DOMAIN']
             
-            # Store values in scene for persistence
-            if not hasattr(scene, "domain_maker_start"):
-                scene.domain_maker_start = 1
-            if not hasattr(scene, "domain_maker_end"):
-                scene.domain_maker_end = 50
-            
-            row.prop(scene, "domain_maker_start", text="Start")
-            row.prop(scene, "domain_maker_end", text="End")
-            
-            # Split button
-            row = col.row()
-            row.scale_y = 1.5
-            op = row.operator("proteinblender.split_domain", text="Split Chain", icon='MESH_PLANE')
-            
-            # Pass parameters to operator
-            op.chain_id = selected_item.chain_id
-            op.molecule_id = selected_item.parent_id
-            op.split_start = scene.domain_maker_start
-            op.split_end = scene.domain_maker_end
-            
-            # Info about auto-generation
-            col.separator()
-            info_box = col.box()
-            info_col = info_box.column(align=True)
-            info_col.scale_y = 0.8
-            info_col.label(text="Auto-generates complementary", icon='INFO')
-            info_col.label(text="domains to cover full chain")
+            # Determine button type based on selection
+            if len(domains_selected) >= 2:
+                # Check if domains are adjacent and from same chain
+                can_merge = self.check_domains_adjacent(domains_selected)
+                
+                if can_merge:
+                    # Merge button
+                    row = col.row()
+                    row.scale_y = 1.5
+                    op = row.operator("proteinblender.merge_domains", text="Merge Domains", icon='AUTOMERGE_ON')
+                    col.separator()
+                    info_box = col.box()
+                    info_col = info_box.column(align=True)
+                    info_col.scale_y = 0.8
+                    info_col.label(text=f"Merge {len(domains_selected)} selected domains", icon='INFO')
+                else:
+                    # Can't merge - not adjacent or different chains
+                    row = col.row()
+                    row.scale_y = 1.5
+                    row.operator("proteinblender.merge_domains", text="Merge Domains", icon='AUTOMERGE_ON')
+                    row.enabled = False
+                    col.separator()
+                    info_box = col.box()
+                    info_col = info_box.column(align=True)
+                    info_col.scale_y = 0.8
+                    info_col.label(text="Domains must be adjacent", icon='ERROR')
+                    info_col.label(text="and from the same chain")
+            else:
+                # Split button for single chain/domain
+                if selected_item:
+                    item_type = "Chain" if selected_item.item_type == 'CHAIN' else "Domain"
+                    row = col.row()
+                    row.scale_y = 1.5
+                    op = row.operator("proteinblender.split_domain_popup", text=f"Split {item_type}", icon='MESH_PLANE')
+                    op.item_id = selected_item.item_id
+                    op.item_type = selected_item.item_type
+                else:
+                    # No valid selection
+                    row = col.row()
+                    row.scale_y = 1.5
+                    row.label(text="No valid selection", icon='ERROR')
+                    return
+                
+                col.separator()
+                info_box = col.box()
+                info_col = info_box.column(align=True)
+                info_col.scale_y = 0.8
+                info_col.label(text="Split into multiple domains", icon='INFO')
+                if selected_item.item_type == 'CHAIN':
+                    info_col.label(text="Auto-generates complementary domains")
             
         # Domain operations
         elif selected_item.item_type == 'DOMAIN':
@@ -152,6 +282,7 @@ def register_props():
         name="Start",
         description="Start residue for new domain",
         min=1,
+        max=10000,  # Reasonable max for protein length
         default=1
     )
     
@@ -159,6 +290,7 @@ def register_props():
         name="End",
         description="End residue for new domain",
         min=1,
+        max=10000,  # Reasonable max for protein length
         default=50
     )
 
@@ -173,6 +305,7 @@ def unregister_props():
 
 # Classes to register
 CLASSES = [
+    PROTEINBLENDER_OT_validate_domain_range,
     PROTEINBLENDER_PT_domain_maker,
 ]
 

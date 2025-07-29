@@ -88,6 +88,20 @@ class ProteinOutlinerItem(PropertyGroup):
         description="For chain items, the chain identifier"
     )
     
+    chain_start: IntProperty(
+        name="Chain Start",
+        description="For chain items, start residue number",
+        default=1,
+        min=1
+    )
+    
+    chain_end: IntProperty(
+        name="Chain End",
+        description="For chain items, end residue number",
+        default=1,
+        min=1
+    )
+    
     domain_start: IntProperty(
         name="Domain Start",
         description="For domain items, start residue"

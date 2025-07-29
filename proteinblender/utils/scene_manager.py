@@ -637,6 +637,43 @@ def build_outliner_hierarchy(context=None):
                 chain_item.indent_level = 1
                 chain_item.icon = 'LINKED'
                 
+                # Get chain residue ranges
+                if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
+                    # chain_residue_ranges is keyed by label_asym_id (like 'A', 'B', etc)
+                    # Try multiple ways to find the correct chain range
+                    
+                    # First, try using idx_to_label_asym_id_map
+                    if hasattr(molecule, 'idx_to_label_asym_id_map') and chain_id in molecule.idx_to_label_asym_id_map:
+                        label_asym_id = molecule.idx_to_label_asym_id_map[chain_id]
+                        if label_asym_id in molecule.chain_residue_ranges:
+                            start, end = molecule.chain_residue_ranges[label_asym_id]
+                            chain_item.chain_start = start
+                            chain_item.chain_end = end
+                    # Second, try auth_chain_id_map
+                    elif chain_mapping and chain_id in chain_mapping:
+                        label_asym_id = chain_mapping[chain_id]
+                        if label_asym_id in molecule.chain_residue_ranges:
+                            start, end = molecule.chain_residue_ranges[label_asym_id]
+                            chain_item.chain_start = start
+                            chain_item.chain_end = end
+                    # Third, try using chain_name directly if it matches
+                    elif chain_name in molecule.chain_residue_ranges:
+                        start, end = molecule.chain_residue_ranges[chain_name]
+                        chain_item.chain_start = start
+                        chain_item.chain_end = end
+                    # Fourth, try converting chain_id to string
+                    elif str(chain_id) in molecule.chain_residue_ranges:
+                        start, end = molecule.chain_residue_ranges[str(chain_id)]
+                        chain_item.chain_start = start
+                        chain_item.chain_end = end
+                    
+                    # Debug output if we couldn't find ranges
+                    if chain_item.chain_start == 1 and chain_item.chain_end == 1:
+                        print(f"Warning: Could not find residue range for chain {chain_name} (id={chain_id})")
+                        print(f"  Available keys in chain_residue_ranges: {list(molecule.chain_residue_ranges.keys())}")
+                        if hasattr(molecule, 'idx_to_label_asym_id_map'):
+                            print(f"  idx_to_label_asym_id_map: {molecule.idx_to_label_asym_id_map}")
+                
                 # Debug output (commented out for production)
                 # print(f"\nProcessing chain {chain_name} (id={chain_id}):")
                 # print(f"Available domains in molecule: {list(molecule.domains.keys())}")
