@@ -568,7 +568,7 @@ def build_outliner_hierarchy(context=None):
     item_memberships = {}  # Store which groups each item belongs to
     
     for item in scene.outliner_items:
-        if item.item_type == 'GROUP':
+        if item.item_type == 'GROUP' and item.item_id != "groups_separator":
             existing_groups[item.item_id] = {
                 'name': item.name,
                 'is_expanded': item.is_expanded,

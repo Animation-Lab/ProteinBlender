@@ -47,6 +47,26 @@ class PROTEINBLENDER_UL_outliner(UIList):
         
         return True
     
+    def _are_all_group_members_selected(self, scene, group_item):
+        """Check if all members of a group are selected"""
+        member_ids = group_item.group_memberships.split(',') if group_item.group_memberships else []
+        if not member_ids:
+            return False
+        
+        # Check each member
+        for member_id in member_ids:
+            member_selected = False
+            for item in scene.outliner_items:
+                if item.item_id == member_id:
+                    if not item.is_selected:
+                        return False
+                    member_selected = True
+                    break
+            if not member_selected:
+                return False
+        
+        return True
+    
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         # Check if this is the separator
         if item.item_id == "groups_separator":
@@ -80,17 +100,32 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Add some space before the controls
         row.separator()
         
-        # For groups, add edit and delete buttons
+        # For groups, add delete button, checkbox and visibility toggle
         if item.item_type == 'GROUP' and item.item_id != "groups_separator":
-            # Edit button
-            op = row.operator("proteinblender.edit_group", text="", icon='GREASEPENCIL')
-            op.action = 'EDIT'
-            op.group_id = item.item_id
-            
-            # Delete button
-            op = row.operator("proteinblender.edit_group", text="", icon='X')
+            # Delete button (trash can) - use the edit_group operator with DELETE action
+            op = row.operator("proteinblender.edit_group", text="", icon='TRASH', emboss=False)
             op.action = 'DELETE'
             op.group_id = item.item_id
+            
+            # Selection checkbox - check if all members are selected
+            all_selected = self._are_all_group_members_selected(context.scene, item)
+            
+            if all_selected:
+                selection_icon = 'CHECKBOX_HLT'
+            else:
+                selection_icon = 'CHECKBOX_DEHLT'
+            
+            # Use regular outliner_select operator for groups
+            op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
+            op.item_id = item.item_id
+            
+            # Visibility toggle
+            if item.is_visible:
+                visibility_icon = 'HIDE_OFF'
+            else:
+                visibility_icon = 'HIDE_ON'
+            op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
+            op.item_id = item.item_id
         else:
             # Selection toggle (unlabeled checkbox in mockup)
             if item.is_selected:
@@ -109,6 +144,8 @@ class PROTEINBLENDER_UL_outliner(UIList):
             op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
             op.item_id = item.item_id
     
+
+
 
 
 class PROTEINBLENDER_OT_toggle_expand(Operator):
@@ -200,30 +237,64 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             # Select/deselect all children (chains and domains)
             self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'CHAIN':
-            # For chains, only select children if the chain is being selected
-            # Don't auto-deselect children when deselecting a chain
-            if new_selection_state:
+            # Check if this chain has domains
+            has_domains = False
+            for item in scene.outliner_items:
+                if item.parent_id == clicked_item.item_id and item.item_type == 'DOMAIN':
+                    has_domains = True
+                    break
+            
+            # If chain has domains, don't auto-select children
+            # The chain checkbox should only reflect if ALL domains are selected
+            if not has_domains and new_selection_state:
+                # Only chains without domains should select their children (if any)
                 self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'GROUP':
-            # Select/deselect all references in the group
-            for ref_item in scene.outliner_items:
-                if ref_item.parent_id == clicked_item.item_id and "_ref_" in ref_item.item_id:
-                    ref_item.is_selected = new_selection_state
-                    # Also update the original item that this reference points to
-                    if ref_item.group_memberships:
-                        for orig_item in scene.outliner_items:
-                            if orig_item.item_id == ref_item.group_memberships:
-                                orig_item.is_selected = new_selection_state
-                                # If it's a protein, also select its children
-                                if orig_item.item_type == 'PROTEIN':
-                                    self.select_children(scene, orig_item.item_id, new_selection_state)
-                                break
+            # For groups, we want the checkbox to select/deselect all members
+            # Get member IDs from group
+            member_ids = clicked_item.group_memberships.split(',') if clicked_item.group_memberships else []
+            
+            # Check if all members are currently selected
+            all_selected = True
+            for member_id in member_ids:
+                for item in scene.outliner_items:
+                    if item.item_id == member_id:
+                        if not item.is_selected:
+                            all_selected = False
+                            break
+                if not all_selected:
+                    break
+            
+            # Toggle selection state based on current state
+            new_state = not all_selected
+            
+            # Select/deselect ONLY the actual members listed in the group
+            for member_id in member_ids:
+                for item in scene.outliner_items:
+                    if item.item_id == member_id:
+                        item.is_selected = new_state
+                        
+                        # Update all references to this item
+                        for ref_item in scene.outliner_items:
+                            if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
+                                ref_item.is_selected = new_state
+                        
+                        # Sync this member to Blender
+                        from ..handlers.selection_sync import sync_outliner_to_blender_selection
+                        sync_outliner_to_blender_selection(context, member_id)
+                        
+                        # For groups, we should NOT automatically select children
+                        # Groups should only select their explicit members
+                        break
+            
+            # Don't modify clicked_item.is_selected for groups
+            return {'FINISHED'}
         # Note: We don't automatically select/deselect children for chains anymore
         # This allows independent chain selection without affecting parent
         
         # Update parent chain selection based on children
         if clicked_item.item_type == 'DOMAIN':
-            # Check if all sibling domains are selected
+            # Always update parent chain selection when domain selection changes
             parent_chain_id = clicked_item.parent_id
             if parent_chain_id:
                 self.update_parent_chain_selection(scene, parent_chain_id)
@@ -282,7 +353,10 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             pass
     
     def select_children(self, scene, parent_id, select_state):
-        """Recursively select/deselect all children of an item"""
+        """Recursively select/deselect all children of an item and sync to Blender"""
+        # Import sync function
+        from ..handlers.selection_sync import sync_outliner_to_blender_selection
+        
         # Find the parent item to check if it's a group
         parent_item = None
         for item in scene.outliner_items:
@@ -297,6 +371,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 for item in scene.outliner_items:
                     if item.item_id == member_id:
                         item.is_selected = select_state
+                        # Sync this item to Blender
+                        sync_outliner_to_blender_selection(bpy.context, member_id)
                         # Update all references to this item
                         for ref_item in scene.outliner_items:
                             if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
@@ -310,6 +386,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             for item in scene.outliner_items:
                 if item.parent_id == parent_id:
                     item.is_selected = select_state
+                    # Sync this item to Blender (especially important for domains)
+                    sync_outliner_to_blender_selection(bpy.context, item.item_id)
                     # Update all references to this item
                     for ref_item in scene.outliner_items:
                         if "_ref_" in ref_item.item_id and ref_item.group_memberships == item.item_id:

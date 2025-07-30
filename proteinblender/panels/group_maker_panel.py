@@ -187,6 +187,9 @@ class PROTEINBLENDER_OT_edit_group(Operator):
                     self.new_name = item.name
                     break
             return context.window_manager.invoke_props_dialog(self)
+        elif self.action == 'DELETE':
+            # Show confirmation dialog
+            return context.window_manager.invoke_confirm(self, event)
         return self.execute(context)
     
     def draw(self, context):
@@ -340,48 +343,11 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         box.label(text="Group Maker", icon='GROUP')
         box.separator()
         
-        # Check for existing groups
-        groups = [item for item in scene.outliner_items if item.item_type == 'GROUP']
-        
         # Create New Group button
         col = box.column(align=True)
         row = col.row()
         row.scale_y = 1.5
         row.operator("proteinblender.create_group", text="Create New Group", icon='GROUP')
-        
-        if groups:
-            col.separator()
-            
-            # Show existing groups
-            box = col.box()
-            box_col = box.column(align=True)
-            box_col.label(text="Groups:", icon='GROUP')
-            
-            for group in groups:
-                row = box_col.row(align=True)
-                
-                # Group name
-                if group.is_selected:
-                    row.label(text=group.name, icon='RADIOBUT_ON')
-                else:
-                    row.label(text=group.name, icon='RADIOBUT_OFF')
-                
-                # Edit operations
-                if group.is_selected:
-                    sub = row.row(align=True)
-                    sub.scale_x = 0.8
-                    
-                    op = sub.operator("proteinblender.edit_group", text="", icon='ADD')
-                    op.action = 'ADD'
-                    
-                    op = sub.operator("proteinblender.edit_group", text="", icon='REMOVE')
-                    op.action = 'REMOVE'
-                    
-                    op = sub.operator("proteinblender.edit_group", text="", icon='GREASEPENCIL')
-                    op.action = 'RENAME'
-                    
-                    op = sub.operator("proteinblender.edit_group", text="", icon='X')
-                    op.action = 'DELETE'
         
         # Info section
         box.separator()
@@ -391,7 +357,8 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         
         # Show selection info
         selected_items = [item for item in scene.outliner_items if item.is_selected]
-        ungrouped_items = [item for item in selected_items if item.item_type != 'GROUP']
+        # Filter out groups and separator from selection count
+        ungrouped_items = [item for item in selected_items if item.item_type not in ['GROUP'] and item.item_id != "groups_separator"]
         
         if ungrouped_items:
             info_col.label(text=f"{len(ungrouped_items)} items selected", icon='INFO')
