@@ -218,19 +218,18 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         new_selection_state = not clicked_item.is_selected
         clicked_item.is_selected = new_selection_state
         
-        # Update all references to this item (both ways)
-        # If this is a reference, update the original too
+        # Update references - but only in one direction to prevent loops
         if "_ref_" in self.item_id:
-            # Update the original item
+            # This is a reference item - update the original
             for orig_item in scene.outliner_items:
                 if orig_item.item_id == actual_item_id:
                     orig_item.is_selected = new_selection_state
                     break
-        
-        # Update all references to this item
-        for ref_item in scene.outliner_items:
-            if "_ref_" in ref_item.item_id and ref_item.group_memberships == actual_item_id:
-                ref_item.is_selected = new_selection_state
+        else:
+            # This is an original item - update all its references
+            for ref_item in scene.outliner_items:
+                if "_ref_" in ref_item.item_id and ref_item.group_memberships == actual_item_id:
+                    ref_item.is_selected = new_selection_state
         
         # Handle hierarchical selection
         if clicked_item.item_type == 'PROTEIN':
@@ -250,44 +249,23 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 # Only chains without domains should select their children (if any)
                 self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'GROUP':
-            # For groups, we want the checkbox to select/deselect all members
-            # Get member IDs from group
-            member_ids = clicked_item.group_memberships.split(',') if clicked_item.group_memberships else []
+            # For groups, clicking the checkbox should toggle the group's own selection state
+            # This does NOT automatically affect member selection - that's a separate action
+            # The group checkbox simply shows whether the group itself is "selected" for operations
             
-            # Check if all members are currently selected
-            all_selected = True
-            for member_id in member_ids:
-                for item in scene.outliner_items:
-                    if item.item_id == member_id:
-                        if not item.is_selected:
-                            all_selected = False
-                            break
-                if not all_selected:
-                    break
+            # Note: If you want the old behavior where group checkbox selects all members,
+            # that should be a separate operator or modifier key (e.g., Shift+Click)
             
-            # Toggle selection state based on current state
-            new_state = not all_selected
+            # For now, just toggle the group's selection state
+            # The visual checkbox state will reflect whether all members are selected
+            # via the _are_all_group_members_selected check in draw_item
             
-            # Select/deselect ONLY the actual members listed in the group
-            for member_id in member_ids:
-                for item in scene.outliner_items:
-                    if item.item_id == member_id:
-                        item.is_selected = new_state
-                        
-                        # Update all references to this item
-                        for ref_item in scene.outliner_items:
-                            if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
-                                ref_item.is_selected = new_state
-                        
-                        # Sync this member to Blender
-                        from ..handlers.selection_sync import sync_outliner_to_blender_selection
-                        sync_outliner_to_blender_selection(context, member_id)
-                        
-                        # For groups, we should NOT automatically select children
-                        # Groups should only select their explicit members
-                        break
+            # Update UI immediately before returning
+            for area in context.screen.areas:
+                if area.type == 'PROPERTIES':
+                    area.tag_redraw()
             
-            # Don't modify clicked_item.is_selected for groups
+            # Don't propagate to members - just return
             return {'FINISHED'}
         # Note: We don't automatically select/deselect children for chains anymore
         # This allows independent chain selection without affecting parent
@@ -299,7 +277,16 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             if parent_chain_id:
                 self.update_parent_chain_selection(scene, parent_chain_id)
         
-        # Sync to Blender selection
+        # Update UI immediately for responsive feedback
+        # Force immediate redraw for better checkbox responsiveness
+        for area in context.screen.areas:
+            if area.type == 'PROPERTIES':
+                area.tag_redraw()
+        
+        # Also update the current area
+        context.area.tag_redraw()
+        
+        # Sync to Blender selection (do this after UI update for better responsiveness)
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
         sync_outliner_to_blender_selection(context, actual_item_id)
         
@@ -318,8 +305,6 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 scene.domain_maker_start = clicked_item.domain_start
                 scene.domain_maker_end = clicked_item.domain_end
         
-        # Update UI
-        context.area.tag_redraw()
         return {'FINISHED'}
     
     def update_parent_chain_selection(self, scene, chain_id):
@@ -365,30 +350,22 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 break
         
         if parent_item and parent_item.item_type == 'GROUP':
-            # For groups, select members by their membership
-            member_ids = parent_item.group_memberships.split(',') if parent_item.group_memberships else []
-            for member_id in member_ids:
-                for item in scene.outliner_items:
-                    if item.item_id == member_id:
-                        item.is_selected = select_state
-                        # Sync this item to Blender
-                        sync_outliner_to_blender_selection(bpy.context, member_id)
-                        # Update all references to this item
-                        for ref_item in scene.outliner_items:
-                            if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
-                                ref_item.is_selected = select_state
-                        # If it's a protein, also select its children
-                        if item.item_type == 'PROTEIN':
-                            self.select_children(scene, item.item_id, select_state)
-                        break
+            # Groups should NOT automatically select their members
+            # This prevents unexpected selection cascades
+            # If you want to select all group members, use a dedicated operator
+            return
         else:
             # For non-groups, use parent-child relationship
             for item in scene.outliner_items:
                 if item.parent_id == parent_id:
+                    # Skip reference items - they'll be updated by their originals
+                    if "_ref_" in item.item_id:
+                        continue
+                        
                     item.is_selected = select_state
                     # Sync this item to Blender (especially important for domains)
                     sync_outliner_to_blender_selection(bpy.context, item.item_id)
-                    # Update all references to this item
+                    # Update all references to this item (one-way only)
                     for ref_item in scene.outliner_items:
                         if "_ref_" in ref_item.item_id and ref_item.group_memberships == item.item_id:
                             ref_item.is_selected = select_state

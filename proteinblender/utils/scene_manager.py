@@ -566,8 +566,20 @@ def build_outliner_hierarchy(context=None):
     # Store existing groups and their memberships before clearing
     existing_groups = {}
     item_memberships = {}  # Store which groups each item belongs to
+    item_selection_states = {}  # Store selection states for all items
+    item_expansion_states = {}  # Store expansion states for all items
+    
+    # Temporarily disable selection sync during rebuild
+    from ..handlers.selection_sync import _selection_update_depth, _skip_timer_until
+    import time
+    _skip_timer_until = time.time() + 0.05  # Reduced to 50ms for responsiveness
     
     for item in scene.outliner_items:
+        # Store selection state for all items
+        if item.item_id and item.item_id != "groups_separator":
+            item_selection_states[item.item_id] = item.is_selected
+            item_expansion_states[item.item_id] = item.is_expanded
+            
         if item.item_type == 'GROUP' and item.item_id != "groups_separator":
             existing_groups[item.item_id] = {
                 'name': item.name,
@@ -604,6 +616,12 @@ def build_outliner_hierarchy(context=None):
         protein_item.icon = 'MESH_DATA'
         protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True
         
+        # Restore selection and expansion states
+        if molecule_id in item_selection_states:
+            protein_item.is_selected = item_selection_states[molecule_id]
+        if molecule_id in item_expansion_states:
+            protein_item.is_expanded = item_expansion_states[molecule_id]
+        
         # Get chains from the molecule
         if mol_object and "chain_id" in mol_object.data.attributes:
             chain_attr = mol_object.data.attributes["chain_id"]
@@ -636,6 +654,12 @@ def build_outliner_hierarchy(context=None):
                 chain_item.chain_id = str(chain_id)
                 chain_item.indent_level = 1
                 chain_item.icon = 'LINKED'
+                
+                # Restore selection and expansion states
+                if chain_item.item_id in item_selection_states:
+                    chain_item.is_selected = item_selection_states[chain_item.item_id]
+                if chain_item.item_id in item_expansion_states:
+                    chain_item.is_expanded = item_expansion_states[chain_item.item_id]
                 
                 # Get chain residue ranges
                 if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
@@ -743,6 +767,10 @@ def build_outliner_hierarchy(context=None):
                         domain_item.indent_level = 2
                         domain_item.icon = 'GROUP_VERTEX'
                         domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+                        
+                        # Restore selection state
+                        if domain_id in item_selection_states:
+                            domain_item.is_selected = item_selection_states[domain_id]
     
     # Restore group memberships to items
     for item in scene.outliner_items:

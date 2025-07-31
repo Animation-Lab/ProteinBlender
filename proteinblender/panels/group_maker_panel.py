@@ -71,7 +71,8 @@ class PROTEINBLENDER_OT_create_group(Operator):
             if group_id not in current_groups:
                 current_groups.append(group_id)
                 item.group_memberships = ','.join(filter(None, current_groups))
-            item.is_selected = False  # Deselect grouped items
+            # Keep items selected - don't deselect them automatically
+            # This prevents confusion where creating a group changes selection
         
         # Create the group item
         group_item = scene.outliner_items.add()
@@ -82,7 +83,7 @@ class PROTEINBLENDER_OT_create_group(Operator):
         group_item.indent_level = 0
         group_item.icon = 'GROUP'
         group_item.is_expanded = True
-        group_item.is_selected = True
+        group_item.is_selected = False  # Don't auto-select the new group
         
         # Store member IDs in the group's memberships field for easy access
         member_ids = [item.item_id for item in items_to_group]
@@ -90,12 +91,6 @@ class PROTEINBLENDER_OT_create_group(Operator):
         
         # Rebuild the outliner to reflect the new group
         build_outliner_hierarchy(context)
-        
-        # Make sure the new group is selected
-        for item in scene.outliner_items:
-            if item.item_id == group_id:
-                item.is_selected = True
-                break
         
         self.report({'INFO'}, f"Created group: {self.group_name} with {len(items_to_group)} items")
         return {'FINISHED'}

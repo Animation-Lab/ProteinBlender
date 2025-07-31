@@ -6,15 +6,23 @@ from ..utils.scene_manager import ProteinBlenderScene
 
 # Global variables for selection tracking
 _last_selection = set()
-_selection_update_in_progress = False
+_selection_update_depth = 0  # Use depth counter instead of boolean
 _timer_handle = None
+_skip_timer_until = 0  # Timestamp to skip timer updates until
 
 
 def check_selection_changes():
     """Timer function to check for selection changes"""
-    global _last_selection, _selection_update_in_progress
+    global _last_selection, _selection_update_depth, _skip_timer_until
     
-    if _selection_update_in_progress:
+    import time
+    current_time = time.time()
+    
+    # Skip if we're within the skip window
+    if current_time < _skip_timer_until:
+        return 0.1
+    
+    if _selection_update_depth > 0:
         return 0.1  # Check again in 0.1 seconds
     
     # Ensure we have a valid context
@@ -49,17 +57,17 @@ def clear_selection_handlers():
 
 def on_blender_selection_change():
     """Called when user selects objects in viewport/native outliner"""
-    global _selection_update_in_progress
+    global _selection_update_depth
     
     # Prevent recursive updates
-    if _selection_update_in_progress:
+    if _selection_update_depth > 0:
         return
     
-    _selection_update_in_progress = True
+    _selection_update_depth += 1
     try:
         update_outliner_from_blender_selection()
     finally:
-        _selection_update_in_progress = False
+        _selection_update_depth -= 1
 
 
 def update_outliner_from_blender_selection():
@@ -129,12 +137,14 @@ def update_outliner_from_blender_selection():
                 item.is_selected = False
     
     # Update all reference items to match their originals
+    # This is a one-way sync from original to reference only
     for item in scene.outliner_items:
         if "_ref_" in item.item_id and item.group_memberships:
             # Find the original item
             for orig_item in scene.outliner_items:
                 if orig_item.item_id == item.group_memberships:
-                    item.is_selected = orig_item.is_selected
+                    if item.is_selected != orig_item.is_selected:
+                        item.is_selected = orig_item.is_selected
                     break
     
     # Update UI
@@ -145,13 +155,17 @@ def update_outliner_from_blender_selection():
 
 def sync_outliner_to_blender_selection(context, item_id):
     """Sync outliner selection to Blender objects"""
-    global _selection_update_in_progress
+    global _selection_update_depth, _skip_timer_until
+    
+    # Set skip timer to prevent timer updates during this operation
+    import time
+    _skip_timer_until = time.time() + 0.1  # Reduced from 300ms to 100ms
     
     # Prevent recursive updates
-    if _selection_update_in_progress:
+    if _selection_update_depth > 2:  # Allow some depth for legitimate nested calls
         return
     
-    _selection_update_in_progress = True
+    _selection_update_depth += 1
     try:
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
@@ -268,30 +282,14 @@ def sync_outliner_to_blender_selection(context, item_id):
                                                 active_set = True
         
         elif item.item_type == 'GROUP':
-            # Select all members of the group
-            member_ids = item.group_memberships.split(',') if item.group_memberships else []
-            active_set = False
-            
-            for member_id in member_ids:
-                # Find the member item
-                member_item = None
-                for outliner_item in scene.outliner_items:
-                    if outliner_item.item_id == member_id:
-                        member_item = outliner_item
-                        break
-                
-                if member_item:
-                    # Update the member's selection state to match the group
-                    member_item.is_selected = item.is_selected
-                    # Update all references to this member
-                    for ref_item in scene.outliner_items:
-                        if "_ref_" in ref_item.item_id and ref_item.group_memberships == member_id:
-                            ref_item.is_selected = item.is_selected
-                    # Recursively sync the member
-                    sync_outliner_to_blender_selection(context, member_id)
+            # Groups themselves don't have Blender objects to select
+            # Group selection is just a UI state, not a viewport selection
+            # This prevents group selection from cascading to members
+            # Return early to avoid unnecessary processing
+            return
     
     finally:
-        _selection_update_in_progress = False
+        _selection_update_depth -= 1
 
 
 def update_outliner_selection_display(context):
