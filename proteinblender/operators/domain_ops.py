@@ -497,28 +497,53 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
-        # Find selected domains
-        selected_domains = []
+        # Find selected domains and remove duplicates
+        # (user might have selected both actual domain and its group reference)
+        domains_dict = {}  # Track unique domains by their actual ID
+        
         for item in scene.outliner_items:
             if item.is_selected and item.item_type == 'DOMAIN':
-                selected_domains.append(item)
+                # Get the actual domain ID and item
+                if "_ref_" in item.item_id:
+                    # This is a reference - extract actual domain ID
+                    parts = item.item_id.split("_ref_", 1)
+                    if len(parts) == 2:
+                        actual_domain_id = parts[1]
+                        # Find the actual domain item
+                        for actual_item in scene.outliner_items:
+                            if actual_item.item_id == actual_domain_id:
+                                if actual_domain_id not in domains_dict:
+                                    domains_dict[actual_domain_id] = actual_item
+                                break
+                else:
+                    # This is an actual domain
+                    if item.item_id not in domains_dict:
+                        domains_dict[item.item_id] = item
+        
+        # Get unique selected domains
+        selected_domains = list(domains_dict.values())
+        actual_domain_items = selected_domains  # They're all actual items now
         
         if len(selected_domains) < 2:
             self.report({'WARNING'}, "Select at least 2 domains to merge")
             return {'CANCELLED'}
         
-        # Check that all domains belong to the same chain
-        parent_chains = {item.parent_id for item in selected_domains}
+        # Use actual domain items for parent chain check
+        parent_chains = set()
+        for item in actual_domain_items:
+            parent_id = item.parent_id
+            parent_chains.add(parent_id)
+        
         if len(parent_chains) > 1:
             self.report({'WARNING'}, "Can only merge domains from the same chain")
             return {'CANCELLED'}
         
-        # Sort domains by start position
-        selected_domains.sort(key=lambda d: d.domain_start)
+        # Sort actual domains by start position
+        actual_domain_items.sort(key=lambda d: d.domain_start)
         
         # Check if they're adjacent
-        for i in range(len(selected_domains) - 1):
-            if selected_domains[i].domain_end + 1 != selected_domains[i+1].domain_start:
+        for i in range(len(actual_domain_items) - 1):
+            if actual_domain_items[i].domain_end + 1 != actual_domain_items[i+1].domain_start:
                 self.report({'WARNING'}, "Domains must be adjacent to merge")
                 return {'CANCELLED'}
         
@@ -544,14 +569,15 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         # Capture molecule state before making changes (for undo/redo support)
         scene_manager._capture_molecule_state(molecule_id)
         
-        # Calculate merged domain range
-        merged_start = selected_domains[0].domain_start
-        merged_end = selected_domains[-1].domain_end
+        # Calculate merged domain range using actual domains
+        merged_start = actual_domain_items[0].domain_start
+        merged_end = actual_domain_items[-1].domain_end
         merged_name = f"Residues {merged_start}-{merged_end}"
         
         # Collect groups that contain any of the domains being merged
         affected_groups = {}  # group_id -> set of domain outliner IDs in this group
-        domain_outliner_ids = [item.item_id for item in selected_domains]
+        # Use the actual domain IDs, not the reference IDs
+        domain_outliner_ids = [item.item_id for item in actual_domain_items]
         
         for group_item in scene.outliner_items:
             if group_item.item_type == 'GROUP' and group_item.group_memberships:
@@ -561,8 +587,8 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     affected_groups[group_item.item_id] = domains_in_group
                     self.report({'INFO'}, f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
         
-        # Remove the old domains
-        for domain_item in selected_domains:
+        # Remove the old domains (use actual domain items)
+        for domain_item in actual_domain_items:
             # Find the actual domain in molecule
             domain_to_remove = None
             for domain_id, domain in molecule.domains.items():

@@ -91,24 +91,53 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         if len(domains) < 2:
             return False
         
-        # Check all domains are from same parent chain
+        # Get the actual parent chains, handling group references
         parent_chains = set()
         for domain in domains:
-            # Get parent chain
             parent_id = domain.parent_id
+            
+            # If this is a group reference item, extract the actual parent chain ID
+            if "_ref_" in domain.item_id:
+                # For group references, the actual parent is embedded in the reference ID
+                # Format: group_XXXXX_ref_ACTUAL_PARENT_ID
+                parts = domain.item_id.split("_ref_", 1)
+                if len(parts) == 2:
+                    # The actual parent is after '_ref_'
+                    # But we need to find the actual chain parent, not the domain parent
+                    # The reference ID points to the actual domain, so we need to parse it
+                    actual_domain_id = parts[1]
+                    # Domain IDs are like: 3b75_001_9_1_51_Residues_1-51
+                    # The chain parent would be: 3b75_001_chain_9
+                    id_parts = actual_domain_id.split('_')
+                    if len(id_parts) >= 3:
+                        # Reconstruct the chain parent ID
+                        molecule_id = '_'.join(id_parts[:2])  # e.g., "3b75_001"
+                        chain_id = id_parts[2]  # e.g., "9"
+                        parent_id = f"{molecule_id}_chain_{chain_id}"
+            
             parent_chains.add(parent_id)
         
         if len(parent_chains) != 1:
+            print(f"[Domain Maker] Different parent chains: {parent_chains}")
             return False
         
         # Sort domains by start position
         sorted_domains = sorted(domains, key=lambda d: d.domain_start)
         
+        # Debug print
+        print(f"[Domain Maker] Checking adjacency for {len(sorted_domains)} domains:")
+        for d in sorted_domains:
+            print(f"  - {d.name}: {d.domain_start}-{d.domain_end} (ID: {d.item_id})")
+        
         # Check if they're adjacent (end of one is start-1 of next)
         for i in range(len(sorted_domains) - 1):
-            if sorted_domains[i].domain_end + 1 != sorted_domains[i+1].domain_start:
+            current_end = sorted_domains[i].domain_end
+            next_start = sorted_domains[i+1].domain_start
+            if current_end + 1 != next_start:
+                print(f"[Domain Maker] Not adjacent: {sorted_domains[i].name} ends at {current_end}, {sorted_domains[i+1].name} starts at {next_start}")
                 return False
         
+        print(f"[Domain Maker] All domains are adjacent!")
         return True
     
     def draw(self, context):
@@ -188,7 +217,26 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
             
             # Count selected items and check if they're adjacent
             selected_items = [item for item in scene.outliner_items if item.is_selected]
-            domains_selected = [item for item in selected_items if item.item_type == 'DOMAIN']
+            
+            # Filter domains and remove duplicates (when both actual and reference are selected)
+            domains_dict = {}  # Use dict to track unique domains by their actual ID
+            for item in selected_items:
+                if item.item_type == 'DOMAIN':
+                    # Get the actual domain ID
+                    if "_ref_" in item.item_id:
+                        # This is a reference - extract actual domain ID
+                        parts = item.item_id.split("_ref_", 1)
+                        if len(parts) == 2:
+                            actual_id = parts[1]
+                            # Only add if we haven't seen this domain yet
+                            if actual_id not in domains_dict:
+                                domains_dict[actual_id] = item
+                    else:
+                        # This is an actual domain
+                        if item.item_id not in domains_dict:
+                            domains_dict[item.item_id] = item
+            
+            domains_selected = list(domains_dict.values())
             
             # Determine button type based on selection
             if len(domains_selected) >= 2:
@@ -209,14 +257,31 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
                     # Can't merge - not adjacent or different chains
                     row = col.row()
                     row.scale_y = 1.5
-                    row.operator("proteinblender.merge_domains", text="Merge Domains", icon='AUTOMERGE_ON')
+                    # Create the operator button but disable it
+                    op = row.operator("proteinblender.merge_domains", text="Merge Domains", icon='AUTOMERGE_ON')
                     row.enabled = False
                     col.separator()
                     info_box = col.box()
                     info_col = info_box.column(align=True)
                     info_col.scale_y = 0.8
-                    info_col.label(text="Domains must be adjacent", icon='ERROR')
-                    info_col.label(text="and from the same chain")
+                    
+                    # More detailed error message
+                    if len(set(d.parent_id for d in domains_selected)) > 1:
+                        info_col.label(text="Domains from different chains", icon='ERROR')
+                    else:
+                        # Check which domains are not adjacent
+                        sorted_domains = sorted(domains_selected, key=lambda d: d.domain_start)
+                        non_adjacent = []
+                        for i in range(len(sorted_domains) - 1):
+                            if sorted_domains[i].domain_end + 1 != sorted_domains[i+1].domain_start:
+                                non_adjacent.append(f"{sorted_domains[i].name} and {sorted_domains[i+1].name}")
+                        
+                        if non_adjacent:
+                            info_col.label(text="Domains must be adjacent", icon='ERROR')
+                            if len(non_adjacent) == 1:
+                                info_col.label(text=f"Gap between: {non_adjacent[0]}")
+                        else:
+                            info_col.label(text="Cannot merge these domains", icon='ERROR')
             else:
                 # Split button for single chain/domain
                 if selected_item:
