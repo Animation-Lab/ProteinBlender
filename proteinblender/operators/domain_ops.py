@@ -338,19 +338,42 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                 del molecule.domains[domain_id]
                 self.report({'INFO'}, f"Removed domain {domain_id} from molecule")
         
+        # Check if the chain being split was in any groups
+        chain_groups = []
+        chain_outliner_id = f"{self.molecule_id}_chain_{self.chain_id}"
+        
+        # Debug: print the chain ID we're looking for
+        self.report({'INFO'}, f"Looking for chain with outliner ID: {chain_outliner_id}")
+        
+        # Find groups that contain this chain
+        for item in context.scene.outliner_items:
+            if item.item_type == 'GROUP' and item.group_memberships:
+                member_ids = item.group_memberships.split(',')
+                self.report({'INFO'}, f"Group '{item.name}' has members: {member_ids}")
+                if chain_outliner_id in member_ids:
+                    chain_groups.append(item)
+                    self.report({'INFO'}, f"Chain was in group: {item.name}")
+        
         # Create the new domains
         created_domains = []
+        created_outliner_ids = []  # Track outliner IDs for group updates
+        
         for i, (start, end) in enumerate(domains):
             domain_name = f"Residues {start}-{end}"  # More descriptive name
             
             # Check if this exact domain already exists for this chain
             domain_exists = False
+            domain_outliner_id = None
+            
             for domain_id, domain in molecule.domains.items():
                 if (hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id) and
                     domain.start == start and domain.end == end):
                     domain_exists = True
+                    # Domain ID already includes molecule ID, so use it directly
+                    domain_outliner_id = domain_id
                     self.report({'INFO'}, f"Domain {domain_name} already exists, skipping creation")
                     created_domains.append(domain_id)
+                    created_outliner_ids.append(domain_outliner_id)
                     break
             
             if not domain_exists:
@@ -367,12 +390,29 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                 
                 if created_domain_ids:
                     created_domains.extend(created_domain_ids)
+                    # Domain IDs already include molecule ID, use them directly
+                    for domain_id in created_domain_ids:
+                        created_outliner_ids.append(domain_id)
                     self.report({'INFO'}, f"Created {domain_name}")
                 else:
                     self.report({'WARNING'}, f"Failed to create domain {start}-{end}")
         
-        # Rebuild outliner to show new domains
+        # Update group memberships BEFORE rebuilding outliner
+        # IMPORTANT: We keep the chain in the group, not individual domains
+        # The hierarchy will show domains under the chain
+        if chain_groups:
+            self.report({'INFO'}, f"Found {len(chain_groups)} groups containing the chain")
+            self.report({'INFO'}, f"Chain will remain in groups, with domains shown as children")
+            
+            # We don't need to update group memberships here because:
+            # 1. The chain stays in the group
+            # 2. The domains will be shown as children of the chain in the group view
+        
+        # Rebuild outliner to show new domains and updated groups
         build_outliner_hierarchy(context)
+        
+        # No need to update domain group memberships individually
+        # They will be shown under their parent chain in the group view
         
         # Log final state
         self.report({'INFO'}, f"Domains after split:")
@@ -509,6 +549,18 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         merged_end = selected_domains[-1].domain_end
         merged_name = f"Residues {merged_start}-{merged_end}"
         
+        # Collect groups that contain any of the domains being merged
+        affected_groups = {}  # group_id -> set of domain outliner IDs in this group
+        domain_outliner_ids = [item.item_id for item in selected_domains]
+        
+        for group_item in scene.outliner_items:
+            if group_item.item_type == 'GROUP' and group_item.group_memberships:
+                member_ids = set(group_item.group_memberships.split(','))
+                domains_in_group = set(domain_outliner_ids) & member_ids
+                if domains_in_group:
+                    affected_groups[group_item.item_id] = domains_in_group
+                    self.report({'INFO'}, f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
+        
         # Remove the old domains
         for domain_item in selected_domains:
             # Find the actual domain in molecule
@@ -542,11 +594,66 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         
         if created_domain_ids:
             self.report({'INFO'}, f"Created merged domain: {merged_name}")
+            
+            # Check if all domains cover the entire chain
+            chain_start, chain_end = merged_start, merged_end
+            if hasattr(molecule, 'chain_residue_ranges'):
+                # Get actual chain range
+                chain_id_int = int(parent_chain.chain_id) if parent_chain.chain_id.isdigit() else None
+                if hasattr(molecule, 'idx_to_label_asym_id_map') and chain_id_int is not None:
+                    if chain_id_int in molecule.idx_to_label_asym_id_map:
+                        label_asym_id = molecule.idx_to_label_asym_id_map[chain_id_int]
+                        if label_asym_id in molecule.chain_residue_ranges:
+                            chain_start, chain_end = molecule.chain_residue_ranges[label_asym_id]
+                elif parent_chain.chain_id in molecule.chain_residue_ranges:
+                    chain_start, chain_end = molecule.chain_residue_ranges[parent_chain.chain_id]
+            
+            # Check if the merged domain covers the entire chain
+            covers_entire_chain = (merged_start == chain_start and merged_end == chain_end)
+            
+            # For groups, we only track chains, not individual domains
+            # So we only need to update if merging creates a full chain
+            if affected_groups and covers_entire_chain:
+                self.report({'INFO'}, "Domains cover entire chain - will add chain to groups")
+                
+                # The chain might already be in the groups, but we'll ensure it's there
+                for group_id in affected_groups.keys():
+                    # Find the group
+                    group_item = None
+                    for item in scene.outliner_items:
+                        if item.item_type == 'GROUP' and item.item_id == group_id:
+                            group_item = item
+                            break
+                    
+                    if group_item:
+                        # Get current members
+                        current_members = set(group_item.group_memberships.split(',')) if group_item.group_memberships else set()
+                        
+                        # Add the chain if not already present
+                        chain_outliner_id = f"{molecule_id}_chain_{parent_chain.chain_id}"
+                        if chain_outliner_id not in current_members:
+                            current_members.add(chain_outliner_id)
+                            # Update the group
+                            group_item.group_memberships = ','.join(filter(None, current_members))
+                            self.report({'INFO'}, f"Added chain to group '{group_item.name}'")
+                        else:
+                            self.report({'INFO'}, f"Chain already in group '{group_item.name}'")
         else:
             self.report({'ERROR'}, "Failed to create merged domain")
         
         # Rebuild outliner
         build_outliner_hierarchy(context)
+        
+        # Update chain's group membership if needed
+        if affected_groups and covers_entire_chain:
+            for item in context.scene.outliner_items:
+                if item.item_id == f"{molecule_id}_chain_{parent_chain.chain_id}":
+                    # Update chain's group membership
+                    item_groups = set(item.group_memberships.split(',')) if item.group_memberships else set()
+                    item_groups.update(affected_groups.keys())
+                    item.group_memberships = ','.join(filter(None, item_groups))
+                    self.report({'INFO'}, f"Updated chain group memberships")
+                    break
         
         return {'FINISHED'}
 

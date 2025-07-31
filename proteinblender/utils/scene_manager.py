@@ -716,7 +716,8 @@ def build_outliner_hierarchy(context=None):
                     for domain_id, domain in chain_domains:
                         domain_item = scene.outliner_items.add()
                         domain_item.item_type = 'DOMAIN'
-                        domain_item.item_id = f"{molecule_id}_{domain_id}"
+                        # Domain ID already includes molecule ID, so use it directly
+                        domain_item.item_id = domain_id
                         domain_item.parent_id = chain_item.item_id
                         
                         # Extract meaningful domain name
@@ -783,25 +784,46 @@ def build_outliner_hierarchy(context=None):
         
         # Add group members as references (not moving them from original location)
         if group_item.is_expanded:
+            # Helper function to add a reference item with its children
+            def add_reference_with_children(member_id, parent_ref_id, indent_offset=0):
+                if member_id not in item_map:
+                    return
+                    
+                original_item = item_map[member_id]
+                
+                # Create a reference item
+                ref_item = scene.outliner_items.add()
+                ref_item.item_type = original_item.item_type
+                ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
+                ref_item.parent_id = parent_ref_id
+                ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
+                ref_item.object_name = original_item.object_name
+                ref_item.indent_level = 1 + indent_offset
+                ref_item.icon = original_item.icon
+                ref_item.is_visible = original_item.is_visible
+                ref_item.is_selected = original_item.is_selected
+                ref_item.is_expanded = original_item.is_expanded
+                ref_item.chain_id = original_item.chain_id
+                ref_item.chain_start = original_item.chain_start
+                ref_item.chain_end = original_item.chain_end
+                ref_item.domain_start = original_item.domain_start
+                ref_item.domain_end = original_item.domain_end
+                # Store the original item ID for reference
+                ref_item.group_memberships = member_id  # Store original ID
+                
+                # If this is a chain and it's expanded, add its domain children
+                if original_item.item_type == 'CHAIN' and original_item.is_expanded:
+                    # Find all domains that belong to this chain
+                    for child_item in scene.outliner_items:
+                        if (child_item.item_type == 'DOMAIN' and 
+                            child_item.parent_id == member_id and
+                            child_item.item_id not in [f"{group_id}_ref_{child_item.item_id}"]):  # Avoid duplicates
+                            # Add the domain as a child of the chain reference
+                            add_reference_with_children(child_item.item_id, ref_item.item_id, 1)
+            
+            # Add each member with its hierarchy
             for member_id in group_info.get('members', []):
-                if member_id in item_map:
-                    original_item = item_map[member_id]
-                    # Create a reference item under the group
-                    ref_item = scene.outliner_items.add()
-                    ref_item.item_type = original_item.item_type
-                    ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
-                    ref_item.parent_id = group_id
-                    ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
-                    ref_item.object_name = original_item.object_name
-                    ref_item.indent_level = 1
-                    ref_item.icon = original_item.icon
-                    ref_item.is_visible = original_item.is_visible
-                    ref_item.is_selected = original_item.is_selected
-                    ref_item.chain_id = original_item.chain_id
-                    ref_item.domain_start = original_item.domain_start
-                    ref_item.domain_end = original_item.domain_end
-                    # Store the original item ID for reference
-                    ref_item.group_memberships = member_id  # Store original ID
+                add_reference_with_children(member_id, group_id)
     
     # Update outliner display
     if context.area:
