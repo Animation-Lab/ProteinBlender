@@ -89,11 +89,8 @@ class PROTEINBLENDER_UL_outliner(UIList):
         if item.item_type in ['PROTEIN', 'GROUP'] and not is_reference:
             show_expand = True
         elif item.item_type == 'CHAIN' and not is_reference:
-            # Check if this chain has any domains
-            for potential_child in data.outliner_items:
-                if potential_child.parent_id == item.item_id and potential_child.item_type == 'DOMAIN':
-                    show_expand = True
-                    break
+            # Use the has_domains property to determine if we should show expand arrow
+            show_expand = item.has_domains
         
         if show_expand:
             if item.is_expanded:

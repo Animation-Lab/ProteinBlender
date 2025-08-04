@@ -734,6 +734,10 @@ def build_outliner_hierarchy(context=None):
                         if match_found:
                             chain_domains.append((domain_id, domain))
                 
+                # Mark if this chain has domains (for UI purposes)
+                if len(chain_domains) > 1:
+                    chain_item.has_domains = True
+                    
                 # Only add domains if there's more than one for this chain
                 # OR if the domain doesn't span the entire chain
                 # AND only if the chain is expanded
@@ -848,6 +852,7 @@ def build_outliner_hierarchy(context=None):
                 ref_item.chain_end = original_item.chain_end
                 ref_item.domain_start = original_item.domain_start
                 ref_item.domain_end = original_item.domain_end
+                ref_item.has_domains = original_item.has_domains
                 # Store the original item ID for reference
                 ref_item.group_memberships = member_id  # Store original ID
                 

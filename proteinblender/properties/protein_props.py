@@ -118,6 +118,13 @@ class ProteinOutlinerItem(PropertyGroup):
         description="Comma-separated list of group IDs this item belongs to",
         default=""
     )
+    
+    # Track if a chain has domains (for UI purposes)
+    has_domains: BoolProperty(
+        name="Has Domains",
+        description="Whether this chain has domain children",
+        default=False
+    )
 
 class ProteinProperties(bpy.types.PropertyGroup):
     import_method: EnumProperty(
