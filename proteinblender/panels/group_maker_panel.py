@@ -28,7 +28,10 @@ class PROTEINBLENDER_OT_create_group(Operator):
             return {'CANCELLED'}
         
         # Generate default name
-        self.group_name = f"Group {len([i for i in context.scene.outliner_items if i.item_type == 'GROUP']) + 1}"
+        # Count only actual groups, excluding the separator
+        group_count = len([i for i in context.scene.outliner_items 
+                          if i.item_type == 'GROUP' and i.item_id != "groups_separator"])
+        self.group_name = f"Group {group_count + 1}"
         
         return context.window_manager.invoke_props_dialog(self)
     

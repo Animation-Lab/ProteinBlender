@@ -249,23 +249,51 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 # Only chains without domains should select their children (if any)
                 self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'GROUP':
-            # For groups, clicking the checkbox should toggle the group's own selection state
-            # This does NOT automatically affect member selection - that's a separate action
-            # The group checkbox simply shows whether the group itself is "selected" for operations
+            # For groups, the checkbox should act as a toggle all for members
+            # Get member IDs from group
+            member_ids = clicked_item.group_memberships.split(',') if clicked_item.group_memberships else []
             
-            # Note: If you want the old behavior where group checkbox selects all members,
-            # that should be a separate operator or modifier key (e.g., Shift+Click)
+            # Check if all members are currently selected
+            all_selected = True
+            for member_id in member_ids:
+                for item in scene.outliner_items:
+                    if item.item_id == member_id:
+                        if not item.is_selected:
+                            all_selected = False
+                            break
+                if not all_selected:
+                    break
             
-            # For now, just toggle the group's selection state
-            # The visual checkbox state will reflect whether all members are selected
-            # via the _are_all_group_members_selected check in draw_item
+            # Toggle selection state based on current state
+            new_state = not all_selected
             
-            # Update UI immediately before returning
+            # Select/deselect the reference items shown under this group
+            # We should NOT select the original items, only the references displayed in the group
+            for item in scene.outliner_items:
+                # Check if this is a reference item that belongs to this group
+                if item.parent_id == clicked_item.item_id and "_ref_" in item.item_id:
+                    item.is_selected = new_state
+                    
+                    # Get the actual item ID from the reference
+                    actual_member_id = item.group_memberships
+                    if actual_member_id:
+                        # Find and update the original item to match
+                        for orig_item in scene.outliner_items:
+                            if orig_item.item_id == actual_member_id:
+                                orig_item.is_selected = new_state
+                                
+                                # Sync to Blender (but only if it's not a group)
+                                if orig_item.item_type != 'GROUP':
+                                    from ..handlers.selection_sync import sync_outliner_to_blender_selection
+                                    sync_outliner_to_blender_selection(context, actual_member_id)
+                                break
+            
+            # Update UI immediately
             for area in context.screen.areas:
                 if area.type == 'PROPERTIES':
                     area.tag_redraw()
             
-            # Don't propagate to members - just return
+            # Don't modify clicked_item.is_selected for groups
             return {'FINISHED'}
         # Note: We don't automatically select/deselect children for chains anymore
         # This allows independent chain selection without affecting parent

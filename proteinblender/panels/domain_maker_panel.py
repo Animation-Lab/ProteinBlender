@@ -288,7 +288,7 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
                     item_type = "Chain" if selected_item.item_type == 'CHAIN' else "Domain"
                     row = col.row()
                     row.scale_y = 1.5
-                    op = row.operator("proteinblender.split_domain_popup", text=f"Split {item_type}", icon='MESH_PLANE')
+                    op = row.operator("proteinblender.split_domain_popup", text=f"Split {item_type}", icon='MOD_ARRAY')
                     op.item_id = selected_item.item_id
                     op.item_type = selected_item.item_type
                 else:
