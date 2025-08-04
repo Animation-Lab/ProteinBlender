@@ -125,6 +125,11 @@ class MOLECULE_PB_OT_delete(Operator):
             pass
         # Perform deletion
         scene_manager.delete_molecule(self.molecule_id)
+        
+        # Rebuild the outliner hierarchy to reflect the deletion
+        from ..utils.scene_manager import build_outliner_hierarchy
+        build_outliner_hierarchy(context)
+        
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_update_identifier(Operator):

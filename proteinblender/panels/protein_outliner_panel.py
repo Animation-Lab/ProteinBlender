@@ -100,49 +100,40 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Add some space before the controls
         row.separator()
         
-        # For groups, add delete button, checkbox and visibility toggle
-        if item.item_type == 'GROUP' and item.item_id != "groups_separator":
+        # Handle different item types
+        if item.item_type == 'GROUP' and item.item_id == "groups_separator":
+            # Groups separator - no controls
+            return
+        
+        # Add controls based on item type
+        # First: Delete button for proteins and groups
+        if item.item_type == 'PROTEIN':
+            # Delete button (trash can) - use the existing molecule.delete operator
+            delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
+            if delete_op:
+                delete_op.molecule_id = item.item_id
+        elif item.item_type == 'GROUP':
             # Delete button (trash can) - use the edit_group operator with DELETE action
             op = row.operator("proteinblender.edit_group", text="", icon='TRASH', emboss=False)
             op.action = 'DELETE'
             op.group_id = item.item_id
-            
-            # Selection checkbox - check if all members are selected
+        
+        # Second: Selection checkbox for all items
+        if item.item_type == 'GROUP':
+            # For groups, check if all members are selected
             all_selected = self._are_all_group_members_selected(context.scene, item)
-            
-            if all_selected:
-                selection_icon = 'CHECKBOX_HLT'
-            else:
-                selection_icon = 'CHECKBOX_DEHLT'
-            
-            # Use regular outliner_select operator for groups
-            op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
-            op.item_id = item.item_id
-            
-            # Visibility toggle
-            if item.is_visible:
-                visibility_icon = 'HIDE_OFF'
-            else:
-                visibility_icon = 'HIDE_ON'
-            op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
-            op.item_id = item.item_id
+            selection_icon = 'CHECKBOX_HLT' if all_selected else 'CHECKBOX_DEHLT'
         else:
-            # Selection toggle (unlabeled checkbox in mockup)
-            if item.is_selected:
-                selection_icon = 'CHECKBOX_HLT'
-            else:
-                selection_icon = 'CHECKBOX_DEHLT'
-            
-            op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
-            op.item_id = item.item_id
-            
-            # Visibility toggle
-            if item.is_visible:
-                visibility_icon = 'HIDE_OFF'
-            else:
-                visibility_icon = 'HIDE_ON'
-            op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
-            op.item_id = item.item_id
+            # For other items, use their own selection state
+            selection_icon = 'CHECKBOX_HLT' if item.is_selected else 'CHECKBOX_DEHLT'
+        
+        op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
+        op.item_id = item.item_id
+        
+        # Third: Visibility toggle for all items
+        visibility_icon = 'HIDE_OFF' if item.is_visible else 'HIDE_ON'
+        op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
+        op.item_id = item.item_id
     
 
 
