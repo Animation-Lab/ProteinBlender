@@ -83,8 +83,19 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Check if this is a reference item
         is_reference = item.item_id.startswith("group_") and "_ref_" in item.item_id
         
-        # Expand/collapse for proteins and groups only (not references)
+        # Expand/collapse for proteins, groups, and chains with domains (not references)
+        show_expand = False
+        
         if item.item_type in ['PROTEIN', 'GROUP'] and not is_reference:
+            show_expand = True
+        elif item.item_type == 'CHAIN' and not is_reference:
+            # Check if this chain has any domains
+            for potential_child in data.outliner_items:
+                if potential_child.parent_id == item.item_id and potential_child.item_type == 'DOMAIN':
+                    show_expand = True
+                    break
+        
+        if show_expand:
             if item.is_expanded:
                 icon = 'TRIA_DOWN'
             else:
@@ -154,16 +165,23 @@ class PROTEINBLENDER_OT_toggle_expand(Operator):
             return {'CANCELLED'}
             
         scene = context.scene
+        item_type = None
         for item in scene.outliner_items:
             if item.item_id == self.item_id:
                 item.is_expanded = not item.is_expanded
+                item_type = item.item_type
                 break
         
-        # Redraw UI
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                area.tag_redraw()
-                
+        # If we toggled a chain, we need to rebuild the hierarchy to show/hide domains
+        if item_type == 'CHAIN':
+            from ..utils.scene_manager import build_outliner_hierarchy
+            build_outliner_hierarchy(context)
+        else:
+            # For other types, just redraw UI
+            for area in context.screen.areas:
+                if area.type == 'PROPERTIES':
+                    area.tag_redraw()
+                    
         return {'FINISHED'}
 
 

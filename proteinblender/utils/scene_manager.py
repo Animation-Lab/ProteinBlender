@@ -736,7 +736,8 @@ def build_outliner_hierarchy(context=None):
                 
                 # Only add domains if there's more than one for this chain
                 # OR if the domain doesn't span the entire chain
-                if len(chain_domains) > 1:
+                # AND only if the chain is expanded
+                if len(chain_domains) > 1 and chain_item.is_expanded:
                     for domain_id, domain in chain_domains:
                         domain_item = scene.outliner_items.add()
                         domain_item.item_type = 'DOMAIN'
