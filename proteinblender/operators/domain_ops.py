@@ -25,12 +25,35 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         ]
     )
     
+    # Store original visibility states
+    original_visibility: dict = {}
+    preview_active: bool = False
+    target_node_tree = None
+    target_res_node = None
+    
+    def update_preview_range(self, context):
+        """Update the geometry node range in real-time"""
+        if not self.preview_active or not self.target_res_node:
+            return
+        
+        # Update the Min/Max inputs of the Select Res ID Range node
+        if "Min" in self.target_res_node.inputs:
+            self.target_res_node.inputs["Min"].default_value = self.split_start
+        if "Max" in self.target_res_node.inputs:
+            self.target_res_node.inputs["Max"].default_value = self.split_end
+        
+        # Force viewport update
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+    
     split_start: IntProperty(
         name="Start",
         description="Start residue for split",
         min=1,
         max=10000,
-        default=1
+        default=1,
+        update=update_preview_range
     )
     
     split_end: IntProperty(
@@ -38,7 +61,8 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         description="End residue for split",
         min=1,
         max=10000,
-        default=50
+        default=50,
+        update=update_preview_range
     )
     
     def invoke(self, context, event):
@@ -78,6 +102,9 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
             if self.split_end == min_val:
                 self.split_end = min_val + 1  # Ensure end > start
         
+        # Setup preview mode
+        self.setup_preview_mode(context, selected_item)
+        
         # Show popup
         return context.window_manager.invoke_props_dialog(self)
     
@@ -104,6 +131,13 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
             
             layout.label(text=f"Split {selected_item.name}")
             layout.label(text=f"Valid range: {min_val}-{max_val}")
+            
+            # Add preview mode indicator
+            if self.preview_active:
+                box = layout.box()
+                box.label(text="Preview Mode Active", icon='VIEW3D')
+                box.label(text="Adjust sliders to see real-time changes")
+            
             layout.separator()
             
             col = layout.column()
@@ -120,7 +154,142 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
             if self.split_start == min_val and self.split_end == max_val:
                 layout.label(text="Range covers entire item", icon='ERROR')
     
+    def setup_preview_mode(self, context, selected_item):
+        """Setup the preview mode by isolating the domain and connecting to geometry nodes"""
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Store original visibility states and hide other objects
+        self.original_visibility = {}
+        
+        # Get the molecule and domain/chain object
+        molecule_id = None
+        target_object = None
+        chain_id = None
+        
+        if selected_item.item_type == 'CHAIN':
+            molecule_id = selected_item.parent_id
+            chain_id = selected_item.chain_id
+            # For chains, we need to find or create a temporary domain object for the full chain
+            molecule = scene_manager.molecules.get(molecule_id)
+            if molecule:
+                # Look for an existing domain that covers the full chain
+                for domain_id, domain in molecule.domains.items():
+                    if (hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id) and
+                        domain.start == selected_item.chain_start and 
+                        domain.end == selected_item.chain_end):
+                        if domain.object:
+                            target_object = domain.object
+                            break
+                
+                # If no full-chain domain exists, find any domain for this chain
+                if not target_object:
+                    for domain_id, domain in molecule.domains.items():
+                        if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id):
+                            if domain.object:
+                                target_object = domain.object
+                                break
+        else:  # DOMAIN
+            # Find parent chain
+            for chain_item in context.scene.outliner_items:
+                if chain_item.item_id == selected_item.parent_id:
+                    molecule_id = chain_item.parent_id
+                    chain_id = chain_item.chain_id
+                    break
+            
+            # Find the domain in the molecule
+            molecule = scene_manager.molecules.get(molecule_id)
+            if molecule:
+                # Look for domain by matching properties
+                for domain_id, domain in molecule.domains.items():
+                    if (hasattr(domain, 'start') and hasattr(domain, 'end') and
+                        domain.start == selected_item.domain_start and 
+                        domain.end == selected_item.domain_end and
+                        str(domain.chain_id) == str(chain_id)):
+                        if domain.object:
+                            target_object = domain.object
+                            break
+        
+        if not target_object or not molecule_id:
+            print(f"Could not find target object for preview. molecule_id={molecule_id}, chain_id={chain_id}")
+            return
+        
+        # Hide all protein objects from the same molecule except the one being split
+        molecule = scene_manager.molecules.get(molecule_id)
+        if molecule:
+            # Hide the parent molecule object
+            if molecule.molecule and molecule.molecule.object:
+                self.original_visibility[molecule.molecule.object.name] = molecule.molecule.object.hide_viewport
+                molecule.molecule.object.hide_viewport = True
+            
+            # Hide all domain objects except the target
+            for domain_id, domain in molecule.domains.items():
+                if domain.object:
+                    self.original_visibility[domain.object.name] = domain.object.hide_viewport
+                    if domain.object != target_object:
+                        domain.object.hide_viewport = True
+                    else:
+                        domain.object.hide_viewport = False
+        
+        # Find the geometry node tree and Select Res ID Range node
+        if target_object.modifiers:
+            for modifier in target_object.modifiers:
+                if modifier.type == 'NODES' and modifier.node_group:
+                    self.target_node_tree = modifier.node_group
+                    # Find the Select Res ID Range node
+                    for node in self.target_node_tree.nodes:
+                        if node.type == 'GROUP' and node.node_tree and "Select Res ID Range" in node.node_tree.name:
+                            self.target_res_node = node
+                            self.preview_active = True
+                            # Set initial values
+                            if "Min" in node.inputs:
+                                node.inputs["Min"].default_value = self.split_start
+                            if "Max" in node.inputs:
+                                node.inputs["Max"].default_value = self.split_end
+                            break
+                    break
+    
+    def cleanup_preview_mode(self, context):
+        """Restore original visibility states and reset node values"""
+        # Reset the node to its original values if we have a reference
+        if self.target_res_node:
+            scene = context.scene
+            # Find the original item to get its actual range
+            for item in scene.outliner_items:
+                if item.item_id == self.item_id:
+                    if item.item_type == 'CHAIN':
+                        original_start = item.chain_start
+                        original_end = item.chain_end
+                    else:  # DOMAIN
+                        original_start = item.domain_start
+                        original_end = item.domain_end
+                    
+                    # Reset the node values
+                    if "Min" in self.target_res_node.inputs:
+                        self.target_res_node.inputs["Min"].default_value = original_start
+                    if "Max" in self.target_res_node.inputs:
+                        self.target_res_node.inputs["Max"].default_value = original_end
+                    break
+        
+        # Restore original visibility
+        for obj_name, visibility in self.original_visibility.items():
+            if obj_name in bpy.data.objects:
+                bpy.data.objects[obj_name].hide_viewport = visibility
+        
+        # Reset preview state
+        self.preview_active = False
+        self.target_node_tree = None
+        self.target_res_node = None
+        self.original_visibility = {}
+        
+        # Force viewport update
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+    
     def execute(self, context):
+        # Cleanup preview mode first
+        self.cleanup_preview_mode(context)
+        
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
@@ -183,6 +352,11 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         )
         
         return {'FINISHED'}
+    
+    def cancel(self, context):
+        """Handle cancellation of the operator"""
+        self.cleanup_preview_mode(context)
+        return {'CANCELLED'}
 
 
 class PROTEINBLENDER_OT_split_domain(Operator):
