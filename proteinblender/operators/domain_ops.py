@@ -25,26 +25,70 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         ]
     )
     
-    # Store original visibility states
-    original_visibility: dict = {}
-    preview_active: bool = False
-    target_node_tree = None
-    target_res_node = None
-    
     def update_preview_range(self, context):
         """Update the geometry node range in real-time"""
-        if not self.preview_active or not self.target_res_node:
+        # Try to get the node from scene properties (persistent across operator instances)
+        if "pb_preview_object" not in context.scene:
+            print("No preview object stored in scene")
+            return
+            
+        # Retrieve the stored references
+        obj_name = context.scene.get("pb_preview_object")
+        mod_name = context.scene.get("pb_preview_modifier")
+        node_name = context.scene.get("pb_preview_node")
+        
+        if not all([obj_name, mod_name, node_name]):
+            print("Missing stored references")
             return
         
-        # Update the Min/Max inputs of the Select Res ID Range node
-        if "Min" in self.target_res_node.inputs:
-            self.target_res_node.inputs["Min"].default_value = self.split_start
-        if "Max" in self.target_res_node.inputs:
-            self.target_res_node.inputs["Max"].default_value = self.split_end
+        # Find the object
+        obj = bpy.data.objects.get(obj_name)
+        if not obj:
+            print(f"Could not find object '{obj_name}'")
+            return
         
-        # Force viewport update
+        # Find the modifier
+        modifier = obj.modifiers.get(mod_name)
+        if not modifier or modifier.type != 'NODES' or not modifier.node_group:
+            print(f"Could not find geometry nodes modifier '{mod_name}'")
+            return
+        
+        # Find the node
+        node = modifier.node_group.nodes.get(node_name)
+        if not node:
+            print(f"Could not find node '{node_name}'")
+            return
+        
+        print(f"Updating preview range: Start={self.split_start}, End={self.split_end}")
+        
+        # Update the Min/Max inputs of the Select Res ID Range node
+        try:
+            # Update Min
+            if "Min" in node.inputs:
+                old_min = node.inputs["Min"].default_value
+                node.inputs["Min"].default_value = self.split_start
+                print(f"  Updated Min: {old_min} -> {self.split_start}")
+            else:
+                print(f"  Warning: Could not find Min input in node")
+            
+            # Update Max
+            if "Max" in node.inputs:
+                old_max = node.inputs["Max"].default_value  
+                node.inputs["Max"].default_value = self.split_end
+                print(f"  Updated Max: {old_max} -> {self.split_end}")
+            else:
+                print(f"  Warning: Could not find Max input in node")
+            
+            # Force depsgraph update
+            if context.view_layer:
+                context.view_layer.update()
+                
+        except Exception as e:
+            print(f"  Error updating node values: {e}")
+        
+        # Force viewport and node editor update
         for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
+            if area.type in {'VIEW_3D', 'NODE_EDITOR'}:
                 area.tag_redraw()
     
     split_start: IntProperty(
@@ -68,6 +112,12 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
     def invoke(self, context, event):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Initialize instance attributes
+        self.original_visibility = {}
+        self.preview_active = False
+        self.target_node_tree = None
+        self.target_res_node = None
         
         # Find the selected item
         selected_item = None
@@ -133,7 +183,7 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
             layout.label(text=f"Valid range: {min_val}-{max_val}")
             
             # Add preview mode indicator
-            if self.preview_active:
+            if hasattr(self, 'preview_active') and self.preview_active:
                 box = layout.box()
                 box.label(text="Preview Mode Active", icon='VIEW3D')
                 box.label(text="Adjust sliders to see real-time changes")
@@ -231,55 +281,105 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
                         domain.object.hide_viewport = False
         
         # Find the geometry node tree and Select Res ID Range node
-        if target_object.modifiers:
+        # Since we have isolated a single object, just find ANY Select Res ID Range node in it
+        if target_object and target_object.modifiers:
+            print(f"Looking for Select Res ID Range node in object: {target_object.name}")
+            
             for modifier in target_object.modifiers:
                 if modifier.type == 'NODES' and modifier.node_group:
                     self.target_node_tree = modifier.node_group
-                    # Find the Select Res ID Range node
+                    print(f"  Found geometry nodes modifier: {modifier.name}")
+                    
+                    # Simply find ANY Select Res ID Range node in this tree
+                    # Since this is the isolated object, it should be the right one
                     for node in self.target_node_tree.nodes:
-                        if node.type == 'GROUP' and node.node_tree and "Select Res ID Range" in node.node_tree.name:
-                            self.target_res_node = node
-                            self.preview_active = True
-                            # Set initial values
-                            if "Min" in node.inputs:
-                                node.inputs["Min"].default_value = self.split_start
-                            if "Max" in node.inputs:
-                                node.inputs["Max"].default_value = self.split_end
-                            break
-                    break
+                        if node.type == 'GROUP' and node.node_tree:
+                            # Check if this is a Select Res ID Range node
+                            if "Select Res ID Range" in node.node_tree.name:
+                                print(f"    Found Select Res ID Range node: {node.name}")
+                                self.target_res_node = node
+                                self.preview_active = True
+                                
+                                # Store node reference in scene properties for persistence
+                                context.scene["pb_preview_object"] = target_object.name
+                                context.scene["pb_preview_modifier"] = modifier.name
+                                context.scene["pb_preview_node"] = node.name
+                                print(f"    Stored references: object='{target_object.name}', modifier='{modifier.name}', node='{node.name}'")
+                                
+                                # Debug: List all inputs
+                                print(f"      Node inputs: {[inp.name for inp in node.inputs if inp.type in ('VALUE', 'INT')]}")
+                                
+                                # Set initial values
+                                if "Min" in node.inputs:
+                                    print(f"      Setting Min from {node.inputs['Min'].default_value} to {self.split_start}")
+                                    node.inputs["Min"].default_value = self.split_start
+                                
+                                if "Max" in node.inputs:
+                                    print(f"      Setting Max from {node.inputs['Max'].default_value} to {self.split_end}")
+                                    node.inputs["Max"].default_value = self.split_end
+                                
+                                # Force update
+                                if context.view_layer:
+                                    context.view_layer.update()
+                                
+                                print(f"    Preview mode activated!")
+                                return  # We found it, done!
+                    
+                    # If we get here, we didn't find the node
+                    if not self.target_res_node:
+                        print("  Warning: No Select Res ID Range node found in this object's node tree")
+                    break  # Only check the first geometry nodes modifier
     
     def cleanup_preview_mode(self, context):
         """Restore original visibility states and reset node values"""
-        # Reset the node to its original values if we have a reference
-        if self.target_res_node:
-            scene = context.scene
-            # Find the original item to get its actual range
-            for item in scene.outliner_items:
-                if item.item_id == self.item_id:
-                    if item.item_type == 'CHAIN':
-                        original_start = item.chain_start
-                        original_end = item.chain_end
-                    else:  # DOMAIN
-                        original_start = item.domain_start
-                        original_end = item.domain_end
-                    
-                    # Reset the node values
-                    if "Min" in self.target_res_node.inputs:
-                        self.target_res_node.inputs["Min"].default_value = original_start
-                    if "Max" in self.target_res_node.inputs:
-                        self.target_res_node.inputs["Max"].default_value = original_end
-                    break
+        scene = context.scene
+        
+        # Try to reset node values using stored references
+        if all(k in scene for k in ["pb_preview_object", "pb_preview_modifier", "pb_preview_node"]):
+            obj = bpy.data.objects.get(scene.get("pb_preview_object"))
+            if obj and obj.modifiers:
+                modifier = obj.modifiers.get(scene.get("pb_preview_modifier"))
+                if modifier and modifier.node_group:
+                    node = modifier.node_group.nodes.get(scene.get("pb_preview_node"))
+                    if node:
+                        # Find the original item to get its actual range
+                        for item in scene.outliner_items:
+                            if item.item_id == self.item_id:
+                                if item.item_type == 'CHAIN':
+                                    original_start = item.chain_start
+                                    original_end = item.chain_end
+                                else:  # DOMAIN
+                                    original_start = item.domain_start
+                                    original_end = item.domain_end
+                                
+                                # Reset the node values
+                                if "Min" in node.inputs:
+                                    node.inputs["Min"].default_value = original_start
+                                if "Max" in node.inputs:
+                                    node.inputs["Max"].default_value = original_end
+                                break
+        
+        # Clean up scene properties
+        for prop in ["pb_preview_object", "pb_preview_modifier", "pb_preview_node"]:
+            if prop in scene:
+                del scene[prop]
+                print(f"Cleaned up scene property: {prop}")
         
         # Restore original visibility
-        for obj_name, visibility in self.original_visibility.items():
-            if obj_name in bpy.data.objects:
-                bpy.data.objects[obj_name].hide_viewport = visibility
+        if hasattr(self, 'original_visibility'):
+            for obj_name, visibility in self.original_visibility.items():
+                if obj_name in bpy.data.objects:
+                    bpy.data.objects[obj_name].hide_viewport = visibility
         
-        # Reset preview state
-        self.preview_active = False
-        self.target_node_tree = None
-        self.target_res_node = None
-        self.original_visibility = {}
+        # Reset preview state if attributes exist
+        if hasattr(self, 'preview_active'):
+            self.preview_active = False
+        if hasattr(self, 'target_node_tree'):
+            self.target_node_tree = None
+        if hasattr(self, 'target_res_node'):
+            self.target_res_node = None
+        if hasattr(self, 'original_visibility'):
+            self.original_visibility = {}
         
         # Force viewport update
         for area in context.screen.areas:
