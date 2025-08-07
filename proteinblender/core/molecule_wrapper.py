@@ -343,6 +343,10 @@ class MoleculeWrapper:
         domain.style = self.style
         
         # Create domain object (copy of parent molecule)
+        if not self.molecule or not self.molecule.object:
+            print(f"ERROR: Cannot create domain {domain_id} - parent molecule object does not exist")
+            return None
+            
         if not domain.create_object_from_parent(self.molecule.object):
             print(f"Failed to create domain object for {domain_id}")
             return None
@@ -1167,6 +1171,13 @@ class MoleculeWrapper:
             print(f"Warning: Domain {domain_id} not found for deletion.")
             return None
         
+        # During cleanup (molecule deletion), just delete domains directly without merging
+        if is_cleanup_call:
+            print(f"Cleanup mode: directly deleting domain {domain_id}")
+            self._delete_domain_direct(domain_id)
+            return None
+        
+        # Normal deletion logic with merging follows...
         domain_to_delete = self.domains[domain_id]
         chain_id = domain_to_delete.chain_id
         start_del = domain_to_delete.start

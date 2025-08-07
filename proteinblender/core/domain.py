@@ -120,9 +120,13 @@ class DomainDefinition:
         """Create a new Blender object for the domain by copying parent"""
         try:
             # First verify parent has required modifier
+            # Check for either MolecularNodes (original molecule) or DomainNodes (existing domain)
             parent_modifier = parent_obj.modifiers.get("MolecularNodes")
+            if not parent_modifier:
+                parent_modifier = parent_obj.modifiers.get("DomainNodes")
+            
             if not parent_modifier or not parent_modifier.node_group:
-                print("Parent object does not have a valid MolecularNodes modifier")
+                print(f"Parent object {parent_obj.name} does not have a valid MolecularNodes or DomainNodes modifier")
                 return False
 
             # Copy parent molecule object with data
@@ -183,10 +187,13 @@ class DomainDefinition:
             return False
 
         try:
-            # Get the parent molecule's node group
+            # Get the parent's node group (could be MolecularNodes or DomainNodes)
             parent_modifier = self.object.modifiers.get("MolecularNodes")
+            if not parent_modifier:
+                parent_modifier = self.object.modifiers.get("DomainNodes")
+            
             if not parent_modifier or not parent_modifier.node_group:
-                print("Parent molecule has no valid node group")
+                print("Parent has no valid node group (neither MolecularNodes nor DomainNodes)")
                 return False
 
             # Copy the parent node group
@@ -195,7 +202,7 @@ class DomainDefinition:
             self.node_group.name = f"{self.name}_nodes"
             self.node_group_name = self.node_group.name
 
-            # Remove the old MolecularNodes modifier and create our new one
+            # Remove the old modifier (either MolecularNodes or DomainNodes) and create our new one
             self.object.modifiers.remove(parent_modifier)
             modifier = self.object.modifiers.new(name="DomainNodes", type='NODES')
             modifier.node_group = self.node_group

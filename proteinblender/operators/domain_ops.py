@@ -266,10 +266,8 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         # Hide all protein objects from the same molecule except the one being split
         molecule = scene_manager.molecules.get(molecule_id)
         if molecule:
-            # Hide the parent molecule object
-            if molecule.molecule and molecule.molecule.object:
-                self.original_visibility[molecule.molecule.object.name] = molecule.molecule.object.hide_viewport
-                molecule.molecule.object.hide_viewport = True
+            # Note: We don't hide the parent molecule object to maintain proper parent-child relationships
+            # The parent molecule doesn't have visible geometry anyway (domains have the actual geometry)
             
             # Hide all domain objects except the target
             for domain_id, domain in molecule.domains.items():
@@ -571,6 +569,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         domains_to_remove = []
         chain_start, chain_end = self.get_chain_range(molecule)
         
+        
         self.report({'INFO'}, f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
         
         for domain_id, domain in molecule.domains.items():
@@ -604,8 +603,9 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                 # Remove the domain's Blender object if it exists
                 if hasattr(domain, 'object') and domain.object:
                     try:
+                        obj_name = domain.object.name
                         bpy.data.objects.remove(domain.object, do_unlink=True)
-                        self.report({'INFO'}, f"Removed Blender object for domain {domain_id}")
+                        self.report({'INFO'}, f"Removed Blender object {obj_name} for domain {domain_id}")
                     except:
                         self.report({'WARNING'}, f"Could not remove Blender object for domain {domain_id}")
                 # Remove from molecule's domains
@@ -632,6 +632,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         created_domains = []
         created_outliner_ids = []  # Track outliner IDs for group updates
         
+        
         for i, (start, end) in enumerate(domains):
             domain_name = f"Residues {start}-{end}"  # More descriptive name
             
@@ -651,6 +652,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     break
             
             if not domain_exists:
+                    
                 # Create domain using the molecule's create_domain method
                 # The method expects: chain_id_int_str, start, end, name, auto_fill_chain, parent_domain_id
                 created_domain_ids = molecule._create_domain_with_params(
