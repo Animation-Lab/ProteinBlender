@@ -789,8 +789,12 @@ def build_outliner_hierarchy(context=None):
     # Add existing groups at the end
     # First, create a mapping of item_id to item for easy lookup
     item_map = {}
+    existing_ref_ids = set()  # Track existing reference IDs to avoid duplicates
     for item in scene.outliner_items:
         item_map[item.item_id] = item
+        # If this is a reference item, add it to our tracking set
+        if "_ref_" in item.item_id:
+            existing_ref_ids.add(item.item_id)
     
     # Add separator if there are groups
     if existing_groups:
@@ -818,13 +822,10 @@ def build_outliner_hierarchy(context=None):
         group_item.is_expanded = group_info.get('is_expanded', True)
         group_item.is_selected = group_info.get('is_selected', False)
         
-        # Filter out domains from group members
-        filtered_members = []
-        for member_id in group_info.get('members', []):
-            if member_id in item_map and item_map[member_id].item_type != 'DOMAIN':
-                filtered_members.append(member_id)
-        
-        group_item.group_memberships = ','.join(filtered_members)
+        # Store all members (including domains) in the group
+        # We'll handle display logic when adding references
+        all_members = group_info.get('members', [])
+        group_item.group_memberships = ','.join(all_members)
         
         # Add group members as references (not moving them from original location)
         if group_item.is_expanded:
@@ -840,13 +841,21 @@ def build_outliner_hierarchy(context=None):
                 ref_item.item_type = original_item.item_type
                 ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
                 ref_item.parent_id = parent_ref_id
+                # Track this reference ID to avoid duplicates
+                existing_ref_ids.add(ref_item.item_id)
                 ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
                 ref_item.object_name = original_item.object_name
                 ref_item.indent_level = 1 + indent_offset
                 ref_item.icon = original_item.icon
                 ref_item.is_visible = original_item.is_visible
                 ref_item.is_selected = original_item.is_selected
-                ref_item.is_expanded = original_item.is_expanded
+                # Preserve the expansion state of reference items independently
+                # Check if we have a stored state for this reference item
+                if ref_item.item_id in item_expansion_states:
+                    ref_item.is_expanded = item_expansion_states[ref_item.item_id]
+                else:
+                    # Default to expanded for new reference items
+                    ref_item.is_expanded = True
                 ref_item.chain_id = original_item.chain_id
                 ref_item.chain_start = original_item.chain_start
                 ref_item.chain_end = original_item.chain_end
@@ -856,31 +865,46 @@ def build_outliner_hierarchy(context=None):
                 # Store the original item ID for reference
                 ref_item.group_memberships = member_id  # Store original ID
                 
-                # If this is a chain and it's expanded, add its domain children
-                if original_item.item_type == 'CHAIN' and original_item.is_expanded:
+                # If this is a chain and it's expanded, add its domain children ONLY if they are group members
+                if original_item.item_type == 'CHAIN' and ref_item.is_expanded:
                     # Find all domains that belong to this chain
+                    # We need to look for original domains (not references) that belong to the original chain
                     for child_item in scene.outliner_items:
+                        # Skip reference items - we only want original domains
+                        if "_ref_" in child_item.item_id:
+                            continue
+                            
                         if (child_item.item_type == 'DOMAIN' and 
                             child_item.parent_id == member_id):
-                            # Check if a reference for this domain already exists under this chain
-                            ref_id = f"{group_id}_ref_{child_item.item_id}"
-                            ref_exists = False
-                            for existing_item in scene.outliner_items:
-                                if existing_item.item_id == ref_id:
-                                    ref_exists = True
-                                    break
-                            
-                            if not ref_exists:
-                                # Add the domain as a child of the chain reference
-                                add_reference_with_children(child_item.item_id, ref_item.item_id, 1)
+                            # IMPORTANT: Only add domains that are explicitly group members
+                            # Check if this domain is in the group's member list
+                            if child_item.item_id in group_info.get('members', []):
+                                # Check if a reference for this domain already exists
+                                ref_id = f"{group_id}_ref_{child_item.item_id}"
+                                
+                                if ref_id not in existing_ref_ids:
+                                    # Add the domain as a child of the chain reference
+                                    add_reference_with_children(child_item.item_id, ref_item.item_id, 1)
+                                    # Track that we've added this reference
+                                    existing_ref_ids.add(ref_id)
             
             # Add each member with its hierarchy
-            # Filter out domains - they should only appear as children of chains
             for member_id in group_info.get('members', []):
                 if member_id in item_map:
                     member_item = item_map[member_id]
-                    # Only add non-domain items as direct group members
-                    if member_item.item_type != 'DOMAIN':
+                    # For domains, check if their parent chain is also in the group
+                    if member_item.item_type == 'DOMAIN':
+                        # Check if the parent chain is in the group
+                        parent_chain_in_group = False
+                        if member_item.parent_id in group_info.get('members', []):
+                            parent_chain_in_group = True
+                        
+                        # Only add domain as direct member if its parent chain is NOT in the group
+                        # (If the chain is in the group, the domain will be added as a child of the chain)
+                        if not parent_chain_in_group:
+                            add_reference_with_children(member_id, group_id)
+                    else:
+                        # Add non-domain items directly
                         add_reference_with_children(member_id, group_id)
     
     # Update outliner display

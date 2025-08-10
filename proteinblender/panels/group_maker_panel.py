@@ -99,20 +99,81 @@ class PROTEINBLENDER_OT_create_group(Operator):
         return {'FINISHED'}
 
 
+class PROTEINBLENDER_OT_delete_group(Operator):
+    """Delete a group"""
+    bl_idname = "proteinblender.delete_group"
+    bl_label = "Delete Group"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    group_id: StringProperty(
+        name="Group ID",
+        description="ID of the group to delete"
+    )
+    
+    def invoke(self, context, event):
+        # Find the group name for the confirmation message
+        for item in context.scene.outliner_items:
+            if item.item_id == self.group_id and item.item_type == 'GROUP':
+                self.group_name = item.name
+                break
+        return context.window_manager.invoke_confirm(self, event)
+    
+    def draw(self, context):
+        layout = self.layout
+        group_name = getattr(self, 'group_name', 'this group')
+        layout.label(text=f'Are you sure you want to delete "{group_name}"?')
+    
+    def execute(self, context):
+        scene = context.scene
+        
+        # Find and remove the group
+        group_item = None
+        group_index = -1
+        for i, item in enumerate(scene.outliner_items):
+            if item.item_id == self.group_id and item.item_type == 'GROUP':
+                group_item = item
+                group_index = i
+                break
+        
+        if not group_item:
+            self.report({'ERROR'}, "Group not found")
+            return {'CANCELLED'}
+        
+        # Remove group membership from all items
+        for item in scene.outliner_items:
+            if item.group_memberships:
+                groups = item.group_memberships.split(',')
+                if self.group_id in groups:
+                    groups.remove(self.group_id)
+                    item.group_memberships = ','.join(groups)
+        
+        # Remove the group item
+        scene.outliner_items.remove(group_index)
+        
+        # Rebuild outliner
+        from ..utils.scene_manager import build_outliner_hierarchy
+        build_outliner_hierarchy(context)
+        self.report({'INFO'}, f"Deleted group: {group_item.name}")
+        
+        # Update UI
+        context.area.tag_redraw()
+        return {'FINISHED'}
+
+
 class PROTEINBLENDER_OT_edit_group(Operator):
     """Edit selected group"""
     bl_idname = "proteinblender.edit_group"
-    bl_label = "Edit Group"
+    bl_label = "Delete Group"
     bl_options = {'REGISTER', 'UNDO'}
     
     action: EnumProperty(
         name="Action",
         items=[
-            ('EDIT', "Edit Group", "Edit group name and members"),
+            ('EDIT', "DeleteGroup", "Edit group name and members"),
             ('ADD', "Add to Group", "Add selected items to group"),
             ('REMOVE', "Remove from Group", "Remove selected items from group"),
             ('RENAME', "Rename Group", "Rename the group"),
-            ('DELETE', "Delete Group", "Delete the group"),
+            ('DELETE', "Delete Group", "Delete the group"),  # Keep for backward compatibility
         ]
     )
     
@@ -186,12 +247,22 @@ class PROTEINBLENDER_OT_edit_group(Operator):
                     break
             return context.window_manager.invoke_props_dialog(self)
         elif self.action == 'DELETE':
-            # Show confirmation dialog
+            # Fallback for when the dedicated delete operator isn't available
             return context.window_manager.invoke_confirm(self, event)
         return self.execute(context)
     
     def draw(self, context):
         layout = self.layout
+        
+        if self.action == 'DELETE':
+            # Show a clear delete confirmation message
+            group_name = "this group"
+            for item in context.scene.outliner_items:
+                if item.item_id == self.group_id and item.item_type == 'GROUP':
+                    group_name = f'"{item.name}"'
+                    break
+            layout.label(text=f"Are you sure you want to delete {group_name}?", icon='ERROR')
+            return
         
         if self.action == 'EDIT':
             # Group name
@@ -275,6 +346,7 @@ class PROTEINBLENDER_OT_edit_group(Operator):
             self.report({'INFO'}, f"Updated group: {self.new_name}")
             
         elif self.action == 'DELETE':
+            # Fallback implementation for when dedicated delete operator isn't available
             # Find and remove the group
             group_item = None
             group_index = -1
@@ -373,6 +445,7 @@ class PROTEINBLENDER_PT_group_maker(Panel):
 # Classes to register
 CLASSES = [
     PROTEINBLENDER_OT_create_group,
+    PROTEINBLENDER_OT_delete_group,
     PROTEINBLENDER_OT_edit_group,
     PROTEINBLENDER_PT_group_maker,
 ]

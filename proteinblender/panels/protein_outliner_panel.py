@@ -83,13 +83,14 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Check if this is a reference item
         is_reference = item.item_id.startswith("group_") and "_ref_" in item.item_id
         
-        # Expand/collapse for proteins, groups, and chains with domains (not references)
+        # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
         
         if item.item_type in ['PROTEIN', 'GROUP'] and not is_reference:
             show_expand = True
-        elif item.item_type == 'CHAIN' and not is_reference:
-            # Use the has_domains property to determine if we should show expand arrow
+        elif item.item_type == 'CHAIN':
+            # Show expand arrow for chains with domains (both original and reference items)
+            # This allows collapsing/expanding domains in groups too
             show_expand = item.has_domains
         
         if show_expand:
@@ -122,9 +123,11 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 delete_op.molecule_id = item.item_id
         elif item.item_type == 'GROUP':
             # Delete button (trash can) - use the edit_group operator with DELETE action
+            # This is more reliable than trying to use an operator that might not be registered
             op = row.operator("proteinblender.edit_group", text="", icon='TRASH', emboss=False)
-            op.action = 'DELETE'
-            op.group_id = item.item_id
+            if op:
+                op.action = 'DELETE'
+                op.group_id = item.item_id
         
         # Second: Selection checkbox for all items
         if item.item_type == 'GROUP':
@@ -163,6 +166,9 @@ class PROTEINBLENDER_OT_toggle_expand(Operator):
             
         scene = context.scene
         item_type = None
+        is_reference = "_ref_" in self.item_id
+        new_state = None
+        
         for item in scene.outliner_items:
             if item.item_id == self.item_id:
                 item.is_expanded = not item.is_expanded
@@ -170,6 +176,7 @@ class PROTEINBLENDER_OT_toggle_expand(Operator):
                 break
         
         # If we toggled a chain, we need to rebuild the hierarchy to show/hide domains
+        # This includes reference chains in groups
         if item_type == 'CHAIN':
             from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
