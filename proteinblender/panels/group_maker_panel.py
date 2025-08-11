@@ -27,6 +27,32 @@ class PROTEINBLENDER_OT_create_group(Operator):
             self.report({'WARNING'}, "Select items to create a group")
             return {'CANCELLED'}
         
+        # Filter out groups and check for items already in groups
+        valid_items = [item for item in selected_items 
+                      if item.item_type not in ['GROUP'] and item.item_id != "groups_separator"]
+        
+        # Check if any selected items are already in groups
+        items_with_groups = []
+        for item in valid_items:
+            if item.group_memberships:
+                items_with_groups.append(item.name)
+        
+        if items_with_groups:
+            # Build error message
+            if len(items_with_groups) == 1:
+                self.report({'ERROR'}, f'Cannot create group: "{items_with_groups[0]}" is already in a group')
+            elif len(items_with_groups) <= 3:
+                items_str = ', '.join([f'"{name}"' for name in items_with_groups])
+                self.report({'ERROR'}, f'Cannot create group: {items_str} are already in groups')
+            else:
+                first_items = ', '.join([f'"{name}"' for name in items_with_groups[:2]])
+                self.report({'ERROR'}, f'Cannot create group: {first_items} and {len(items_with_groups)-2} more items are already in groups')
+            return {'CANCELLED'}
+        
+        if not valid_items:
+            self.report({'WARNING'}, "No valid items selected to create a group")
+            return {'CANCELLED'}
+        
         # Generate default name
         # Count only actual groups, excluding the separator
         group_count = len([i for i in context.scene.outliner_items 
@@ -58,9 +84,22 @@ class PROTEINBLENDER_OT_create_group(Operator):
         
         # Filter items that can be grouped (exclude groups themselves)
         items_to_group = []
+        items_already_grouped = []
         for item in selected_items:
-            if item.item_type != 'GROUP':
-                items_to_group.append(item)
+            if item.item_type != 'GROUP' and item.item_id != "groups_separator":
+                # Check if already in a group
+                if item.group_memberships:
+                    items_already_grouped.append(item.name)
+                else:
+                    items_to_group.append(item)
+        
+        # If any items are already in groups, don't proceed
+        if items_already_grouped:
+            if len(items_already_grouped) == 1:
+                self.report({'ERROR'}, f'Cannot create group: "{items_already_grouped[0]}" is already in a group')
+            else:
+                self.report({'ERROR'}, f'Cannot create group: {len(items_already_grouped)} selected items are already in groups')
+            return {'CANCELLED'}
         
         if not items_to_group:
             self.report({'WARNING'}, "No valid items to group")
@@ -413,10 +452,36 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         box.label(text="Group Maker", icon='GROUP')
         box.separator()
         
-        # Create New Group button
+        # Get selected items and check their group memberships
+        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        # Filter out groups and separator from selection count
+        ungrouped_items = [item for item in selected_items if item.item_type not in ['GROUP'] and item.item_id != "groups_separator"]
+        
+        # Check if any selected items are already in groups
+        items_already_grouped = []
+        group_names_dict = {}  # Map group IDs to names
+        
+        # First build a map of group IDs to names
+        for item in scene.outliner_items:
+            if item.item_type == 'GROUP':
+                group_names_dict[item.item_id] = item.name
+        
+        # Check which items are already in groups
+        for item in ungrouped_items:
+            if item.group_memberships:
+                group_ids = item.group_memberships.split(',')
+                # Get the names of groups this item belongs to
+                group_names = [group_names_dict.get(gid, gid) for gid in group_ids if gid]
+                if group_names:
+                    items_already_grouped.append((item.name, group_names))
+        
+        # Create New Group button - disable if items are already grouped
         col = box.column(align=True)
         row = col.row()
         row.scale_y = 1.5
+        
+        # Disable button if any selected items are already in groups
+        row.enabled = len(items_already_grouped) == 0 and len(ungrouped_items) > 0
         row.operator("proteinblender.create_group", text="Create New Group", icon='GROUP')
         
         # Info section
@@ -425,15 +490,33 @@ class PROTEINBLENDER_PT_group_maker(Panel):
         info_col = info_box.column(align=True)
         info_col.scale_y = 0.8
         
-        # Show selection info
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        # Filter out groups and separator from selection count
-        ungrouped_items = [item for item in selected_items if item.item_type not in ['GROUP'] and item.item_id != "groups_separator"]
-        
-        if ungrouped_items:
+        # Show warnings if items are already grouped
+        if items_already_grouped:
+            # Show warning icon and message
+            warning_row = info_col.row()
+            warning_row.alert = True
+            warning_row.label(text="Cannot create group:", icon='ERROR')
+            
+            # List items that are already in groups
+            for item_name, group_names in items_already_grouped[:3]:  # Show max 3 items
+                if len(group_names) == 1:
+                    info_col.label(text=f'  "{item_name}" is in {group_names[0]}', icon='DOT')
+                else:
+                    groups_str = ', '.join(group_names[:2])
+                    if len(group_names) > 2:
+                        groups_str += f' (+{len(group_names)-2} more)'
+                    info_col.label(text=f'  "{item_name}" is in: {groups_str}', icon='DOT')
+            
+            # If there are more items, show count
+            if len(items_already_grouped) > 3:
+                info_col.label(text=f"  ...and {len(items_already_grouped)-3} more items", icon='DOT')
+                
+        elif ungrouped_items:
+            # Show regular selection info
             info_col.label(text=f"{len(ungrouped_items)} items selected", icon='INFO')
             info_col.label(text="Ready to create group")
         else:
+            # No items selected
             info_col.label(text="Select items to group", icon='INFO')
             info_col.label(text="Proteins, chains, or domains")
         
