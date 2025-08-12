@@ -82,18 +82,42 @@ class DomainTransformData(PropertyGroup):
     rotation: FloatVectorProperty(name="Rotation", size=3, subtype='EULER')
     scale: FloatVectorProperty(name="Scale", size=3, default=(1, 1, 1))
 
+class GroupTransformData(PropertyGroup):
+    """Stores transform data for a group in a pose"""
+    group_id: StringProperty(name="Group ID", description="ID of the group and object")
+    relative_location: FloatVectorProperty(name="Relative Location", size=3)
+    relative_rotation: FloatVectorProperty(name="Relative Rotation", size=3, subtype='EULER')
+    relative_scale: FloatVectorProperty(name="Relative Scale", size=3, default=(1, 1, 1))
+
 class MoleculePose(PropertyGroup):
     """Group of properties representing a saved pose for a molecule"""
     name: StringProperty(name="Pose Name", description="Name of this pose", default="New Pose")
     
-    # Add properties for the main protein object transform
+    # Pose metadata
+    is_default: BoolProperty(name="Is Default", description="Is this the default pose", default=False)
+    created_at: StringProperty(name="Created At", description="Creation timestamp")
+    modified_at: StringProperty(name="Modified At", description="Last modification timestamp")
+    
+    # Groups in this pose
+    group_ids: StringProperty(name="Group IDs", description="Comma-separated list of group IDs")
+    
+    # Alpha carbon center reference
+    alpha_carbon_center: FloatVectorProperty(name="Alpha Carbon Center", size=3)
+    
+    # Screenshot path
+    screenshot_path: StringProperty(name="Screenshot Path", description="Path to pose thumbnail")
+    
+    # Add properties for the main protein object transform (legacy support)
     has_protein_transform: BoolProperty(name="Has Protein Transform", default=False)
     protein_location: FloatVectorProperty(name="Protein Location", size=3)
     protein_rotation: FloatVectorProperty(name="Protein Rotation", size=3, subtype='EULER')
     protein_scale: FloatVectorProperty(name="Protein Scale", size=3, default=(1, 1, 1))
     
-    # Collection of domain transforms
+    # Collection of domain transforms (legacy support)
     domain_transforms: CollectionProperty(type=DomainTransformData)
+    
+    # Collection of group transforms (new system)
+    group_transforms: CollectionProperty(type=GroupTransformData)
     
 class MoleculeKeyframe(PropertyGroup):
     """Group of properties representing a saved keyframe for a molecule"""
@@ -391,6 +415,7 @@ def register():
     bpy.utils.register_class(Domain)
     bpy.utils.register_class(ChainSelectionItem)
     bpy.utils.register_class(DomainTransformData)
+    bpy.utils.register_class(GroupTransformData)
     bpy.utils.register_class(MoleculePose)
     bpy.utils.register_class(MoleculeKeyframe)
     bpy.utils.register_class(MoleculeListItem)
@@ -539,6 +564,7 @@ def unregister():
         MoleculeKeyframe,
         ChainSelectionItem,
         DomainTransformData,
+        GroupTransformData,
         MoleculePose,
         Domain
     ]

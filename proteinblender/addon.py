@@ -15,6 +15,7 @@ from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes, register as register_panels, unregister as unregister_panels
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
+from .properties.pose_props import register as register_pose_props, unregister as unregister_pose_props
 from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -94,6 +95,7 @@ def register() -> None:
     # Register properties
     register_protein_props()
     register_molecule_props()
+    register_pose_props()  # Register pose properties
     register_panels()  # Register panel properties
     
     # Register domain expanded property if not already registered
@@ -162,6 +164,11 @@ def unregister() -> None:
         unregister_molecule_props()
     except Exception as e:
         logger.debug(f"Failed to unregister molecule props: {e}")
+    
+    try:
+        unregister_pose_props()
+    except Exception as e:
+        logger.debug(f"Failed to unregister pose props: {e}")
     
     try:
         unregister_panels()

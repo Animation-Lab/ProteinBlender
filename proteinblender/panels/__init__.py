@@ -28,6 +28,11 @@ from .group_maker_panel import (
 )
 from .pose_library_panel import (
     PROTEINBLENDER_PT_pose_library,
+    PROTEINBLENDER_OT_toggle_group_selection,
+    PROTEINBLENDER_OT_create_pose,
+    PROTEINBLENDER_OT_apply_pose,
+    PROTEINBLENDER_OT_capture_pose,
+    PROTEINBLENDER_OT_delete_pose,
     PROTEINBLENDER_OT_placeholder
 )
 from .animation_panel import PROTEINBLENDER_PT_animation
@@ -53,6 +58,11 @@ __all__ = [
     'PROTEINBLENDER_OT_edit_group',
     'PROTEINBLENDER_PT_group_maker',
     'PROTEINBLENDER_PT_pose_library',
+    'PROTEINBLENDER_OT_toggle_group_selection',
+    'PROTEINBLENDER_OT_create_pose',
+    'PROTEINBLENDER_OT_apply_pose',
+    'PROTEINBLENDER_OT_capture_pose',
+    'PROTEINBLENDER_OT_delete_pose',
     'PROTEINBLENDER_OT_placeholder',
     'PROTEINBLENDER_PT_animation',
     'CLASSES',
@@ -71,6 +81,11 @@ CLASSES = [
     PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_OT_create_group,
     PROTEINBLENDER_OT_edit_group,
+    PROTEINBLENDER_OT_toggle_group_selection,
+    PROTEINBLENDER_OT_create_pose,
+    PROTEINBLENDER_OT_apply_pose,
+    PROTEINBLENDER_OT_capture_pose,
+    PROTEINBLENDER_OT_delete_pose,
     PROTEINBLENDER_OT_placeholder,
     
     # Panels in order (top to bottom)

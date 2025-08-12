@@ -737,6 +737,11 @@ def build_outliner_hierarchy(context=None):
                 # Mark if this chain has domains (for UI purposes)
                 if len(chain_domains) > 1:
                     chain_item.has_domains = True
+                elif len(chain_domains) == 1:
+                    # If there's exactly one domain for this chain, the chain item should reference that domain's object
+                    domain_id, domain = chain_domains[0]
+                    if domain.object:
+                        chain_item.object_name = domain.object.name
                     
                 # Only add domains if there's more than one for this chain
                 # OR if the domain doesn't span the entire chain
