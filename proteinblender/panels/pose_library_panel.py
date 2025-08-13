@@ -229,6 +229,23 @@ class PROTEINBLENDER_OT_create_pose(Operator):
             # Store the preview path in the pose
             pose.preview_path = str(preview_file)
             
+            # Load the image into Blender's data so it's available for display
+            # This must be done here, not during drawing
+            try:
+                # Check if image already exists and remove it
+                img_name = f"pose_preview_{safe_name}"
+                if img_name in bpy.data.images:
+                    old_img = bpy.data.images[img_name]
+                    bpy.data.images.remove(old_img)
+                
+                # Load the new image
+                img = bpy.data.images.load(str(preview_file))
+                img.name = img_name
+                # Generate preview for UI display
+                img.preview_ensure()
+            except Exception as e:
+                print(f"Warning: Could not load preview into Blender: {e}")
+            
         except Exception as e:
             print(f"Warning: Could not capture pose preview: {e}")
     
@@ -517,6 +534,23 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
             # Store the preview path in the pose
             pose.preview_path = str(preview_file)
             
+            # Load the image into Blender's data so it's available for display
+            # This must be done here, not during drawing
+            try:
+                # Check if image already exists and remove it
+                img_name = f"pose_preview_{safe_name}"
+                if img_name in bpy.data.images:
+                    old_img = bpy.data.images[img_name]
+                    bpy.data.images.remove(old_img)
+                
+                # Load the new image
+                img = bpy.data.images.load(str(preview_file))
+                img.name = img_name
+                # Generate preview for UI display
+                img.preview_ensure()
+            except Exception as e:
+                print(f"Warning: Could not load preview into Blender: {e}")
+            
         except Exception as e:
             print(f"Warning: Could not capture pose preview: {e}")
     
@@ -773,42 +807,46 @@ class PROTEINBLENDER_PT_pose_library(Panel):
             
             # Screenshot preview
             screenshot_box = pose_col.box()
-            screenshot_box.scale_y = 3.0
             
-            # Check if preview exists and display it
+            # Try to display the preview image
+            preview_shown = False
+            
+            # Look for the image in Blender's loaded images
+            # The image should have been loaded when the pose was created
             if pose.preview_path:
                 import os
-                if os.path.exists(pose.preview_path):
-                    # Try to load and display the preview image
-                    try:
-                        # Load image if not already loaded
-                        import bpy.path
-                        img_name = f"pose_preview_{idx}"
-                        if img_name not in bpy.data.images:
-                            img = bpy.data.images.load(pose.preview_path)
-                            img.name = img_name
-                        else:
-                            img = bpy.data.images[img_name]
-                            # Reload to get updates
-                            img.reload()
-                        
-                        # Display using template_preview
-                        screenshot_box.template_preview(img, show_buttons=False)
-                    except Exception as e:
-                        # Fallback to icon if image can't be loaded
-                        screenshot_row = screenshot_box.row()
-                        screenshot_row.alignment = 'CENTER'
-                        screenshot_row.label(text="", icon='IMAGE_DATA')
-                else:
-                    # Preview file doesn't exist
-                    screenshot_row = screenshot_box.row()
-                    screenshot_row.alignment = 'CENTER'
-                    screenshot_row.label(text="", icon='IMAGE_DATA')
-            else:
-                # No preview path set
-                screenshot_row = screenshot_box.row()
-                screenshot_row.alignment = 'CENTER'
-                screenshot_row.label(text="", icon='IMAGE_DATA')
+                # Normalize the preview path for comparison
+                preview_path_normalized = os.path.normpath(pose.preview_path)
+                
+                # Find image by comparing normalized paths
+                for img in bpy.data.images:
+                    # Skip images without filepath
+                    if not img.filepath:
+                        continue
+                    
+                    # Compare normalized paths
+                    img_path_normalized = os.path.normpath(img.filepath)
+                    
+                    if preview_path_normalized == img_path_normalized:
+                        # Found the image!
+                        if img.preview and img.preview.icon_id > 0:
+                            # Use template_icon for a single large preview
+                            # This method is designed specifically for displaying large icons
+                            screenshot_box.template_icon(icon_value=img.preview.icon_id, scale=5.0)
+                            
+                            preview_shown = True
+                            break
+            
+            # If no preview shown, display placeholder with proper scaling
+            if not preview_shown:
+                # Use a centered layout with a large placeholder icon
+                col = screenshot_box.column()
+                col.alignment = 'CENTER'
+                row = col.row()
+                row.alignment = 'CENTER'
+                row.scale_x = 3.0
+                row.scale_y = 3.0
+                row.label(text="", icon='IMAGE_DATA')
             
             # Action buttons
             button_row = pose_col.row(align=True)
@@ -820,18 +858,18 @@ class PROTEINBLENDER_PT_pose_library(Panel):
             )
             apply_op.pose_index = idx
             
-            # Capture button
+            # Update button (formerly Capture)
             capture_op = button_row.operator(
                 "proteinblender.capture_pose",
-                text="Capture"
+                text="Update"
             )
             capture_op.pose_index = idx
             
-            # Delete button
+            # Delete button with only trash icon
             delete_op = button_row.operator(
                 "proteinblender.delete_pose",
-                text="Delete",
-                icon='X'
+                text="",
+                icon='TRASH'
             )
             delete_op.pose_index = idx
             
