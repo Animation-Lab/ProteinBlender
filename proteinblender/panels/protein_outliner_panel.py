@@ -27,7 +27,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         item = items[item_idx]
         
         # Separator is always shown
-        if item.item_id == "groups_separator":
+        if item.item_id == "puppets_separator":
             return True
         
         # Top-level items are always shown
@@ -69,7 +69,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
     
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         # Check if this is the separator
-        if item.item_id == "groups_separator":
+        if item.item_id == "puppets_separator":
             layout.label(text=item.name)
             return
         
@@ -110,7 +110,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         row.separator()
         
         # Handle different item types
-        if item.item_type == 'GROUP' and item.item_id == "groups_separator":
+        if item.item_type == 'GROUP' and item.item_id == "puppets_separator":
             # Groups separator - no controls
             return
         
@@ -161,7 +161,7 @@ class PROTEINBLENDER_OT_toggle_expand(Operator):
     
     def execute(self, context):
         # Don't allow interaction with separator
-        if self.item_id == "groups_separator":
+        if self.item_id == "puppets_separator":
             return {'CANCELLED'}
             
         scene = context.scene
@@ -201,7 +201,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         scene = context.scene
         
         # Don't allow interaction with separator
-        if self.item_id == "groups_separator":
+        if self.item_id == "puppets_separator":
             return {'CANCELLED'}
         
         # Find the clicked item
@@ -426,7 +426,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         scene = context.scene
         
         # Don't allow interaction with separator
-        if self.item_id == "groups_separator":
+        if self.item_id == "puppets_separator":
             return {'CANCELLED'}
         
         # Check if this is a reference item

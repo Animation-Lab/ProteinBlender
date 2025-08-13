@@ -7,17 +7,17 @@ from datetime import datetime
 
 
 class GroupSelectionItem(PropertyGroup):
-    """Helper class to store group selection state"""
-    group_id: StringProperty(name="Group ID")
-    group_name: StringProperty(name="Group Name")
+    """Helper class to store puppet selection state"""
+    puppet_id: StringProperty(name="Puppet ID")
+    puppet_name: StringProperty(name="Puppet Name")
     selected: BoolProperty(name="Selected", default=False)
 
 
 class PROTEINBLENDER_OT_create_pose(Operator):
-    """Create a new pose from selected groups"""
+    """Create a new pose from selected puppets"""
     bl_idname = "proteinblender.create_pose"
     bl_label = "Create Pose"
-    bl_description = "Save current positions of selected groups as a new pose"
+    bl_description = "Save current positions of selected puppets as a new pose"
     bl_options = {'REGISTER', 'UNDO'}
     
     pose_name: StringProperty(
@@ -33,23 +33,23 @@ class PROTEINBLENDER_OT_create_pose(Operator):
             pose_count = len(context.scene.pose_library)
         self.pose_name = f"Pose {pose_count + 1}"
         
-        # Store available groups as a simple list for this operator instance
-        self.available_groups = []
-        self.selected_groups = {}  # Dictionary to track selected state
+        # Store available puppets as a simple list for this operator instance
+        self.available_puppets = []
+        self.selected_puppets = {}  # Dictionary to track selected state
         
-        # Get available groups
+        # Get available puppets
         if hasattr(context.scene, 'outliner_items'):
             for item in context.scene.outliner_items:
-                if item.item_type == 'GROUP' and item.item_id != "groups_separator":
-                    self.available_groups.append({
+                if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
+                    self.available_puppets.append({
                         'id': item.item_id,
                         'name': item.name
                     })
-                    # Initialize all groups as selected by default
-                    self.selected_groups[item.item_id] = True
+                    # Initialize all puppets as selected by default
+                    self.selected_puppets[item.item_id] = True
         
-        if not self.available_groups:
-            self.report({'WARNING'}, "No groups available. Create groups first.")
+        if not self.available_puppets:
+            self.report({'WARNING'}, "No puppets available. Create puppets first.")
             return {'CANCELLED'}
         
         # Store this instance for the toggle operator
@@ -69,21 +69,21 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         layout.separator()
         layout.label(text="Select Groups to Include:", icon='GROUP')
         
-        # Create a box for the group list
+        # Create a box for the puppet list
         box = layout.box()
         col = box.column(align=True)
         
-        # Display each group as a checkbox using operator button toggles
-        for group in self.available_groups:
+        # Display each puppet as a checkbox using operator button toggles
+        for puppet in self.available_puppets:
             row = col.row(align=True)
             # Use toggle buttons to simulate checkboxes
-            icon = 'CHECKBOX_HLT' if self.selected_groups.get(group['id'], False) else 'CHECKBOX_DEHLT'
-            op = row.operator('proteinblender.toggle_group_selection', text=group['name'], icon=icon, emboss=False)
-            op.group_id = group['id']
+            icon = 'CHECKBOX_HLT' if self.selected_puppets.get(puppet['id'], False) else 'CHECKBOX_DEHLT'
+            op = row.operator('proteinblender.toggle_puppet_selection', text=puppet['name'], icon=icon, emboss=False)
+            op.puppet_id = puppet['id']
             op.operator_instance_id = str(id(self))  # Pass operator instance ID
         
-        if not self.available_groups:
-            col.label(text="No groups available", icon='INFO')
+        if not self.available_puppets:
+            col.label(text="No puppets available", icon='INFO')
     
     def check(self, context):
         # This method is called when properties change
@@ -97,17 +97,17 @@ class PROTEINBLENDER_OT_create_pose(Operator):
             self.report({'ERROR'}, "Pose library not initialized")
             return {'CANCELLED'}
         
-        # Collect selected groups
+        # Collect selected puppets
         selected_ids = []
         selected_names = []
         
-        for group in self.available_groups:
-            if self.selected_groups.get(group['id'], False):
-                selected_ids.append(group['id'])
-                selected_names.append(group['name'])
+        for puppet in self.available_puppets:
+            if self.selected_puppets.get(puppet['id'], False):
+                selected_ids.append(puppet['id'])
+                selected_names.append(puppet['name'])
         
         if not selected_ids:
-            self.report({'WARNING'}, "No groups selected. Please select at least one group.")
+            self.report({'WARNING'}, "No puppets selected. Please select at least one puppet.")
             return {'CANCELLED'}
         
         # Clean up stored instance
@@ -119,37 +119,37 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         # Create new pose
         pose = scene.pose_library.add()
         pose.name = self.pose_name
-        pose.group_ids = ','.join(selected_ids)
-        pose.group_names = ', '.join(selected_names)
+        pose.puppet_ids = ','.join(selected_ids)
+        pose.puppet_names = ', '.join(selected_names)
         pose.created_timestamp = datetime.now().isoformat()
         pose.modified_timestamp = pose.created_timestamp
         
-        # Capture transforms for each group
+        # Capture transforms for each puppet
         print(f"\nDebug: Creating pose '{self.pose_name}'")
-        print(f"Debug: Selected group IDs: {selected_ids}")
+        print(f"Debug: Selected puppet IDs: {selected_ids}")
         
-        for group_id in selected_ids:
-            print(f"Debug: Processing group {group_id}")
+        for puppet_id in selected_ids:
+            print(f"Debug: Processing puppet {puppet_id}")
             try:
-                # Get objects in this group
-                objects = self.get_group_objects(context, group_id)
-                print(f"Debug: Group {group_id} has {len(objects)} objects")
+                # Get objects in this puppet
+                objects = self.get_puppet_objects(context, puppet_id)
+                print(f"Debug: Group {puppet_id} has {len(objects)} objects")
                 
                 if not objects:
-                    print(f"Debug: WARNING - No objects found for group {group_id}")
+                    print(f"Debug: WARNING - No objects found for puppet {puppet_id}")
                     # Try to understand why
                     for item in context.scene.outliner_items:
-                        if item.item_id == group_id and item.item_type == 'GROUP':
-                            print(f"  Group members: {item.group_memberships}")
+                        if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                            print(f"  Group members: {item.puppet_memberships}")
                             break
                 
                 for obj in objects:
                     transform = pose.transforms.add()
-                    transform.group_id = group_id
-                    # Find the group name
-                    group_name = next((g['name'] for g in self.available_groups 
-                                     if g['id'] == group_id), group_id)
-                    transform.group_name = group_name
+                    transform.puppet_id = puppet_id
+                    # Find the puppet name
+                    puppet_name = next((g['name'] for g in self.available_puppets 
+                                     if g['id'] == puppet_id), puppet_id)
+                    transform.puppet_name = puppet_name
                     transform.object_name = obj.name
                     
                     # Store absolute positions (we'll calculate relative later if needed)
@@ -171,7 +171,7 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                         print(f"    Absolute location: {list(obj.location)}")
                         print(f"    No parent object")
             except Exception as e:
-                print(f"Debug: ERROR processing group {group_id}: {e}")
+                print(f"Debug: ERROR processing puppet {puppet_id}: {e}")
                 import traceback
                 traceback.print_exc()
         
@@ -182,7 +182,7 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         if hasattr(scene, 'active_pose_index'):
             scene.active_pose_index = len(scene.pose_library) - 1
         
-        self.report({'INFO'}, f"Created pose '{self.pose_name}' with {len(selected_ids)} group(s)")
+        self.report({'INFO'}, f"Created pose '{self.pose_name}' with {len(selected_ids)} puppet(s)")
         return {'FINISHED'}
     
     def capture_pose_preview(self, context, pose):
@@ -249,29 +249,29 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         except Exception as e:
             print(f"Warning: Could not capture pose preview: {e}")
     
-    def get_group_objects(self, context, group_id):
-        """Get all objects that belong to a group"""
+    def get_puppet_objects(self, context, puppet_id):
+        """Get all objects that belong to a puppet"""
         objects = []
         
-        # Find group item
-        group_item = None
+        # Find puppet item
+        puppet_item = None
         if hasattr(context.scene, 'outliner_items'):
             for item in context.scene.outliner_items:
-                if item.item_id == group_id and item.item_type == 'GROUP':
-                    group_item = item
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    puppet_item = item
                     break
         
-        if not group_item or not hasattr(group_item, 'group_memberships'):
-            print(f"Debug: No group found or no memberships for group {group_id}")
+        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
+            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
             return objects
         
-        if not group_item.group_memberships:
-            print(f"Debug: Empty memberships for group {group_id}")
+        if not puppet_item.puppet_memberships:
+            print(f"Debug: Empty memberships for puppet {puppet_id}")
             return objects
         
         # Parse member IDs and find corresponding objects
-        member_ids = group_item.group_memberships.split(',')
-        print(f"Debug: Group '{group_item.name}' has members: {member_ids}")
+        member_ids = puppet_item.puppet_memberships.split(',')
+        print(f"Debug: Group '{puppet_item.name}' has members: {member_ids}")
         
         # Import scene manager to access molecules
         from ..utils.scene_manager import ProteinBlenderScene
@@ -299,8 +299,8 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                     import re
                     match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
                     if match:
-                        mol_id = match.group(1)
-                        domain_id = match.group(2)
+                        mol_id = match.puppet(1)
+                        domain_id = match.puppet(2)
                     else:
                         # Fallback to splitting on last underscore
                         parts = member_id.rsplit('_', 1)
@@ -370,15 +370,15 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                             print(f"Debug: Outliner item {member_id} has object_name='{item.object_name}' but object not found in scene")
                         break
         
-        print(f"Debug: Total objects found for group: {len(objects)}")
+        print(f"Debug: Total objects found for puppet: {len(objects)}")
         return objects
     
 
 class PROTEINBLENDER_OT_apply_pose(Operator):
-    """Apply a saved pose to restore group positions"""
+    """Apply a saved pose to restore puppet positions"""
     bl_idname = "proteinblender.apply_pose"
     bl_label = "Apply Pose"
-    bl_description = "Restore groups to their saved positions in this pose"
+    bl_description = "Restore puppets to their saved positions in this pose"
     bl_options = {'REGISTER', 'UNDO'}
     
     pose_index: IntProperty(name="Pose Index", default=0)
@@ -442,10 +442,10 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
 
 
 class PROTEINBLENDER_OT_capture_pose(Operator):
-    """Update pose with current group positions"""
+    """Update pose with current puppet positions"""
     bl_idname = "proteinblender.capture_pose"
     bl_label = "Capture Pose"
-    bl_description = "Update this pose with the current positions of its groups"
+    bl_description = "Update this pose with the current positions of its puppets"
     bl_options = {'REGISTER', 'UNDO'}
     
     pose_index: IntProperty(name="Pose Index", default=0)
@@ -466,16 +466,16 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
         # Clear existing transforms
         pose.transforms.clear()
         
-        # Re-capture transforms for each group
-        group_ids = pose.group_ids.split(',') if pose.group_ids else []
+        # Re-capture transforms for each puppet
+        puppet_ids = pose.puppet_ids.split(',') if pose.puppet_ids else []
         
-        for group_id in group_ids:
-            # Get objects in this group
-            objects = self.get_group_objects(context, group_id)
+        for puppet_id in puppet_ids:
+            # Get objects in this puppet
+            objects = self.get_puppet_objects(context, puppet_id)
             
             for obj in objects:
                 transform = pose.transforms.add()
-                transform.group_id = group_id
+                transform.puppet_id = puppet_id
                 transform.object_name = obj.name
                 transform.location = obj.location.copy()
                 transform.rotation_euler = obj.rotation_euler.copy()
@@ -554,29 +554,29 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
         except Exception as e:
             print(f"Warning: Could not capture pose preview: {e}")
     
-    def get_group_objects(self, context, group_id):
-        """Get all objects that belong to a group"""
+    def get_puppet_objects(self, context, puppet_id):
+        """Get all objects that belong to a puppet"""
         objects = []
         
-        # Find group item
-        group_item = None
+        # Find puppet item
+        puppet_item = None
         if hasattr(context.scene, 'outliner_items'):
             for item in context.scene.outliner_items:
-                if item.item_id == group_id and item.item_type == 'GROUP':
-                    group_item = item
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    puppet_item = item
                     break
         
-        if not group_item or not hasattr(group_item, 'group_memberships'):
-            print(f"Debug: No group found or no memberships for group {group_id}")
+        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
+            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
             return objects
         
-        if not group_item.group_memberships:
-            print(f"Debug: Empty memberships for group {group_id}")
+        if not puppet_item.puppet_memberships:
+            print(f"Debug: Empty memberships for puppet {puppet_id}")
             return objects
         
         # Parse member IDs and find corresponding objects
-        member_ids = group_item.group_memberships.split(',')
-        print(f"Debug: Group '{group_item.name}' has members: {member_ids}")
+        member_ids = puppet_item.puppet_memberships.split(',')
+        print(f"Debug: Group '{puppet_item.name}' has members: {member_ids}")
         
         # Import scene manager to access molecules
         from ..utils.scene_manager import ProteinBlenderScene
@@ -604,8 +604,8 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                     import re
                     match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
                     if match:
-                        mol_id = match.group(1)
-                        domain_id = match.group(2)
+                        mol_id = match.puppet(1)
+                        domain_id = match.puppet(2)
                     else:
                         # Fallback to splitting on last underscore
                         parts = member_id.rsplit('_', 1)
@@ -675,7 +675,7 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                             print(f"Debug: Outliner item {member_id} has object_name='{item.object_name}' but object not found in scene")
                         break
         
-        print(f"Debug: Total objects found for group: {len(objects)}")
+        print(f"Debug: Total objects found for puppet: {len(objects)}")
         return objects
 
 
@@ -731,7 +731,7 @@ class PROTEINBLENDER_OT_placeholder(Operator):
 
 
 class PROTEINBLENDER_PT_pose_library(Panel):
-    """Panel for managing group poses"""
+    """Panel for managing puppet poses"""
     bl_label = "Protein Pose Library"
     bl_idname = "PROTEINBLENDER_PT_pose_library"
     bl_space_type = 'PROPERTIES'
@@ -768,7 +768,7 @@ class PROTEINBLENDER_PT_pose_library(Panel):
         if not scene.pose_library or len(scene.pose_library) == 0:
             info_box = main_box.box()
             info_box.label(text="No poses saved yet", icon='INFO')
-            info_box.label(text="Click 'Create Pose' to save group positions")
+            info_box.label(text="Click 'Create Pose' to save puppet positions")
             return
         
         main_box.separator()
@@ -793,17 +793,17 @@ class PROTEINBLENDER_PT_pose_library(Panel):
             active_idx = getattr(scene, 'active_pose_index', 0)
             header.label(text=pose.name, icon='LAYER_ACTIVE' if idx == active_idx else 'LAYER_USED')
             
-            # Groups label
-            if pose.group_names:
-                groups_box = pose_col.box()
-                groups_box.scale_y = 0.8
-                groups_box.label(text="Groups:", icon='GROUP')
-                # Split long group lists into multiple lines
-                group_names = pose.group_names.split(', ')
-                for i in range(0, len(group_names), 2):
-                    row = groups_box.row()
+            # Puppets label
+            if pose.puppet_names:
+                puppets_box = pose_col.box()
+                puppets_box.scale_y = 0.8
+                puppets_box.label(text="Puppets:", icon='ARMATURE_DATA')
+                # Split long puppet lists into multiple lines
+                puppet_names = pose.puppet_names.split(', ')
+                for i in range(0, len(puppet_names), 2):
+                    row = puppets_box.row()
                     row.scale_y = 0.8
-                    row.label(text=', '.join(group_names[i:i+2]))
+                    row.label(text=', '.join(puppet_names[i:i+2]))
             
             # Screenshot preview
             screenshot_box = pose_col.box()
@@ -880,13 +880,13 @@ class PROTEINBLENDER_PT_pose_library(Panel):
                 info_row.label(text=f"Modified: {pose.modified_timestamp[:10]}")
 
 
-class PROTEINBLENDER_OT_toggle_group_selection(Operator):
-    """Toggle group selection in pose creation dialog"""
-    bl_idname = "proteinblender.toggle_group_selection"
-    bl_label = "Toggle Group Selection"
+class PROTEINBLENDER_OT_toggle_puppet_selection(Operator):
+    """Toggle puppet selection in pose creation dialog"""
+    bl_idname = "proteinblender.toggle_puppet_selection"
+    bl_label = "Toggle Puppet Selection"
     bl_options = {'INTERNAL'}
     
-    group_id: StringProperty()
+    puppet_id: StringProperty()
     operator_instance_id: StringProperty()
     
     def execute(self, context):
@@ -896,8 +896,8 @@ class PROTEINBLENDER_OT_toggle_group_selection(Operator):
             if self.operator_instance_id in instances:
                 instance = instances[self.operator_instance_id]
                 # Toggle the selection state
-                current = instance.selected_groups.get(self.group_id, False)
-                instance.selected_groups[self.group_id] = not current
+                current = instance.selected_puppets.get(self.puppet_id, False)
+                instance.selected_puppets[self.puppet_id] = not current
                 # Force redraw
                 for area in context.screen.areas:
                     area.tag_redraw()
@@ -909,7 +909,7 @@ class PROTEINBLENDER_OT_toggle_group_selection(Operator):
 # Register classes
 CLASSES = [
     GroupSelectionItem,  # Register the helper class first
-    PROTEINBLENDER_OT_toggle_group_selection,  # Add toggle operator
+    PROTEINBLENDER_OT_toggle_puppet_selection,  # Add toggle operator
     PROTEINBLENDER_OT_create_pose,
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,

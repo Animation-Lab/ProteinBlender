@@ -139,10 +139,10 @@ def update_outliner_from_blender_selection():
     # Update all reference items to match their originals
     # This is a one-way sync from original to reference only
     for item in scene.outliner_items:
-        if "_ref_" in item.item_id and item.group_memberships:
+        if "_ref_" in item.item_id and item.puppet_memberships:
             # Find the original item
             for orig_item in scene.outliner_items:
-                if orig_item.item_id == item.group_memberships:
+                if orig_item.item_id == item.puppet_memberships:
                     if item.is_selected != orig_item.is_selected:
                         item.is_selected = orig_item.is_selected
                     break
@@ -175,8 +175,8 @@ def sync_outliner_to_blender_selection(context, item_id):
         if "_ref_" in item_id:
             # Find the reference item to get the actual ID
             for ref_item in scene.outliner_items:
-                if ref_item.item_id == item_id and ref_item.group_memberships:
-                    actual_item_id = ref_item.group_memberships
+                if ref_item.item_id == item_id and ref_item.puppet_memberships:
+                    actual_item_id = ref_item.puppet_memberships
                     break
         
         # Find the item
@@ -281,7 +281,7 @@ def sync_outliner_to_blender_selection(context, item_id):
                                                 context.view_layer.objects.active = fresh_obj
                                                 active_set = True
         
-        elif item.item_type == 'GROUP':
+        elif item.item_type == 'PUPPET':
             # Groups themselves don't have Blender objects to select
             # Group selection is just a UI state, not a viewport selection
             # This prevents group selection from cascading to members

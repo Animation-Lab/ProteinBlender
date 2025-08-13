@@ -576,20 +576,20 @@ def build_outliner_hierarchy(context=None):
     
     for item in scene.outliner_items:
         # Store selection state for all items
-        if item.item_id and item.item_id != "groups_separator":
+        if item.item_id and item.item_id != "puppets_separator":
             item_selection_states[item.item_id] = item.is_selected
             item_expansion_states[item.item_id] = item.is_expanded
             
-        if item.item_type == 'GROUP' and item.item_id != "groups_separator":
+        if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
             existing_groups[item.item_id] = {
                 'name': item.name,
                 'is_expanded': item.is_expanded,
                 'is_selected': item.is_selected,
-                'members': item.group_memberships.split(',') if item.group_memberships else []
+                'members': item.puppet_memberships.split(',') if item.puppet_memberships else []
             }
-        elif item.group_memberships:
+        elif item.puppet_memberships:
             # Store item's group memberships
-            item_memberships[item.item_id] = item.group_memberships
+            item_memberships[item.item_id] = item.puppet_memberships
     
     # Clear existing outliner items
     scene.outliner_items.clear()
@@ -789,7 +789,7 @@ def build_outliner_hierarchy(context=None):
         if item.item_id in item_memberships:
             # Only restore group memberships for non-domain items
             if item.item_type != 'DOMAIN':
-                item.group_memberships = item_memberships[item.item_id]
+                item.puppet_memberships = item_memberships[item.item_id]
     
     # Add existing groups at the end
     # First, create a mapping of item_id to item for easy lookup
@@ -805,9 +805,9 @@ def build_outliner_hierarchy(context=None):
     if existing_groups:
         # Add a visual separator (could be a label or empty item)
         separator = scene.outliner_items.add()
-        separator.item_type = 'GROUP'  # Use GROUP type but make it non-interactive
-        separator.item_id = "groups_separator"
-        separator.name = "─── Groups ───"
+        separator.item_type = 'PUPPET'  # Use PUPPET type but make it non-interactive
+        separator.item_id = "puppets_separator"
+        separator.name = "─── Puppets ───"
         separator.parent_id = ""
         separator.indent_level = 0
         separator.icon = 'NONE'
@@ -818,7 +818,7 @@ def build_outliner_hierarchy(context=None):
     for group_id, group_info in existing_groups.items():
         # Add group item
         group_item = scene.outliner_items.add()
-        group_item.item_type = 'GROUP'
+        group_item.item_type = 'PUPPET'
         group_item.item_id = group_id
         group_item.parent_id = ""
         group_item.name = group_info['name']
@@ -830,7 +830,7 @@ def build_outliner_hierarchy(context=None):
         # Store all members (including domains) in the group
         # We'll handle display logic when adding references
         all_members = group_info.get('members', [])
-        group_item.group_memberships = ','.join(all_members)
+        group_item.puppet_memberships = ','.join(all_members)
         
         # Add group members as references (not moving them from original location)
         if group_item.is_expanded:
@@ -868,7 +868,7 @@ def build_outliner_hierarchy(context=None):
                 ref_item.domain_end = original_item.domain_end
                 ref_item.has_domains = original_item.has_domains
                 # Store the original item ID for reference
-                ref_item.group_memberships = member_id  # Store original ID
+                ref_item.puppet_memberships = member_id  # Store original ID
                 
                 # If this is a chain and it's expanded, add its domain children ONLY if they are group members
                 if original_item.item_type == 'CHAIN' and ref_item.is_expanded:
@@ -991,9 +991,9 @@ def update_outliner_visibility(item_id, visible):
             if obj:
                 obj.hide_set(not visible, view_layer=view_layer)
                 
-    elif item.item_type == 'GROUP':
+    elif item.item_type == 'PUPPET':
         # Update all items that are members of this group
-        member_ids = item.group_memberships.split(',') if item.group_memberships else []
+        member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
         for member_id in member_ids:
             # Find the actual member item
             for member_item in scene.outliner_items:

@@ -28,7 +28,7 @@ class ProteinOutlinerItem(PropertyGroup):
             ('PROTEIN', 'Protein', 'Protein molecule'),
             ('CHAIN', 'Chain', 'Protein chain'),
             ('DOMAIN', 'Domain', 'Protein domain'),
-            ('GROUP', 'Group', 'Group of items')
+            ('PUPPET', 'Puppet', 'Protein Puppet')
         ],
         default='PROTEIN'
     )
@@ -112,10 +112,10 @@ class ProteinOutlinerItem(PropertyGroup):
         description="For domain items, end residue"
     )
     
-    # Group memberships (items can belong to multiple groups)
-    group_memberships: StringProperty(
-        name="Group Memberships",
-        description="Comma-separated list of group IDs this item belongs to",
+    # Puppet memberships (items can belong to multiple puppets)
+    puppet_memberships: StringProperty(
+        name="Puppet Memberships",
+        description="Comma-separated list of puppet IDs this item belongs to",
         default=""
     )
     

@@ -621,8 +621,8 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         
         # Find groups that contain this chain
         for item in context.scene.outliner_items:
-            if item.item_type == 'GROUP' and item.group_memberships:
-                member_ids = item.group_memberships.split(',')
+            if item.item_type == 'PUPPET' and item.puppet_memberships:
+                member_ids = item.puppet_memberships.split(',')
                 self.report({'INFO'}, f"Group '{item.name}' has members: {member_ids}")
                 if chain_outliner_id in member_ids:
                     chain_groups.append(item)
@@ -856,8 +856,8 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         domain_outliner_ids = [item.item_id for item in actual_domain_items]
         
         for group_item in scene.outliner_items:
-            if group_item.item_type == 'GROUP' and group_item.group_memberships:
-                member_ids = set(group_item.group_memberships.split(','))
+            if group_item.item_type == 'PUPPET' and group_item.puppet_memberships:
+                member_ids = set(group_item.puppet_memberships.split(','))
                 domains_in_group = set(domain_outliner_ids) & member_ids
                 if domains_in_group:
                     affected_groups[group_item.item_id] = domains_in_group
@@ -923,20 +923,20 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     # Find the group
                     group_item = None
                     for item in scene.outliner_items:
-                        if item.item_type == 'GROUP' and item.item_id == group_id:
+                        if item.item_type == 'PUPPET' and item.item_id == group_id:
                             group_item = item
                             break
                     
                     if group_item:
                         # Get current members
-                        current_members = set(group_item.group_memberships.split(',')) if group_item.group_memberships else set()
+                        current_members = set(group_item.puppet_memberships.split(',')) if group_item.puppet_memberships else set()
                         
                         # Add the chain if not already present
                         chain_outliner_id = f"{molecule_id}_chain_{parent_chain.chain_id}"
                         if chain_outliner_id not in current_members:
                             current_members.add(chain_outliner_id)
                             # Update the group
-                            group_item.group_memberships = ','.join(filter(None, current_members))
+                            group_item.puppet_memberships = ','.join(filter(None, current_members))
                             self.report({'INFO'}, f"Added chain to group '{group_item.name}'")
                         else:
                             self.report({'INFO'}, f"Chain already in group '{group_item.name}'")
@@ -951,9 +951,9 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
             for item in context.scene.outliner_items:
                 if item.item_id == f"{molecule_id}_chain_{parent_chain.chain_id}":
                     # Update chain's group membership
-                    item_groups = set(item.group_memberships.split(',')) if item.group_memberships else set()
+                    item_groups = set(item.puppet_memberships.split(',')) if item.puppet_memberships else set()
                     item_groups.update(affected_groups.keys())
-                    item.group_memberships = ','.join(filter(None, item_groups))
+                    item.puppet_memberships = ','.join(filter(None, item_groups))
                     self.report({'INFO'}, f"Updated chain group memberships")
                     break
         

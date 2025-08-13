@@ -5,10 +5,10 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatVectorProp
 from bpy.types import PropertyGroup
 
 
-class GroupTransform(PropertyGroup):
-    """Stores transform data for a single group in a pose"""
-    group_id: StringProperty(name="Group ID", description="ID of the group")
-    group_name: StringProperty(name="Group Name", description="Display name of the group")
+class PuppetTransform(PropertyGroup):
+    """Stores transform data for a single puppet in a pose"""
+    puppet_id: StringProperty(name="Puppet ID", description="ID of the puppet")
+    puppet_name: StringProperty(name="Puppet Name", description="Display name of the puppet")
     
     # Store transforms for each object in the group
     object_name: StringProperty(name="Object Name", description="Name of the object")
@@ -21,12 +21,12 @@ class ScenePose(PropertyGroup):
     """A pose that captures positions of selected groups"""
     name: StringProperty(name="Pose Name", description="Name of this pose", default="New Pose")
     
-    # Groups included in this pose
-    group_ids: StringProperty(name="Group IDs", description="Comma-separated list of group IDs")
-    group_names: StringProperty(name="Group Names", description="Comma-separated list of group names for display")
+    # Puppets included in this pose
+    puppet_ids: StringProperty(name="Puppet IDs", description="Comma-separated list of puppet IDs")
+    puppet_names: StringProperty(name="Puppet Names", description="Comma-separated list of puppet names for display")
     
-    # Transforms for all objects in the groups
-    transforms: CollectionProperty(type=GroupTransform)
+    # Transforms for all objects in the puppets
+    transforms: CollectionProperty(type=PuppetTransform)
     
     # Screenshot/preview (for future implementation)
     preview_path: StringProperty(name="Preview Path", description="Path to preview image")
@@ -38,7 +38,7 @@ class ScenePose(PropertyGroup):
 
 def register():
     """Register pose properties"""
-    bpy.utils.register_class(GroupTransform)
+    bpy.utils.register_class(PuppetTransform)
     bpy.utils.register_class(ScenePose)
     
     # Add pose library to scene
@@ -67,4 +67,4 @@ def unregister():
     
     # Unregister classes
     bpy.utils.unregister_class(ScenePose)
-    bpy.utils.unregister_class(GroupTransform)
+    bpy.utils.unregister_class(PuppetTransform)

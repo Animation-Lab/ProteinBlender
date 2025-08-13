@@ -56,7 +56,7 @@ class SelectionManager:
             SelectionManager._select_chain(scene, item, state)
         elif item.item_type == 'DOMAIN':
             SelectionManager._select_domain(scene, item, state)
-        elif item.item_type == 'GROUP':
+        elif item.item_type == 'PUPPET':
             SelectionManager._toggle_group_members(scene, item)
             return  # Groups don't have their own selection state
         
@@ -132,7 +132,7 @@ class SelectionManager:
     @staticmethod
     def _toggle_group_members(scene, group_item) -> None:
         """Toggle selection of all group members"""
-        member_ids = group_item.group_memberships.split(',') if group_item.group_memberships else []
+        member_ids = group_item.puppet_memberships.split(',') if group_item.puppet_memberships else []
         if not member_ids:
             return
         
@@ -169,7 +169,7 @@ class SelectionManager:
     def _update_references(scene, item_id: str, state: bool) -> None:
         """Update all reference items to match original"""
         for ref_item in scene.outliner_items:
-            if "_ref_" in ref_item.item_id and ref_item.group_memberships == item_id:
+            if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == item_id:
                 ref_item.is_selected = state
     
     @staticmethod
@@ -239,7 +239,7 @@ class SelectionManager:
     @staticmethod
     def is_group_fully_selected(scene, group_item) -> bool:
         """Check if all members of a group are selected"""
-        member_ids = group_item.group_memberships.split(',') if group_item.group_memberships else []
+        member_ids = group_item.puppet_memberships.split(',') if group_item.puppet_memberships else []
         if not member_ids:
             return False
         

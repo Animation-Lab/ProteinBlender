@@ -82,9 +82,9 @@ class PoseManager:
         
         # Find all groups in the scene
         for item in context.scene.outliner_items:
-            if item.item_type == 'GROUP' and item.item_id != "groups_separator":
+            if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
                 # Get member IDs for this group
-                member_ids = item.group_memberships.split(',') if item.group_memberships else []
+                member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
                 # Include the group even if it has no members (empty groups are still valid)
                 groups[item.item_id] = member_ids
         
@@ -125,14 +125,14 @@ class PoseManager:
         # Find the group
         group_item = None
         for item in context.scene.outliner_items:
-            if item.item_id == group_id and item.item_type == 'GROUP':
+            if item.item_id == group_id and item.item_type == 'PUPPET':
                 group_item = item
                 break
         
-        if not group_item or not group_item.group_memberships:
+        if not group_item or not group_item.puppet_memberships:
             return objects
         
-        member_ids = group_item.group_memberships.split(',')
+        member_ids = group_item.puppet_memberships.split(',')
         
         for member_id in member_ids:
             # Parse member ID to get molecule and component

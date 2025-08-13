@@ -22,13 +22,13 @@ from .domain_maker_panel import (
     unregister_props as domain_maker_unregister_props
 )
 from .group_maker_panel import (
-    PROTEINBLENDER_OT_create_group,
-    PROTEINBLENDER_OT_edit_group,
-    PROTEINBLENDER_PT_group_maker
+    PROTEINBLENDER_OT_create_puppet,
+    PROTEINBLENDER_OT_edit_puppet,
+    PROTEINBLENDER_PT_puppet_maker
 )
 from .pose_library_panel import (
     PROTEINBLENDER_PT_pose_library,
-    PROTEINBLENDER_OT_toggle_group_selection,
+    PROTEINBLENDER_OT_toggle_puppet_selection,
     PROTEINBLENDER_OT_create_pose,
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,
@@ -54,11 +54,11 @@ __all__ = [
     'PROTEINBLENDER_OT_apply_representation',
     'PROTEINBLENDER_PT_visual_setup',
     'PROTEINBLENDER_PT_domain_maker',
-    'PROTEINBLENDER_OT_create_group',
-    'PROTEINBLENDER_OT_edit_group',
-    'PROTEINBLENDER_PT_group_maker',
+    'PROTEINBLENDER_OT_create_puppet',
+    'PROTEINBLENDER_OT_edit_puppet',
+    'PROTEINBLENDER_PT_puppet_maker',
     'PROTEINBLENDER_PT_pose_library',
-    'PROTEINBLENDER_OT_toggle_group_selection',
+    'PROTEINBLENDER_OT_toggle_puppet_selection',
     'PROTEINBLENDER_OT_create_pose',
     'PROTEINBLENDER_OT_apply_pose',
     'PROTEINBLENDER_OT_capture_pose',
@@ -79,9 +79,9 @@ CLASSES = [
     PROTEINBLENDER_OT_toggle_visibility,
     PROTEINBLENDER_OT_apply_color,
     PROTEINBLENDER_OT_apply_representation,
-    PROTEINBLENDER_OT_create_group,
-    PROTEINBLENDER_OT_edit_group,
-    PROTEINBLENDER_OT_toggle_group_selection,
+    PROTEINBLENDER_OT_create_puppet,
+    PROTEINBLENDER_OT_edit_puppet,
+    PROTEINBLENDER_OT_toggle_puppet_selection,
     PROTEINBLENDER_OT_create_pose,
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,
@@ -93,7 +93,7 @@ CLASSES = [
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
     PROTEINBLENDER_PT_visual_setup,    # 2: Visual Setup
     PROTEINBLENDER_PT_domain_maker,    # 3: Domain Maker
-    PROTEINBLENDER_PT_group_maker,     # 4: Group Maker
+    PROTEINBLENDER_PT_puppet_maker,     # 4: Puppet Maker
     PROTEINBLENDER_PT_pose_library,    # 5: Pose Library
     PROTEINBLENDER_PT_animation,       # 6: Animation
 ]
