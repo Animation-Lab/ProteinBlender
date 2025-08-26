@@ -12,6 +12,45 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
     bl_label = "Create New Puppet"
     bl_options = {'REGISTER', 'UNDO'}
     
+    @classmethod
+    def description(cls, context, properties):
+        """Dynamic tooltip based on selection state"""
+        scene = context.scene
+        
+        # Get selected items
+        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        valid_items = [item for item in selected_items 
+                      if item.item_type not in ['PUPPET'] 
+                      and item.item_id != "puppets_separator"
+                      and "_ref_" not in item.item_id]
+        
+        if not valid_items:
+            return "Select chains or domains to create a puppet"
+        
+        # Check for conflicts
+        puppet_names_dict = {}
+        for item in scene.outliner_items:
+            if item.item_type == 'PUPPET':
+                puppet_names_dict[item.item_id] = item.name
+        
+        conflicts = []
+        for item in valid_items:
+            if item.puppet_memberships:
+                puppet_ids = item.puppet_memberships.split(',')
+                puppet_names = [puppet_names_dict.get(pid, pid) for pid in puppet_ids if pid]
+                if puppet_names:
+                    puppet_text = puppet_names[0] if len(puppet_names) == 1 else ', '.join(puppet_names)
+                    conflicts.append(f"• {item.name} is in {puppet_text}")
+        
+        if conflicts:
+            tooltip = "Cannot create puppet - items must be exclusive to one puppet\n\nConflicts:\n"
+            tooltip += '\n'.join(conflicts[:5])
+            if len(conflicts) > 5:
+                tooltip += f"\n... and {len(conflicts)-5} more"
+            return tooltip
+        
+        return f"Create a new puppet from {len(valid_items)} selected item{'s' if len(valid_items) > 1 else ''}"
+    
     puppet_name: StringProperty(
         name="Puppet Name",
         description="Name for the new protein puppet",
@@ -19,7 +58,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
     )
     
     def invoke(self, context, event):
-        """Show dialog to get group name"""
+        """Show dialog to get puppet name"""
         # Check if any items are selected
         selected_items = [item for item in context.scene.outliner_items if item.is_selected]
         
@@ -27,26 +66,28 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             self.report({'WARNING'}, "Select items to create a puppet")
             return {'CANCELLED'}
         
-        # Filter out groups and check for items already in puppets
+        # Filter out puppets, reference items, and check for items already in puppets
         valid_items = [item for item in selected_items 
-                      if item.item_type not in ['PUPPET'] and item.item_id != "puppets_separator"]
+                      if item.item_type not in ['PUPPET'] 
+                      and item.item_id != "puppets_separator"
+                      and "_ref_" not in item.item_id]
         
         # Check if any selected items are already in puppets
-        items_with_groups = []
+        items_with_puppets = []
         for item in valid_items:
             if item.puppet_memberships:
-                items_with_groups.append(item.name)
+                items_with_puppets.append(item.name)
         
-        if items_with_groups:
+        if items_with_puppets:
             # Build error message
-            if len(items_with_groups) == 1:
-                self.report({'ERROR'}, f'Cannot create puppet: "{items_with_groups[0]}" is already in a puppet')
-            elif len(items_with_groups) <= 3:
-                items_str = ', '.join([f'"{name}"' for name in items_with_groups])
+            if len(items_with_puppets) == 1:
+                self.report({'ERROR'}, f'Cannot create puppet: "{items_with_puppets[0]}" is already in a puppet')
+            elif len(items_with_puppets) <= 3:
+                items_str = ', '.join([f'"{name}"' for name in items_with_puppets])
                 self.report({'ERROR'}, f'Cannot create puppet: {items_str} are already in puppets')
             else:
-                first_items = ', '.join([f'"{name}"' for name in items_with_groups[:2]])
-                self.report({'ERROR'}, f'Cannot create puppet: {first_items} and {len(items_with_groups)-2} more items are already in puppets')
+                first_items = ', '.join([f'"{name}"' for name in items_with_puppets[:2]])
+                self.report({'ERROR'}, f'Cannot create puppet: {first_items} and {len(items_with_puppets)-2} more items are already in puppets')
             return {'CANCELLED'}
         
         if not valid_items:
@@ -54,7 +95,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             return {'CANCELLED'}
         
         # Generate default name
-        # Count only actual groups, excluding the separator
+        # Count only actual puppets, excluding the separator
         puppet_count = len([i for i in context.scene.outliner_items 
                           if i.item_type == 'PUPPET' and i.item_id != "puppets_separator"])
         self.puppet_name = f"Puppet {puppet_count + 1}"
@@ -65,7 +106,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         layout = self.layout
         layout.prop(self, "puppet_name")
         
-        # Show what will be grouped
+        # Show what will be puppeted
         selected_items = [item for item in context.scene.outliner_items if item.is_selected]
         layout.label(text=f"Creating puppet from {len(selected_items)} items", icon='INFO')
     
@@ -78,45 +119,45 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         if not selected_items:
             return {'CANCELLED'}
         
-        # Create group ID
+        # Create puppet ID
         import uuid
         puppet_id = f"puppet_{uuid.uuid4().hex[:8]}"
         
-        # Filter items that can be grouped (exclude groups themselves)
-        items_to_group = []
-        items_already_grouped = []
+        # Filter items that can be puppeted (exclude puppets themselves)
+        items_to_puppet = []
+        items_already_puppeted = []
         for item in selected_items:
-            if item.item_type != 'PUPPET' and item.item_id != "puppets_separator":
+            if item.item_type != 'PUPPET' and item.item_id != "puppets_separator" and "_ref_" not in item.item_id:
                 # Check if already in a puppet
                 if item.puppet_memberships:
-                    items_already_grouped.append(item.name)
+                    items_already_puppeted.append(item.name)
                 else:
-                    items_to_group.append(item)
+                    items_to_puppet.append(item)
         
         # If any items are already in puppets, don't proceed
-        if items_already_grouped:
-            if len(items_already_grouped) == 1:
-                self.report({'ERROR'}, f'Cannot create puppet: "{items_already_grouped[0]}" is already in a puppet')
+        if items_already_puppeted:
+            if len(items_already_puppeted) == 1:
+                self.report({'ERROR'}, f'Cannot create puppet: "{items_already_puppeted[0]}" is already in a puppet')
             else:
-                self.report({'ERROR'}, f'Cannot create puppet: {len(items_already_grouped)} selected items are already in puppets')
+                self.report({'ERROR'}, f'Cannot create puppet: {len(items_already_puppeted)} selected items are already in puppets')
             return {'CANCELLED'}
         
-        if not items_to_group:
+        if not items_to_puppet:
             self.report({'WARNING'}, "No valid items to puppet")
             return {'CANCELLED'}
         
-        # Add group membership to selected items
-        for item in items_to_group:
+        # Add puppet membership to selected items
+        for item in items_to_puppet:
             # Get current memberships
-            current_groups = item.puppet_memberships.split(',') if item.puppet_memberships else []
-            # Add new group if not already a member
-            if puppet_id not in current_groups:
-                current_groups.append(puppet_id)
-                item.puppet_memberships = ','.join(filter(None, current_groups))
+            current_puppets = item.puppet_memberships.split(',') if item.puppet_memberships else []
+            # Add new puppet if not already a member
+            if puppet_id not in current_puppets:
+                current_puppets.append(puppet_id)
+                item.puppet_memberships = ','.join(filter(None, current_puppets))
             # Keep items selected - don't deselect them automatically
-            # This prevents confusion where creating a group changes selection
+            # This prevents confusion where creating a puppet changes selection
         
-        # Create the group item
+        # Create the puppet item
         puppet_item = scene.outliner_items.add()
         puppet_item.item_type = 'PUPPET'
         puppet_item.item_id = puppet_id
@@ -125,16 +166,16 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         puppet_item.indent_level = 0
         puppet_item.icon = 'ARMATURE_DATA'
         puppet_item.is_expanded = True
-        puppet_item.is_selected = False  # Don't auto-select the new group
+        puppet_item.is_selected = False  # Don't auto-select the new puppet
         
-        # Store member IDs in the group's memberships field for easy access
-        member_ids = [item.item_id for item in items_to_group]
+        # Store member IDs in the puppet's memberships field for easy access
+        member_ids = [item.item_id for item in items_to_puppet]
         puppet_item.puppet_memberships = ','.join(member_ids)
         
-        # Rebuild the outliner to reflect the new group
+        # Rebuild the outliner to reflect the new puppet
         build_outliner_hierarchy(context)
         
-        self.report({'INFO'}, f"Created puppet: {self.puppet_name} with {len(items_to_group)} items")
+        self.report({'INFO'}, f"Created puppet: {self.puppet_name} with {len(items_to_puppet)} items")
         return {'FINISHED'}
 
 
@@ -150,7 +191,7 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
     )
     
     def invoke(self, context, event):
-        # Find the group name for the confirmation message
+        # Find the puppet name for the confirmation message
         for item in context.scene.outliner_items:
             if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
                 self.puppet_name = item.name
@@ -159,13 +200,13 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
     
     def draw(self, context):
         layout = self.layout
-        puppet_name = getattr(self, 'puppet_name', 'this group')
+        puppet_name = getattr(self, 'puppet_name', 'this puppet')
         layout.label(text=f'Are you sure you want to delete "{puppet_name}"?')
     
     def execute(self, context):
         scene = context.scene
         
-        # Find and remove the group
+        # Find and remove the puppet
         puppet_item = None
         puppet_index = -1
         for i, item in enumerate(scene.outliner_items):
@@ -178,15 +219,15 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
             self.report({'ERROR'}, "Puppet not found")
             return {'CANCELLED'}
         
-        # Remove group membership from all items
+        # Remove puppet membership from all items
         for item in scene.outliner_items:
             if item.puppet_memberships:
-                groups = item.puppet_memberships.split(',')
+                puppets = item.puppet_memberships.split(',')
                 if self.puppet_id in puppets:
-                    groups.remove(self.puppet_id)
-                    item.puppet_memberships = ','.join(groups)
+                    puppets.remove(self.puppet_id)
+                    item.puppet_memberships = ','.join(puppets)
         
-        # Remove the group item
+        # Remove the puppet item
         scene.outliner_items.remove(puppet_index)
         
         # Rebuild outliner
@@ -222,8 +263,8 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
     )
     
     new_name: StringProperty(
-        name="Group Name",
-        description="Name for the group"
+        name="Puppet Name",
+        description="Name for the puppet"
     )
     
     # Properties to track item selection in edit dialog
@@ -233,7 +274,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
     
     def invoke(self, context, event):
         if self.action == 'EDIT':
-            # Find the group
+            # Find the puppet
             puppet_item = None
             for item in context.scene.outliner_items:
                 if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
@@ -248,7 +289,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             # Clear and populate item selections
             self.item_selections.clear()
             
-            # Get current group members
+            # Get current puppet members
             current_members = set(puppet_item.puppet_memberships.split(',')) if puppet_item.puppet_memberships else set()
             
             # Add all selectable items
@@ -279,7 +320,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             return context.window_manager.invoke_props_dialog(self, width=400)
             
         elif self.action == 'RENAME':
-            # Get selected group name
+            # Get selected puppet name
             for item in context.scene.outliner_items:
                 if item.is_selected and item.item_type == 'PUPPET':
                     self.new_name = item.name
@@ -295,7 +336,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
         
         if self.action == 'DELETE':
             # Show a clear delete confirmation message
-            puppet_name = "this group"
+            puppet_name = "this puppet"
             for item in context.scene.outliner_items:
                 if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
                     puppet_name = f'"{item.name}"'
@@ -304,15 +345,15 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             return
         
         if self.action == 'EDIT':
-            # Group name
+            # Puppet name
             layout.prop(self, "new_name")
             layout.separator()
             
             # Create scrollable list of items
             box = layout.box()
-            box.label(text="Group Members:", icon='GROUP')
+            box.label(text="Puppet Members:", icon='ARMATURE_DATA')
             
-            # Group items by parent
+            # Puppet items by parent
             items_by_parent = {}
             for item in self.item_selections:
                 parent = item.get('parent_name', 'Unknown')
@@ -338,7 +379,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
         scene = context.scene
         
         if self.action == 'EDIT':
-            # Find the group to edit
+            # Find the puppet to edit
             puppet_item = None
             for item in scene.outliner_items:
                 if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
@@ -349,35 +390,35 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
                 self.report({'ERROR'}, "Puppet not found")
                 return {'CANCELLED'}
             
-            # Update group name
+            # Update puppet name
             puppet_item.name = self.new_name
             
-            # Update group members
+            # Update puppet members
             new_members = []
             for item_sel in self.item_selections:
                 if item_sel.get('is_selected', False):
                     new_members.append(item_sel.get('item_id', ''))
             
-            # Update group membership
+            # Update puppet membership
             puppet_item.puppet_memberships = ','.join(filter(None, new_members))
             
             # Update item memberships
-            # First, remove this group from all items
+            # First, remove this puppet from all items
             for item in scene.outliner_items:
                 if item.puppet_memberships:
-                    groups = item.puppet_memberships.split(',')
+                    puppets = item.puppet_memberships.split(',')
                     if self.puppet_id in puppets:
-                        groups.remove(self.puppet_id)
-                        item.puppet_memberships = ','.join(groups)
+                        puppets.remove(self.puppet_id)
+                        item.puppet_memberships = ','.join(puppets)
             
-            # Then add group to selected items
+            # Then add puppet to selected items
             for member_id in new_members:
                 for item in scene.outliner_items:
                     if item.item_id == member_id:
-                        groups = item.puppet_memberships.split(',') if item.puppet_memberships else []
+                        puppets = item.puppet_memberships.split(',') if item.puppet_memberships else []
                         if self.puppet_id not in puppets:
-                            groups.append(self.puppet_id)
-                            item.puppet_memberships = ','.join(filter(None, groups))
+                            puppets.append(self.puppet_id)
+                            item.puppet_memberships = ','.join(filter(None, puppets))
                         break
             
             # Rebuild outliner
@@ -386,7 +427,7 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             
         elif self.action == 'DELETE':
             # Fallback implementation for when dedicated delete operator isn't available
-            # Find and remove the group
+            # Find and remove the puppet
             puppet_item = None
             puppet_index = -1
             for i, item in enumerate(scene.outliner_items):
@@ -399,15 +440,15 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
                 self.report({'ERROR'}, "Puppet not found")
                 return {'CANCELLED'}
             
-            # Remove group membership from all items
+            # Remove puppet membership from all items
             for item in scene.outliner_items:
                 if item.puppet_memberships:
-                    groups = item.puppet_memberships.split(',')
+                    puppets = item.puppet_memberships.split(',')
                     if self.puppet_id in puppets:
-                        groups.remove(self.puppet_id)
-                        item.puppet_memberships = ','.join(groups)
+                        puppets.remove(self.puppet_id)
+                        item.puppet_memberships = ','.join(puppets)
             
-            # Remove the group item
+            # Remove the puppet item
             scene.outliner_items.remove(puppet_index)
             
             # Rebuild outliner
@@ -415,16 +456,16 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             self.report({'INFO'}, f"Deleted puppet: {puppet_item.name}")
             
         elif self.action == 'RENAME':
-            # Find selected group
-            selected_group = None
+            # Find selected puppet
+            selected_puppet = None
             for item in scene.outliner_items:
                 if item.is_selected and item.item_type == 'PUPPET':
-                    selected_group = item
+                    selected_puppet = item
                     break
             
-            if selected_group:
-                selected_group.name = self.new_name
-                self.report({'INFO'}, f"Renamed group to: {self.new_name}")
+            if selected_puppet:
+                selected_puppet.name = self.new_name
+                self.report({'INFO'}, f"Renamed puppet to: {self.new_name}")
         
         # Update UI
         context.area.tag_redraw()
@@ -452,76 +493,41 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         box.label(text="Protein Puppet Maker", icon='ARMATURE_DATA')
         box.separator()
         
-        # Get selected items and check their group memberships
+        # Get selected items and check their puppet memberships
         selected_items = [item for item in scene.outliner_items if item.is_selected]
-        # Filter out groups and separator from selection count
-        ungrouped_items = [item for item in selected_items if item.item_type not in ['PUPPET'] and item.item_id != "puppets_separator"]
+        # Filter out puppets, separator, and reference items from selection count
+        unpuppeted_items = [item for item in selected_items 
+                           if item.item_type not in ['PUPPET'] 
+                           and item.item_id != "puppets_separator"
+                           and "_ref_" not in item.item_id]
         
         # Check if any selected items are already in puppets
-        items_already_grouped = []
-        puppet_names_dict = {}  # Map group IDs to names
+        items_already_puppeted = []
+        puppet_names_dict = {}  # Map puppet IDs to names
         
-        # First build a map of group IDs to names
+        # First build a map of puppet IDs to names
         for item in scene.outliner_items:
             if item.item_type == 'PUPPET':
                 puppet_names_dict[item.item_id] = item.name
         
         # Check which items are already in puppets
-        for item in ungrouped_items:
+        for item in unpuppeted_items:
             if item.puppet_memberships:
                 puppet_ids = item.puppet_memberships.split(',')
                 # Get the names of puppets this item belongs to
                 puppet_names = [puppet_names_dict.get(pid, pid) for pid in puppet_ids if pid]
                 if puppet_names:
-                    items_already_grouped.append((item.name, puppet_names))
+                    items_already_puppeted.append((item.name, puppet_names))
         
-        # Create New Group button - disable if items are already grouped
-        col = box.column(align=True)
-        row = col.row()
+        # Create New Puppet button
+        row = box.row()
         row.scale_y = 1.5
         
-        # Disable button if any selected items are already in puppets
-        row.enabled = len(items_already_grouped) == 0 and len(ungrouped_items) > 0
-        row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
+        # Enable button only if we have valid items and no conflicts
+        row.enabled = len(items_already_puppeted) == 0 and len(unpuppeted_items) > 0
         
-        # Info section
-        box.separator()
-        info_box = box.box()
-        info_col = info_box.column(align=True)
-        info_col.scale_y = 0.8
-        
-        # Show warnings if items are already grouped
-        if items_already_grouped:
-            # Show warning icon and message
-            warning_row = info_col.row()
-            warning_row.alert = True
-            warning_row.label(text="Cannot create puppet:", icon='ERROR')
-            
-            # List items that are already in puppets
-            for item_name, puppet_names in items_already_grouped[:3]:  # Show max 3 items
-                if len(puppet_names) == 1:
-                    info_col.label(text=f'  "{item_name}" is in {puppet_names[0]}', icon='DOT')
-                else:
-                    groups_str = ', '.join(puppet_names[:2])
-                    if len(puppet_names) > 2:
-                        groups_str += f' (+{len(puppet_names)-2} more)'
-                    info_col.label(text=f'  "{item_name}" is in: {groups_str}', icon='DOT')
-            
-            # If there are more items, show count
-            if len(items_already_grouped) > 3:
-                info_col.label(text=f"  ...and {len(items_already_grouped)-3} more items", icon='DOT')
-                
-        elif ungrouped_items:
-            # Show regular selection info
-            info_col.label(text=f"{len(ungrouped_items)} items selected", icon='INFO')
-            info_col.label(text="Ready to create puppet")
-        else:
-            # No items selected
-            info_col.label(text="Select items to puppet", icon='INFO')
-            info_col.label(text="Proteins, chains, or domains")
-        
-        # Add bottom spacing
-        layout.separator()
+        # Create the button
+        op = row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
 
 
 

@@ -1,13 +1,24 @@
 from pathlib import Path
 
 import bpy
-import mrcfile
 import numpy as np
-import starfile
-from PIL import Image
 
-from scipy.spatial.transform import Rotation as R
-from pandas import DataFrame, CategoricalDtype
+# Try to import optional dependencies
+try:
+    import mrcfile
+    import starfile
+    from PIL import Image
+    from scipy.spatial.transform import Rotation as R
+    from pandas import DataFrame, CategoricalDtype
+    STARFILE_DEPS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: StarFile functionality limited due to missing dependency: {e}")
+    STARFILE_DEPS_AVAILABLE = False
+    # Provide dummy classes to prevent import errors
+    DataFrame = None
+    CategoricalDtype = None
+    R = None
+
 from ... import blender as bl
 from databpy import AttributeTypes, BlenderObject
 import databpy
@@ -16,12 +27,16 @@ from .base import Ensemble
 
 class StarFile(Ensemble):
     def __init__(self, file_path):
+        if not STARFILE_DEPS_AVAILABLE:
+            raise ImportError("StarFile functionality requires scipy, pandas, mrcfile, starfile, and PIL. Please install these dependencies.")
         super().__init__(file_path)
         self.type = "starfile"
         self.current_image = -1
 
     @classmethod
     def from_starfile(cls, file_path):
+        if not STARFILE_DEPS_AVAILABLE:
+            raise ImportError("StarFile functionality requires scipy, pandas, mrcfile, starfile, and PIL. Please install these dependencies.")
         self = cls(file_path)
         self.data = self._read()
         self.df = self._assign_df()

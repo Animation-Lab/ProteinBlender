@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Panel, UIList, Operator
 from bpy.props import StringProperty
-from ..utils.scene_manager import build_outliner_hierarchy, update_outliner_visibility
+from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy, update_outliner_visibility
 
 
 class PROTEINBLENDER_UL_outliner(UIList):
@@ -49,7 +49,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
     
     def _are_all_group_members_selected(self, scene, group_item):
         """Check if all members of a group are selected"""
-        member_ids = group_item.group_memberships.split(',') if group_item.group_memberships else []
+        member_ids = group_item.puppet_memberships.split(',') if group_item.puppet_memberships else []
         if not member_ids:
             return False
         
@@ -86,7 +86,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
         
-        if item.item_type in ['PROTEIN', 'GROUP'] and not is_reference:
+        if item.item_type in ['PROTEIN', 'PUPPET'] and not is_reference:
             show_expand = True
         elif item.item_type == 'CHAIN':
             # Show expand arrow for chains with domains (both original and reference items)
@@ -110,27 +110,117 @@ class PROTEINBLENDER_UL_outliner(UIList):
         row.separator()
         
         # Handle different item types
-        if item.item_type == 'GROUP' and item.item_id == "puppets_separator":
+        if item.item_type == 'PUPPET' and item.item_id == "puppets_separator":
             # Groups separator - no controls
             return
         
         # Add controls based on item type
+        # For chains and domains, add copy button and optionally delete button
+        if item.item_type in ['CHAIN', 'DOMAIN']:
+            # Extract the actual domain ID from the item_id
+            # For chains, item_id is like "molecule_id_chain_0" or just a domain_id for chain copies
+            # For domains, item_id is the domain_id directly
+            if item.item_type == 'CHAIN':
+                scene_manager = ProteinBlenderScene.get_instance()
+                
+                # Check if this is a chain copy (item_id is a domain_id)
+                is_chain_copy = False
+                domain_for_chain = None
+                
+                # First check if item_id is directly a domain_id (for chain copies)
+                for molecule_id, molecule in scene_manager.molecules.items():
+                    if item.item_id in molecule.domains:
+                        domain_for_chain = molecule.domains[item.item_id]
+                        is_chain_copy = True
+                        break
+                
+                # If not a chain copy, extract molecule_id and find the matching domain
+                if not is_chain_copy:
+                    parts = item.item_id.rsplit('_chain_', 1)
+                    if len(parts) == 2:
+                        molecule_id = parts[0]
+                        chain_id = parts[1]
+                        molecule = scene_manager.molecules.get(molecule_id)
+                        if molecule:
+                            # Find the domain that represents this chain (full chain domain)
+                            for domain_id, domain in molecule.domains.items():
+                                if str(domain.chain_id) == chain_id:
+                                    domain_for_chain = domain
+                                    break
+                
+                # Add buttons based on what we found
+                if domain_for_chain:
+                    # Add reset transform button for all chains/domains
+                    reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
+                    if reset_op:
+                        if is_chain_copy:
+                            reset_op.domain_id = item.item_id
+                        else:
+                            # Find the domain_id for this chain
+                            for domain_id, domain in molecule.domains.items():
+                                if domain == domain_for_chain:
+                                    reset_op.domain_id = domain_id
+                                    break
+                    
+                    # Add copy button for all chains
+                    copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
+                    if copy_op:
+                        if is_chain_copy:
+                            copy_op.domain_id = item.item_id
+                        else:
+                            # Find the domain_id for this chain
+                            for domain_id, domain in molecule.domains.items():
+                                if domain == domain_for_chain:
+                                    copy_op.domain_id = domain_id
+                                    break
+                    
+                    # Add delete button only if this is a copy
+                    if hasattr(domain_for_chain, 'is_copy') and domain_for_chain.is_copy:
+                        delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
+                        if delete_op:
+                            delete_op.domain_id = item.item_id
+            else:
+                # For domains, use the item_id directly as domain_id
+                domain_id = item.item_id
+                # Need to check if this domain is a copy to show delete button
+                scene_manager = ProteinBlenderScene.get_instance()
+                # Find which molecule this domain belongs to
+                for molecule_id, molecule in scene_manager.molecules.items():
+                    if domain_id in molecule.domains:
+                        domain = molecule.domains[domain_id]
+                        
+                        # Add reset transform button
+                        reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
+                        if reset_op:
+                            reset_op.domain_id = domain_id
+                        
+                        # Add copy button
+                        copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
+                        if copy_op:
+                            copy_op.domain_id = domain_id
+                        
+                        # Add delete button only if this is a copy
+                        if hasattr(domain, 'is_copy') and domain.is_copy:
+                            delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
+                            if delete_op:
+                                delete_op.domain_id = domain_id
+                        break
+        
         # First: Delete button for proteins and groups
-        if item.item_type == 'PROTEIN':
+        elif item.item_type == 'PROTEIN':
             # Delete button (trash can) - use the existing molecule.delete operator
             delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
             if delete_op:
                 delete_op.molecule_id = item.item_id
-        elif item.item_type == 'GROUP':
-            # Delete button (trash can) - use the edit_group operator with DELETE action
-            # This is more reliable than trying to use an operator that might not be registered
-            op = row.operator("proteinblender.edit_group", text="", icon='TRASH', emboss=False)
+        elif item.item_type == 'PUPPET':
+            # Delete button (trash can) - use the edit_puppet operator with DELETE action
+            op = row.operator("proteinblender.edit_puppet", text="", icon='TRASH', emboss=False)
             if op:
                 op.action = 'DELETE'
-                op.group_id = item.item_id
+                op.puppet_id = item.item_id
         
         # Second: Selection checkbox for all items
-        if item.item_type == 'GROUP':
+        if item.item_type == 'PUPPET':
             # For groups, check if all members are selected
             all_selected = self._are_all_group_members_selected(context.scene, item)
             selection_icon = 'CHECKBOX_HLT' if all_selected else 'CHECKBOX_DEHLT'
@@ -212,8 +302,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         if "_ref_" in self.item_id:
             # Extract the original item ID from the reference
             for item in scene.outliner_items:
-                if item.item_id == self.item_id and item.group_memberships:
-                    actual_item_id = item.group_memberships  # Original ID stored here
+                if item.item_id == self.item_id and item.puppet_memberships:
+                    actual_item_id = item.puppet_memberships  # Original ID stored here
                     break
         
         # Find the actual item to select
@@ -241,7 +331,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         else:
             # This is an original item - update all its references
             for ref_item in scene.outliner_items:
-                if "_ref_" in ref_item.item_id and ref_item.group_memberships == actual_item_id:
+                if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id:
                     ref_item.is_selected = new_selection_state
         
         # Handle hierarchical selection
@@ -261,10 +351,10 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             if not has_domains and new_selection_state:
                 # Only chains without domains should select their children (if any)
                 self.select_children(scene, clicked_item.item_id, new_selection_state)
-        elif clicked_item.item_type == 'GROUP':
+        elif clicked_item.item_type == 'PUPPET':
             # For groups, the checkbox should act as a toggle all for members
             # Get member IDs from group
-            member_ids = clicked_item.group_memberships.split(',') if clicked_item.group_memberships else []
+            member_ids = clicked_item.puppet_memberships.split(',') if clicked_item.puppet_memberships else []
             
             # Check if all members are currently selected
             all_selected = True
@@ -288,7 +378,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                     item.is_selected = new_state
                     
                     # Get the actual item ID from the reference
-                    actual_member_id = item.group_memberships
+                    actual_member_id = item.puppet_memberships
                     if actual_member_id:
                         # Find and update the original item to match
                         for orig_item in scene.outliner_items:
@@ -296,7 +386,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                                 orig_item.is_selected = new_state
                                 
                                 # Sync to Blender (but only if it's not a group)
-                                if orig_item.item_type != 'GROUP':
+                                if orig_item.item_type != 'PUPPET':
                                     from ..handlers.selection_sync import sync_outliner_to_blender_selection
                                     sync_outliner_to_blender_selection(context, actual_member_id)
                                 break
@@ -390,7 +480,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 parent_item = item
                 break
         
-        if parent_item and parent_item.item_type == 'GROUP':
+        if parent_item and parent_item.item_type == 'PUPPET':
             # Groups should NOT automatically select their members
             # This prevents unexpected selection cascades
             # If you want to select all group members, use a dedicated operator
@@ -408,7 +498,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                     sync_outliner_to_blender_selection(bpy.context, item.item_id)
                     # Update all references to this item (one-way only)
                     for ref_item in scene.outliner_items:
-                        if "_ref_" in ref_item.item_id and ref_item.group_memberships == item.item_id:
+                        if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == item.item_id:
                             ref_item.is_selected = select_state
                     # Recursively select children
                     self.select_children(scene, item.item_id, select_state)
@@ -434,8 +524,8 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         if "_ref_" in self.item_id:
             # Extract the original item ID from the reference
             for ref_item in scene.outliner_items:
-                if ref_item.item_id == self.item_id and ref_item.group_memberships:
-                    actual_item_id = ref_item.group_memberships
+                if ref_item.item_id == self.item_id and ref_item.puppet_memberships:
+                    actual_item_id = ref_item.puppet_memberships
                     break
         
         # Find the actual item
@@ -471,13 +561,13 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         
         # Update all references to this item
         for ref_item in scene.outliner_items:
-            if "_ref_" in ref_item.item_id and ref_item.group_memberships == actual_item_id:
+            if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id:
                 ref_item.is_visible = new_visibility
         
         # If this is a protein or group, update all children visibility too
-        if item.item_type in ['PROTEIN', 'GROUP']:
+        if item.item_type in ['PROTEIN', 'PUPPET']:
             # For groups, also update all reference items
-            if item.item_type == 'GROUP':
+            if item.item_type == 'PUPPET':
                 for ref_item in scene.outliner_items:
                     if ref_item.parent_id == item.item_id and "_ref_" in ref_item.item_id:
                         ref_item.is_visible = new_visibility
@@ -497,9 +587,9 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                 parent_item = item
                 break
         
-        if parent_item and parent_item.item_type == 'GROUP':
+        if parent_item and parent_item.item_type == 'PUPPET':
             # For groups, update members by their membership
-            member_ids = parent_item.group_memberships.split(',') if parent_item.group_memberships else []
+            member_ids = parent_item.puppet_memberships.split(',') if parent_item.puppet_memberships else []
             for member_id in member_ids:
                 update_outliner_visibility(member_id, visibility)
                 # If it's a protein, also update its children

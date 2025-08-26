@@ -63,6 +63,10 @@ class DomainDefinition:
         self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
         self.domain_id = f"{chain_id}_{start}_{end}"
         self.style = "ribbon"  # Default style
+        # Properties for tracking copies
+        self.is_copy = False  # Whether this domain is a copy
+        self.copy_number = 0  # The copy number (1, 2, 3, etc.)
+        self.original_domain_id = None  # ID of the original domain if this is a copy
 
     def to_properties(self) -> Dict:
         """Convert domain definition to property dictionary for storing in PropertyGroup"""
@@ -78,7 +82,10 @@ class DomainDefinition:
             'node_group_name': self.node_group.name if self.node_group else "",
             'color': self.color,
             'style': self.style,
-            'is_expanded': False
+            'is_expanded': False,
+            'is_copy': self.is_copy,
+            'copy_number': self.copy_number,
+            'original_domain_id': self.original_domain_id
         }
         return props
         
@@ -110,6 +117,14 @@ class DomainDefinition:
         # Set style
         if hasattr(props, 'style'):
             domain.style = props.style
+        
+        # Set copy properties
+        if hasattr(props, 'is_copy'):
+            domain.is_copy = props.is_copy
+        if hasattr(props, 'copy_number'):
+            domain.copy_number = props.copy_number
+        if hasattr(props, 'original_domain_id'):
+            domain.original_domain_id = props.original_domain_id
         
         # Set setup state based on whether object and node group exist
         domain._setup_complete = bool(domain.object and domain.node_group)

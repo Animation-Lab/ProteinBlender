@@ -254,26 +254,67 @@ class MOLECULE_PB_OT_update_domain(Operator):
         
         return {'FINISHED'}
 
-class MOLECULE_PB_OT_delete_domain(Operator):
-    bl_idname = "molecule.delete_domain"
-    bl_label = "Delete Domain"
-    bl_description = "Delete the selected domain"
+class MOLECULE_PB_OT_copy_domain(Operator):
+    bl_idname = "molecule.copy_domain"
+    bl_label = "Copy Domain"
+    bl_description = "Create a copy of the selected domain"
+    bl_options = {'REGISTER', 'UNDO'}
     
-    domain_id: StringProperty()
+    domain_id: StringProperty(description="ID of the domain to copy")
     
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
-        # Get the selected molecule
-        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
+        # Find which molecule owns this domain
+        molecule = None
+        for mol_id, mol in scene_manager.molecules.items():
+            if self.domain_id in mol.domains:
+                molecule = mol
+                break
+        
         if not molecule:
-            self.report({'ERROR'}, "No molecule selected")
+            self.report({'ERROR'}, "Domain not found in any molecule")
             return {'CANCELLED'}
-            
-        # Get the domain to be deleted
-        if self.domain_id not in molecule.domains:
-            self.report({'ERROR'}, "Domain not found")
+        
+        # Call the copy_domain method (will be implemented in MoleculeWrapper)
+        new_domain_id = molecule.copy_domain(self.domain_id)
+        
+        if new_domain_id:
+            self.report({'INFO'}, f"Domain copied successfully")
+            # Rebuild outliner to show the new copy
+            from ..utils.scene_manager import build_outliner_hierarchy
+            build_outliner_hierarchy(context)
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, "Failed to copy domain")
+            return {'CANCELLED'}
+
+class MOLECULE_PB_OT_delete_domain(Operator):
+    bl_idname = "molecule.delete_domain"
+    bl_label = "Delete Domain"
+    bl_description = "Delete the selected domain"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    domain_id: StringProperty()
+    
+    def invoke(self, context, event):
+        # Show confirmation dialog
+        return context.window_manager.invoke_confirm(self, event)
+    
+    def execute(self, context):
+        scene = context.scene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Find which molecule owns this domain
+        molecule = None
+        for mol_id, mol in scene_manager.molecules.items():
+            if self.domain_id in mol.domains:
+                molecule = mol
+                break
+        
+        if not molecule:
+            self.report({'ERROR'}, "Domain not found in any molecule")
             return {'CANCELLED'}
         
         # Delete the domain and get the ID of the domain that replaced it (if any)
@@ -286,6 +327,11 @@ class MOLECULE_PB_OT_delete_domain(Operator):
                 # Make the domain object the active object to help with UI continuity
                 context.view_layer.objects.active = domain.object
         
+        # Rebuild outliner to reflect the deletion
+        from ..utils.scene_manager import build_outliner_hierarchy
+        build_outliner_hierarchy(context)
+        
+        self.report({'INFO'}, f"Domain deleted successfully")
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_keyframe_protein(Operator):
@@ -1332,32 +1378,30 @@ class MOLECULE_PB_OT_reset_domain_transform(Operator):
     bl_idname = "molecule.reset_domain_transform"
     bl_label = "Reset Domain Transform"
     bl_description = "Reset the location, rotation, and scale of this domain object to its initial state"
+    bl_options = {'REGISTER', 'UNDO'}
     
     domain_id: StringProperty()
-    
-    @classmethod
-    def poll(cls, context):
-        # Check if a molecule and the domain object exist
-        scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
-        if not molecule or not molecule.domains:
-            return False
-        # We don't know the domain_id here, so can't check specific domain object
-        return True 
 
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
         
-        if not molecule:
-            self.report({'ERROR'}, "No molecule selected")
+        # Debug: Check if domain_id is being passed
+        if not self.domain_id:
+            self.report({'ERROR'}, "No domain_id provided to reset operator")
             return {'CANCELLED'}
-            
-        domain = molecule.domains.get(self.domain_id)
-        if not domain:
-            self.report({'ERROR'}, f"Domain not found: {self.domain_id}")
+        
+        # Find which molecule owns this domain
+        molecule = None
+        domain = None
+        for mol_id, mol in scene_manager.molecules.items():
+            if self.domain_id in mol.domains:
+                molecule = mol
+                domain = mol.domains[self.domain_id]
+                break
+        
+        if not molecule or not domain:
+            self.report({'ERROR'}, f"Domain '{self.domain_id}' not found in any molecule")
             return {'CANCELLED'}
             
         if not domain.object:
@@ -1372,24 +1416,37 @@ class MOLECULE_PB_OT_reset_domain_transform(Operator):
                 # Convert back to a Matrix object
                 from mathutils import Matrix
                 initial_matrix = Matrix(stored_matrix_list)
-                # --- DEBUG PRINT ADDED ---
-                print(f"DEBUG: Resetting {domain.name}. Stored initial_matrix_local:\n{initial_matrix}")
-                # --- END DEBUG --- 
-                # Apply the matrix
+                
+                # Apply the matrix to reset the transform
                 domain.object.matrix_local = initial_matrix
-                self.report({'INFO'}, f"Reset transform for domain {domain.name} using stored matrix.")
+                
+                # Force viewport update to show the change immediately
+                context.view_layer.update()
+                
+                self.report({'INFO'}, f"Reset transform for domain {domain.name}")
+                return {'FINISHED'}
+                
             except Exception as e:
-                self.report({'ERROR'}, f"Failed to restore initial matrix for {domain.name}: {e}. Falling back to default reset.")
-                # Fallback to simple reset if stored matrix is invalid or missing
-                domain.object.location = (0, 0, 0)
-                domain.object.rotation_euler = (0, 0, 0)
-                domain.object.scale = (1, 1, 1)
-        else:
-            # Fallback for domains created before this feature was added
-            self.report({'WARNING'}, f"No initial matrix found for domain {domain.name}. Resetting to default transforms.")
+                print(f"Error restoring initial matrix: {e}")
+                # Fall through to fallback method below
+        
+        # Fallback: If no stored matrix or it failed, compute relative position
+        # This is better than resetting to (0,0,0) which puts it at world origin
+        if domain.object.parent:
+            # Domain has a parent, so reset to identity transform relative to parent
             domain.object.location = (0, 0, 0)
             domain.object.rotation_euler = (0, 0, 0)
             domain.object.scale = (1, 1, 1)
+            self.report({'INFO'}, f"Reset {domain.name} relative to parent")
+        else:
+            # No parent, reset to world origin
+            domain.object.location = (0, 0, 0)
+            domain.object.rotation_euler = (0, 0, 0)
+            domain.object.scale = (1, 1, 1)
+            self.report({'INFO'}, f"Reset {domain.name} to origin")
+        
+        # Force viewport update
+        context.view_layer.update()
         
         return {'FINISHED'}
 
@@ -1508,6 +1565,7 @@ class MOLECULE_PB_OT_initialize_domain_temp_name(Operator):
 classes = (
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_update_domain,
+    MOLECULE_PB_OT_copy_domain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_toggle_domain_expanded,

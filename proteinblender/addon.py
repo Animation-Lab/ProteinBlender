@@ -11,7 +11,7 @@ from typing import List, Type
 
 from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
-from .operators import CLASSES as operator_classes
+from .operators import CLASSES as operator_classes, register as register_operators, unregister as unregister_operators
 from .panels import CLASSES as panel_classes, register as register_panels, unregister as unregister_panels
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
@@ -97,6 +97,7 @@ def register() -> None:
     register_molecule_props()
     register_pose_props()  # Register pose properties
     register_panels()  # Register panel properties
+    register_operators()  # Register operator properties (includes keyframe_dialog_items)
     
     # Register domain expanded property if not already registered
     if not hasattr(bpy.types.Object, "domain_expanded"):
@@ -174,6 +175,11 @@ def unregister() -> None:
         unregister_panels()
     except Exception as e:
         logger.debug(f"Failed to unregister panel props: {e}")
+    
+    try:
+        unregister_operators()
+    except Exception as e:
+        logger.debug(f"Failed to unregister operator props: {e}")
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):

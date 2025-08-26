@@ -639,16 +639,22 @@ def build_outliner_hierarchy(context=None):
                 chain_item.parent_id = molecule_id
                 
                 # Use chain mapping if available
-                chain_mapping = None
-                if hasattr(molecule, 'chain_mapping'):
-                    chain_mapping = molecule.chain_mapping
-                elif hasattr(molecule, 'idx_to_label_asym_id_map'):
-                    chain_mapping = molecule.idx_to_label_asym_id_map
+                # First try auth_chain_id_map (has the actual author chain IDs like 'S', 'T')
+                # Then fall back to chain_mapping or idx_to_label_asym_id_map
+                chain_name = None
                 
-                if chain_mapping:
-                    chain_name = chain_mapping.get(chain_id, chr(65 + chain_id))
-                else:
-                    chain_name = chr(65 + chain_id)
+                if hasattr(molecule, 'auth_chain_id_map') and molecule.auth_chain_id_map:
+                    chain_name = molecule.auth_chain_id_map.get(chain_id)
+                
+                if not chain_name and hasattr(molecule, 'chain_mapping') and molecule.chain_mapping:
+                    chain_name = molecule.chain_mapping.get(chain_id)
+                
+                if not chain_name and hasattr(molecule, 'idx_to_label_asym_id_map') and molecule.idx_to_label_asym_id_map:
+                    chain_name = molecule.idx_to_label_asym_id_map.get(chain_id)
+                
+                # Final fallback to sequential alphabet
+                if not chain_name:
+                    chain_name = chr(65 + chain_id) if chain_id < 26 else f"Chain{chain_id}"
                 
                 chain_item.name = f"Chain {chain_name}"
                 chain_item.chain_id = str(chain_id)
@@ -705,6 +711,32 @@ def build_outliner_hierarchy(context=None):
                 # Collect domains for this chain
                 chain_domains = []
                 for domain_id, domain in molecule.domains.items():
+                    # Skip chain-level copies - they should be shown as separate chains
+                    if hasattr(domain, 'is_copy') and domain.is_copy:
+                        # Check if this is a full chain copy (covers entire chain range)
+                        if hasattr(molecule, 'chain_residue_ranges'):
+                            # Get the correct chain key for looking up ranges
+                            domain_chain = domain.chain_id
+                            chain_key = None
+                            
+                            # Try to map to the correct key in chain_residue_ranges
+                            if hasattr(molecule, 'idx_to_label_asym_id_map'):
+                                # If domain.chain_id is numeric, map it
+                                if str(domain_chain).isdigit():
+                                    chain_key = molecule.idx_to_label_asym_id_map.get(int(domain_chain))
+                                else:
+                                    # It's already an author chain ID
+                                    chain_key = domain_chain
+                            
+                            if not chain_key:
+                                chain_key = str(domain_chain)
+                            
+                            if chain_key in molecule.chain_residue_ranges:
+                                min_res, max_res = molecule.chain_residue_ranges[chain_key]
+                                if domain.start == min_res and domain.end == max_res:
+                                    # This is a full chain copy, skip it here (will be added as separate chain)
+                                    continue
+                    
                     # Check if domain belongs to this chain
                     domain_chain_id = getattr(domain, 'chain_id', None)
                     
@@ -755,20 +787,18 @@ def build_outliner_hierarchy(context=None):
                         domain_item.parent_id = chain_item.item_id
                         
                         # Extract meaningful domain name
-                        # From "3b75_001_0_1_197_Chain_A" extract "1-197"
+                        # Use the domain's actual name property first
                         domain_display_name = domain.name
-                        if hasattr(domain, 'start') and hasattr(domain, 'end'):
-                            domain_display_name = f"Residues {domain.start}-{domain.end}"
-                        elif '_' in domain.name:
-                            # Try to extract range from name
-                            parts = domain.name.split('_')
-                            if len(parts) >= 5:
-                                try:
-                                    start = int(parts[3])
-                                    end = int(parts[4])
-                                    domain_display_name = f"Residues {start}-{end}"
-                                except:
-                                    pass
+                        
+                        # For copies, the name already includes the copy number (e.g., "Chain A 1")
+                        # For non-copies, show the residue range if available
+                        if not (hasattr(domain, 'is_copy') and domain.is_copy):
+                            if hasattr(domain, 'start') and hasattr(domain, 'end'):
+                                # Only override with residue range for non-copies
+                                # Check if name ends with a number (copy format)
+                                import re
+                                if not re.search(r'\s+\d+$', domain.name):
+                                    domain_display_name = f"Residues {domain.start}-{domain.end}"
                         
                         domain_item.name = domain_display_name
                         domain_item.object_name = domain.object.name if domain.object else ""
@@ -781,6 +811,51 @@ def build_outliner_hierarchy(context=None):
                         # Restore selection state
                         if domain_id in item_selection_states:
                             domain_item.is_selected = item_selection_states[domain_id]
+            
+            # After processing all regular chains, add chain copies as separate chain items
+            # These are full-chain domain copies that should appear at the chain level
+            for domain_id, domain in molecule.domains.items():
+                if hasattr(domain, 'is_copy') and domain.is_copy:
+                    # Check if this is a full chain copy
+                    if hasattr(molecule, 'chain_residue_ranges'):
+                        # Get the correct chain key for looking up ranges
+                        domain_chain = domain.chain_id
+                        chain_key = None
+                        
+                        # Try to map to the correct key in chain_residue_ranges
+                        if hasattr(molecule, 'idx_to_label_asym_id_map'):
+                            # If domain.chain_id is numeric, map it
+                            if str(domain_chain).isdigit():
+                                chain_key = molecule.idx_to_label_asym_id_map.get(int(domain_chain))
+                            else:
+                                # It's already an author chain ID
+                                chain_key = domain_chain
+                        
+                        if not chain_key:
+                            chain_key = str(domain_chain)
+                        
+                        if chain_key in molecule.chain_residue_ranges:
+                            min_res, max_res = molecule.chain_residue_ranges[chain_key]
+                            if domain.start == min_res and domain.end == max_res:
+                                # This is a full chain copy - add it as a chain-level item
+                                chain_copy_item = scene.outliner_items.add()
+                                chain_copy_item.item_type = 'CHAIN'
+                                chain_copy_item.item_id = domain_id  # Use domain_id as the item_id
+                                chain_copy_item.parent_id = molecule_id
+                                chain_copy_item.name = domain.name  # e.g., "1 Chain A"
+                                chain_copy_item.chain_id = str(domain.chain_id)
+                                chain_copy_item.indent_level = 1
+                                chain_copy_item.icon = 'LINKED'
+                                chain_copy_item.object_name = domain.object.name if domain.object else ""
+                                chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+                                chain_copy_item.chain_start = domain.start
+                                chain_copy_item.chain_end = domain.end
+                                
+                                # Restore selection and expansion states
+                                if domain_id in item_selection_states:
+                                    chain_copy_item.is_selected = item_selection_states[domain_id]
+                                if domain_id in item_expansion_states:
+                                    chain_copy_item.is_expanded = item_expansion_states[domain_id]
     
     # Restore group memberships to items
     # IMPORTANT: Only restore memberships for chains and molecules, not domains

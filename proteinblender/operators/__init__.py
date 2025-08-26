@@ -18,6 +18,7 @@ from .operator_import_protein import MOLECULE_OT_import_protein
 from .operator_import_local import MOLECULE_OT_import_local
 from .selection_operators import MOLECULE_PB_OT_select_object
 from .domain_operators import (
+    MOLECULE_PB_OT_copy_domain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_select_keyframe,
@@ -53,6 +54,14 @@ from .domain_ops import (
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
 )
+from .keyframe_operators import (
+    PROTEINBLENDER_OT_create_keyframe,
+    PROTEINBLENDER_OT_keyframe_select_all,
+    PROTEINBLENDER_OT_keyframe_select_none,
+    # Note: KeyframeTransformSettings is registered separately in register_keyframe_operators
+    register as register_keyframe_operators,
+    unregister as unregister_keyframe_operators,
+)
 
 CLASSES = (
     MOLECULE_PB_OT_select,
@@ -67,6 +76,7 @@ CLASSES = (
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
     MOLECULE_PB_OT_toggle_visibility,
     MOLECULE_PB_OT_create_domain,
+    MOLECULE_PB_OT_copy_domain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_select_keyframe,
@@ -97,4 +107,19 @@ CLASSES = (
     PROTEINBLENDER_OT_split_domain,
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
+    PROTEINBLENDER_OT_create_keyframe,
+    PROTEINBLENDER_OT_keyframe_select_all,
+    PROTEINBLENDER_OT_keyframe_select_none,
 )
+
+
+def register():
+    """Register operator-specific properties"""
+    # Call keyframe operators registration to add Scene properties
+    register_keyframe_operators()
+
+
+def unregister():
+    """Unregister operator-specific properties"""
+    # Call keyframe operators unregistration to remove Scene properties
+    unregister_keyframe_operators()

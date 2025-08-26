@@ -317,14 +317,18 @@ class MoleculeWrapper:
         domain = DomainDefinition(mapped_chain, start, end, name if name is not None else generated_name)
         domain.parent_molecule_id = self.identifier
         
-        # If parent_domain_id was provided, use it
-        if parent_domain_id and parent_domain_id in self.domains:
+        # If parent_domain_id was explicitly provided (including None), use it
+        if parent_domain_id is not None and parent_domain_id in self.domains:
             domain.parent_domain_id = parent_domain_id
-        # Otherwise, try to find a suitable parent domain based on containment
-        else:
+        # Only auto-find parent if parent_domain_id was not explicitly passed
+        elif parent_domain_id != "NO_AUTO_PARENT":  # Special flag to prevent auto-parenting
             # Find potential parent domains (domains that contain this one)
             potential_parents = []
             for existing_id, existing_domain in self.domains.items():
+                # Don't make copies children of originals or other copies
+                if hasattr(existing_domain, 'is_copy') and existing_domain.is_copy:
+                    continue
+                    
                 if (existing_domain.chain_id == mapped_chain and
                     existing_domain.start <= start and
                     existing_domain.end >= end and
@@ -452,6 +456,12 @@ class MoleculeWrapper:
             return
 
         domain = self.domains[domain_id_to_normalize]
+        
+        # Skip normalization for domain copies - they have their own naming scheme
+        if hasattr(domain, 'is_copy') and domain.is_copy:
+            print(f"Domain {domain_id_to_normalize} is a copy with name '{domain.name}'. Skipping normalization.")
+            return
+        
         mapped_chain_id = domain.chain_id # This is the mapped chain ID like 'A'
         
         # Get the full residue range for this domain's specific chain from the molecule's overall chain_residue_ranges
@@ -530,7 +540,9 @@ class MoleculeWrapper:
                 if hasattr(domain.object, "temp_domain_name"):
                     domain.object.temp_domain_name = new_name # Keep temp name in sync
         elif is_custom_name:
-            print(f"Domain {domain_id_to_normalize} has custom name '{domain.name}'. Skipping normalization.")
+            # Only print this message if it's not a default chain name
+            if not domain.name.startswith("Chain "):
+                print(f"Domain {domain_id_to_normalize} has custom name '{domain.name}'. Skipping normalization.")
 
     def split_domain(self, original_domain_id: str, split_start: int, split_end: int, split_name: Optional[str] = None) -> List[str]:
         """Splits an existing domain into multiple new domains.
@@ -2025,6 +2037,149 @@ class MoleculeWrapper:
             key=lambda x: (x[1].chain_id, x[1].start)
         )
         return dict(sorted_items)
+
+    def copy_domain(self, domain_id: str) -> Optional[str]:
+        """Create a copy of an existing domain.
+        
+        Args:
+            domain_id: The ID of the domain to copy
+            
+        Returns:
+            The ID of the newly created domain copy, or None if failed
+        """
+        if domain_id not in self.domains:
+            print(f"Error: Domain {domain_id} not found for copying")
+            return None
+            
+        original_domain = self.domains[domain_id]
+        
+        # Track copy numbers for this domain family
+        if not hasattr(self, '_domain_copy_counters'):
+            self._domain_copy_counters = {}
+        
+        # Determine the base name for copies
+        if hasattr(original_domain, 'original_domain_id') and original_domain.original_domain_id:
+            # This is already a copy, use its original
+            base_domain_id = original_domain.original_domain_id
+        else:
+            # This is an original domain
+            base_domain_id = domain_id
+            
+        # Get the next copy number
+        if base_domain_id not in self._domain_copy_counters:
+            self._domain_copy_counters[base_domain_id] = 0
+        self._domain_copy_counters[base_domain_id] += 1
+        copy_number = self._domain_copy_counters[base_domain_id]
+        
+        # Create a new domain with the same parameters
+        # The original domain's chain_id might be either numeric or author format
+        # We need to ensure we pass the numeric chain_id to _create_domain_with_params
+        numeric_chain_id = None
+        original_chain = original_domain.chain_id
+        
+        # Check if original_chain is already numeric
+        if str(original_chain).isdigit():
+            numeric_chain_id = str(original_chain)
+        else:
+            # It's an author chain ID (like 'J'), find the numeric equivalent
+            for num_id, auth_id in self.chain_mapping.items():
+                if auth_id == original_chain:
+                    numeric_chain_id = str(num_id)
+                    break
+        
+        if not numeric_chain_id:
+            # Fallback: try to find it in reverse
+            # Maybe the original_chain is in a different format
+            print(f"Warning: Could not find numeric chain_id for {original_chain}")
+            print(f"  Chain mapping: {self.chain_mapping}")
+            print(f"  Original domain chain_id: {original_domain.chain_id}")
+            numeric_chain_id = "0"  # Default to first chain
+        
+        print(f"DEBUG: Copying domain with chain_id conversion: {original_chain} -> {numeric_chain_id}")
+            
+        # Generate copy name with number suffix (e.g., "Chain A 1")
+        # If copying a copy, we need to extract the base name without the copy number
+        original_name = original_domain.name
+        
+        # Check if the name already has a copy number suffix (e.g., "Chain A 1")
+        import re
+        match = re.match(r'^(.+)\s+(\d+)$', original_name)
+        if match and hasattr(original_domain, 'is_copy') and original_domain.is_copy:
+            # This is a copy, extract the base name
+            base_name = match.group(1)
+            copy_name = f"{base_name} {copy_number}"
+        else:
+            # This is an original or doesn't have a numbered suffix
+            copy_name = f"{original_name} {copy_number}"
+            
+        # Create the domain copy
+        # For full chain copies, don't set parent_domain_id to avoid making it a child
+        # Check if this is a full chain domain
+        is_full_chain = False
+        if hasattr(self, 'chain_residue_ranges'):
+            chain_key = str(original_domain.chain_id)
+            if hasattr(self, 'idx_to_label_asym_id_map'):
+                # Map numeric chain_id to label if needed
+                if str(original_domain.chain_id).isdigit():
+                    chain_key = self.idx_to_label_asym_id_map.get(int(original_domain.chain_id), chain_key)
+            
+            if chain_key in self.chain_residue_ranges:
+                min_res, max_res = self.chain_residue_ranges[chain_key]
+                if original_domain.start == min_res and original_domain.end == max_res:
+                    is_full_chain = True
+        
+        # If it's a full chain copy, use special flag to prevent auto-parenting
+        # Otherwise, keep the same parent as the original
+        parent_for_copy = "NO_AUTO_PARENT" if is_full_chain else original_domain.parent_domain_id
+        
+        new_domain_ids = self._create_domain_with_params(
+            chain_id=numeric_chain_id,
+            start=original_domain.start,
+            end=original_domain.end,
+            name=copy_name,
+            auto_fill_chain=False,  # Don't auto-fill
+            parent_domain_id=parent_for_copy  # NO_AUTO_PARENT for full chains, otherwise keep same parent
+        )
+        
+        if not new_domain_ids:
+            print(f"Failed to create domain copy")
+            return None
+            
+        # Get the main new domain ID (should be the first one)
+        new_domain_id = new_domain_ids[0] if new_domain_ids else None
+        
+        if new_domain_id and new_domain_id in self.domains:
+            new_domain = self.domains[new_domain_id]
+            
+            # Mark as a copy
+            new_domain.is_copy = True
+            new_domain.copy_number = copy_number
+            new_domain.original_domain_id = base_domain_id
+            
+            # Copy the color from the original
+            new_domain.color = original_domain.color
+            if new_domain.object:
+                new_domain.object.domain_color = original_domain.color
+                
+            # Copy the style
+            new_domain.style = original_domain.style
+            if new_domain.object:
+                new_domain.object.domain_style = original_domain.style
+                
+            print(f"Created domain copy: {new_domain_id} (copy #{copy_number} of {base_domain_id})")
+            print(f"  Copy chain_id: {new_domain.chain_id}, Original chain_id: {original_domain.chain_id}")
+            print(f"  Copy name: {new_domain.name}")
+            print(f"  Copy object: {new_domain.object.name if new_domain.object else 'None'}")
+            print(f"  Original object: {original_domain.object.name if original_domain.object else 'None'}")
+            
+            # Verify objects are different
+            if new_domain.object and original_domain.object:
+                if new_domain.object.name == original_domain.object.name:
+                    print(f"WARNING: Copy and original share the same object name!")
+            
+            return new_domain_id
+        
+        return None
 
     def _delete_domain_direct(self, domain_id: str):
         """Internal method to delete a domain without adjusting adjacent domains"""
