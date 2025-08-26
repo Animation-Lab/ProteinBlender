@@ -299,8 +299,8 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                     import re
                     match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
                     if match:
-                        mol_id = match.puppet(1)
-                        domain_id = match.puppet(2)
+                        mol_id = match.group(1)
+                        domain_id = match.group(2)
                     else:
                         # Fallback to splitting on last underscore
                         parts = member_id.rsplit('_', 1)
@@ -604,8 +604,8 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                     import re
                     match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
                     if match:
-                        mol_id = match.puppet(1)
-                        domain_id = match.puppet(2)
+                        mol_id = match.group(1)
+                        domain_id = match.group(2)
                     else:
                         # Fallback to splitting on last underscore
                         parts = member_id.rsplit('_', 1)

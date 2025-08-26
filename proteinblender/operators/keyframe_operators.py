@@ -236,27 +236,49 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 # Debug print
                 print(f"Processing puppet: {item.item_name} (ID: {item.item_id})")
                 
-                # Find all items that belong to this puppet
+                # Find the puppet item in outliner_items
+                puppet_item = None
                 for outliner_item in scene.outliner_items:
-                    # Check if this item belongs to the puppet
-                    if outliner_item.puppet_memberships and item.item_id in outliner_item.puppet_memberships.split(','):
-                        print(f"  Found member: {outliner_item.name} (type: {outliner_item.item_type})")
-                        
-                        if outliner_item.item_type == 'DOMAIN':
-                            # Find the actual domain object
-                            for molecule in scene_manager.molecules.values():
-                                for domain in molecule.domains.values():
-                                    if domain.name == outliner_item.name and domain.object:
-                                        print(f"    Adding domain object: {domain.object.name}")
-                                        objects_to_keyframe.append(domain.object)
-                        elif outliner_item.item_type == 'CHAIN':
-                            # For chains, we need to find the corresponding object
-                            # Chain items have an object_name property
-                            if outliner_item.object_name:
-                                obj = bpy.data.objects.get(outliner_item.object_name)
-                                if obj:
-                                    print(f"    Adding chain object: {obj.name}")
-                                    objects_to_keyframe.append(obj)
+                    if outliner_item.item_type == 'PUPPET' and outliner_item.item_id == item.item_id:
+                        puppet_item = outliner_item
+                        break
+                
+                if puppet_item and puppet_item.puppet_memberships:
+                    # The puppet's puppet_memberships contains the IDs of its members
+                    member_ids = puppet_item.puppet_memberships.split(',')
+                    print(f"  Puppet has members: {member_ids}")
+                    
+                    # Use the same logic as the pose system to find objects
+                    for member_id in member_ids:
+                        if '_chain_' in member_id:
+                            # Parse chain member (e.g., '3b75_001_chain_9')
+                            parts = member_id.rsplit('_chain_', 1)
+                            mol_id = parts[0]
+                            chain_num = parts[1]
+                            
+                            # Find the molecule and domain
+                            if mol_id in scene_manager.molecules:
+                                molecule = scene_manager.molecules[mol_id]
+                                # Look for domain that matches this chain
+                                for domain_id, domain in molecule.domains.items():
+                                    # Check if this is the right chain (e.g., '3b75_001_9_...')
+                                    if domain_id.startswith(f"{mol_id}_{chain_num}_"):
+                                        if domain.object:
+                                            print(f"    Adding chain domain object: {domain.object.name}")
+                                            objects_to_keyframe.append(domain.object)
+                                        break
+                        else:
+                            # Look for domain or other object types
+                            for outliner_item in scene.outliner_items:
+                                if outliner_item.item_id == member_id:
+                                    if outliner_item.object_name:
+                                        obj = bpy.data.objects.get(outliner_item.object_name)
+                                        if obj:
+                                            print(f"    Adding member object: {obj.name}")
+                                            objects_to_keyframe.append(obj)
+                                    break
+                else:
+                    print(f"  No puppet item found or no members")
             
             # Insert keyframes for all collected objects with their CURRENT transforms
             for obj in objects_to_keyframe:
