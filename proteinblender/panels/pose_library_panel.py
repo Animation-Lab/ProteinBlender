@@ -141,6 +141,17 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                     for item in context.scene.outliner_items:
                         if item.item_id == puppet_id and item.item_type == 'PUPPET':
                             print(f"  Group members: {item.puppet_memberships}")
+                            # Try alternative approach to find objects
+                            if item.puppet_memberships:
+                                for member_id in item.puppet_memberships.split(','):
+                                    print(f"  Checking member: {member_id}")
+                                    # Look for outliner item with this ID
+                                    for member_item in context.scene.outliner_items:
+                                        if member_item.item_id == member_id and member_item.object_name:
+                                            obj = bpy.data.objects.get(member_item.object_name)
+                                            if obj:
+                                                print(f"    Found object via outliner: {obj.name}")
+                                                objects.append(obj)
                             break
                 
                 for obj in objects:
@@ -352,23 +363,18 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                 else:
                     print(f"Debug: Molecule {mol_id} not found")
             
-            # Fallback: look in outliner items for object_name
-            # Check if we didn't find the object via domain lookup
-            found_via_domain = False
-            if objects and objects[-1] is not None:
-                found_via_domain = True
-            
-            if not found_via_domain:
-                for item in context.scene.outliner_items:
-                    if item.item_id == member_id:
-                        if item.object_name and item.object_name in bpy.data.objects:
-                            obj = bpy.data.objects[item.object_name]
-                            if obj not in objects:
-                                objects.append(obj)
-                                print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
-                        else:
-                            print(f"Debug: Outliner item {member_id} has object_name='{item.object_name}' but object not found in scene")
-                        break
+            # Always check outliner items as fallback
+            # (some items might store objects directly)
+            for item in context.scene.outliner_items:
+                if item.item_id == member_id:
+                    if item.object_name:
+                        obj = bpy.data.objects.get(item.object_name)
+                        if obj and obj not in objects:
+                            objects.append(obj)
+                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
+                    else:
+                        print(f"Debug: Outliner item {member_id} has no object_name")
+                    break
         
         print(f"Debug: Total objects found for puppet: {len(objects)}")
         return objects
@@ -657,23 +663,18 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                 else:
                     print(f"Debug: Molecule {mol_id} not found")
             
-            # Fallback: look in outliner items for object_name
-            # Check if we didn't find the object via domain lookup
-            found_via_domain = False
-            if objects and objects[-1] is not None:
-                found_via_domain = True
-            
-            if not found_via_domain:
-                for item in context.scene.outliner_items:
-                    if item.item_id == member_id:
-                        if item.object_name and item.object_name in bpy.data.objects:
-                            obj = bpy.data.objects[item.object_name]
-                            if obj not in objects:
-                                objects.append(obj)
-                                print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
-                        else:
-                            print(f"Debug: Outliner item {member_id} has object_name='{item.object_name}' but object not found in scene")
-                        break
+            # Always check outliner items as fallback
+            # (some items might store objects directly)
+            for item in context.scene.outliner_items:
+                if item.item_id == member_id:
+                    if item.object_name:
+                        obj = bpy.data.objects.get(item.object_name)
+                        if obj and obj not in objects:
+                            objects.append(obj)
+                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
+                    else:
+                        print(f"Debug: Outliner item {member_id} has no object_name")
+                    break
         
         print(f"Debug: Total objects found for puppet: {len(objects)}")
         return objects
