@@ -55,15 +55,20 @@ from .domain_ops import (
     PROTEINBLENDER_OT_rename_domain,
 )
 from .keyframe_operators import (
+    PoseKeyframeSettings,  # Must be imported and registered before operators that use it
     PROTEINBLENDER_OT_create_keyframe,
-    PROTEINBLENDER_OT_keyframe_select_all,
-    PROTEINBLENDER_OT_keyframe_select_none,
-    # Note: KeyframeTransformSettings is registered separately in register_keyframe_operators
+    PROTEINBLENDER_OT_keyframe_select_all_poses,
+    PROTEINBLENDER_OT_keyframe_select_none_poses,
+    PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
+    PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
     register as register_keyframe_operators,
     unregister as unregister_keyframe_operators,
 )
 
 CLASSES = (
+    # PropertyGroups must be registered before operators that use them
+    PoseKeyframeSettings,
+    # Operators
     MOLECULE_PB_OT_select,
     MOLECULE_PB_OT_edit,
     MOLECULE_PB_OT_delete,
@@ -108,8 +113,10 @@ CLASSES = (
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
     PROTEINBLENDER_OT_create_keyframe,
-    PROTEINBLENDER_OT_keyframe_select_all,
-    PROTEINBLENDER_OT_keyframe_select_none,
+    PROTEINBLENDER_OT_keyframe_select_all_poses,
+    PROTEINBLENDER_OT_keyframe_select_none_poses,
+    PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
+    PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
 )
 
 

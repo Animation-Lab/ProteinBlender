@@ -6,86 +6,218 @@ from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringPrope
 from ..utils.scene_manager import ProteinBlenderScene
 
 
-class KeyframeTransformSettings(PropertyGroup):
-    """Property group for transform settings in keyframe creation"""
-    item_id: StringProperty(name="Item ID")
-    item_name: StringProperty(name="Item Name")
-    item_type: StringProperty(name="Item Type")  # 'protein', 'pose', 'puppet'
+class PoseKeyframeSettings(PropertyGroup):
+    """Property group for pose keyframe settings"""
+    pose_index: IntProperty(name="Pose Index", default=-1)
+    pose_name: StringProperty(name="Pose Name")
+    puppet_ids: StringProperty(name="Puppet IDs")  # Comma-separated
     
-    keyframe_location: BoolProperty(name="Location", default=True)
-    keyframe_rotation: BoolProperty(name="Rotation", default=True)
-    keyframe_scale: BoolProperty(name="Scale", default=False)
+    # Main checkbox to enable/disable this pose
+    use_pose: BoolProperty(
+        name="Use Pose",
+        description="Apply this pose and keyframe it",
+        default=False
+    )
     
-    is_enabled: BoolProperty(name="Enabled", default=True)
+    # Transform checkboxes
+    keyframe_location: BoolProperty(
+        name="Location",
+        description="Keyframe location",
+        default=True
+    )
+    keyframe_rotation: BoolProperty(
+        name="Rotation", 
+        description="Keyframe rotation",
+        default=True
+    )
+    keyframe_scale: BoolProperty(
+        name="Scale",
+        description="Keyframe scale",
+        default=False
+    )
+    
+    # Conflict tracking
+    has_conflict: BoolProperty(
+        name="Has Conflict",
+        description="This pose conflicts with another selected pose",
+        default=False
+    )
+    conflict_with: StringProperty(
+        name="Conflicts With",
+        description="Name of conflicting pose",
+        default=""
+    )
 
 
 class PROTEINBLENDER_OT_create_keyframe(Operator):
-    """Create keyframes for selected proteins, poses, and puppets"""
+    """Create keyframes from poses"""
     bl_idname = "proteinblender.create_keyframe"
     bl_label = "Create Keyframe"
     bl_options = {'REGISTER', 'UNDO'}
     
     frame_number: IntProperty(
         name="Frame",
-        description="Frame number for keyframe (defaults to current frame)",
+        description="Frame number for keyframe",
         default=1,
         min=1
     )
     
+    pose_items: CollectionProperty(
+        type=PoseKeyframeSettings,
+        name="Pose Items",
+        description="Collection of poses to keyframe"
+    )
+    
+    def get_puppet_objects(self, context, puppet_id):
+        """Get all Blender objects that belong to a puppet group"""
+        objects = []
+        
+        # Find puppet item
+        puppet_item = None
+        if hasattr(context.scene, 'outliner_items'):
+            for item in context.scene.outliner_items:
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    puppet_item = item
+                    break
+        
+        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
+            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
+            return objects
+        
+        if not puppet_item.puppet_memberships:
+            print(f"Debug: Empty memberships for puppet {puppet_id}")
+            return objects
+        
+        # Parse member IDs and find corresponding objects
+        member_ids = puppet_item.puppet_memberships.split(',')
+        print(f"Debug: Puppet '{puppet_item.name}' has members: {member_ids}")
+        
+        # Import scene manager to access molecules
+        from ..utils.scene_manager import ProteinBlenderScene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        for member_id in member_ids:
+            # Member IDs are in format: molecule_id_domain_id
+            if '_' in member_id:
+                # Try to intelligently parse the member_id
+                # First, check if it contains '_chain_'
+                if '_chain_' in member_id:
+                    # Split at '_chain_' to separate molecule_id from chain identifier
+                    parts = member_id.rsplit('_chain_', 1)
+                    mol_id = parts[0]
+                    domain_id = 'chain_' + parts[1]
+                else:
+                    # For custom domains, find where molecule_id ends
+                    import re
+                    match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
+                    if match:
+                        mol_id = match.group(1)
+                        domain_id = match.group(2)
+                    else:
+                        # Fallback to splitting on last underscore
+                        parts = member_id.rsplit('_', 1)
+                        if len(parts) == 2:
+                            mol_id = parts[0]
+                            domain_id = parts[1]
+                        else:
+                            print(f"Debug: Could not parse member_id '{member_id}'")
+                            continue
+                
+                print(f"Debug: Looking for mol_id='{mol_id}', domain_id='{domain_id}'")
+                
+                # Try to find the domain object
+                if mol_id in scene_manager.molecules:
+                    molecule = scene_manager.molecules[mol_id]
+                    
+                    # First try direct lookup
+                    if domain_id in molecule.domains:
+                        domain = molecule.domains[domain_id]
+                        if domain.object:
+                            objects.append(domain.object)
+                            print(f"Debug: Found domain object '{domain.object.name}' for {member_id}")
+                    else:
+                        # If domain_id is like 'chain_4', try to find the matching domain
+                        if domain_id.startswith('chain_'):
+                            chain_index = domain_id.replace('chain_', '')
+                            # Find domain that starts with mol_id_chainindex_
+                            for dom_id, dom in molecule.domains.items():
+                                if dom_id.startswith(f"{mol_id}_{chain_index}_"):
+                                    if dom.object:
+                                        objects.append(dom.object)
+                                        print(f"Debug: Found chain object '{dom.object.name}' for {member_id}")
+                                    break
+            
+            # Always check outliner items as fallback
+            for item in context.scene.outliner_items:
+                if item.item_id == member_id:
+                    if item.object_name:
+                        obj = bpy.data.objects.get(item.object_name)
+                        if obj and obj not in objects:
+                            objects.append(obj)
+                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
+                    break
+        
+        print(f"Debug: Total objects found for puppet: {len(objects)}")
+        return objects
+    
+    def check_conflicts(self):
+        """Check for puppet conflicts between selected poses"""
+        # Clear previous conflict states
+        for item in self.pose_items:
+            item.has_conflict = False
+            item.conflict_with = ""
+        
+        # Check each pair of selected poses
+        selected_poses = [item for item in self.pose_items if item.use_pose]
+        
+        for i, pose_a in enumerate(selected_poses):
+            puppets_a = set(pose_a.puppet_ids.split(',')) if pose_a.puppet_ids else set()
+            
+            for pose_b in selected_poses[i+1:]:
+                puppets_b = set(pose_b.puppet_ids.split(',')) if pose_b.puppet_ids else set()
+                
+                # Check for overlap
+                overlap = puppets_a & puppets_b
+                if overlap:
+                    pose_a.has_conflict = True
+                    pose_b.has_conflict = True
+                    
+                    if not pose_a.conflict_with:
+                        pose_a.conflict_with = pose_b.pose_name
+                    else:
+                        pose_a.conflict_with += f", {pose_b.pose_name}"
+                    
+                    if not pose_b.conflict_with:
+                        pose_b.conflict_with = pose_a.pose_name
+                    else:
+                        pose_b.conflict_with += f", {pose_a.pose_name}"
+    
     def invoke(self, context, event):
         scene = context.scene
         
-        # Clear previous items using the scene property
-        scene.keyframe_dialog_items.clear()
+        # Clear previous items
+        self.pose_items.clear()
         
         # Set frame to current frame
         self.frame_number = scene.frame_current
         
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Add proteins and their poses
-        for molecule_id, molecule in scene_manager.molecules.items():
-            # Add main protein entry
-            item = scene.keyframe_dialog_items.add()
-            item.item_id = molecule_id
-            item.item_name = molecule.identifier
-            item.item_type = 'protein'
-            item.is_enabled = True
-            
-            # Get molecule item from scene property for poses
-            molecule_item = None
-            for scene_item in scene.molecule_list_items:
-                if scene_item.identifier == molecule.identifier:
-                    molecule_item = scene_item
-                    break
-            
-            # Add poses for this molecule
-            if molecule_item and molecule_item.poses:
-                for pose_idx, pose in enumerate(molecule_item.poses):
-                    pose_item = scene.keyframe_dialog_items.add()
-                    pose_item.item_id = f"{molecule_id}_pose_{pose_idx}"
-                    pose_item.item_name = f"  └─ {pose.name}"
-                    pose_item.item_type = 'pose'
-                    pose_item.is_enabled = False  # Disabled by default
-        
-        # Add puppets (skip separator items)
-        for outliner_item in scene.outliner_items:
-            if (outliner_item.item_type == 'PUPPET' and 
-                outliner_item.item_id != "puppets_separator" and
-                outliner_item.name and 
-                not outliner_item.name.startswith("─")):
-                puppet_item = scene.keyframe_dialog_items.add()
-                puppet_item.item_id = outliner_item.item_id
-                puppet_item.item_name = outliner_item.name
-                puppet_item.item_type = 'puppet'
-                puppet_item.is_enabled = True
+        # Add poses from the pose library
+        if hasattr(scene, 'pose_library'):
+            for idx, pose in enumerate(scene.pose_library):
+                item = self.pose_items.add()
+                item.pose_index = idx
+                item.pose_name = pose.name
+                item.puppet_ids = pose.puppet_ids
+                item.use_pose = False  # Unchecked by default
+                item.keyframe_location = True
+                item.keyframe_rotation = True
+                item.keyframe_scale = False
         
         # Show popup dialog
-        return context.window_manager.invoke_props_dialog(self, width=400)
+        return context.window_manager.invoke_props_dialog(self, width=500)
     
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
         
         # Frame number input
         row = layout.row()
@@ -94,92 +226,109 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         
         layout.separator()
         
-        # Header row with proper spacing
-        header = layout.row()
-        col = header.column()
-        col.alignment = 'LEFT'
-        col.label(text="Item")
+        # Check for conflicts whenever UI is drawn
+        self.check_conflicts()
         
-        col = header.column()
-        col.alignment = 'CENTER'
-        col.label(text="Location")
+        # Show conflict warning if any exist
+        has_any_conflict = any(item.has_conflict for item in self.pose_items if item.use_pose)
+        if has_any_conflict:
+            box = layout.box()
+            col = box.column()
+            col.alert = True
+            col.label(text="⚠ Warning: Conflicting poses selected", icon='ERROR')
+            col.label(text="Poses controlling the same puppets cannot be applied together")
         
-        col = header.column()
-        col.alignment = 'CENTER'
-        col.label(text="Rotation")
-        
-        col = header.column()
-        col.alignment = 'CENTER'
-        col.label(text="Scale")
-        
-        layout.separator()
-        
-        # Item rows - use scene property
+        # Pose rows
         box = layout.box()
         
-        # Track if we need to add a separator for puppets
-        has_proteins = False
-        has_puppets = False
-        for item in scene.keyframe_dialog_items:
-            if item.item_type in ['protein', 'pose']:
-                has_proteins = True
-            elif item.item_type == 'puppet':
-                has_puppets = True
-        
-        # Draw items
-        last_type = None
-        for item in scene.keyframe_dialog_items:
-            # Add separator between proteins/poses and puppets
-            if last_type in ['protein', 'pose'] and item.item_type == 'puppet':
-                box.separator()
-                # Add puppets label
-                row = box.row()
-                row.label(text="——— Puppets ———")
+        if not self.pose_items:
+            box.label(text="No poses available", icon='INFO')
+            box.label(text="Create poses in the Pose Library first")
+        else:
+            # Create a subtle header with icons
+            header_row = box.row(align=False)
+            header_row.scale_y = 0.8
+            header_row.label(text="")  # Empty space for checkbox column
             
-            row = box.row(align=False)
+            # Pose name label - left aligned to match actual pose names
+            header_row.label(text="Pose Name")
             
-            # Item name column with enable checkbox
-            col = row.column()
-            col.alignment = 'LEFT'
-            sub = col.row(align=True)
-            sub.prop(item, "is_enabled", text="")
+            # Spacer to push transform icons to the right
+            header_row.separator(factor=2.0)
             
-            # Add appropriate icon and indentation
-            if item.item_type == 'pose':
-                sub.label(text="    " + item.item_name)
-            elif item.item_type == 'protein':
-                sub.label(text=item.item_name, icon='RNA')
-            elif item.item_type == 'puppet':
-                sub.label(text=item.item_name, icon='GROUP')
+            # Transform type icons
+            header_row.label(text="", icon='CON_LOCLIKE')  # Location icon
+            header_row.label(text="", icon='CON_ROTLIKE')  # Rotation icon  
+            header_row.label(text="", icon='CON_SIZELIKE')  # Scale icon
             
-            # Transform checkbox columns
-            col = row.column()
-            col.alignment = 'CENTER'
-            col.enabled = item.is_enabled
-            col.prop(item, "keyframe_location", text="")
+            box.separator(factor=0.5)
             
-            col = row.column()
-            col.alignment = 'CENTER'
-            col.enabled = item.is_enabled
-            col.prop(item, "keyframe_rotation", text="")
-            
-            col = row.column()
-            col.alignment = 'CENTER'
-            col.enabled = item.is_enabled
-            col.prop(item, "keyframe_scale", text="")
-            
-            last_type = item.item_type
+            for item in self.pose_items:
+                row = box.row(align=False)
+                row.scale_y = 1.2  # Make rows slightly taller for better readability
+                
+                # Color the entire row if there's a conflict
+                if item.has_conflict and item.use_pose:
+                    row.alert = True
+                
+                # Checkbox for selecting the pose (always enabled)
+                row.prop(item, "use_pose", text="")
+                
+                # Pose name with icon and puppet count (takes up space)
+                name_col = row.column()
+                name_col.alignment = 'LEFT'
+                name_row = name_col.row(align=True)
+                name_row.label(text=item.pose_name, icon='POSE_HLT')
+                if item.puppet_ids:
+                    puppet_count = len(item.puppet_ids.split(','))
+                    name_row.label(text=f"({puppet_count} puppet{'s' if puppet_count > 1 else ''})")
+                
+                # Add spacer to push transform checkboxes to the right
+                row.separator(factor=2.0)
+                
+                # Transform checkboxes - each in its own sub-row for proper enabling
+                loc_row = row.row()
+                loc_row.enabled = item.use_pose and not item.has_conflict
+                loc_row.prop(item, "keyframe_location", text="")
+                
+                rot_row = row.row()
+                rot_row.enabled = item.use_pose and not item.has_conflict
+                rot_row.prop(item, "keyframe_rotation", text="")
+                
+                scale_row = row.row()
+                scale_row.enabled = item.use_pose and not item.has_conflict
+                scale_row.prop(item, "keyframe_scale", text="")
+                
+                # Show conflict details below the row if needed
+                if item.has_conflict and item.use_pose:
+                    conflict_row = box.row()
+                    conflict_row.alert = True
+                    conflict_row.label(text=f"    ⚠ Conflicts with: {item.conflict_with}", icon='BLANK1')
         
         layout.separator()
         
         # Select all/none buttons
         row = layout.row(align=True)
-        row.operator("proteinblender.keyframe_select_all", text="Select All")
-        row.operator("proteinblender.keyframe_select_none", text="Select None")
+        row.operator("proteinblender.keyframe_select_all_poses", text="Select All")
+        row.operator("proteinblender.keyframe_select_none_poses", text="Select None")
     
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Check for conflicts one more time
+        self.check_conflicts()
+        
+        # Get selected poses without conflicts
+        selected_poses = [item for item in self.pose_items 
+                         if item.use_pose and not item.has_conflict]
+        
+        if not selected_poses:
+            if any(item.has_conflict for item in self.pose_items if item.use_pose):
+                self.report({'ERROR'}, "Cannot apply conflicting poses. Please resolve conflicts.")
+            else:
+                self.report({'WARNING'}, "No poses selected")
+            return {'CANCELLED'}
         
         # Store current frame
         original_frame = scene.frame_current
@@ -189,174 +338,261 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             scene.frame_set(self.frame_number)
         
         keyframed_count = 0
+        applied_poses = []
         
-        for item in scene.keyframe_dialog_items:
-            if not item.is_enabled:
+        for pose_item in selected_poses:
+            if pose_item.pose_index < 0 or pose_item.pose_index >= len(scene.pose_library):
                 continue
             
+            pose = scene.pose_library[pose_item.pose_index]
+            applied_poses.append(pose.name)
+            
+            # DON'T apply the pose - we want to keyframe current positions
+            # The pose just tells us WHICH objects to keyframe
+            print(f"Keyframing objects from pose '{pose.name}' at frame {self.frame_number}")
+            
+            # Collect all objects that are part of this pose's puppets
             objects_to_keyframe = []
             
-            if item.item_type == 'protein':
-                # Keyframe the main protein and all its domains
-                molecule = scene_manager.molecules.get(item.item_id)
-                if molecule and molecule.object:
-                    objects_to_keyframe.append(molecule.object)
-                    
-                    # Add all domain objects
-                    for domain in molecule.domains.values():
-                        if domain.object:
-                            objects_to_keyframe.append(domain.object)
-            
-            elif item.item_type == 'pose':
-                # Extract molecule_id and pose_index from item_id
-                parts = item.item_id.split('_pose_')
-                if len(parts) == 2:
-                    molecule_id = parts[0]
-                    pose_idx = int(parts[1])
-                    
-                    molecule = scene_manager.molecules.get(molecule_id)
-                    if molecule:
-                        # Get molecule item for poses
-                        for scene_item in scene.molecule_list_items:
-                            if scene_item.identifier == molecule.identifier:
-                                if 0 <= pose_idx < len(scene_item.poses):
-                                    pose = scene_item.poses[pose_idx]
-                                    
-                                    # NOTE: Don't apply the pose here - assume it's already applied
-                                    # The user should have already applied the pose they want to keyframe
-                                    
-                                    # Keyframe the affected domains with their CURRENT transforms
-                                    for transform in pose.domain_transforms:
-                                        domain = molecule.domains.get(transform.domain_id)
-                                        if domain and domain.object:
-                                            objects_to_keyframe.append(domain.object)
-                                break
-            
-            elif item.item_type == 'puppet':
-                # Debug print
-                print(f"Processing puppet: {item.item_name} (ID: {item.item_id})")
+            # Get puppet IDs from the pose
+            if pose.puppet_ids:
+                puppet_ids = pose.puppet_ids.split(',')
                 
-                # Find the puppet item in outliner_items
-                puppet_item = None
-                for outliner_item in scene.outliner_items:
-                    if outliner_item.item_type == 'PUPPET' and outliner_item.item_id == item.item_id:
-                        puppet_item = outliner_item
-                        break
-                
-                if puppet_item and puppet_item.puppet_memberships:
-                    # The puppet's puppet_memberships contains the IDs of its members
-                    member_ids = puppet_item.puppet_memberships.split(',')
-                    print(f"  Puppet has members: {member_ids}")
+                for puppet_id in puppet_ids:
+                    puppet_id = puppet_id.strip()
+                    print(f"  Looking for objects in puppet: {puppet_id}")
                     
-                    # Use the same logic as the pose system to find objects
-                    for member_id in member_ids:
-                        if '_chain_' in member_id:
-                            # Parse chain member (e.g., '3b75_001_chain_9')
-                            parts = member_id.rsplit('_chain_', 1)
-                            mol_id = parts[0]
-                            chain_num = parts[1]
-                            
-                            # Find the molecule and domain
-                            if mol_id in scene_manager.molecules:
-                                molecule = scene_manager.molecules[mol_id]
-                                # Look for domain that matches this chain
-                                for domain_id, domain in molecule.domains.items():
-                                    # Check if this is the right chain (e.g., '3b75_001_9_...')
-                                    if domain_id.startswith(f"{mol_id}_{chain_num}_"):
-                                        if domain.object:
-                                            print(f"    Adding chain domain object: {domain.object.name}")
-                                            objects_to_keyframe.append(domain.object)
-                                        break
-                        else:
-                            # Look for domain or other object types
-                            for outliner_item in scene.outliner_items:
-                                if outliner_item.item_id == member_id:
-                                    if outliner_item.object_name:
-                                        obj = bpy.data.objects.get(outliner_item.object_name)
-                                        if obj:
-                                            print(f"    Adding member object: {obj.name}")
-                                            objects_to_keyframe.append(obj)
-                                    break
+                    # Find puppet objects using the same logic as pose library panel
+                    puppet_objects = self.get_puppet_objects(context, puppet_id)
+                    
+                    for obj in puppet_objects:
+                        if obj not in objects_to_keyframe:
+                            objects_to_keyframe.append(obj)
+                            print(f"  Will keyframe: {obj.name}")
+            
+            # Collect parent objects that need keyframing
+            parent_objects = set()
+            
+            # Get or create action for the object
+            def ensure_action_and_group(obj, group_name):
+                """Ensure object has an action and create/get the action group"""
+                # Make sure the object has an action
+                if not obj.animation_data:
+                    obj.animation_data_create()
+                
+                if not obj.animation_data.action:
+                    # Create a new action for this object
+                    action_name = f"{obj.name}_Action"
+                    obj.animation_data.action = bpy.data.actions.new(name=action_name)
+                
+                action = obj.animation_data.action
+                
+                # Get or create the action group for this pose
+                group = None
+                if group_name in action.groups:
+                    group = action.groups[group_name]
                 else:
-                    print(f"  No puppet item found or no members")
+                    group = action.groups.new(name=group_name)
+                    # Set a color for the group (optional - makes it visually distinct)
+                    import random
+                    random.seed(hash(group_name))
+                    group.color_set = random.choice(['DEFAULT', 'THEME01', 'THEME02', 'THEME03', 
+                                                    'THEME04', 'THEME05', 'THEME06', 'THEME07',
+                                                    'THEME08', 'THEME09', 'THEME10'])
+                
+                return action, group
             
-            # Insert keyframes for all collected objects with their CURRENT transforms
+            # Create a group name for this pose
+            pose_group_name = f"Pose: {pose.name}"
+            
+            # Insert keyframes for all affected objects using their CURRENT transforms
             for obj in objects_to_keyframe:
-                # The keyframe_insert will capture the object's current transform
-                # No need to modify anything - just keyframe the current state
-                if item.keyframe_location:
+                print(f"\n  Object: {obj.name}")
+                print(f"    Current Location: {list(obj.location)}")
+                print(f"    Current Rotation: {list(obj.rotation_euler)}")
+                print(f"    Current Scale: {list(obj.scale)}")
+                
+                # Check if object has a parent
+                if obj.parent:
+                    print(f"    Parent: {obj.parent.name}")
+                    print(f"    Parent Location: {list(obj.parent.location)}")
+                    print(f"    World Location: {list(obj.matrix_world.translation)}")
+                    # Add parent to list of objects to keyframe
+                    parent_objects.add(obj.parent)
+                else:
+                    print(f"    No parent (world location = local location)")
+                
+                # Get or create action and group for this object
+                action, group = ensure_action_and_group(obj, pose_group_name)
+                
+                # Track what we're keyframing
+                keyframed_properties = []
+                
+                if pose_item.keyframe_location:
                     obj.keyframe_insert(data_path="location", frame=self.frame_number)
-                if item.keyframe_rotation:
+                    keyframed_properties.append("location")
+                    print(f"    ✓ Keyframed location at frame {self.frame_number}")
+                    
+                    # Assign the location F-Curves to the group
+                    for axis in range(3):  # X, Y, Z
+                        fcurve = action.fcurves.find('location', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                    
+                if pose_item.keyframe_rotation:
                     obj.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
-                if item.keyframe_scale:
+                    keyframed_properties.append("rotation")
+                    print(f"    ✓ Keyframed rotation at frame {self.frame_number}")
+                    
+                    # Assign the rotation F-Curves to the group
+                    for axis in range(3):  # X, Y, Z
+                        fcurve = action.fcurves.find('rotation_euler', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                    
+                if pose_item.keyframe_scale:
                     obj.keyframe_insert(data_path="scale", frame=self.frame_number)
+                    keyframed_properties.append("scale")
+                    print(f"    ✓ Keyframed scale at frame {self.frame_number}")
+                    
+                    # Assign the scale F-Curves to the group
+                    for axis in range(3):  # X, Y, Z
+                        fcurve = action.fcurves.find('scale', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                
+                if keyframed_properties:
+                    print(f"    Summary: Keyframed {', '.join(keyframed_properties)} for {obj.name}")
+                else:
+                    print(f"    Warning: No properties were keyframed for {obj.name}")
+                    
                 keyframed_count += 1
-                print(f"Keyframed {obj.name} at frame {self.frame_number} - Loc: {obj.location}, Rot: {obj.rotation_euler}")
+            
+            # Also keyframe parent objects (the proteins themselves)
+            for parent in parent_objects:
+                print(f"\n  Parent Object: {parent.name}")
+                print(f"    Current Location: {list(parent.location)}")
+                print(f"    Current Rotation: {list(parent.rotation_euler)}")
+                print(f"    Current Scale: {list(parent.scale)}")
+                
+                # Get or create action and group for the parent
+                action, group = ensure_action_and_group(parent, pose_group_name)
+                
+                keyframed_properties = []
+                
+                if pose_item.keyframe_location:
+                    parent.keyframe_insert(data_path="location", frame=self.frame_number)
+                    keyframed_properties.append("location")
+                    print(f"    ✓ Keyframed parent location at frame {self.frame_number}")
+                    
+                    # Assign the location F-Curves to the group
+                    for axis in range(3):
+                        fcurve = action.fcurves.find('location', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                    
+                if pose_item.keyframe_rotation:
+                    parent.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
+                    keyframed_properties.append("rotation")
+                    print(f"    ✓ Keyframed parent rotation at frame {self.frame_number}")
+                    
+                    # Assign the rotation F-Curves to the group
+                    for axis in range(3):
+                        fcurve = action.fcurves.find('rotation_euler', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                    
+                if pose_item.keyframe_scale:
+                    parent.keyframe_insert(data_path="scale", frame=self.frame_number)
+                    keyframed_properties.append("scale")
+                    print(f"    ✓ Keyframed parent scale at frame {self.frame_number}")
+                    
+                    # Assign the scale F-Curves to the group
+                    for axis in range(3):
+                        fcurve = action.fcurves.find('scale', index=axis)
+                        if fcurve:
+                            fcurve.group = group
+                
+                if keyframed_properties:
+                    print(f"    Summary: Keyframed {', '.join(keyframed_properties)} for parent {parent.name}")
+                    keyframed_count += 1
         
         # Restore original frame
-        scene.frame_set(original_frame)
+        if original_frame != self.frame_number:
+            scene.frame_set(original_frame)
         
-        self.report({'INFO'}, f"Created keyframes for {keyframed_count} objects at frame {self.frame_number}")
+        pose_names = ", ".join(applied_poses)
+        self.report({'INFO'}, f"Keyframed {keyframed_count} objects from poses: {pose_names} at frame {self.frame_number}")
         return {'FINISHED'}
 
 
-class PROTEINBLENDER_OT_keyframe_select_all(Operator):
-    """Select all items and transforms for keyframing"""
-    bl_idname = "proteinblender.keyframe_select_all"
+class PROTEINBLENDER_OT_keyframe_select_all_poses(Operator):
+    """Select all poses for keyframing"""
+    bl_idname = "proteinblender.keyframe_select_all_poses"
     bl_label = "Select All"
     
     def execute(self, context):
-        scene = context.scene
-        for item in scene.keyframe_dialog_items:
-            item.is_enabled = True
-            item.keyframe_location = True
-            item.keyframe_rotation = True
-            item.keyframe_scale = True
+        # Get the active operator
+        wm = context.window_manager
+        if hasattr(wm, 'operators') and len(wm.operators) > 0:
+            for op in reversed(wm.operators):
+                if hasattr(op, 'bl_idname') and op.bl_idname == 'proteinblender.create_keyframe':
+                    if hasattr(op, 'pose_items'):
+                        for item in op.pose_items:
+                            item.use_pose = True
+                            # Keep default transform settings
+                        # Force a redraw to update conflict detection
+                        context.area.tag_redraw()
+                    break
         return {'FINISHED'}
 
 
-class PROTEINBLENDER_OT_keyframe_select_none(Operator):
-    """Deselect all items for keyframing"""
-    bl_idname = "proteinblender.keyframe_select_none"
+class PROTEINBLENDER_OT_keyframe_select_none_poses(Operator):
+    """Deselect all poses"""
+    bl_idname = "proteinblender.keyframe_select_none_poses"
     bl_label = "Select None"
     
     def execute(self, context):
-        scene = context.scene
-        for item in scene.keyframe_dialog_items:
-            item.is_enabled = False
+        # Get the active operator
+        wm = context.window_manager
+        if hasattr(wm, 'operators') and len(wm.operators) > 0:
+            for op in reversed(wm.operators):
+                if hasattr(op, 'bl_idname') and op.bl_idname == 'proteinblender.create_keyframe':
+                    if hasattr(op, 'pose_items'):
+                        for item in op.pose_items:
+                            item.use_pose = False
+                        # Force a redraw to update conflict detection
+                        context.area.tag_redraw()
+                    break
         return {'FINISHED'}
+
+
+# Keep old operators for backwards compatibility but deprecated
+class PROTEINBLENDER_OT_keyframe_select_all(Operator):
+    """Deprecated - use keyframe_select_all_poses"""
+    bl_idname = "proteinblender.keyframe_select_all"
+    bl_label = "Select All (Deprecated)"
+    
+    def execute(self, context):
+        return bpy.ops.proteinblender.keyframe_select_all_poses()
+
+
+class PROTEINBLENDER_OT_keyframe_select_none(Operator):
+    """Deprecated - use keyframe_select_none_poses"""
+    bl_idname = "proteinblender.keyframe_select_none"
+    bl_label = "Select None (Deprecated)"
+    
+    def execute(self, context):
+        return bpy.ops.proteinblender.keyframe_select_none_poses()
 
 
 def register():
     """Register keyframe operators and properties"""
-    # NOTE: The operator classes are already registered via the CLASSES tuple
-    # in operators/__init__.py, so we only need to register the PropertyGroup
-    # and add the Scene property here
-    
-    # Register the PropertyGroup - use try/except for safety
-    try:
-        bpy.utils.register_class(KeyframeTransformSettings)
-    except ValueError:
-        # Already registered, that's fine
-        pass
-    
-    # Add collection property to Scene
-    if not hasattr(bpy.types.Scene, 'keyframe_dialog_items'):
-        bpy.types.Scene.keyframe_dialog_items = CollectionProperty(
-            type=KeyframeTransformSettings,
-            name="Keyframe Dialog Items"
-        )
+    # PoseKeyframeSettings is now registered with the main CLASSES in __init__.py
+    pass
 
 
 def unregister():
     """Unregister keyframe operators and properties"""
-    # Remove scene property
-    if hasattr(bpy.types.Scene, 'keyframe_dialog_items'):
-        del bpy.types.Scene.keyframe_dialog_items
-    
-    # Unregister the PropertyGroup - use try/except for safety
-    try:
-        bpy.utils.unregister_class(KeyframeTransformSettings)
-    except (ValueError, RuntimeError):
-        # Already unregistered or never registered, that's fine
-        pass
+    # PoseKeyframeSettings is now unregistered with the main CLASSES in __init__.py
+    pass
