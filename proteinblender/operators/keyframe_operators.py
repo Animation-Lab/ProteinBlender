@@ -347,9 +347,17 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             pose = scene.pose_library[pose_item.pose_index]
             applied_poses.append(pose.name)
             
-            # DON'T apply the pose - we want to keyframe current positions
-            # The pose just tells us WHICH objects to keyframe
-            print(f"Keyframing objects from pose '{pose.name}' at frame {self.frame_number}")
+            # First, apply the pose to set the transforms
+            print(f"Applying pose '{pose.name}' before keyframing at frame {self.frame_number}")
+            
+            # Apply the pose transforms
+            for transform in pose.transforms:
+                obj = bpy.data.objects.get(transform.object_name)
+                if obj:
+                    obj.location = transform.location
+                    obj.rotation_euler = transform.rotation_euler
+                    obj.scale = transform.scale
+                    print(f"  Applied transform to {obj.name}")
             
             # Collect all objects that are part of this pose's puppets
             objects_to_keyframe = []
@@ -373,39 +381,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             # Collect parent objects that need keyframing
             parent_objects = set()
             
-            # Get or create action for the object
-            def ensure_action_and_group(obj, group_name):
-                """Ensure object has an action and create/get the action group"""
-                # Make sure the object has an action
-                if not obj.animation_data:
-                    obj.animation_data_create()
-                
-                if not obj.animation_data.action:
-                    # Create a new action for this object
-                    action_name = f"{obj.name}_Action"
-                    obj.animation_data.action = bpy.data.actions.new(name=action_name)
-                
-                action = obj.animation_data.action
-                
-                # Get or create the action group for this pose
-                group = None
-                if group_name in action.groups:
-                    group = action.groups[group_name]
-                else:
-                    group = action.groups.new(name=group_name)
-                    # Set a color for the group (optional - makes it visually distinct)
-                    import random
-                    random.seed(hash(group_name))
-                    group.color_set = random.choice(['DEFAULT', 'THEME01', 'THEME02', 'THEME03', 
-                                                    'THEME04', 'THEME05', 'THEME06', 'THEME07',
-                                                    'THEME08', 'THEME09', 'THEME10'])
-                
-                return action, group
-            
-            # Create a group name for this pose
-            pose_group_name = f"Pose: {pose.name}"
-            
-            # Insert keyframes for all affected objects using their CURRENT transforms
+            # Insert keyframes for all affected objects with the pose transforms applied
             for obj in objects_to_keyframe:
                 print(f"\n  Object: {obj.name}")
                 print(f"    Current Location: {list(obj.location)}")
@@ -422,9 +398,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 else:
                     print(f"    No parent (world location = local location)")
                 
-                # Get or create action and group for this object
-                action, group = ensure_action_and_group(obj, pose_group_name)
-                
                 # Track what we're keyframing
                 keyframed_properties = []
                 
@@ -433,33 +406,15 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     keyframed_properties.append("location")
                     print(f"    ✓ Keyframed location at frame {self.frame_number}")
                     
-                    # Assign the location F-Curves to the group
-                    for axis in range(3):  # X, Y, Z
-                        fcurve = action.fcurves.find('location', index=axis)
-                        if fcurve:
-                            fcurve.group = group
-                    
                 if pose_item.keyframe_rotation:
                     obj.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
                     keyframed_properties.append("rotation")
                     print(f"    ✓ Keyframed rotation at frame {self.frame_number}")
                     
-                    # Assign the rotation F-Curves to the group
-                    for axis in range(3):  # X, Y, Z
-                        fcurve = action.fcurves.find('rotation_euler', index=axis)
-                        if fcurve:
-                            fcurve.group = group
-                    
                 if pose_item.keyframe_scale:
                     obj.keyframe_insert(data_path="scale", frame=self.frame_number)
                     keyframed_properties.append("scale")
                     print(f"    ✓ Keyframed scale at frame {self.frame_number}")
-                    
-                    # Assign the scale F-Curves to the group
-                    for axis in range(3):  # X, Y, Z
-                        fcurve = action.fcurves.find('scale', index=axis)
-                        if fcurve:
-                            fcurve.group = group
                 
                 if keyframed_properties:
                     print(f"    Summary: Keyframed {', '.join(keyframed_properties)} for {obj.name}")
@@ -475,9 +430,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 print(f"    Current Rotation: {list(parent.rotation_euler)}")
                 print(f"    Current Scale: {list(parent.scale)}")
                 
-                # Get or create action and group for the parent
-                action, group = ensure_action_and_group(parent, pose_group_name)
-                
                 keyframed_properties = []
                 
                 if pose_item.keyframe_location:
@@ -485,33 +437,15 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     keyframed_properties.append("location")
                     print(f"    ✓ Keyframed parent location at frame {self.frame_number}")
                     
-                    # Assign the location F-Curves to the group
-                    for axis in range(3):
-                        fcurve = action.fcurves.find('location', index=axis)
-                        if fcurve:
-                            fcurve.group = group
-                    
                 if pose_item.keyframe_rotation:
                     parent.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
                     keyframed_properties.append("rotation")
                     print(f"    ✓ Keyframed parent rotation at frame {self.frame_number}")
                     
-                    # Assign the rotation F-Curves to the group
-                    for axis in range(3):
-                        fcurve = action.fcurves.find('rotation_euler', index=axis)
-                        if fcurve:
-                            fcurve.group = group
-                    
                 if pose_item.keyframe_scale:
                     parent.keyframe_insert(data_path="scale", frame=self.frame_number)
                     keyframed_properties.append("scale")
                     print(f"    ✓ Keyframed parent scale at frame {self.frame_number}")
-                    
-                    # Assign the scale F-Curves to the group
-                    for axis in range(3):
-                        fcurve = action.fcurves.find('scale', index=axis)
-                        if fcurve:
-                            fcurve.group = group
                 
                 if keyframed_properties:
                     print(f"    Summary: Keyframed {', '.join(keyframed_properties)} for parent {parent.name}")
