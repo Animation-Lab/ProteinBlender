@@ -114,7 +114,11 @@ class PROTEINBLENDER_OT_apply_color(Operator):
                 self._apply_color_to_object(obj, color)
     
     def _apply_color_to_object(self, obj, color):
-        """Apply color to a molecular object through its geometry nodes"""
+        """Apply color to a molecular object through its geometry nodes and set material transparency"""
+        # Apply transparency to the Style node's Material input
+        if len(color) >= 4:
+            apply_material_transparency_to_style_node(obj, color[3])
+        
         # Find the MolecularNodes modifier
         mod = None
         for modifier in obj.modifiers:
@@ -349,8 +353,116 @@ def apply_domain_color_direct(scene_manager, domain_item, color):
             apply_color_to_object(obj, color)
 
 
+def get_or_create_transparent_material(alpha_value):
+    """Get or create a transparent material with the specified alpha value"""
+    # Create a unique material name based on alpha to allow multiple transparency levels
+    mat_name = f"MN_Transparent_Alpha_{int(alpha_value * 100)}"
+    
+    # Check if material already exists
+    mat = bpy.data.materials.get(mat_name)
+    if mat:
+        # Update alpha value in case it changed slightly
+        if mat.use_nodes and mat.node_tree:
+            for node in mat.node_tree.nodes:
+                if node.type == 'BSDF_PRINCIPLED':
+                    node.inputs['Alpha'].default_value = alpha_value
+                    break
+        return mat
+    
+    # Create new material
+    mat = bpy.data.materials.new(name=mat_name)
+    
+    # Set up transparency for EEVEE
+    mat.blend_method = 'BLEND'  # Options are: 'OPAQUE', 'CLIP', 'HASHED', 'BLEND'
+    mat.use_backface_culling = False
+    mat.show_transparent_back = True
+    
+    # Set up node tree for principled BSDF
+    mat.use_nodes = True
+    node_tree = mat.node_tree
+    
+    # Clear default nodes
+    node_tree.nodes.clear()
+    
+    # Create Principled BSDF
+    principled_node = node_tree.nodes.new('ShaderNodeBsdfPrincipled')
+    principled_node.location = (0, 0)
+    
+    # Create material output
+    output_node = node_tree.nodes.new('ShaderNodeOutputMaterial')
+    output_node.location = (300, 0)
+    
+    # Connect principled to output
+    node_tree.links.new(principled_node.outputs['BSDF'], output_node.inputs['Surface'])
+    
+    # Set alpha value
+    principled_node.inputs['Alpha'].default_value = alpha_value
+    
+    # Set base color to white (will be tinted by geometry node colors)
+    principled_node.inputs['Base Color'].default_value = (1, 1, 1, 1)
+    
+    # Add attribute node to get color from geometry
+    attr_node = node_tree.nodes.new('ShaderNodeAttribute')
+    attr_node.location = (-300, 0)
+    attr_node.attribute_name = "Color"  # MolecularNodes stores colors in Color attribute
+    
+    # Connect attribute color to base color
+    node_tree.links.new(attr_node.outputs['Color'], principled_node.inputs['Base Color'])
+    
+    return mat
+
+
+def apply_material_transparency_to_style_node(obj, alpha_value):
+    """Apply transparent material to the Style node in geometry nodes"""
+    # Find the geometry nodes modifier
+    mod = None
+    for modifier in obj.modifiers:
+        if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
+            mod = modifier
+            break
+    
+    if not mod or not mod.node_group:
+        return False
+    
+    node_tree = mod.node_group
+    
+    # Find the Style node (could be Style Surface, Style Ribbon, etc.)
+    style_node = None
+    for node in node_tree.nodes:
+        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
+            style_node = node
+            break
+    
+    if not style_node:
+        print(f"Warning: No Style node found in {obj.name}")
+        return False
+    
+    # Check if the Style node has a Material input
+    material_input = style_node.inputs.get("Material")
+    if not material_input:
+        print(f"Warning: Style node in {obj.name} has no Material input")
+        return False
+    
+    # Get or create transparent material
+    if alpha_value < 1.0:
+        mat = get_or_create_transparent_material(alpha_value)
+    else:
+        # Use default material for fully opaque
+        from ..utils.molecularnodes.blender import material
+        mat = material.default()
+    
+    # Assign material to the Style node
+    material_input.default_value = mat
+    
+    return True
+
+
 def apply_color_to_object(obj, color):
-    """Apply color to a molecular object through its geometry nodes"""
+    """Apply color to a molecular object through its geometry nodes and set material transparency"""
+    # Apply transparency to the Style node's Material input
+    if len(color) >= 4:
+        apply_material_transparency_to_style_node(obj, color[3])
+    
     # Find the MolecularNodes modifier
     mod = None
     for modifier in obj.modifiers:
