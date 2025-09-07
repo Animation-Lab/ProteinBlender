@@ -457,6 +457,74 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
     return True
 
 
+def get_object_color(obj):
+    """Get the current color from an object's geometry nodes"""
+    # Default color if nothing found
+    default_color = (0.8, 0.1, 0.8, 1.0)  # Purple/salmon default
+    
+    # Find the geometry nodes modifier
+    mod = None
+    for modifier in obj.modifiers:
+        if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
+            mod = modifier
+            break
+    
+    if not mod or not mod.node_group:
+        # Try any nodes modifier
+        for modifier in obj.modifiers:
+            if modifier.type == 'NODES':
+                mod = modifier
+                break
+        if not mod or not mod.node_group:
+            return default_color
+    
+    node_tree = mod.node_group
+    
+    # Look for Custom Combine Color node first (this is what we create)
+    for node in node_tree.nodes:
+        if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
+            # Read the RGB values
+            r = node.inputs['Red'].default_value
+            g = node.inputs['Green'].default_value
+            b = node.inputs['Blue'].default_value
+            
+            # Get alpha from the Style node's material if possible
+            alpha = 1.0
+            style_node = None
+            for n in node_tree.nodes:
+                if n.type == 'GROUP' and n.node_tree and 'Style' in n.node_tree.name:
+                    style_node = n
+                    break
+            
+            if style_node:
+                material_input = style_node.inputs.get("Material")
+                if material_input and material_input.default_value:
+                    mat = material_input.default_value
+                    if mat.use_nodes and mat.node_tree:
+                        for mat_node in mat.node_tree.nodes:
+                            if mat_node.type == 'BSDF_PRINCIPLED':
+                                alpha = mat_node.inputs['Alpha'].default_value
+                                break
+            
+            return (r, g, b, alpha)
+    
+    # If no Custom Combine Color, look for Color Common node
+    for node in node_tree.nodes:
+        if node.type == 'GROUP' and node.node_tree and 'Color Common' in node.node_tree.name:
+            # Try to get the Carbon color (commonly used for coloring)
+            if 'Carbon' in node.inputs:
+                color_value = node.inputs['Carbon'].default_value
+                if len(color_value) >= 3:
+                    return (color_value[0], color_value[1], color_value[2], 1.0)
+            # Also check for a general Color input
+            if 'Color' in node.inputs:
+                color_value = node.inputs['Color'].default_value
+                if len(color_value) >= 3:
+                    return (color_value[0], color_value[1], color_value[2], 1.0)
+    
+    return default_color
+
+
 def apply_color_to_object(obj, color):
     """Apply color to a molecular object through its geometry nodes and set material transparency"""
     # Apply transparency to the Style node's Material input
@@ -588,8 +656,86 @@ def apply_color_to_object(obj, color):
     obj.select_set(True)
 
 
+# Global flag to prevent feedback loops
+_is_syncing_color = False
+
+def sync_color_to_selection(context):
+    """Sync the color picker to match the first selected item's color"""
+    global _is_syncing_color
+    
+    scene = context.scene
+    scene_manager = ProteinBlenderScene.get_instance()
+    
+    # Find first selected item
+    selected_items = [item for item in scene.outliner_items if item.is_selected]
+    if not selected_items:
+        # No selection - don't change the color picker
+        print("sync_color_to_selection: No items selected")
+        return
+    
+    print(f"sync_color_to_selection: {len(selected_items)} items selected, first: {selected_items[0].name}")
+    
+    first_item = selected_items[0]
+    obj = None
+    
+    # Get the object based on item type
+    if first_item.item_type == 'PROTEIN':
+        molecule = scene_manager.molecules.get(first_item.item_id)
+        if molecule and molecule.object:
+            obj = molecule.object
+    elif first_item.item_type == 'CHAIN':
+        # Find first domain in this chain
+        parent_molecule = scene_manager.molecules.get(first_item.parent_id)
+        if parent_molecule:
+            chain_id_str = first_item.item_id.split('_chain_')[-1]
+            for domain in parent_molecule.domains.values():
+                if str(domain.chain_id) == chain_id_str:
+                    if domain.object:
+                        obj = domain.object
+                        break
+    elif first_item.item_type == 'DOMAIN':
+        if first_item.object_name:
+            obj = bpy.data.objects.get(first_item.object_name)
+    
+    # Get color from the object and update the color picker
+    if obj:
+        color = get_object_color(obj)
+        print(f"Syncing color to picker: R={color[0]:.2f}, G={color[1]:.2f}, B={color[2]:.2f}, A={color[3]:.2f}")
+        
+        # Set a flag to prevent feedback loop
+        _is_syncing_color = True
+        try:
+            # Directly set the color property - ensure it's a tuple with 4 components
+            if len(color) == 3:
+                color = (color[0], color[1], color[2], 1.0)
+            
+            # Set the color property using list assignment to ensure all components are set
+            scene.visual_setup_color[0] = color[0]  # R
+            scene.visual_setup_color[1] = color[1]  # G
+            scene.visual_setup_color[2] = color[2]  # B
+            scene.visual_setup_color[3] = color[3] if len(color) > 3 else 1.0  # A
+            
+            # Force UI update
+            for area in context.screen.areas:
+                if area.type in ['PROPERTIES', 'VIEW_3D']:
+                    area.tag_redraw()
+            
+            # Also try to update the region
+            if context.region:
+                context.region.tag_redraw()
+                
+        finally:
+            _is_syncing_color = False
+
+
 def update_color(self, context):
     """Live update callback for color property"""
+    global _is_syncing_color
+    
+    # Skip if we're syncing from selection to prevent feedback loop
+    if _is_syncing_color:
+        return
+    
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
     

@@ -143,6 +143,14 @@ class ProteinBlenderScene:
         self.active_molecule = molecule.identifier
         # Build outliner hierarchy
         build_outliner_hierarchy(bpy.context)
+        
+        # Deselect all outliner items after import for clean state
+        for item in scene.outliner_items:
+            item.is_selected = False
+        
+        # Also deselect all objects in the 3D viewport
+        bpy.ops.object.select_all(action='DESELECT')
+        
         # Force UI refresh
         self._refresh_ui()
 

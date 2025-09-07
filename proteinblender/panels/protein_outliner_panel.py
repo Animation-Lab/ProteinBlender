@@ -421,6 +421,10 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
         sync_outliner_to_blender_selection(context, actual_item_id)
         
+        # Sync color picker to match selected item's color
+        from ..panels.visual_setup_panel import sync_color_to_selection
+        sync_color_to_selection(context)
+        
         # Initialize domain maker values based on selection
         if hasattr(scene, 'domain_maker_start'):
             if clicked_item.item_type == 'CHAIN':

@@ -178,6 +178,9 @@ class DomainDefinition:
             # Set up the parent inverse matrix to handle parent's transformation
             self.object.matrix_parent_inverse = parent_obj.matrix_world.inverted()
             
+            # Ensure the domain object is not selected (for clean UI state)
+            self.object.select_set(False)
+            
             # Set up initial node group
             if not self._setup_node_group():
                 # Clean up if node group setup failed
