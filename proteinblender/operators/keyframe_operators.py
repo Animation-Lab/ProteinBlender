@@ -35,6 +35,11 @@ class PoseKeyframeSettings(PropertyGroup):
         description="Keyframe scale",
         default=False
     )
+    keyframe_color: BoolProperty(
+        name="Color",
+        description="Keyframe color and transparency",
+        default=True
+    )
     
     # Conflict tracking
     has_conflict: BoolProperty(
@@ -260,6 +265,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             header_row.label(text="", icon='CON_LOCLIKE')  # Location icon
             header_row.label(text="", icon='CON_ROTLIKE')  # Rotation icon  
             header_row.label(text="", icon='CON_SIZELIKE')  # Scale icon
+            header_row.label(text="", icon='COLOR')  # Color icon
             
             box.separator(factor=0.5)
             
@@ -298,6 +304,10 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 scale_row = row.row()
                 scale_row.enabled = item.use_pose and not item.has_conflict
                 scale_row.prop(item, "keyframe_scale", text="")
+                
+                color_row = row.row()
+                color_row.enabled = item.use_pose and not item.has_conflict
+                color_row.prop(item, "keyframe_color", text="")
                 
                 # Show conflict details below the row if needed
                 if item.has_conflict and item.use_pose:
@@ -347,6 +357,18 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             pose = scene.pose_library[pose_item.pose_index]
             applied_poses.append(pose.name)
             
+            # If color keyframing is enabled, capture current colors BEFORE applying pose
+            current_colors = {}
+            if pose_item.keyframe_color:
+                from ..panels.visual_setup_panel import get_object_color
+                for transform in pose.transforms:
+                    obj = bpy.data.objects.get(transform.object_name)
+                    if obj:
+                        color = get_object_color(obj)
+                        if color:
+                            current_colors[transform.object_name] = color
+                            print(f"  Captured current color for {obj.name}: {color}")
+            
             # First, apply the pose to set the transforms
             print(f"Applying pose '{pose.name}' before keyframing at frame {self.frame_number}")
             
@@ -357,6 +379,23 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     obj.location = transform.location
                     obj.rotation_euler = transform.rotation_euler
                     obj.scale = transform.scale
+                    
+                    # For color: use current color if available, otherwise use pose color
+                    if pose_item.keyframe_color:
+                        if transform.object_name in current_colors:
+                            # Use the current color (user's recent change)
+                            color = current_colors[transform.object_name]
+                            obj["pb_color"] = list(color)
+                            from ..panels.visual_setup_panel import apply_color_to_object
+                            apply_color_to_object(obj, color)
+                            print(f"  Using current color for {obj.name}")
+                        elif transform.has_color:
+                            # Fall back to pose's stored color
+                            obj["pb_color"] = list(transform.color)
+                            from ..panels.visual_setup_panel import apply_color_to_object
+                            apply_color_to_object(obj, transform.color)
+                            print(f"  Using pose color for {obj.name}")
+                    
                     print(f"  Applied transform to {obj.name}")
             
             # Collect all objects that are part of this pose's puppets
@@ -415,6 +454,11 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     obj.keyframe_insert(data_path="scale", frame=self.frame_number)
                     keyframed_properties.append("scale")
                     print(f"    ✓ Keyframed scale at frame {self.frame_number}")
+                
+                if pose_item.keyframe_color and "pb_color" in obj:
+                    obj.keyframe_insert(data_path='["pb_color"]', frame=self.frame_number)
+                    keyframed_properties.append("color")
+                    print(f"    ✓ Keyframed color at frame {self.frame_number}")
                 
                 if keyframed_properties:
                     print(f"    Summary: Keyframed {', '.join(keyframed_properties)} for {obj.name}")

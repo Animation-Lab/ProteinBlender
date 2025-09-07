@@ -372,10 +372,22 @@ def get_or_create_transparent_material(alpha_value):
     # Create new material
     mat = bpy.data.materials.new(name=mat_name)
     
-    # Set up transparency for EEVEE
-    mat.blend_method = 'BLEND'  # Options are: 'OPAQUE', 'CLIP', 'HASHED', 'BLEND'
-    mat.use_backface_culling = False
-    mat.show_transparent_back = True
+    # Set up transparency for EEVEE based on alpha value
+    # Use different blend modes based on transparency level for better lighting
+    if alpha_value >= 0.98:
+        # Nearly opaque - use OPAQUE for proper lighting
+        mat.blend_method = 'OPAQUE'
+        mat.use_backface_culling = True
+    elif alpha_value >= 0.5:
+        # Semi-transparent - use CLIP for better performance and lighting
+        mat.blend_method = 'CLIP'
+        mat.alpha_threshold = 0.5
+        mat.use_backface_culling = False
+    else:
+        # Truly transparent - use BLEND
+        mat.blend_method = 'BLEND'
+        mat.use_backface_culling = False
+        mat.show_transparent_back = True
     
     # Set up node tree for principled BSDF
     mat.use_nodes = True
@@ -444,10 +456,11 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
         return False
     
     # Get or create transparent material
-    if alpha_value < 1.0:
+    # Use a threshold to avoid lighting issues with nearly-opaque materials
+    if alpha_value < 0.98:  # Only use transparent material if significantly transparent
         mat = get_or_create_transparent_material(alpha_value)
     else:
-        # Use default material for fully opaque
+        # Use default material for opaque or nearly opaque
         from ..utils.molecularnodes.blender import material
         mat = material.default()
     

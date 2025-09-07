@@ -127,6 +127,10 @@ def register() -> None:
     # Register selection sync handlers
     from .handlers import selection_sync
     selection_sync.register()
+    
+    # Register frame change handler for color animation
+    from .handlers import frame_change_handler
+    frame_change_handler.register()
 
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
@@ -154,6 +158,13 @@ def unregister() -> None:
         selection_sync.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister selection sync handler: {e}")
+    
+    # Unregister frame change handler
+    try:
+        from .handlers import frame_change_handler
+        frame_change_handler.unregister()
+    except Exception as e:
+        logger.debug(f"Failed to unregister frame change handler: {e}")
 
     # Unregister properties
     try:

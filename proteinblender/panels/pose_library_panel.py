@@ -168,6 +168,15 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                     transform.rotation_euler = obj.rotation_euler.copy()
                     transform.scale = obj.scale.copy()
                     
+                    # Capture color if available
+                    from ..panels.visual_setup_panel import get_object_color
+                    color = get_object_color(obj)
+                    if color:
+                        transform.color = color
+                        transform.has_color = True
+                    else:
+                        transform.has_color = False
+                    
                     # Calculate and print relative position to parent
                     parent_obj = obj.parent
                     if parent_obj:
@@ -432,6 +441,12 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                 obj.location = transform.location
                 obj.rotation_euler = transform.rotation_euler
                 obj.scale = transform.scale
+                
+                # Apply color if available
+                if transform.has_color:
+                    from ..panels.visual_setup_panel import apply_color_to_object
+                    apply_color_to_object(obj, transform.color)
+                
                 applied_count += 1
                 
                 print(f"  Applied transform - new location: {list(obj.location)}")
@@ -486,6 +501,15 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                 transform.location = obj.location.copy()
                 transform.rotation_euler = obj.rotation_euler.copy()
                 transform.scale = obj.scale.copy()
+                
+                # Capture color if available
+                from ..panels.visual_setup_panel import get_object_color
+                color = get_object_color(obj)
+                if color:
+                    transform.color = color
+                    transform.has_color = True
+                else:
+                    transform.has_color = False
         
         # Update timestamp
         pose.modified_timestamp = datetime.now().isoformat()

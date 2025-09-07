@@ -15,6 +15,21 @@ class PuppetTransform(PropertyGroup):
     location: FloatVectorProperty(name="Location", size=3)
     rotation_euler: FloatVectorProperty(name="Rotation", size=3, subtype='EULER')
     scale: FloatVectorProperty(name="Scale", size=3, default=(1, 1, 1))
+    
+    # Color data (RGBA)
+    color: FloatVectorProperty(
+        name="Color", 
+        size=4, 
+        subtype='COLOR',
+        default=(0.8, 0.1, 0.8, 1.0),
+        min=0.0,
+        max=1.0
+    )
+    has_color: BoolProperty(
+        name="Has Color",
+        description="Whether this transform includes color data",
+        default=False
+    )
 
 
 class ScenePose(PropertyGroup):
