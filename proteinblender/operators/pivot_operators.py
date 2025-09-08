@@ -61,20 +61,25 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
         
         import numpy as np
         
-        all_first_positions = []
+        # Collect ALL alpha carbons from ALL domains
+        all_alpha_positions = []
+        all_alpha_res_ids = []
+        fallback_position = None
         
         for obj in objects:
             # Check if this is a molecular object with attributes
             if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
                 # Fallback to object origin if not a proper molecular object
-                all_first_positions.append(obj.location)
+                if fallback_position is None:
+                    fallback_position = obj.location
                 continue
             
             try:
                 # Check if alpha carbon attribute exists
                 if "is_alpha_carbon" not in obj.data.attributes:
-                    # No alpha carbon data, use object origin
-                    all_first_positions.append(obj.location)
+                    # No alpha carbon data, use object origin as fallback
+                    if fallback_position is None:
+                        fallback_position = obj.location
                     continue
                 
                 # Get the mesh data with evaluated modifiers
@@ -92,45 +97,43 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
                 mesh.vertices.foreach_get("co", positions)
                 positions = positions.reshape(-1, 3)
                 
-                # Check for residue IDs
-                if "res_id" in mesh.attributes:
-                    res_id_attr = mesh.attributes["res_id"]
-                    res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                    res_id_attr.data.foreach_get("value", res_ids)
-                    
-                    # Filter for alpha carbons
-                    alpha_positions = positions[is_alpha]
-                    alpha_res_ids = res_ids[is_alpha]
-                    
-                    if len(alpha_positions) > 0:
-                        # Find the alpha carbon with the minimum residue ID
-                        min_res_idx = np.argmin(alpha_res_ids)
-                        first_ca_pos = alpha_positions[min_res_idx]
+                # Filter for alpha carbons
+                alpha_positions = positions[is_alpha]
+                
+                if len(alpha_positions) > 0:
+                    # Check for residue IDs
+                    if "res_id" in mesh.attributes:
+                        res_id_attr = mesh.attributes["res_id"]
+                        res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                        res_id_attr.data.foreach_get("value", res_ids)
+                        alpha_res_ids = res_ids[is_alpha]
                         
-                        # Convert to world space
-                        first_pos = obj.matrix_world @ Vector(first_ca_pos)
-                        all_first_positions.append(first_pos)
+                        # Convert to world space and add to our collection
+                        for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
+                            world_pos = obj.matrix_world @ Vector(ca_pos)
+                            all_alpha_positions.append(world_pos)
+                            all_alpha_res_ids.append(res_id)
                     else:
-                        all_first_positions.append(obj.location)
-                else:
-                    # No residue data, just use first alpha carbon by index
-                    alpha_positions = positions[is_alpha]
-                    if len(alpha_positions) > 0:
-                        # Convert to world space
-                        first_pos = obj.matrix_world @ Vector(alpha_positions[0])
-                        all_first_positions.append(first_pos)
-                    else:
-                        all_first_positions.append(obj.location)
+                        # No residue data, just add positions
+                        for ca_pos in alpha_positions:
+                            world_pos = obj.matrix_world @ Vector(ca_pos)
+                            all_alpha_positions.append(world_pos)
+                            # Use index as pseudo res_id (will still find minimum)
+                            all_alpha_res_ids.append(len(all_alpha_positions))
                     
             except Exception as e:
-                # If any error occurs, fallback to object origin
+                # If any error occurs, store fallback
                 print(f"Error getting alpha carbon for {obj.name}: {e}")
-                all_first_positions.append(obj.location)
+                if fallback_position is None:
+                    fallback_position = obj.location
         
-        if all_first_positions:
-            # Return the overall first position (minimum along main axis)
-            # This handles multiple domains by finding the true N-terminal
-            return min(all_first_positions, key=lambda p: (p.z))  # Proteins often align along Z
+        # Now find the global first alpha carbon
+        if all_alpha_positions and all_alpha_res_ids:
+            # Find the alpha carbon with the minimum residue ID across ALL domains
+            min_res_idx = np.argmin(all_alpha_res_ids)
+            return all_alpha_positions[min_res_idx]
+        elif fallback_position:
+            return fallback_position
         
         return None
     
@@ -225,20 +228,25 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
         
         import numpy as np
         
-        all_last_positions = []
+        # Collect ALL alpha carbons from ALL domains
+        all_alpha_positions = []
+        all_alpha_res_ids = []
+        fallback_position = None
         
         for obj in objects:
             # Check if this is a molecular object with attributes
             if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
                 # Fallback to object origin if not a proper molecular object
-                all_last_positions.append(obj.location)
+                if fallback_position is None:
+                    fallback_position = obj.location
                 continue
             
             try:
                 # Check if alpha carbon attribute exists
                 if "is_alpha_carbon" not in obj.data.attributes:
-                    # No alpha carbon data, use object origin
-                    all_last_positions.append(obj.location)
+                    # No alpha carbon data, use object origin as fallback
+                    if fallback_position is None:
+                        fallback_position = obj.location
                     continue
                 
                 # Get the mesh data with evaluated modifiers
@@ -256,45 +264,43 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
                 mesh.vertices.foreach_get("co", positions)
                 positions = positions.reshape(-1, 3)
                 
-                # Check for residue IDs
-                if "res_id" in mesh.attributes:
-                    res_id_attr = mesh.attributes["res_id"]
-                    res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                    res_id_attr.data.foreach_get("value", res_ids)
-                    
-                    # Filter for alpha carbons
-                    alpha_positions = positions[is_alpha]
-                    alpha_res_ids = res_ids[is_alpha]
-                    
-                    if len(alpha_positions) > 0:
-                        # Find the alpha carbon with the maximum residue ID
-                        max_res_idx = np.argmax(alpha_res_ids)
-                        last_ca_pos = alpha_positions[max_res_idx]
+                # Filter for alpha carbons
+                alpha_positions = positions[is_alpha]
+                
+                if len(alpha_positions) > 0:
+                    # Check for residue IDs
+                    if "res_id" in mesh.attributes:
+                        res_id_attr = mesh.attributes["res_id"]
+                        res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                        res_id_attr.data.foreach_get("value", res_ids)
+                        alpha_res_ids = res_ids[is_alpha]
                         
-                        # Convert to world space
-                        last_pos = obj.matrix_world @ Vector(last_ca_pos)
-                        all_last_positions.append(last_pos)
+                        # Convert to world space and add to our collection
+                        for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
+                            world_pos = obj.matrix_world @ Vector(ca_pos)
+                            all_alpha_positions.append(world_pos)
+                            all_alpha_res_ids.append(res_id)
                     else:
-                        all_last_positions.append(obj.location)
-                else:
-                    # No residue data, just use last alpha carbon by index
-                    alpha_positions = positions[is_alpha]
-                    if len(alpha_positions) > 0:
-                        # Convert to world space
-                        last_pos = obj.matrix_world @ Vector(alpha_positions[-1])
-                        all_last_positions.append(last_pos)
-                    else:
-                        all_last_positions.append(obj.location)
+                        # No residue data, just add positions
+                        for ca_pos in alpha_positions:
+                            world_pos = obj.matrix_world @ Vector(ca_pos)
+                            all_alpha_positions.append(world_pos)
+                            # Use index as pseudo res_id (will still find maximum)
+                            all_alpha_res_ids.append(len(all_alpha_positions))
                     
             except Exception as e:
-                # If any error occurs, fallback to object origin
+                # If any error occurs, store fallback
                 print(f"Error getting alpha carbon for {obj.name}: {e}")
-                all_last_positions.append(obj.location)
+                if fallback_position is None:
+                    fallback_position = obj.location
         
-        if all_last_positions:
-            # Return the overall last position (maximum along main axis)
-            # This handles multiple domains by finding the true C-terminal
-            return max(all_last_positions, key=lambda p: (p.z))  # Proteins often align along Z
+        # Now find the global last alpha carbon
+        if all_alpha_positions and all_alpha_res_ids:
+            # Find the alpha carbon with the maximum residue ID across ALL domains
+            max_res_idx = np.argmax(all_alpha_res_ids)
+            return all_alpha_positions[max_res_idx]
+        elif fallback_position:
+            return fallback_position
         
         return None
     
