@@ -239,7 +239,7 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         selected_items = [item for item in scene.outliner_items if item.is_selected]
         
         if not selected_items:
-            box.label(text="Select items to apply visual settings", icon='INFO')
+            box.label(text="Select items to apply settings to all selected", icon='INFO')
             layout.separator()  # Add bottom spacing
             return
         
@@ -283,6 +283,31 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         # Style dropdown on the right
         col_right = row.column(align=True)
         col_right.prop(scene, "visual_setup_style", text="")
+        
+        # Separator between color/style and pivot controls
+        box.separator()
+        
+        # Pivot Point controls
+        col = box.column(align=True)
+        col.label(text="Pivot Point", icon='PIVOT_CURSOR')
+        
+        # First row of pivot buttons
+        row = col.row(align=True)
+        row.scale_y = 1.2
+        row.operator("proteinblender.set_pivot_first", text="First")
+        row.operator("proteinblender.set_pivot_last", text="Last")
+        row.operator("proteinblender.set_pivot_center", text="Center")
+        
+        # Custom button - hidden for now
+        # custom_active = scene.get("custom_pivot_active", False)
+        # if custom_active:
+        #     row.operator("proteinblender.set_pivot_custom", text="Cancel", icon='X', depress=True)
+        # else:
+        #     row.operator("proteinblender.set_pivot_custom", text="Custom")
+        
+        # Reset button on its own row
+        row = col.row(align=True)
+        row.operator("proteinblender.reset_pivot", text="Reset to Origin", icon='LOOP_BACK')
         
         # Add bottom spacing
         layout.separator()

@@ -64,6 +64,13 @@ from .keyframe_operators import (
     register as register_keyframe_operators,
     unregister as unregister_keyframe_operators,
 )
+from .pivot_operators import (
+    PROTEINBLENDER_OT_set_pivot_first,
+    PROTEINBLENDER_OT_set_pivot_last,
+    PROTEINBLENDER_OT_set_pivot_center,
+    PROTEINBLENDER_OT_set_pivot_custom,
+    PROTEINBLENDER_OT_reset_pivot,
+)
 
 CLASSES = (
     # PropertyGroups must be registered before operators that use them
@@ -117,6 +124,12 @@ CLASSES = (
     PROTEINBLENDER_OT_keyframe_select_none_poses,
     PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
     PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
+    # Pivot operators
+    PROTEINBLENDER_OT_set_pivot_first,
+    PROTEINBLENDER_OT_set_pivot_last,
+    PROTEINBLENDER_OT_set_pivot_center,
+    PROTEINBLENDER_OT_set_pivot_custom,
+    PROTEINBLENDER_OT_reset_pivot,
 )
 
 
