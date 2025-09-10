@@ -33,7 +33,7 @@ class PoseKeyframeSettings(PropertyGroup):
     keyframe_scale: BoolProperty(
         name="Scale",
         description="Keyframe scale",
-        default=False
+        default=True
     )
     keyframe_color: BoolProperty(
         name="Color",

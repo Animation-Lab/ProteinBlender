@@ -147,6 +147,10 @@ def update_outliner_from_blender_selection():
                         item.is_selected = orig_item.is_selected
                     break
     
+    # Sync color picker to match selected item's color
+    from ..panels.visual_setup_panel import sync_color_to_selection
+    sync_color_to_selection(bpy.context)
+    
     # Update UI
     for area in bpy.context.screen.areas:
         if area.type == 'PROPERTIES':

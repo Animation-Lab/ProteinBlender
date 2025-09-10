@@ -2,23 +2,9 @@ import bpy
 from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, CollectionProperty
 from bpy.types import PropertyGroup
 
-def on_outliner_selection_change(self, context):
-    """Callback when outliner selection changes via index"""
-    # Get the selected item
-    scene = context.scene
-    if 0 <= scene.outliner_index < len(scene.outliner_items):
-        selected_item = scene.outliner_items[scene.outliner_index]
-        
-        # Clear all selections first
-        for item in scene.outliner_items:
-            item.is_selected = False
-        
-        # Select the clicked item
-        selected_item.is_selected = True
-        
-        # Sync to Blender selection
-        from ..handlers.selection_sync import sync_outliner_to_blender_selection
-        sync_outliner_to_blender_selection(context, selected_item.item_id)
+# REMOVED: on_outliner_selection_change callback
+# We no longer use row selection - only checkbox selection is allowed
+# This prevents confusion between row highlighting and actual selection state
 
 class ProteinOutlinerItem(PropertyGroup):
     """Unified item for protein outliner display"""
@@ -182,10 +168,11 @@ def register():
     # Add properties to scene
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
     bpy.types.Scene.outliner_items = CollectionProperty(type=ProteinOutlinerItem)
+    # outliner_index is kept for UIList compatibility but has no update callback
+    # We don't use row selection - only checkbox selection
     bpy.types.Scene.outliner_index = IntProperty(
         name="Outliner Index",
-        default=0,
-        update=on_outliner_selection_change
+        default=-1  # Default to -1 to indicate no row selection
     )
     
     # Register placeholder property for animation panel

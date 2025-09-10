@@ -7,6 +7,12 @@ from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy,
 class PROTEINBLENDER_UL_outliner(UIList):
     """Custom UIList for hierarchical protein display"""
     
+    # Disable row selection by overriding these properties
+    use_filter_show = False
+    use_filter_sort_alpha = False
+    use_filter_sort_reverse = False
+    use_filter_invert = False
+    
     def filter_items(self, context, data, propname):
         """Filter items based on parent expansion state"""
         items = getattr(data, propname)
@@ -72,6 +78,11 @@ class PROTEINBLENDER_UL_outliner(UIList):
         if item.item_id == "puppets_separator":
             layout.label(text=item.name)
             return
+        
+        # Override the active state - we don't use row selection
+        # Make the row non-interactive by disabling highlight
+        layout.use_property_split = False
+        layout.use_property_decorate = False
         
         # Visual hierarchy through indentation
         row = layout.row(align=True)
@@ -636,13 +647,16 @@ class PROTEINBLENDER_PT_outliner(Panel):
             box.label(text="No proteins loaded", icon='INFO')
             return
         
-        # UIList inside the box
+        # UIList inside the box - disable row selection by not tracking index
+        # We use a dummy property that doesn't get updated to prevent row selection
         box.template_list(
             "PROTEINBLENDER_UL_outliner", "",
             scene, "outliner_items",
             scene, "outliner_index",
             rows=10,
-            maxrows=20
+            maxrows=20,
+            type='DEFAULT',
+            columns=1
         )
         
         # Add bottom spacing

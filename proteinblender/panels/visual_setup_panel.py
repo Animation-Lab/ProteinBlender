@@ -495,10 +495,13 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
     return True
 
 
-def get_object_color(obj):
-    """Get the current color from an object's geometry nodes"""
-    # Default color if nothing found
-    default_color = (0.8, 0.1, 0.8, 1.0)  # Purple/salmon default
+def get_object_style(obj):
+    """Get the current style from an object's geometry nodes"""
+    if not obj:
+        print("get_object_style: No object provided")
+        return None
+    
+    print(f"get_object_style: Getting style from {obj.name}")
     
     # Find the geometry nodes modifier
     mod = None
@@ -514,6 +517,60 @@ def get_object_color(obj):
                 mod = modifier
                 break
         if not mod or not mod.node_group:
+            print(f"get_object_style: No geometry nodes modifier found on {obj.name}")
+            return None
+    
+    node_tree = mod.node_group
+    
+    # Find the style node and determine its type
+    for node in node_tree.nodes:
+        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
+            node_tree_name = node.node_tree.name
+            print(f"Found style node with tree: {node_tree_name}")
+            
+            # Map MolecularNodes style node names to our style names
+            style_map = {
+                'Style Spheres': 'spheres',
+                'Style Cartoon': 'cartoon',
+                'Style Surface': 'surface',
+                'Style Ribbon': 'ribbon',
+                'Style Sticks': 'sticks',
+                'Style Ball and Stick': 'ball_and_stick'
+            }
+            
+            for style_node_name, style_key in style_map.items():
+                if style_node_name in node_tree_name:
+                    return style_key
+    
+    return None
+
+
+def get_object_color(obj):
+    """Get the current color from an object's geometry nodes"""
+    # Default color if nothing found
+    default_color = (0.8, 0.1, 0.8, 1.0)  # Purple/salmon default
+    
+    if not obj:
+        print("get_object_color: No object provided")
+        return default_color
+    
+    print(f"get_object_color: Getting color from {obj.name}")
+    
+    # Find the geometry nodes modifier
+    mod = None
+    for modifier in obj.modifiers:
+        if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
+            mod = modifier
+            break
+    
+    if not mod or not mod.node_group:
+        # Try any nodes modifier
+        for modifier in obj.modifiers:
+            if modifier.type == 'NODES':
+                mod = modifier
+                break
+        if not mod or not mod.node_group:
+            print(f"get_object_color: No geometry nodes modifier found on {obj.name}")
             return default_color
     
     node_tree = mod.node_group
@@ -694,12 +751,13 @@ def apply_color_to_object(obj, color):
     obj.select_set(True)
 
 
-# Global flag to prevent feedback loops
+# Global flags to prevent feedback loops
 _is_syncing_color = False
+_is_syncing_style = False
 
 def sync_color_to_selection(context):
     """Sync the color picker to match the first selected item's color"""
-    global _is_syncing_color
+    global _is_syncing_color, _is_syncing_style
     
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
@@ -723,20 +781,62 @@ def sync_color_to_selection(context):
             obj = molecule.object
     elif first_item.item_type == 'CHAIN':
         # Find first domain in this chain
-        parent_molecule = scene_manager.molecules.get(first_item.parent_id)
-        if parent_molecule:
-            chain_id_str = first_item.item_id.split('_chain_')[-1]
-            for domain in parent_molecule.domains.values():
-                if str(domain.chain_id) == chain_id_str:
-                    if domain.object:
+        # First check if this is a domain ID (for chain copies)
+        domain_id = None
+        is_chain_copy = False
+        
+        # Check if item_id is directly a domain_id (for chain copies)
+        for molecule_id, molecule in scene_manager.molecules.items():
+            if first_item.item_id in molecule.domains:
+                domain_id = first_item.item_id
+                is_chain_copy = True
+                break
+        
+        if is_chain_copy and domain_id:
+            # It's a chain copy - get the domain object directly
+            for molecule_id, molecule in scene_manager.molecules.items():
+                if domain_id in molecule.domains:
+                    domain = molecule.domains[domain_id]
+                    if hasattr(domain, 'object'):
                         obj = domain.object
-                        break
+                    elif hasattr(domain, 'object_name'):
+                        obj = bpy.data.objects.get(domain.object_name)
+                    break
+        else:
+            # Regular chain - find first domain in this chain
+            parent_molecule = scene_manager.molecules.get(first_item.parent_id)
+            if parent_molecule:
+                chain_id_str = first_item.item_id.split('_chain_')[-1]
+                for domain_id, domain in parent_molecule.domains.items():
+                    # Check if domain belongs to this chain
+                    domain_chain_id = getattr(domain, 'chain_id', None)
+                    if domain_chain_id is not None and str(domain_chain_id) == chain_id_str:
+                        if hasattr(domain, 'object'):
+                            obj = domain.object
+                        elif hasattr(domain, 'object_name'):
+                            obj = bpy.data.objects.get(domain.object_name)
+                        if obj:
+                            break
     elif first_item.item_type == 'DOMAIN':
-        if first_item.object_name:
+        # For domains, first try to find it in the scene_manager
+        domain_found = False
+        for molecule_id, molecule in scene_manager.molecules.items():
+            if first_item.item_id in molecule.domains:
+                domain = molecule.domains[first_item.item_id]
+                if hasattr(domain, 'object'):
+                    obj = domain.object
+                elif hasattr(domain, 'object_name'):
+                    obj = bpy.data.objects.get(domain.object_name)
+                domain_found = True
+                break
+        
+        # Fallback to using object_name from the item
+        if not domain_found and first_item.object_name:
             obj = bpy.data.objects.get(first_item.object_name)
     
-    # Get color from the object and update the color picker
+    # Get color and style from the object and update the visual setup panel
     if obj:
+        # Get and set color
         color = get_object_color(obj)
         print(f"Syncing color to picker: R={color[0]:.2f}, G={color[1]:.2f}, B={color[2]:.2f}, A={color[3]:.2f}")
         
@@ -753,6 +853,14 @@ def sync_color_to_selection(context):
             scene.visual_setup_color[2] = color[2]  # B
             scene.visual_setup_color[3] = color[3] if len(color) > 3 else 1.0  # A
             
+            # Also get and set the style
+            _is_syncing_style = True
+            style = get_object_style(obj)
+            if style:
+                scene.visual_setup_style = style
+                print(f"Syncing style to panel: {style}")
+            _is_syncing_style = False
+            
             # Force UI update
             for area in context.screen.areas:
                 if area.type in ['PROPERTIES', 'VIEW_3D']:
@@ -764,6 +872,8 @@ def sync_color_to_selection(context):
                 
         finally:
             _is_syncing_color = False
+    else:
+        print(f"sync_color_to_selection: Could not find object for {first_item.item_type}: {first_item.name}")
 
 
 def update_color(self, context):
@@ -937,6 +1047,12 @@ def apply_style_to_object(obj, style):
 
 def update_style(self, context):
     """Live update callback for style property"""
+    global _is_syncing_style
+    
+    # Skip if we're syncing from selection to prevent feedback loop
+    if _is_syncing_style:
+        return
+    
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
     
