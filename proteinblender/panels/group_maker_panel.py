@@ -179,15 +179,15 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         
         # Create the Empty object
         bpy.ops.object.empty_add(
-            type='SPHERE',  # Use sphere for better visibility
-            radius=1.0,
+            type='PLAIN_AXES',  # Use plain axes for minimal visual distraction
+            radius=0,
             location=center,
             align='WORLD'
         )
         empty_obj = context.active_object
         empty_obj.name = empty_name
-        empty_obj.show_name = True  # Show name in viewport
-        empty_obj.empty_display_size = 2.0  # Make it visible
+        empty_obj.show_name = False  # Hide name in viewport to reduce clutter
+        empty_obj.empty_display_size = 1.0  # Make it smaller and less intrusive
         
         # Parent all domain objects to the Empty
         if domain_objects:
