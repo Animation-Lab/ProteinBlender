@@ -3,6 +3,7 @@
 import bpy
 from bpy.types import Panel, Operator
 from bpy.props import StringProperty, EnumProperty
+from mathutils import Vector
 from ..utils.scene_manager import build_outliner_hierarchy, ProteinBlenderScene
 
 
@@ -126,6 +127,8 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         # Filter items that can be puppeted (exclude puppets themselves)
         items_to_puppet = []
         items_already_puppeted = []
+        domain_objects = []  # Collect actual Blender objects to parent
+        
         for item in selected_items:
             if item.item_type != 'PUPPET' and item.item_id != "puppets_separator" and "_ref_" not in item.item_id:
                 # Check if already in a puppet
@@ -133,6 +136,11 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
                     items_already_puppeted.append(item.name)
                 else:
                     items_to_puppet.append(item)
+                    # Collect the actual Blender objects for parenting
+                    if item.object_name:
+                        obj = bpy.data.objects.get(item.object_name)
+                        if obj:
+                            domain_objects.append(obj)
         
         # If any items are already in puppets, don't proceed
         if items_already_puppeted:
@@ -145,6 +153,60 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         if not items_to_puppet:
             self.report({'WARNING'}, "No valid items to puppet")
             return {'CANCELLED'}
+        
+        # Create Empty controller object for the puppet
+        empty_name = f"{self.puppet_name}_Controller"
+        
+        # Calculate center position of all domain objects
+        if domain_objects:
+            # Get bounding box center of all objects
+            min_coord = [float('inf')] * 3
+            max_coord = [float('-inf')] * 3
+            
+            for obj in domain_objects:
+                # Get world space bounding box
+                bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+                for corner in bbox_corners:
+                    for i in range(3):
+                        min_coord[i] = min(min_coord[i], corner[i])
+                        max_coord[i] = max(max_coord[i], corner[i])
+            
+            # Calculate center
+            center = Vector([(min_coord[i] + max_coord[i]) / 2 for i in range(3)])
+        else:
+            # Default to world origin if no objects
+            center = Vector((0, 0, 0))
+        
+        # Create the Empty object
+        bpy.ops.object.empty_add(
+            type='SPHERE',  # Use sphere for better visibility
+            radius=1.0,
+            location=center,
+            align='WORLD'
+        )
+        empty_obj = context.active_object
+        empty_obj.name = empty_name
+        empty_obj.show_name = True  # Show name in viewport
+        empty_obj.empty_display_size = 2.0  # Make it visible
+        
+        # Parent all domain objects to the Empty
+        if domain_objects:
+            # Deselect all first
+            bpy.ops.object.select_all(action='DESELECT')
+            
+            # Select all domain objects
+            for obj in domain_objects:
+                obj.select_set(True)
+            
+            # Set Empty as active (parent)
+            context.view_layer.objects.active = empty_obj
+            empty_obj.select_set(True)
+            
+            # Parent with keep transform
+            bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
+            
+            # Deselect all after parenting
+            bpy.ops.object.select_all(action='DESELECT')
         
         # Add puppet membership to selected items
         for item in items_to_puppet:
@@ -167,6 +229,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         puppet_item.icon = 'ARMATURE_DATA'
         puppet_item.is_expanded = True
         puppet_item.is_selected = False  # Don't auto-select the new puppet
+        puppet_item.controller_object_name = empty_name  # Store the Empty's name
         
         # Store member IDs in the puppet's memberships field for easy access
         member_ids = [item.item_id for item in items_to_puppet]
@@ -218,6 +281,23 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
         if not puppet_item:
             self.report({'ERROR'}, "Puppet not found")
             return {'CANCELLED'}
+        
+        # Delete the Empty controller object if it exists
+        if puppet_item.controller_object_name:
+            empty_obj = bpy.data.objects.get(puppet_item.controller_object_name)
+            if empty_obj:
+                # First unparent all children (they'll remain in place)
+                children = [child for child in empty_obj.children]
+                for child in children:
+                    # Store current world matrix
+                    mat = child.matrix_world.copy()
+                    # Clear parent
+                    child.parent = None
+                    # Restore world position
+                    child.matrix_world = mat
+                
+                # Now delete the Empty
+                bpy.data.objects.remove(empty_obj, do_unlink=True)
         
         # Remove puppet membership from all items
         for item in scene.outliner_items:

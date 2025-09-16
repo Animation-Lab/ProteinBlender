@@ -295,8 +295,8 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         row = col.row(align=True)
         row.scale_y = 1.2
         row.operator("proteinblender.set_pivot_first", text="First")
-        row.operator("proteinblender.set_pivot_last", text="Last")
         row.operator("proteinblender.set_pivot_center", text="Center")
+        row.operator("proteinblender.set_pivot_last", text="Last")
         
         # Custom button - hidden for now
         # custom_active = scene.get("custom_pivot_active", False)

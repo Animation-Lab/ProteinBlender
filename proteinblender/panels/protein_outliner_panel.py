@@ -363,30 +363,22 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 # Only chains without domains should select their children (if any)
                 self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'PUPPET':
-            # For groups, the checkbox should act as a toggle all for members
+            # Toggle the puppet's selection state first
+            clicked_item.is_selected = new_selection_state
+            
+            # Sync the puppet's Empty controller with its checkbox state
+            from ..handlers.selection_sync import sync_outliner_to_blender_selection
+            sync_outliner_to_blender_selection(context, clicked_item.item_id)
+            
+            # Also select/deselect all children when puppet is selected
             # Get member IDs from group
             member_ids = clicked_item.puppet_memberships.split(',') if clicked_item.puppet_memberships else []
             
-            # Check if all members are currently selected
-            all_selected = True
-            for member_id in member_ids:
-                for item in scene.outliner_items:
-                    if item.item_id == member_id:
-                        if not item.is_selected:
-                            all_selected = False
-                            break
-                if not all_selected:
-                    break
-            
-            # Toggle selection state based on current state
-            new_state = not all_selected
-            
             # Select/deselect the reference items shown under this group
-            # We should NOT select the original items, only the references displayed in the group
             for item in scene.outliner_items:
                 # Check if this is a reference item that belongs to this group
                 if item.parent_id == clicked_item.item_id and "_ref_" in item.item_id:
-                    item.is_selected = new_state
+                    item.is_selected = new_selection_state
                     
                     # Get the actual item ID from the reference
                     actual_member_id = item.puppet_memberships
@@ -394,11 +386,10 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                         # Find and update the original item to match
                         for orig_item in scene.outliner_items:
                             if orig_item.item_id == actual_member_id:
-                                orig_item.is_selected = new_state
+                                orig_item.is_selected = new_selection_state
                                 
                                 # Sync to Blender (but only if it's not a group)
                                 if orig_item.item_type != 'PUPPET':
-                                    from ..handlers.selection_sync import sync_outliner_to_blender_selection
                                     sync_outliner_to_blender_selection(context, actual_member_id)
                                 break
             
@@ -407,7 +398,6 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                 if area.type == 'PROPERTIES':
                     area.tag_redraw()
             
-            # Don't modify clicked_item.is_selected for groups
             return {'FINISHED'}
         # Note: We don't automatically select/deselect children for chains anymore
         # This allows independent chain selection without affecting parent

@@ -305,32 +305,32 @@ class MOLECULE_PB_OT_delete_domain(Operator):
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
-        
+
         # Find which molecule owns this domain
         molecule = None
         for mol_id, mol in scene_manager.molecules.items():
             if self.domain_id in mol.domains:
                 molecule = mol
                 break
-        
+
         if not molecule:
             self.report({'ERROR'}, "Domain not found in any molecule")
             return {'CANCELLED'}
-        
+
         # Delete the domain and get the ID of the domain that replaced it (if any)
         new_domain_id = molecule.delete_domain(self.domain_id)
-        
+
         # If there's a replacement domain, select it to maintain UI continuity
         if new_domain_id and new_domain_id in molecule.domains:
             domain = molecule.domains.get(new_domain_id)
             if domain and domain.object:
                 # Make the domain object the active object to help with UI continuity
                 context.view_layer.objects.active = domain.object
-        
+
         # Rebuild outliner to reflect the deletion
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
-        
+
         self.report({'INFO'}, f"Domain deleted successfully")
         return {'FINISHED'}
 

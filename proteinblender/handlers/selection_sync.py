@@ -79,62 +79,74 @@ def update_outliner_from_blender_selection():
     # Build set of selected object names for quick lookup
     selected_names = {obj.name for obj in selected_objects}
     
-    # Update outliner selection state
+    # First check if any puppet Empty controllers are selected
     for item in scene.outliner_items:
-        # For items with direct objects, check if selected
-        if item.object_name and item.object_name in selected_names:
-            item.is_selected = True
-        else:
-            # For chain items, check if any of their domains are selected
-            if item.item_type == 'CHAIN':
-                # Extract chain info
-                chain_id_str = item.item_id.split('_chain_')[-1]
-                try:
-                    chain_id = int(chain_id_str)
-                except:
-                    chain_id = chain_id_str
-                
-                # Get parent molecule
-                parent_molecule = scene_manager.molecules.get(item.parent_id)
-                if parent_molecule:
-                    # Check if any domain of this chain is selected
-                    chain_has_selection = False
-                    for domain in parent_molecule.domains.values():
-                        if domain.object:
-                            try:
-                                # Check if object is still valid before accessing it
-                                obj_name = domain.object.name
-                                if obj_name in selected_names:
-                                    # Check if domain belongs to this chain
-                                    domain_chain_id = getattr(domain, 'chain_id', None)
-                                    
-                                    # Extract chain from domain name if needed
-                                    if domain_chain_id is None and hasattr(domain, 'name'):
-                                        import re
-                                        match = re.search(r'Chain_([A-Z])', domain.name)
-                                        if match:
-                                            domain_chain_id = match.group(1)
-                                        elif '_' in domain.name:
-                                            match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                                            if match2:
-                                                domain_chain_id = int(match2.group(1))
-                                    
-                                    # Check if this domain belongs to the chain
-                                    if domain_chain_id is not None:
-                                        domain_chain_str = str(domain_chain_id)
-                                        chain_str = str(chain_id)
-                                        
-                                        if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                                            chain_has_selection = True
-                                            break
-                            except ReferenceError:
-                                # Object has been removed, skip this domain
-                                pass
-                    
-                    item.is_selected = chain_has_selection
+        if item.item_type == 'PUPPET' and item.controller_object_name:
+            # Check if the Empty controller is selected
+            if item.controller_object_name in selected_names:
+                item.is_selected = True
             else:
-                # For other items without objects, deselect
                 item.is_selected = False
+    
+    # Update outliner selection state for other items
+    for item in scene.outliner_items:
+        # Skip puppets - already handled above
+        if item.item_type == 'PUPPET':
+            continue
+        # For items with direct objects, check if selected
+        elif item.object_name and item.object_name in selected_names:
+            item.is_selected = True
+        elif item.item_type == 'CHAIN':
+            # Extract chain info
+            chain_id_str = item.item_id.split('_chain_')[-1]
+            try:
+                chain_id = int(chain_id_str)
+            except:
+                chain_id = chain_id_str
+            
+            # Get parent molecule
+            parent_molecule = scene_manager.molecules.get(item.parent_id)
+            if parent_molecule:
+                # Check if any domain of this chain is selected
+                chain_has_selection = False
+                for domain in parent_molecule.domains.values():
+                    if domain.object:
+                        try:
+                            # Check if object is still valid before accessing it
+                            obj_name = domain.object.name
+                            if obj_name in selected_names:
+                                # Check if domain belongs to this chain
+                                domain_chain_id = getattr(domain, 'chain_id', None)
+                                
+                                # Extract chain from domain name if needed
+                                if domain_chain_id is None and hasattr(domain, 'name'):
+                                    import re
+                                    match = re.search(r'Chain_([A-Z])', domain.name)
+                                    if match:
+                                        domain_chain_id = match.group(1)
+                                    elif '_' in domain.name:
+                                        match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
+                                        if match2:
+                                            domain_chain_id = int(match2.group(1))
+                                
+                                # Check if this domain belongs to the chain
+                                if domain_chain_id is not None:
+                                    domain_chain_str = str(domain_chain_id)
+                                    chain_str = str(chain_id)
+                                    
+                                    if domain_chain_str == chain_str or domain_chain_id == chain_id:
+                                        chain_has_selection = True
+                                        break
+                        except ReferenceError:
+                            # Object has been removed, skip this domain
+                            pass
+                
+                item.is_selected = chain_has_selection
+            else:
+                item.is_selected = False
+        else:
+            # For other items without objects, deselect
+            item.is_selected = False
     
     # Update all reference items to match their originals
     # This is a one-way sync from original to reference only
@@ -147,14 +159,36 @@ def update_outliner_from_blender_selection():
                         item.is_selected = orig_item.is_selected
                     break
     
+    # When a puppet Empty is selected/deselected, also update all its member items
+    for puppet_item in scene.outliner_items:
+        if puppet_item.item_type == 'PUPPET':
+            # Get member IDs from the puppet
+            member_ids = puppet_item.puppet_memberships.split(',') if puppet_item.puppet_memberships else []
+            
+            # Update all reference items under this puppet to match puppet's selection state
+            for ref_item in scene.outliner_items:
+                if ref_item.parent_id == puppet_item.item_id and "_ref_" in ref_item.item_id:
+                    ref_item.is_selected = puppet_item.is_selected
+            
+            # Also update the original items to match puppet's selection state
+            for member_id in member_ids:
+                for item in scene.outliner_items:
+                    if item.item_id == member_id:
+                        item.is_selected = puppet_item.is_selected
+                        break
+    
     # Sync color picker to match selected item's color
     from ..panels.visual_setup_panel import sync_color_to_selection
     sync_color_to_selection(bpy.context)
     
-    # Update UI
+    # Update UI - force redraw to show checkbox changes
     for area in bpy.context.screen.areas:
-        if area.type == 'PROPERTIES':
+        if area.type in ['PROPERTIES', 'VIEW_3D']:
             area.tag_redraw()
+    
+    # Also force region redraw
+    if bpy.context.region:
+        bpy.context.region.tag_redraw()
 
 
 def sync_outliner_to_blender_selection(context, item_id):
@@ -316,10 +350,18 @@ def sync_outliner_to_blender_selection(context, item_id):
                                                     active_set = True
         
         elif item.item_type == 'PUPPET':
-            # Groups themselves don't have Blender objects to select
-            # Group selection is just a UI state, not a viewport selection
-            # This prevents group selection from cascading to members
-            # Return early to avoid unnecessary processing
+            # Select/deselect the puppet's Empty controller if it exists
+            puppet_item = item
+            if puppet_item.controller_object_name:
+                empty_obj = bpy.data.objects.get(puppet_item.controller_object_name)
+                if empty_obj:
+                    empty_obj.select_set(item.is_selected)
+                    
+                    # Make Empty the active object if selected
+                    if item.is_selected:
+                        context.view_layer.objects.active = empty_obj
+            
+            # Don't cascade to members - the Empty's parent-child relationship handles that
             return
     
     finally:

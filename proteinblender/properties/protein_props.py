@@ -105,6 +105,12 @@ class ProteinOutlinerItem(PropertyGroup):
         default=""
     )
     
+    controller_object_name: StringProperty(
+        name="Controller Object",
+        description="Name of the Empty object that controls this puppet's transform",
+        default=""
+    )
+    
     # Track if a chain has domains (for UI purposes)
     has_domains: BoolProperty(
         name="Has Domains",

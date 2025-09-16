@@ -196,39 +196,39 @@ class ProteinBlenderScene:
         """Delete a molecule and update the UI list"""
         # Capture state before deletion
         self._capture_molecule_state(identifier)
-        
+
         # Check if the molecule exists via the manager, which holds the actual MoleculeWrapper objects
         if self.molecule_manager.get_molecule(identifier):
             # Call the MoleculeManager's delete_molecule method
-            # This method now handles the core cleanup of the molecule wrapper, 
+            # This method now handles the core cleanup of the molecule wrapper,
             # its Blender object, and potentially its collection.
             self.molecule_manager.delete_molecule(identifier)
-            
+
             # Update UI list - this part is for the ProteinBlenderScene's own UI management
             scene = bpy.context.scene
             for i, item in enumerate(scene.molecule_list_items):
                 if item.identifier == identifier:
                     scene.molecule_list_items.remove(i)
                     break
-            
+
             # Reset UI state if the deleted molecule was the selected one
             if scene.selected_molecule_id == identifier:
                 scene.selected_molecule_id = ""
                 # scene.molecule_list_index = 0 # Resetting index might not be desired
-                
+
                 # Reset other UI properties related to molecule/domain editing
                 try:
                     enum_items = scene.bl_rna.properties["new_domain_chain"].enum_items
                     if enum_items:
                         scene.new_domain_chain = enum_items[0].identifier
                 except (KeyError, AttributeError, RuntimeError): # RuntimeError for enum not found
-                    pass 
-                
+                    pass
+
                 scene.new_domain_start = 1
                 scene.new_domain_end = 9999
                 # scene.temp_domain_start = 1 # These are for active split, might not need reset here
                 # scene.temp_domain_end = 9999
-                # scene.temp_domain_id = "" 
+                # scene.temp_domain_id = ""
                 # scene.active_splitting_domain_id = "" # Also related to active split context
 
                 # scene.show_domain_preview = False # This relates to a different feature
@@ -237,7 +237,7 @@ class ProteinBlenderScene:
 
             # Refresh UI
             self._refresh_ui()
-            
+
             return True
         return False
 
@@ -582,19 +582,58 @@ def build_outliner_hierarchy(context=None):
     import time
     _skip_timer_until = time.time() + 0.05  # Reduced to 50ms for responsiveness
     
+    # Get all valid molecule and domain IDs currently in the scene
+    valid_item_ids = set()
+    for molecule_id in scene_manager.molecules.keys():
+        valid_item_ids.add(molecule_id)
+        molecule = scene_manager.molecules.get(molecule_id)
+        if hasattr(molecule, 'domains'):
+            valid_item_ids.update(molecule.domains.keys())
+
+        # Also add chain IDs which are used in outliner items
+        # Chain IDs have format: "{molecule_id}_chain_{chain_id}"
+        mol_object = None
+        if hasattr(molecule, 'object') and molecule.object:
+            mol_object = molecule.object
+        elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+            mol_object = molecule.molecule.object
+
+        if mol_object and "chain_id" in mol_object.data.attributes:
+            chain_attr = mol_object.data.attributes["chain_id"]
+            chain_ids = set(value.value for value in chain_attr.data)
+            for chain_id in chain_ids:
+                valid_item_ids.add(f"{molecule_id}_chain_{chain_id}")
+
     for item in scene.outliner_items:
         # Store selection state for all items
         if item.item_id and item.item_id != "puppets_separator":
             item_selection_states[item.item_id] = item.is_selected
             item_expansion_states[item.item_id] = item.is_expanded
-            
+
         if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
-            existing_groups[item.item_id] = {
-                'name': item.name,
-                'is_expanded': item.is_expanded,
-                'is_selected': item.is_selected,
-                'members': item.puppet_memberships.split(',') if item.puppet_memberships else []
-            }
+            # Check if puppet has any valid members
+            member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
+            valid_members = [m for m in member_ids if m in valid_item_ids]
+
+            if valid_members:
+                # Only store puppets that have at least one valid member
+                existing_groups[item.item_id] = {
+                    'name': item.name,
+                    'is_expanded': item.is_expanded,
+                    'is_selected': item.is_selected,
+                    'controller_object_name': item.controller_object_name,
+                    'members': valid_members  # Store only valid members
+                }
+            else:
+                # Puppet has no valid members - clean up its controller object
+                if item.controller_object_name:
+                    controller_obj = bpy.data.objects.get(item.controller_object_name)
+                    if controller_obj:
+                        # First unlink from all collections
+                        for collection in controller_obj.users_collection:
+                            collection.objects.unlink(controller_obj)
+                        # Then remove the object
+                        bpy.data.objects.remove(controller_obj, do_unlink=True)
         elif item.puppet_memberships:
             # Store item's group memberships
             item_memberships[item.item_id] = item.puppet_memberships
@@ -909,6 +948,7 @@ def build_outliner_hierarchy(context=None):
         group_item.icon = 'GROUP'
         group_item.is_expanded = group_info.get('is_expanded', True)
         group_item.is_selected = group_info.get('is_selected', False)
+        group_item.controller_object_name = group_info.get('controller_object_name', '')  # RESTORE THE CONTROLLER!
         
         # Store all members (including domains) in the group
         # We'll handle display logic when adding references
@@ -916,84 +956,85 @@ def build_outliner_hierarchy(context=None):
         group_item.puppet_memberships = ','.join(all_members)
         
         # Add group members as references (not moving them from original location)
-        if group_item.is_expanded:
-            # Helper function to add a reference item with its children
-            def add_reference_with_children(member_id, parent_ref_id, indent_offset=0):
-                if member_id not in item_map:
-                    return
-                    
-                original_item = item_map[member_id]
-                
-                # Create a reference item
-                ref_item = scene.outliner_items.add()
-                ref_item.item_type = original_item.item_type
-                ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
-                ref_item.parent_id = parent_ref_id
-                # Track this reference ID to avoid duplicates
-                existing_ref_ids.add(ref_item.item_id)
-                ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
-                ref_item.object_name = original_item.object_name
-                ref_item.indent_level = 1 + indent_offset
-                ref_item.icon = original_item.icon
-                ref_item.is_visible = original_item.is_visible
-                ref_item.is_selected = original_item.is_selected
-                # Preserve the expansion state of reference items independently
-                # Check if we have a stored state for this reference item
-                if ref_item.item_id in item_expansion_states:
-                    ref_item.is_expanded = item_expansion_states[ref_item.item_id]
-                else:
-                    # Default to expanded for new reference items
-                    ref_item.is_expanded = True
-                ref_item.chain_id = original_item.chain_id
-                ref_item.chain_start = original_item.chain_start
-                ref_item.chain_end = original_item.chain_end
-                ref_item.domain_start = original_item.domain_start
-                ref_item.domain_end = original_item.domain_end
-                ref_item.has_domains = original_item.has_domains
-                # Store the original item ID for reference
-                ref_item.puppet_memberships = member_id  # Store original ID
-                
-                # If this is a chain and it's expanded, add its domain children ONLY if they are group members
-                if original_item.item_type == 'CHAIN' and ref_item.is_expanded:
-                    # Find all domains that belong to this chain
-                    # We need to look for original domains (not references) that belong to the original chain
-                    for child_item in scene.outliner_items:
-                        # Skip reference items - we only want original domains
-                        if "_ref_" in child_item.item_id:
-                            continue
-                            
-                        if (child_item.item_type == 'DOMAIN' and 
-                            child_item.parent_id == member_id):
-                            # IMPORTANT: Only add domains that are explicitly group members
-                            # Check if this domain is in the group's member list
-                            if child_item.item_id in group_info.get('members', []):
-                                # Check if a reference for this domain already exists
-                                ref_id = f"{group_id}_ref_{child_item.item_id}"
-                                
-                                if ref_id not in existing_ref_ids:
-                                    # Add the domain as a child of the chain reference
-                                    add_reference_with_children(child_item.item_id, ref_item.item_id, 1)
-                                    # Track that we've added this reference
-                                    existing_ref_ids.add(ref_id)
-            
-            # Add each member with its hierarchy
-            for member_id in group_info.get('members', []):
-                if member_id in item_map:
-                    member_item = item_map[member_id]
-                    # For domains, check if their parent chain is also in the group
-                    if member_item.item_type == 'DOMAIN':
-                        # Check if the parent chain is in the group
-                        parent_chain_in_group = False
-                        if member_item.parent_id in group_info.get('members', []):
-                            parent_chain_in_group = True
-                        
-                        # Only add domain as direct member if its parent chain is NOT in the group
-                        # (If the chain is in the group, the domain will be added as a child of the chain)
-                        if not parent_chain_in_group:
-                            add_reference_with_children(member_id, group_id)
-                    else:
-                        # Add non-domain items directly
+        # Always build complete hierarchy - UI filtering will handle visibility
+        # Helper function to add a reference item with its children
+        def add_reference_with_children(member_id, parent_ref_id, indent_offset=0):
+            if member_id not in item_map:
+                return
+
+            original_item = item_map[member_id]
+
+            # Create a reference item
+            ref_item = scene.outliner_items.add()
+            ref_item.item_type = original_item.item_type
+            ref_item.item_id = f"{group_id}_ref_{member_id}"  # Unique ID for the reference
+            ref_item.parent_id = parent_ref_id
+            # Track this reference ID to avoid duplicates
+            existing_ref_ids.add(ref_item.item_id)
+            ref_item.name = f"→ {original_item.name}"  # Arrow to indicate reference
+            ref_item.object_name = original_item.object_name
+            ref_item.indent_level = 1 + indent_offset
+            ref_item.icon = original_item.icon
+            ref_item.is_visible = original_item.is_visible
+            ref_item.is_selected = original_item.is_selected
+            # Preserve the expansion state of reference items independently
+            # Check if we have a stored state for this reference item
+            if ref_item.item_id in item_expansion_states:
+                ref_item.is_expanded = item_expansion_states[ref_item.item_id]
+            else:
+                # Default to collapsed for new reference items to match original behavior
+                ref_item.is_expanded = False
+            ref_item.chain_id = original_item.chain_id
+            ref_item.chain_start = original_item.chain_start
+            ref_item.chain_end = original_item.chain_end
+            ref_item.domain_start = original_item.domain_start
+            ref_item.domain_end = original_item.domain_end
+            ref_item.has_domains = original_item.has_domains
+            # Store the original item ID for reference
+            ref_item.puppet_memberships = member_id  # Store original ID
+
+            # If this is a chain, always add its domain children (UI will filter based on expansion)
+            # ONLY add domains that are group members
+            if original_item.item_type == 'CHAIN':
+                # Find all domains that belong to this chain
+                # We need to look for original domains (not references) that belong to the original chain
+                for child_item in scene.outliner_items:
+                    # Skip reference items - we only want original domains
+                    if "_ref_" in child_item.item_id:
+                        continue
+
+                    if (child_item.item_type == 'DOMAIN' and
+                        child_item.parent_id == member_id):
+                        # IMPORTANT: Only add domains that are explicitly group members
+                        # Check if this domain is in the group's member list
+                        if child_item.item_id in group_info.get('members', []):
+                            # Check if a reference for this domain already exists
+                            ref_id = f"{group_id}_ref_{child_item.item_id}"
+
+                            if ref_id not in existing_ref_ids:
+                                # Add the domain as a child of the chain reference
+                                add_reference_with_children(child_item.item_id, ref_item.item_id, 1)
+                                # Track that we've added this reference
+                                existing_ref_ids.add(ref_id)
+
+        # Add each member with its hierarchy
+        for member_id in group_info.get('members', []):
+            if member_id in item_map:
+                member_item = item_map[member_id]
+                # For domains, check if their parent chain is also in the group
+                if member_item.item_type == 'DOMAIN':
+                    # Check if the parent chain is in the group
+                    parent_chain_in_group = False
+                    if member_item.parent_id in group_info.get('members', []):
+                        parent_chain_in_group = True
+
+                    # Only add domain as direct member if its parent chain is NOT in the group
+                    # (If the chain is in the group, the domain will be added as a child of the chain)
+                    if not parent_chain_in_group:
                         add_reference_with_children(member_id, group_id)
+                else:
+                    # Add non-domain items directly
+                    add_reference_with_children(member_id, group_id)
     
     # Update outliner display
     if context.area:
