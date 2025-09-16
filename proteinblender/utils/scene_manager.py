@@ -578,9 +578,9 @@ def build_outliner_hierarchy(context=None):
     item_expansion_states = {}  # Store expansion states for all items
     
     # Temporarily disable selection sync during rebuild
-    from ..handlers.selection_sync import _selection_update_depth, _skip_timer_until
-    import time
-    _skip_timer_until = time.time() + 0.05  # Reduced to 50ms for responsiveness
+    from ..handlers import selection_sync
+    old_depth = selection_sync._selection_update_depth
+    selection_sync._selection_update_depth = 999  # High value to prevent any updates during rebuild
     
     # Get all valid molecule and domain IDs currently in the scene
     valid_item_ids = set()
@@ -1037,6 +1037,9 @@ def build_outliner_hierarchy(context=None):
                     add_reference_with_children(member_id, group_id)
     
     # Update outliner display
+    # Re-enable selection sync
+    selection_sync._selection_update_depth = old_depth
+
     if context.area:
         context.area.tag_redraw()
 

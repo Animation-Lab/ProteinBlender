@@ -317,24 +317,49 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                                     domain_obj.scale = transform.scale
             
             # Keyframe the Empty controller based on checkboxes
-            if controller_obj:
+            # Only process if puppet is selected
+            if controller_obj and puppet_item.use_puppet:
                 keyframed_properties = []
-                
+
+                # Location
                 if puppet_item.keyframe_location:
                     controller_obj.keyframe_insert(data_path="location", frame=self.frame_number)
                     keyframed_properties.append("location")
                     print(f"  ✓ Keyframed controller location at frame {self.frame_number}")
-                
+                else:
+                    # Remove existing keyframe if checkbox is unchecked
+                    try:
+                        controller_obj.keyframe_delete(data_path="location", frame=self.frame_number)
+                        print(f"  ✗ Removed controller location keyframe at frame {self.frame_number}")
+                    except:
+                        pass  # No keyframe exists to remove
+
+                # Rotation
                 if puppet_item.keyframe_rotation:
                     controller_obj.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
                     keyframed_properties.append("rotation")
                     print(f"  ✓ Keyframed controller rotation at frame {self.frame_number}")
-                
+                else:
+                    # Remove existing keyframe if checkbox is unchecked
+                    try:
+                        controller_obj.keyframe_delete(data_path="rotation_euler", frame=self.frame_number)
+                        print(f"  ✗ Removed controller rotation keyframe at frame {self.frame_number}")
+                    except:
+                        pass  # No keyframe exists to remove
+
+                # Scale
                 if puppet_item.keyframe_scale:
                     controller_obj.keyframe_insert(data_path="scale", frame=self.frame_number)
                     keyframed_properties.append("scale")
                     print(f"  ✓ Keyframed controller scale at frame {self.frame_number}")
-                
+                else:
+                    # Remove existing keyframe if checkbox is unchecked
+                    try:
+                        controller_obj.keyframe_delete(data_path="scale", frame=self.frame_number)
+                        print(f"  ✗ Removed controller scale keyframe at frame {self.frame_number}")
+                    except:
+                        pass  # No keyframe exists to remove
+
                 if keyframed_properties:
                     print(f"  Controller: Keyframed {', '.join(keyframed_properties)}")
                     total_keyframed += 1

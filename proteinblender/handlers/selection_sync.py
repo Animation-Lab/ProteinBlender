@@ -5,69 +5,111 @@ from ..utils.scene_manager import ProteinBlenderScene
 
 
 # Global variables for selection tracking
-_last_selection = set()
-_selection_update_depth = 0  # Use depth counter instead of boolean
-_timer_handle = None
-_skip_timer_until = 0  # Timestamp to skip timer updates until
+_selection_update_depth = 0  # Use depth counter to prevent recursion
+_msgbus_owner = None  # Owner object for msgbus subscriptions
+_subscribed_objects = set()  # Track which objects we've subscribed to
 
 
-def check_selection_changes():
-    """Timer function to check for selection changes"""
-    global _last_selection, _selection_update_depth, _skip_timer_until
-    
-    import time
-    current_time = time.time()
-    
-    # Skip if we're within the skip window
-    if current_time < _skip_timer_until:
-        return 0.1
-    
-    if _selection_update_depth > 0:
-        return 0.1  # Check again in 0.1 seconds
-    
-    # Ensure we have a valid context
-    try:
-        if not hasattr(bpy.context, 'selected_objects'):
-            return 0.1  # Context not ready, check again
-            
-        # Get current selection
-        current_selection = set(obj.name for obj in bpy.context.selected_objects)
-        
-        # Check if selection has changed
-        if current_selection != _last_selection:
-            _last_selection = current_selection
-            on_blender_selection_change()
-    except Exception:
-        # Context not available, just continue
-        pass
-    
-    return 0.1  # Check again in 0.1 seconds
-
-
-def clear_selection_handlers():
-    """Clear timer for selection checking"""
-    global _timer_handle
-    if _timer_handle is not None:
-        try:
-            bpy.app.timers.unregister(_timer_handle)
-        except Exception:
-            pass
-        _timer_handle = None
-
-
-def on_blender_selection_change():
-    """Called when user selects objects in viewport/native outliner"""
+def on_selection_changed(*args):
+    """Callback for msgbus when selection changes"""
     global _selection_update_depth
-    
+
     # Prevent recursive updates
     if _selection_update_depth > 0:
         return
-    
+
+    _selection_update_depth += 1
+    try:
+        # Defer the actual update to avoid issues during msgbus callback
+        bpy.app.timers.register(lambda: deferred_selection_update(), first_interval=0.01, persistent=False)
+    finally:
+        _selection_update_depth -= 1
+
+
+def deferred_selection_update():
+    """Deferred update to handle selection changes outside of msgbus callback context"""
+    global _selection_update_depth
+
+    if _selection_update_depth > 0:
+        return None  # Return None to stop the timer
+
     _selection_update_depth += 1
     try:
         update_outliner_from_blender_selection()
     finally:
         _selection_update_depth -= 1
+
+    return None  # Return None to stop the timer
+
+
+def subscribe_to_object_selection(obj):
+    """Subscribe to selection changes for a specific object"""
+    global _msgbus_owner, _subscribed_objects
+
+    if not _msgbus_owner or obj.name in _subscribed_objects:
+        return
+
+    try:
+        # Subscribe to this object's select property
+        key = obj.path_resolve("select", False)
+        bpy.msgbus.subscribe_rna(
+            key=key,
+            owner=_msgbus_owner,
+            args=(),
+            notify=on_selection_changed,
+        )
+        _subscribed_objects.add(obj.name)
+    except Exception:
+        # Object may not support selection subscription
+        pass
+
+
+def clear_selection_handlers():
+    """Clear all msgbus subscriptions"""
+    global _msgbus_owner, _subscribed_objects
+
+    if _msgbus_owner is not None:
+        try:
+            bpy.msgbus.clear_by_owner(_msgbus_owner)
+        except Exception:
+            pass
+        _msgbus_owner = None
+
+    _subscribed_objects.clear()
+
+
+def refresh_object_subscriptions():
+    """Refresh msgbus subscriptions for all objects in the scene"""
+    global _msgbus_owner, _subscribed_objects
+
+    # Clear existing subscriptions
+    clear_selection_handlers()
+
+    # Create new owner
+    _msgbus_owner = object()
+    _subscribed_objects = set()
+
+    # Check if we have access to bpy.data (not available during registration)
+    try:
+        # Subscribe to all selectable objects
+        if hasattr(bpy.data, 'objects'):
+            for obj in bpy.data.objects:
+                if obj.type not in {'CAMERA', 'LIGHT'}:  # Skip non-selectable types
+                    subscribe_to_object_selection(obj)
+    except Exception:
+        pass  # Will be set up on first file load
+
+    # Always subscribe to the generic Object selection property for new objects
+    try:
+        key = (bpy.types.Object, "select")
+        bpy.msgbus.subscribe_rna(
+            key=key,
+            owner=_msgbus_owner,
+            args=(),
+            notify=on_selection_changed,
+        )
+    except Exception:
+        pass
 
 
 def update_outliner_from_blender_selection():
@@ -80,13 +122,25 @@ def update_outliner_from_blender_selection():
     selected_names = {obj.name for obj in selected_objects}
     
     # First check if any puppet Empty controllers are selected
+    # Store current puppet selection states to preserve them if needed
+    puppet_states = {}
     for item in scene.outliner_items:
-        if item.item_type == 'PUPPET' and item.controller_object_name:
-            # Check if the Empty controller is selected
-            if item.controller_object_name in selected_names:
-                item.is_selected = True
-            else:
-                item.is_selected = False
+        if item.item_type == 'PUPPET':
+            puppet_states[item.item_id] = item.is_selected
+
+            if item.controller_object_name:
+                # Check if the Empty controller is selected
+                if item.controller_object_name in selected_names:
+                    item.is_selected = True
+                else:
+                    # Only deselect if we're sure the Empty is not selected
+                    # Check if the Empty object actually exists
+                    empty_obj = bpy.data.objects.get(item.controller_object_name)
+                    if empty_obj and not empty_obj.select_get():
+                        item.is_selected = False
+                    elif not empty_obj:
+                        # Empty doesn't exist, clear selection
+                        item.is_selected = False
     
     # Update outliner selection state for other items
     for item in scene.outliner_items:
@@ -193,11 +247,7 @@ def update_outliner_from_blender_selection():
 
 def sync_outliner_to_blender_selection(context, item_id):
     """Sync outliner selection to Blender objects"""
-    global _selection_update_depth, _skip_timer_until
-    
-    # Set skip timer to prevent timer updates during this operation
-    import time
-    _skip_timer_until = time.time() + 0.1  # Reduced from 300ms to 100ms
+    global _selection_update_depth
     
     # Prevent recursive updates
     if _selection_update_depth > 2:  # Allow some depth for legitimate nested calls
@@ -376,17 +426,56 @@ def update_outliner_selection_display(context):
             area.tag_redraw()
 
 
+def on_depsgraph_update_post(scene, depsgraph):
+    """Handler for depsgraph updates to catch new objects"""
+    # Check if any new objects were added
+    for update in depsgraph.updates:
+        if isinstance(update.id, bpy.types.Object):
+            obj = update.id
+            if obj.name not in _subscribed_objects:
+                subscribe_to_object_selection(obj)
+
+
+def on_load_post(dummy):
+    """Handler for file load to refresh subscriptions"""
+    refresh_object_subscriptions()
+
+
+def delayed_init():
+    """Delayed initialization to run after Blender is fully loaded"""
+    refresh_object_subscriptions()
+    return None  # Stop the timer
+
+
 def register():
     """Register all selection sync handlers"""
-    global _timer_handle
-    # Clear any existing timer
+    # Clear any existing handlers
     clear_selection_handlers()
-    
-    # Register timer to check for selection changes
-    _timer_handle = bpy.app.timers.register(check_selection_changes, first_interval=0.1)
+
+    # Try to initialize msgbus subscriptions
+    refresh_object_subscriptions()
+
+    # Schedule a delayed initialization in case Blender isn't fully ready yet
+    bpy.app.timers.register(delayed_init, first_interval=0.1, persistent=False)
+
+    # Register depsgraph handler to catch new objects
+    if on_depsgraph_update_post not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(on_depsgraph_update_post)
+
+    # Register load handler to refresh subscriptions after file load
+    if on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(on_load_post)
 
 
 def unregister():
     """Unregister all selection sync handlers"""
-    # Clear timer
+    # Clear msgbus subscriptions
     clear_selection_handlers()
+
+    # Remove depsgraph handler
+    if on_depsgraph_update_post in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(on_depsgraph_update_post)
+
+    # Remove load handler
+    if on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(on_load_post)

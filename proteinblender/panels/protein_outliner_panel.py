@@ -308,39 +308,49 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         # Find the clicked item
         clicked_item = None
         actual_item_id = self.item_id
-        
+        reference_item = None
+
         # Check if this is a reference item
         if "_ref_" in self.item_id:
-            # Extract the original item ID from the reference
+            # Find the reference item that was clicked
             for item in scene.outliner_items:
-                if item.item_id == self.item_id and item.puppet_memberships:
-                    actual_item_id = item.puppet_memberships  # Original ID stored here
+                if item.item_id == self.item_id:
+                    reference_item = item
+                    if item.puppet_memberships:
+                        actual_item_id = item.puppet_memberships  # Original ID stored here
                     break
-        
+
         # Find the actual item to select
         for item in scene.outliner_items:
             if item.item_id == actual_item_id:
                 clicked_item = item
                 break
-        
+
         if not clicked_item:
             return {'CANCELLED'}
-        
+
         # Remove this block - it's redundant and interferes with proper toggling
-        
-        # Toggle selection state
-        new_selection_state = not clicked_item.is_selected
-        clicked_item.is_selected = new_selection_state
-        
-        # Update references - but only in one direction to prevent loops
-        if "_ref_" in self.item_id:
-            # This is a reference item - update the original
-            for orig_item in scene.outliner_items:
-                if orig_item.item_id == actual_item_id:
-                    orig_item.is_selected = new_selection_state
-                    break
+
+        # Toggle selection state based on what was clicked
+        if reference_item:
+            # If a reference was clicked, toggle based on the reference's state
+            new_selection_state = not reference_item.is_selected
+            reference_item.is_selected = new_selection_state
+            clicked_item.is_selected = new_selection_state
         else:
-            # This is an original item - update all its references
+            # If the original was clicked, toggle based on the original's state
+            new_selection_state = not clicked_item.is_selected
+            clicked_item.is_selected = new_selection_state
+        
+        # Update all references to keep them in sync
+        if "_ref_" in self.item_id:
+            # A reference was clicked - already updated both reference and original above
+            # Now update any other references to the same item
+            for ref_item in scene.outliner_items:
+                if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id and ref_item.item_id != self.item_id:
+                    ref_item.is_selected = new_selection_state
+        else:
+            # The original was clicked - update all its references
             for ref_item in scene.outliner_items:
                 if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id:
                     ref_item.is_selected = new_selection_state
@@ -365,7 +375,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         elif clicked_item.item_type == 'PUPPET':
             # Toggle the puppet's selection state first
             clicked_item.is_selected = new_selection_state
-            
+
             # Sync the puppet's Empty controller with its checkbox state
             from ..handlers.selection_sync import sync_outliner_to_blender_selection
             sync_outliner_to_blender_selection(context, clicked_item.item_id)
