@@ -378,62 +378,50 @@ def apply_domain_color_direct(scene_manager, domain_item, color):
             apply_color_to_object(obj, color)
 
 
-def get_or_create_transparent_material(alpha_value):
-    """Get or create a transparent material with the specified alpha value"""
-    # Create a unique material name based on alpha to allow multiple transparency levels
-    mat_name = f"MN_Transparent_Alpha_{int(alpha_value * 100)}"
-    
+def get_or_create_transparent_material(obj_name=None):
+    """Get or create a single transparent material for animation purposes"""
+    # Use a single material name that can be animated
+    # If obj_name is provided, create a unique material per object for independent animation
+    if obj_name:
+        mat_name = f"MN_Transparent_{obj_name}"
+    else:
+        mat_name = "MN_Transparent_Animated"
+
     # Check if material already exists
     mat = bpy.data.materials.get(mat_name)
     if mat:
-        # Update alpha value in case it changed slightly
-        if mat.use_nodes and mat.node_tree:
-            for node in mat.node_tree.nodes:
-                if node.type == 'BSDF_PRINCIPLED':
-                    node.inputs['Alpha'].default_value = alpha_value
-                    break
+        # Material exists, just return it (alpha will be set separately)
         return mat
-    
+
     # Create new material
     mat = bpy.data.materials.new(name=mat_name)
-    
-    # Set up transparency for EEVEE based on alpha value
-    # Use different blend modes based on transparency level for better lighting
-    if alpha_value >= 0.98:
-        # Nearly opaque - use OPAQUE for proper lighting
-        mat.blend_method = 'OPAQUE'
-        mat.use_backface_culling = True
-    elif alpha_value >= 0.5:
-        # Semi-transparent - use CLIP for better performance and lighting
-        mat.blend_method = 'CLIP'
-        mat.alpha_threshold = 0.5
-        mat.use_backface_culling = False
-    else:
-        # Truly transparent - use BLEND
-        mat.blend_method = 'BLEND'
-        mat.use_backface_culling = False
-        mat.show_transparent_back = True
-    
+
+    # Set up transparency for EEVEE - use BLEND mode for smooth alpha animation
+    mat.blend_method = 'BLEND'
+    mat.use_backface_culling = False
+    mat.show_transparent_back = True
+
     # Set up node tree for principled BSDF
     mat.use_nodes = True
     node_tree = mat.node_tree
-    
+
     # Clear default nodes
     node_tree.nodes.clear()
-    
+
     # Create Principled BSDF
     principled_node = node_tree.nodes.new('ShaderNodeBsdfPrincipled')
     principled_node.location = (0, 0)
-    
+
     # Create material output
     output_node = node_tree.nodes.new('ShaderNodeOutputMaterial')
     output_node.location = (300, 0)
-    
+
     # Connect principled to output
     node_tree.links.new(principled_node.outputs['BSDF'], output_node.inputs['Surface'])
-    
-    # Set alpha value
-    principled_node.inputs['Alpha'].default_value = alpha_value
+
+    # Set default alpha value to 1.0 (fully opaque)
+    # This will be modified when applying transparency
+    principled_node.inputs['Alpha'].default_value = 1.0
     
     # Set base color to white (will be tinted by geometry node colors)
     principled_node.inputs['Base Color'].default_value = (1, 1, 1, 1)
@@ -450,48 +438,63 @@ def get_or_create_transparent_material(alpha_value):
 
 
 def apply_material_transparency_to_style_node(obj, alpha_value):
-    """Apply transparent material to the Style node in geometry nodes"""
+    """Apply transparent material to the Style node in geometry nodes and set alpha value"""
     # Find the geometry nodes modifier
     mod = None
     for modifier in obj.modifiers:
         if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
             mod = modifier
             break
-    
+
     if not mod or not mod.node_group:
         return False
-    
+
     node_tree = mod.node_group
-    
+
     # Find the Style node (could be Style Surface, Style Ribbon, etc.)
     style_node = None
     for node in node_tree.nodes:
         if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
             style_node = node
             break
-    
+
     if not style_node:
         print(f"Warning: No Style node found in {obj.name}")
         return False
-    
+
     # Check if the Style node has a Material input
     material_input = style_node.inputs.get("Material")
     if not material_input:
         print(f"Warning: Style node in {obj.name} has no Material input")
         return False
-    
-    # Get or create transparent material
-    # Use a threshold to avoid lighting issues with nearly-opaque materials
-    if alpha_value < 0.98:  # Only use transparent material if significantly transparent
-        mat = get_or_create_transparent_material(alpha_value)
+
+    # Check if we already have a material assigned
+    current_mat = material_input.default_value
+
+    # If no material or it's a legacy alpha-named material, get/create our animated material
+    if not current_mat or "Alpha_" in current_mat.name:
+        # Get or create a single transparent material for this object
+        mat = get_or_create_transparent_material(obj.name)
+        material_input.default_value = mat
     else:
-        # Use default material for opaque or nearly opaque
-        from ..utils.molecularnodes.blender import material
-        mat = material.default()
-    
-    # Assign material to the Style node
-    material_input.default_value = mat
-    
+        mat = current_mat
+
+    # Now update the alpha value in the material's Principled BSDF node
+    if mat and mat.use_nodes and mat.node_tree:
+        for node in mat.node_tree.nodes:
+            if node.type == 'BSDF_PRINCIPLED':
+                # Update the alpha value - this is what will be keyframed
+                node.inputs['Alpha'].default_value = alpha_value
+
+                # Update blend method based on alpha for better viewport display
+                if alpha_value >= 0.98:
+                    mat.blend_method = 'OPAQUE'
+                elif alpha_value < 0.1:
+                    mat.blend_method = 'BLEND'
+                else:
+                    mat.blend_method = 'BLEND'  # Keep BLEND for smooth animation
+                break
+
     return True
 
 

@@ -1069,10 +1069,12 @@ def update_outliner_visibility(item_id, visible):
         molecule = scene_manager.molecules.get(item_id)
         if molecule and molecule.object:
             molecule.object.hide_set(not visible, view_layer=view_layer)
+            molecule.object.hide_render = not visible
             # Update all domains
             for domain in molecule.domains.values():
                 if domain.object:
                     domain.object.hide_set(not visible, view_layer=view_layer)
+                    domain.object.hide_render = not visible
                     
     elif item.item_type == 'CHAIN':
         # Update all domains belonging to this chain
@@ -1110,6 +1112,7 @@ def update_outliner_visibility(item_id, visible):
                     if domain_chain_str == chain_str or domain_chain_id == chain_id:
                         if domain.object:
                             domain.object.hide_set(not visible, view_layer=view_layer)
+                            domain.object.hide_render = not visible
                     
     elif item.item_type == 'DOMAIN':
         # Update just the domain
@@ -1117,8 +1120,17 @@ def update_outliner_visibility(item_id, visible):
             obj = bpy.data.objects.get(item.object_name)
             if obj:
                 obj.hide_set(not visible, view_layer=view_layer)
+                # Also hide from render when hidden in viewport
+                obj.hide_render = not visible
                 
     elif item.item_type == 'PUPPET':
+        # Update the puppet's controller object visibility
+        if item.controller_object_name:
+            controller_obj = bpy.data.objects.get(item.controller_object_name)
+            if controller_obj:
+                controller_obj.hide_set(not visible, view_layer=view_layer)
+                controller_obj.hide_render = not visible
+
         # Update all items that are members of this group
         member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
         for member_id in member_ids:

@@ -587,12 +587,46 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                     if ref_item.parent_id == item.item_id and "_ref_" in ref_item.item_id:
                         ref_item.is_visible = new_visibility
             self.update_children_visibility(scene, actual_item_id, new_visibility)
+
+            # If this is a protein, also hide/show puppets that contain its chains
+            if item.item_type == 'PROTEIN':
+                self.update_puppet_visibility_for_protein(scene, actual_item_id, new_visibility)
         # Note: Chains don't automatically update children visibility
         
         # Update UI
         context.area.tag_redraw()
         return {'FINISHED'}
     
+    def update_puppet_visibility_for_protein(self, scene, protein_id, visibility):
+        """Update visibility of puppets that contain chains from this protein"""
+        # First, find all chain IDs that belong to this protein
+        protein_chain_ids = []
+        for item in scene.outliner_items:
+            if item.parent_id == protein_id and item.item_type == 'CHAIN':
+                protein_chain_ids.append(item.item_id)
+
+        # Now check all puppets to see if they contain any of these chains
+        for puppet in scene.outliner_items:
+            if puppet.item_type == 'PUPPET' and puppet.item_id != "puppets_separator":
+                # Get the puppet's member IDs
+                member_ids = puppet.puppet_memberships.split(',') if puppet.puppet_memberships else []
+
+                # Check if any of the puppet's members are chains from this protein
+                has_protein_chains = any(chain_id in member_ids for chain_id in protein_chain_ids)
+
+                if has_protein_chains:
+                    # Update puppet visibility to match the protein
+                    puppet.is_visible = visibility
+                    update_outliner_visibility(puppet.item_id, visibility)
+
+                    # Also update all reference items under this puppet
+                    for ref_item in scene.outliner_items:
+                        if ref_item.parent_id == puppet.item_id and "_ref_" in ref_item.item_id:
+                            ref_item.is_visible = visibility
+                            # Update the actual visibility of the referenced item
+                            if ref_item.puppet_memberships:
+                                update_outliner_visibility(ref_item.puppet_memberships, visibility)
+
     def update_children_visibility(self, scene, parent_id, visibility):
         """Recursively update visibility of all children"""
         # Find the parent item to check if it's a group

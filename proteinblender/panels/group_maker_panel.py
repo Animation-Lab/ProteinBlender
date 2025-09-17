@@ -204,10 +204,22 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             
             # Parent with keep transform
             bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
-            
-            # Deselect all after parenting
+
+            # Keep the Empty controller selected and re-select domain objects
             bpy.ops.object.select_all(action='DESELECT')
-        
+
+            # Select the Empty controller
+            empty_obj.select_set(True)
+            context.view_layer.objects.active = empty_obj
+
+            # Also select all domain objects
+            for obj in domain_objects:
+                obj.select_set(True)
+        else:
+            # Even if no domain objects, ensure the Empty controller is selected
+            empty_obj.select_set(True)
+            context.view_layer.objects.active = empty_obj
+
         # Add puppet membership to selected items
         for item in items_to_puppet:
             # Get current memberships
