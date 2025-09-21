@@ -616,14 +616,27 @@ def build_outliner_hierarchy(context=None):
             valid_members = [m for m in member_ids if m in valid_item_ids]
 
             if valid_members:
-                # Only store puppets that have at least one valid member
-                existing_groups[item.item_id] = {
-                    'name': item.name,
-                    'is_expanded': item.is_expanded,
-                    'is_selected': item.is_selected,
-                    'controller_object_name': item.controller_object_name,
-                    'members': valid_members  # Store only valid members
-                }
+                # Filter out any proteins from the member list - puppets should only contain chains and domains
+                filtered_members = []
+                for member_id in valid_members:
+                    # Check if this member is a protein by looking at existing items
+                    is_protein = False
+                    for check_item in scene.outliner_items:
+                        if check_item.item_id == member_id and check_item.item_type == 'PROTEIN':
+                            is_protein = True
+                            break
+                    if not is_protein:
+                        filtered_members.append(member_id)
+
+                # Only store puppets that have at least one valid non-protein member
+                if filtered_members:
+                    existing_groups[item.item_id] = {
+                        'name': item.name,
+                        'is_expanded': item.is_expanded,
+                        'is_selected': item.is_selected,
+                        'controller_object_name': item.controller_object_name,
+                        'members': filtered_members  # Store only chains and domains
+                    }
             else:
                 # Puppet has no valid members - clean up its controller object
                 if item.controller_object_name:
@@ -1021,6 +1034,11 @@ def build_outliner_hierarchy(context=None):
         for member_id in group_info.get('members', []):
             if member_id in item_map:
                 member_item = item_map[member_id]
+
+                # Skip proteins - they should never be puppet members
+                if member_item.item_type == 'PROTEIN':
+                    continue
+
                 # For domains, check if their parent chain is also in the group
                 if member_item.item_type == 'DOMAIN':
                     # Check if the parent chain is in the group
@@ -1033,7 +1051,7 @@ def build_outliner_hierarchy(context=None):
                     if not parent_chain_in_group:
                         add_reference_with_children(member_id, group_id)
                 else:
-                    # Add non-domain items directly
+                    # Add non-domain, non-protein items (chains) directly
                     add_reference_with_children(member_id, group_id)
     
     # Update outliner display

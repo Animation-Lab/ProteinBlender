@@ -20,8 +20,8 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         
         # Get selected items
         selected_items = [item for item in scene.outliner_items if item.is_selected]
-        valid_items = [item for item in selected_items 
-                      if item.item_type not in ['PUPPET'] 
+        valid_items = [item for item in selected_items
+                      if item.item_type not in ['PUPPET', 'PROTEIN']
                       and item.item_id != "puppets_separator"
                       and "_ref_" not in item.item_id]
         
@@ -67,9 +67,9 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             self.report({'WARNING'}, "Select items to create a puppet")
             return {'CANCELLED'}
         
-        # Filter out puppets, reference items, and check for items already in puppets
-        valid_items = [item for item in selected_items 
-                      if item.item_type not in ['PUPPET'] 
+        # Filter out puppets, proteins, reference items, and check for items already in puppets
+        valid_items = [item for item in selected_items
+                      if item.item_type not in ['PUPPET', 'PROTEIN']
                       and item.item_id != "puppets_separator"
                       and "_ref_" not in item.item_id]
         
@@ -130,7 +130,10 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         domain_objects = []  # Collect actual Blender objects to parent
         
         for item in selected_items:
-            if item.item_type != 'PUPPET' and item.item_id != "puppets_separator" and "_ref_" not in item.item_id:
+            # Exclude puppets, proteins, separators, and reference items
+            if (item.item_type not in ['PUPPET', 'PROTEIN'] and
+                item.item_id != "puppets_separator" and
+                "_ref_" not in item.item_id):
                 # Check if already in a puppet
                 if item.puppet_memberships:
                     items_already_puppeted.append(item.name)
