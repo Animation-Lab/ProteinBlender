@@ -131,10 +131,20 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         for puppet_id in selected_ids:
             print(f"Debug: Processing puppet {puppet_id}")
             try:
+                # Get the puppet controller Empty object
+                controller_obj = None
+                for item in context.scene.outliner_items:
+                    if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                        if item.controller_object_name:
+                            controller_obj = bpy.data.objects.get(item.controller_object_name)
+                            if controller_obj:
+                                print(f"Debug: Found controller '{controller_obj.name}' for puppet {puppet_id}")
+                        break
+
                 # Get objects in this puppet
                 objects = self.get_puppet_objects(context, puppet_id)
                 print(f"Debug: Group {puppet_id} has {len(objects)} objects")
-                
+
                 if not objects:
                     print(f"Debug: WARNING - No objects found for puppet {puppet_id}")
                     # Try to understand why
@@ -153,21 +163,43 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                                                 print(f"    Found object via outliner: {obj.name}")
                                                 objects.append(obj)
                             break
-                
+
                 for obj in objects:
                     transform = pose.transforms.add()
                     transform.puppet_id = puppet_id
                     # Find the puppet name
-                    puppet_name = next((g['name'] for g in self.available_puppets 
+                    puppet_name = next((g['name'] for g in self.available_puppets
                                      if g['id'] == puppet_id), puppet_id)
                     transform.puppet_name = puppet_name
                     transform.object_name = obj.name
-                    
-                    # Store absolute positions (we'll calculate relative later if needed)
-                    transform.location = obj.location.copy()
-                    transform.rotation_euler = obj.rotation_euler.copy()
-                    transform.scale = obj.scale.copy()
-                    
+
+                    # Store transforms RELATIVE to the puppet controller
+                    if controller_obj:
+                        # Calculate relative transforms using matrix math for accuracy
+                        from mathutils import Matrix
+
+                        # Get the inverse of the controller's world matrix
+                        controller_matrix_inv = controller_obj.matrix_world.inverted()
+
+                        # Get object's transform relative to controller
+                        relative_matrix = controller_matrix_inv @ obj.matrix_world
+
+                        # Extract location, rotation, scale from the relative matrix
+                        transform.location = relative_matrix.to_translation()
+                        transform.rotation_euler = relative_matrix.to_euler()
+                        transform.scale = relative_matrix.to_scale()
+
+                        print(f"  Stored RELATIVE: {obj.name}")
+                        print(f"    Controller location: {list(controller_obj.location)}")
+                        print(f"    Object world location: {list(obj.location)}")
+                        print(f"    Relative location: {list(transform.location)}")
+                    else:
+                        # Fallback to absolute positions if no controller found
+                        print(f"  WARNING: No controller found, storing absolute positions")
+                        transform.location = obj.location.copy()
+                        transform.rotation_euler = obj.rotation_euler.copy()
+                        transform.scale = obj.scale.copy()
+
                     # Capture color if available
                     from ..panels.visual_setup_panel import get_object_color
                     color = get_object_color(obj)
@@ -176,20 +208,6 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                         transform.has_color = True
                     else:
                         transform.has_color = False
-                    
-                    # Calculate and print relative position to parent
-                    parent_obj = obj.parent
-                    if parent_obj:
-                        # Calculate relative position to parent
-                        relative_loc = obj.location - parent_obj.location
-                        print(f"  Stored: {obj.name}")
-                        print(f"    Absolute location: {list(obj.location)}")
-                        print(f"    Parent: {parent_obj.name} at {list(parent_obj.location)}")
-                        print(f"    Relative to parent: {list(relative_loc)}")
-                    else:
-                        print(f"  Stored: {obj.name}")
-                        print(f"    Absolute location: {list(obj.location)}")
-                        print(f"    No parent object")
             except Exception as e:
                 print(f"Debug: ERROR processing puppet {puppet_id}: {e}")
                 import traceback
@@ -400,64 +418,95 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
     
     def execute(self, context):
         scene = context.scene
-        
+
         if not hasattr(scene, 'pose_library'):
             self.report({'ERROR'}, "Pose library not initialized")
             return {'CANCELLED'}
-        
+
         if self.pose_index < 0 or self.pose_index >= len(scene.pose_library):
             self.report({'ERROR'}, "Invalid pose index")
             return {'CANCELLED'}
-        
+
         pose = scene.pose_library[self.pose_index]
         applied_count = 0
         not_found = []
-        
+
         print(f"\nDebug: Applying pose '{pose.name}'")
         print(f"Debug: Pose has {len(pose.transforms)} transforms")
-        
-        # Apply transforms
+
+        # Group transforms by puppet to find their controllers
+        puppets = {}
         for transform in pose.transforms:
-            print(f"Debug: Looking for object '{transform.object_name}'")
-            obj = bpy.data.objects.get(transform.object_name)
-            if obj:
-                print(f"Debug: Found object '{obj.name}'")
-                
-                # Get parent info
-                parent_obj = obj.parent
-                if parent_obj:
-                    from mathutils import Vector
-                    current_relative = obj.location - parent_obj.location
-                    saved_relative = Vector(transform.location) - parent_obj.location
-                    print(f"  Parent: {parent_obj.name} at {list(parent_obj.location)}")
-                    print(f"  Current relative position: {list(current_relative)}")
-                    print(f"  Saved relative position: {list(saved_relative)}")
+            if transform.puppet_id not in puppets:
+                puppets[transform.puppet_id] = {'controller': None, 'transforms': []}
+            puppets[transform.puppet_id]['transforms'].append(transform)
+
+        # Find controller for each puppet
+        for puppet_id in puppets:
+            for item in scene.outliner_items:
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    if item.controller_object_name:
+                        controller_obj = bpy.data.objects.get(item.controller_object_name)
+                        if controller_obj:
+                            puppets[puppet_id]['controller'] = controller_obj
+                            print(f"Debug: Found controller '{controller_obj.name}' for puppet {puppet_id}")
+                    break
+
+        # Apply transforms
+        for puppet_id, puppet_data in puppets.items():
+            controller_obj = puppet_data['controller']
+
+            for transform in puppet_data['transforms']:
+                print(f"Debug: Looking for object '{transform.object_name}'")
+                obj = bpy.data.objects.get(transform.object_name)
+                if obj:
+                    print(f"Debug: Found object '{obj.name}'")
+
+                    if controller_obj:
+                        # Apply transforms RELATIVE to the puppet controller
+                        from mathutils import Matrix, Vector, Euler
+
+                        # Build the relative transformation matrix
+                        relative_matrix = Matrix()
+                        relative_matrix = Matrix.Translation(Vector(transform.location))
+                        relative_matrix @= Euler(transform.rotation_euler).to_matrix().to_4x4()
+
+                        # Apply scale
+                        scale_matrix = Matrix()
+                        for i in range(3):
+                            scale_matrix[i][i] = transform.scale[i]
+                        relative_matrix @= scale_matrix
+
+                        # Apply relative to controller's current world position
+                        world_matrix = controller_obj.matrix_world @ relative_matrix
+                        obj.matrix_world = world_matrix
+
+                        print(f"  Applied RELATIVE transform:")
+                        print(f"    Controller at: {list(controller_obj.location)}")
+                        print(f"    Relative location: {list(transform.location)}")
+                        print(f"    Result world location: {list(obj.location)}")
+                    else:
+                        # Fallback to absolute positioning if no controller
+                        print(f"  WARNING: No controller found, applying absolute transform")
+                        obj.location = transform.location
+                        obj.rotation_euler = transform.rotation_euler
+                        obj.scale = transform.scale
+                        print(f"  Applied absolute transform - new location: {list(obj.location)}")
+
+                    # Apply color if available
+                    if transform.has_color:
+                        from ..panels.visual_setup_panel import apply_color_to_object
+                        apply_color_to_object(obj, transform.color)
+
+                    applied_count += 1
                 else:
-                    print(f"  No parent object")
-                    print(f"  Current absolute position: {list(obj.location)}")
-                    print(f"  Saved absolute position: {list(transform.location)}")
-                
-                # Apply the saved transform
-                obj.location = transform.location
-                obj.rotation_euler = transform.rotation_euler
-                obj.scale = transform.scale
-                
-                # Apply color if available
-                if transform.has_color:
-                    from ..panels.visual_setup_panel import apply_color_to_object
-                    apply_color_to_object(obj, transform.color)
-                
-                applied_count += 1
-                
-                print(f"  Applied transform - new location: {list(obj.location)}")
-            else:
-                print(f"Debug: Object '{transform.object_name}' NOT FOUND")
-                not_found.append(transform.object_name)
-        
+                    print(f"Debug: Object '{transform.object_name}' NOT FOUND")
+                    not_found.append(transform.object_name)
+
         if not_found:
             print(f"Debug: Could not find objects: {not_found}")
             print(f"Debug: Available objects: {[obj.name for obj in bpy.data.objects if 'domain' in obj.name.lower() or 'chain' in obj.name.lower()][:10]}")
-        
+
         self.report({'INFO'}, f"Applied pose '{pose.name}' ({applied_count}/{len(pose.transforms)} objects)")
         return {'FINISHED'}
 
@@ -489,19 +538,44 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
         
         # Re-capture transforms for each puppet
         puppet_ids = pose.puppet_ids.split(',') if pose.puppet_ids else []
-        
+
         for puppet_id in puppet_ids:
+            # Get the puppet controller Empty object
+            controller_obj = None
+            for item in context.scene.outliner_items:
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    if item.controller_object_name:
+                        controller_obj = bpy.data.objects.get(item.controller_object_name)
+                    break
+
             # Get objects in this puppet
             objects = self.get_puppet_objects(context, puppet_id)
-            
+
             for obj in objects:
                 transform = pose.transforms.add()
                 transform.puppet_id = puppet_id
                 transform.object_name = obj.name
-                transform.location = obj.location.copy()
-                transform.rotation_euler = obj.rotation_euler.copy()
-                transform.scale = obj.scale.copy()
-                
+
+                # Store transforms RELATIVE to the puppet controller
+                if controller_obj:
+                    from mathutils import Matrix
+
+                    # Get the inverse of the controller's world matrix
+                    controller_matrix_inv = controller_obj.matrix_world.inverted()
+
+                    # Get object's transform relative to controller
+                    relative_matrix = controller_matrix_inv @ obj.matrix_world
+
+                    # Extract location, rotation, scale from the relative matrix
+                    transform.location = relative_matrix.to_translation()
+                    transform.rotation_euler = relative_matrix.to_euler()
+                    transform.scale = relative_matrix.to_scale()
+                else:
+                    # Fallback to absolute positions if no controller found
+                    transform.location = obj.location.copy()
+                    transform.rotation_euler = obj.rotation_euler.copy()
+                    transform.scale = obj.scale.copy()
+
                 # Capture color if available
                 from ..panels.visual_setup_panel import get_object_color
                 color = get_object_color(obj)

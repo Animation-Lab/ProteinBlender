@@ -471,13 +471,30 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
     # Check if we already have a material assigned
     current_mat = material_input.default_value
 
-    # If no material or it's a legacy alpha-named material, get/create our animated material
+    # Check if material needs to be created or duplicated
+    mat = None
+
     if not current_mat or "Alpha_" in current_mat.name:
-        # Get or create a single transparent material for this object
+        # No material or legacy material - create a new one
         mat = get_or_create_transparent_material(obj.name)
         material_input.default_value = mat
     else:
+        # We have a material - check if it's shared with other objects
         mat = current_mat
+
+        # Check if this material is being used by multiple objects
+        # If it is, we need to duplicate it to allow independent alpha control
+        if mat.users > 1:
+            # Material is shared - create a unique copy for this object
+            print(f"Material '{mat.name}' is shared ({mat.users} users). Creating unique copy for {obj.name}")
+
+            # Duplicate the material
+            mat = mat.copy()
+            mat.name = f"MN_Transparent_{obj.name}"
+
+            # Assign the duplicated material
+            material_input.default_value = mat
+            print(f"Created unique material '{mat.name}' for independent alpha control")
 
     # Now update the alpha value in the material's Principled BSDF node
     if mat and mat.use_nodes and mat.node_tree:
