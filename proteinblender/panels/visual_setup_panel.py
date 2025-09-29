@@ -371,10 +371,38 @@ def apply_chain_color_direct(scene_manager, chain_item, color):
 
 def apply_domain_color_direct(scene_manager, domain_item, color):
     """Apply color to a single domain"""
-    # Find the domain object
+    # For domains, we should use the molecule's update_domain_color method
+    # which properly handles Color Common node uniqueness
+
+    # Find the parent molecule - domains always have a parent
+    if domain_item.parent_id:
+        # Parent could be a chain - get the chain's parent (molecule)
+        parent_chain = None
+        for item in bpy.context.scene.outliner_items:
+            if item.item_id == domain_item.parent_id:
+                parent_chain = item
+                break
+
+        if parent_chain and parent_chain.parent_id:
+            molecule = scene_manager.molecules.get(parent_chain.parent_id)
+            if molecule:
+                # Find the domain ID - need to match by object name or properties
+                for domain_id, domain in molecule.domains.items():
+                    if (hasattr(domain, 'object') and domain.object and
+                        domain.object.name == domain_item.object_name):
+                        # Use the molecule's update method which handles node uniqueness
+                        success = molecule.update_domain_color(domain_id, color)
+                        if success:
+                            print(f"Updated domain {domain_id} color via molecule method")
+                        else:
+                            print(f"Failed to update domain {domain_id} color")
+                        return
+
+    # Fallback to direct object color application if molecule method not available
     if domain_item.object_name:
         obj = bpy.data.objects.get(domain_item.object_name)
         if obj:
+            print(f"Fallback: Applying color directly to object {obj.name}")
             apply_color_to_object(obj, color)
 
 
@@ -645,14 +673,14 @@ def apply_color_to_object(obj, color):
     # Apply transparency to the Style node's Material input
     if len(color) >= 4:
         apply_material_transparency_to_style_node(obj, color[3])
-    
-    # Find the MolecularNodes modifier
+
+    # Find the geometry nodes modifier - could be MolecularNodes (for proteins) or DomainNodes (for domains)
     mod = None
     for modifier in obj.modifiers:
-        if modifier.type == 'NODES' and modifier.name == "MolecularNodes":
+        if modifier.type == 'NODES' and (modifier.name == "MolecularNodes" or modifier.name == "DomainNodes"):
             mod = modifier
             break
-    
+
     if not mod or not mod.node_group:
         # Try to find any nodes modifier if exact name doesn't match
         for modifier in obj.modifiers:

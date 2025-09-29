@@ -231,13 +231,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 op.puppet_id = item.item_id
         
         # Second: Selection checkbox for all items
-        if item.item_type == 'PUPPET':
-            # For groups, check if all members are selected
-            all_selected = self._are_all_group_members_selected(context.scene, item)
-            selection_icon = 'CHECKBOX_HLT' if all_selected else 'CHECKBOX_DEHLT'
-        else:
-            # For other items, use their own selection state
-            selection_icon = 'CHECKBOX_HLT' if item.is_selected else 'CHECKBOX_DEHLT'
+        # For all items including puppets, use their own selection state
+        # Puppet checkbox now only reflects the controller's selection state
+        selection_icon = 'CHECKBOX_HLT' if item.is_selected else 'CHECKBOX_DEHLT'
         
         op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
         op.item_id = item.item_id
@@ -379,29 +375,9 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             # Sync the puppet's Empty controller with its checkbox state
             from ..handlers.selection_sync import sync_outliner_to_blender_selection
             sync_outliner_to_blender_selection(context, clicked_item.item_id)
-            
-            # Also select/deselect all children when puppet is selected
-            # Get member IDs from group
-            member_ids = clicked_item.puppet_memberships.split(',') if clicked_item.puppet_memberships else []
-            
-            # Select/deselect the reference items shown under this group
-            for item in scene.outliner_items:
-                # Check if this is a reference item that belongs to this group
-                if item.parent_id == clicked_item.item_id and "_ref_" in item.item_id:
-                    item.is_selected = new_selection_state
-                    
-                    # Get the actual item ID from the reference
-                    actual_member_id = item.puppet_memberships
-                    if actual_member_id:
-                        # Find and update the original item to match
-                        for orig_item in scene.outliner_items:
-                            if orig_item.item_id == actual_member_id:
-                                orig_item.is_selected = new_selection_state
-                                
-                                # Sync to Blender (but only if it's not a group)
-                                if orig_item.item_type != 'PUPPET':
-                                    sync_outliner_to_blender_selection(context, actual_member_id)
-                                break
+
+            # Don't automatically select/deselect children - puppet checkbox only controls the controller
+            # This allows independent selection of puppet members
             
             # Update UI immediately
             for area in context.screen.areas:

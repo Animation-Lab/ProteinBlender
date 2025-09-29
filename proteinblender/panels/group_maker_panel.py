@@ -245,6 +245,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         puppet_item.is_expanded = True
         puppet_item.is_selected = False  # Don't auto-select the new puppet
         puppet_item.controller_object_name = empty_name  # Store the Empty's name
+        puppet_item.object_name = empty_name  # Also set object_name for selection sync (like domains)
         
         # Store member IDs in the puppet's memberships field for easy access
         member_ids = [item.item_id for item in items_to_puppet]

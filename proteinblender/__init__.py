@@ -164,7 +164,7 @@ dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
-    "version": (1, 0, 1),
+    "version": (1, 1, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",

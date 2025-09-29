@@ -962,6 +962,7 @@ def build_outliner_hierarchy(context=None):
         group_item.is_expanded = group_info.get('is_expanded', True)
         group_item.is_selected = group_info.get('is_selected', False)
         group_item.controller_object_name = group_info.get('controller_object_name', '')  # RESTORE THE CONTROLLER!
+        group_item.object_name = group_info.get('controller_object_name', '')  # Also set object_name for selection sync
         
         # Store all members (including domains) in the group
         # We'll handle display logic when adding references

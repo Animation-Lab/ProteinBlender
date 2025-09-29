@@ -1708,8 +1708,8 @@ class MoleculeWrapper:
                 
                 # Create a unique node tree for this domain to ensure independent color control
                 original_node_tree = color_emit.node_tree
-                new_node_tree_name = f"Color Common_{domain.id}"
-                
+                new_node_tree_name = f"Color Common_{domain.domain_id}"
+
                 # Create a copy of the node tree with a unique name
                 new_node_tree = original_node_tree.copy()
                 new_node_tree.name = new_node_tree_name
@@ -1721,7 +1721,20 @@ class MoleculeWrapper:
                 elif len(color_emit.inputs) > 0 and hasattr(color_emit.inputs[0], "default_value"):
                     color_emit.inputs[0].default_value = domain_color
             else:
-                # Override existing Color Common node to our domain color
+                # Found existing Color Common node - need to make it unique for this domain
+                # Check if this node's tree is already unique to this domain
+                if color_emit.node_tree and not color_emit.node_tree.name.endswith(f"_{domain.domain_id}"):
+                    # This node tree is shared - create a unique copy
+                    original_node_tree = color_emit.node_tree
+                    new_node_tree_name = f"Color Common_{domain.domain_id}"
+
+                    # Create a copy of the node tree with a unique name
+                    new_node_tree = original_node_tree.copy()
+                    new_node_tree.name = new_node_tree_name
+                    color_emit.node_tree = new_node_tree
+                    print(f"Created unique Color Common node tree for domain {domain.domain_id}")
+
+                # Now update the color on our unique node tree
                 try:
                     if "Carbon" in color_emit.inputs:
                         color_emit.inputs["Carbon"].default_value = domain.color
@@ -2001,29 +2014,44 @@ class MoleculeWrapper:
 
     def update_domain_color(self, domain_id: str, color: tuple) -> bool:
         """Update the color of a domain
-        
+
         Args:
             domain_id (str): The ID of the domain to update
             color (tuple): The new color as an RGBA tuple (r, g, b, a)
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
         if domain_id not in self.domains or not self.domains[domain_id].node_group:
             return False
-            
+
         domain = self.domains[domain_id]
         try:
             # Update the stored color in the domain object for consistency
             domain.color = color
-            
+
             for node in domain.node_group.nodes:
                 if node.name == "Color Common":
+                    # Check if this Color Common node has a unique node tree for this domain
+                    if (node.bl_idname == 'GeometryNodeGroup' and node.node_tree and
+                        not node.node_tree.name.endswith(f"_{domain_id}")):
+                        # The node tree is shared - create a unique copy
+                        original_node_tree = node.node_tree
+                        new_node_tree_name = f"Color Common_{domain_id}"
+
+                        # Create a copy of the node tree with a unique name
+                        new_node_tree = original_node_tree.copy()
+                        new_node_tree.name = new_node_tree_name
+                        node.node_tree = new_node_tree
+                        print(f"Created unique Color Common node tree for domain {domain_id} during color update")
+
                     # Set the default_value directly with the color tuple
                     node.inputs["Carbon"].default_value = color
                     return True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error updating domain color for {domain_id}: {e}")
+            import traceback
+            traceback.print_exc()
         return False
         
     def get_sorted_domains(self) -> Dict[str, DomainDefinition]:
