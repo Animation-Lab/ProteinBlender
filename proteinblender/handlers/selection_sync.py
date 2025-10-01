@@ -171,38 +171,38 @@ def update_outliner_from_blender_selection():
             else:
                 item.is_selected = False
         elif item.item_type == 'CHAIN':
-            # IMPORTANT: Chain selection is now independent of domain selection
-            # Chains don't auto-select when their domains are selected (prevents cascade)
-            # But chains should deselect if none of their domains are selected
+            # For chains, check if the chain object itself is selected in the viewport
+            # First, try to find the chain's object by checking if item has object_name
+            chain_object_selected = False
 
-            # Check if ANY domain in this chain is selected
-            chain_has_any_selection = False
+            if item.object_name:
+                # Direct chain object (for full chain domains)
+                chain_object_selected = item.object_name in selected_names
+            else:
+                # Check if this is a chain item that references a domain
+                # Extract chain info and find the corresponding domain object
+                chain_id_str = item.item_id.split('_chain_')[-1] if '_chain_' in item.item_id else ""
+                if chain_id_str:
+                    try:
+                        chain_id = int(chain_id_str)
+                    except:
+                        chain_id = chain_id_str
 
-            # Extract chain info
-            chain_id_str = item.item_id.split('_chain_')[-1] if '_chain_' in item.item_id else ""
-            if chain_id_str:
-                try:
-                    chain_id = int(chain_id_str)
-                except:
-                    chain_id = chain_id_str
+                    # Get parent molecule
+                    parent_molecule = scene_manager.molecules.get(item.parent_id)
+                    if parent_molecule:
+                        # Find the domain that represents this chain
+                        for domain in parent_molecule.domains.values():
+                            if domain.object and hasattr(domain, 'chain_id'):
+                                # Check if this domain belongs to the chain
+                                if str(domain.chain_id) == str(chain_id):
+                                    # Check if this domain's object is selected
+                                    if domain.object.name in selected_names:
+                                        chain_object_selected = True
+                                        break
 
-                # Get parent molecule
-                parent_molecule = scene_manager.molecules.get(item.parent_id)
-                if parent_molecule:
-                    for domain in parent_molecule.domains.values():
-                        if domain.object and hasattr(domain, 'chain_id'):
-                            # Check if this domain belongs to the chain
-                            if str(domain.chain_id) == str(chain_id):
-                                # Check if domain's object is selected
-                                if domain.object.name in selected_names:
-                                    chain_has_any_selection = True
-                                    break
-
-            # Only clear chain selection if NO domains are selected
-            # Don't auto-select chain if domains are selected (prevents cascade)
-            if not chain_has_any_selection:
-                item.is_selected = False
-            # If chain was manually selected, keep it selected unless all domains are deselected
+            # Update chain selection based on whether its object is selected
+            item.is_selected = chain_object_selected
         else:
             # For other items without objects, deselect
             item.is_selected = False
