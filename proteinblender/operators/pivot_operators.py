@@ -779,73 +779,12 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         set_object_origin_static(obj, new_origin)
 
 
-class PROTEINBLENDER_OT_reset_pivot(Operator):
-    """Reset pivot point to original position"""
-    bl_idname = "proteinblender.reset_pivot"
-    bl_label = "Reset Pivot to Origin"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        scene = context.scene
-        
-        # Clean up any active custom pivot mode
-        if scene.get("custom_pivot_active", False):
-            pivot_empty = bpy.data.objects.get("PROTEINBLENDER_PIVOT_GIZMO")
-            if pivot_empty:
-                bpy.data.objects.remove(pivot_empty, do_unlink=True)
-            scene["custom_pivot_active"] = False
-            if "custom_pivot_target_items" in scene:
-                del scene["custom_pivot_target_items"]
-        
-        # Get selected items
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
-        if not selected_items:
-            self.report({'WARNING'}, "No items selected")
-            return {'CANCELLED'}
-        
-        success_count = 0
-        for item in selected_items:
-            if item.item_type == 'DOMAIN' or item.item_type == 'CHAIN':
-                obj = bpy.data.objects.get(item.object_name) if item.object_name else None
-                if obj:
-                    # Check if we have stored original pivot
-                    if "original_pivot" in obj:
-                        original_pos = Vector(obj["original_pivot"])
-                        self.set_object_origin(obj, original_pos)
-                        success_count += 1
-                    else:
-                        # Reset to parent's origin
-                        if obj.parent:
-                            self.set_object_origin(obj, obj.parent.location)
-                            success_count += 1
-                        else:
-                            # Reset to world origin
-                            self.set_object_origin(obj, Vector((0, 0, 0)))
-                            success_count += 1
-        
-        if success_count > 0:
-            self.report({'INFO'}, f"Reset pivot for {success_count} item(s)")
-        
-        # Force UI redraw
-        for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-    
-    def set_object_origin(self, obj, new_origin):
-        """Set the object's origin to a new position"""
-        set_object_origin_static(obj, new_origin)
-
-
 # Classes to register
 CLASSES = [
     PROTEINBLENDER_OT_set_pivot_first,
     PROTEINBLENDER_OT_set_pivot_last,
     PROTEINBLENDER_OT_set_pivot_center,
     PROTEINBLENDER_OT_set_pivot_custom,
-    PROTEINBLENDER_OT_reset_pivot,
 ]
 
 

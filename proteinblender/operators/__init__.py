@@ -70,7 +70,6 @@ from .pivot_operators import (
     PROTEINBLENDER_OT_set_pivot_last,
     PROTEINBLENDER_OT_set_pivot_center,
     PROTEINBLENDER_OT_set_pivot_custom,
-    PROTEINBLENDER_OT_reset_pivot,
 )
 
 CLASSES = (
@@ -131,7 +130,6 @@ CLASSES = (
     PROTEINBLENDER_OT_set_pivot_last,
     PROTEINBLENDER_OT_set_pivot_center,
     PROTEINBLENDER_OT_set_pivot_custom,
-    PROTEINBLENDER_OT_reset_pivot,
 )
 
 

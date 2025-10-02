@@ -284,31 +284,21 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         col_right = row.column(align=True)
         col_right.prop(scene, "visual_setup_style", text="")
         
-        # Separator between color/style and pivot controls
-        box.separator()
-        
-        # Pivot Point controls
-        col = box.column(align=True)
-        col.label(text="Pivot Point", icon='PIVOT_CURSOR')
-        
-        # First row of pivot buttons
-        row = col.row(align=True)
-        row.scale_y = 1.2
-        row.operator("proteinblender.set_pivot_first", text="First")
-        row.operator("proteinblender.set_pivot_center", text="Center")
-        row.operator("proteinblender.set_pivot_last", text="Last")
-        
-        # Custom button - hidden for now
-        # custom_active = scene.get("custom_pivot_active", False)
-        # if custom_active:
-        #     row.operator("proteinblender.set_pivot_custom", text="Cancel", icon='X', depress=True)
-        # else:
-        #     row.operator("proteinblender.set_pivot_custom", text="Custom")
-        
-        # Reset button on its own row
-        row = col.row(align=True)
-        row.operator("proteinblender.reset_pivot", text="Reset to Origin", icon='LOOP_BACK')
-        
+        # Pivot Point controls - only show when exactly 1 chain or domain is selected
+        if len(selected_items) == 1 and selected_items[0].item_type in ['CHAIN', 'DOMAIN']:
+            # Separator between color/style and pivot controls
+            box.separator()
+
+            col = box.column(align=True)
+            col.label(text="Pivot Point", icon='PIVOT_CURSOR')
+
+            # Row of pivot buttons
+            row = col.row(align=True)
+            row.scale_y = 1.2
+            row.operator("proteinblender.set_pivot_first", text="First")
+            row.operator("proteinblender.set_pivot_center", text="Center")
+            row.operator("proteinblender.set_pivot_last", text="Last")
+
         # Add bottom spacing
         layout.separator()
 
