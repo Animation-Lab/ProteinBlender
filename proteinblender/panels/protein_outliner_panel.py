@@ -184,12 +184,19 @@ class PROTEINBLENDER_UL_outliner(UIList):
                                 if domain == domain_for_chain:
                                     copy_op.domain_id = domain_id
                                     break
-                    
-                    # Add delete button only if this is a copy
+
+                    # Add delete button
                     if hasattr(domain_for_chain, 'is_copy') and domain_for_chain.is_copy:
+                        # For chain copies, use domain delete operator
                         delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
                         if delete_op:
                             delete_op.domain_id = item.item_id
+                    else:
+                        # For regular chains, use chain delete operator
+                        delete_op = row.operator("molecule.delete_chain", text="", icon='TRASH', emboss=False)
+                        if delete_op:
+                            delete_op.chain_id = chain_id
+                            delete_op.molecule_id = molecule_id
             else:
                 # For domains, use the item_id directly as domain_id
                 domain_id = item.item_id

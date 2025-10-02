@@ -486,9 +486,13 @@ def _refresh_object_references_only(scene_manager, scene):
 def sync_molecule_list_after_undo(*args):
     """Sync molecule state after undo/redo operations"""
     try:
+        print("\n========== UNDO/REDO HANDLER STARTING ==========")
         scene_manager = ProteinBlenderScene.get_instance()
         scene = bpy.context.scene
-        
+
+        print(f"Current molecules in scene_manager: {list(scene_manager.molecules.keys())}")
+        print(f"Saved states available: {list(scene_manager._saved_states.keys())}")
+
         # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
         molecules_to_remove = []
         for molecule_id, molecule in list(scene_manager.molecules.items()):
@@ -520,29 +524,69 @@ def sync_molecule_list_after_undo(*args):
         
         for molecule_id, saved_state in list(scene_manager._saved_states.items()):
             current_molecule = scene_manager.molecules.get(molecule_id)
-            
+
+            print(f"\nProcessing saved state for molecule {molecule_id}")
+            print(f"  current_molecule exists: {current_molecule is not None}")
+            if current_molecule:
+                print(f"  current_molecule is valid: {_is_molecule_valid(current_molecule)}")
+                print(f"  current_molecule has invalid domains: {_has_invalid_domains(current_molecule)}")
+                print(f"  current_molecule.domains: {list(current_molecule.domains.keys())}")
+
             # Check if molecule exists and is valid
             needs_restore = (
-                current_molecule is None or 
+                current_molecule is None or
                 not _is_molecule_valid(current_molecule) or
                 _has_invalid_domains(current_molecule)
             )
-            
+
+            print(f"  Initial needs_restore: {needs_restore}")
+            print(f"  saved_state has domains: {saved_state.domains_data is not None}")
+            if saved_state.domains_data:
+                print(f"  saved_state domains count: {len(saved_state.domains_data)}")
+
+            # Also check if domains were deleted but their objects were restored by undo
+            # This happens when you delete a chain and then undo
+            if not needs_restore and current_molecule and saved_state.domains_data:
+                print(f"Checking for missing domains in molecule {molecule_id}")
+                print(f"  Current domains: {list(current_molecule.domains.keys())}")
+                print(f"  Saved domains: {list(saved_state.domains_data.keys())}")
+                # Check if any domain objects from the saved state exist in Blender
+                # but are missing from molecule.domains
+                for saved_domain_id, saved_domain_data in saved_state.domains_data.items():
+                    if saved_domain_id not in current_molecule.domains:
+                        # Domain is missing from molecule.domains
+                        # Check if its object was restored by undo
+                        domain_obj_name = saved_domain_data.get('object_name')
+                        print(f"  Domain {saved_domain_id} missing, checking for object {domain_obj_name}")
+                        if domain_obj_name and domain_obj_name in bpy.data.objects:
+                            # Object exists but domain entry doesn't - need to restore
+                            print(f"    -> Object exists! Setting needs_restore=True")
+                            needs_restore = True
+                            break
+
+            print(f"Molecule {molecule_id}: needs_restore={needs_restore}")
+
             # Only restore if the object actually exists in Blender (was restored by undo)
             if needs_restore and saved_state.molecule_data.get('object_name'):
                 restored_obj = bpy.data.objects.get(saved_state.molecule_data['object_name'])
                 if restored_obj:  # Object exists, so this should be restored
+                    print(f"  -> Adding to restore list")
                     molecules_to_restore.append((molecule_id, saved_state))
         
         # Step 3: Restore missing molecules
+        print(f"\nRestoring {len(molecules_to_restore)} molecules")
         for molecule_id, saved_state in molecules_to_restore:
             try:
+                print(f"Restoring molecule {molecule_id}...")
                 restored = saved_state.restore_to_scene(scene_manager)
+                print(f"  -> Restore result: {restored}")
                 # Once restored, clear its saved state
                 if restored and molecule_id in scene_manager._saved_states:
                     del scene_manager._saved_states[molecule_id]
             except Exception as e:
                 print(f"Warning: Failed to restore molecule {molecule_id}: {e}")
+                import traceback
+                traceback.print_exc()
         
         # If we restored any molecules, mark the last one as selected
         if molecules_to_restore:
@@ -556,7 +600,14 @@ def sync_molecule_list_after_undo(*args):
         else:
             # Just refresh object references without rebuilding the entire UI
             _refresh_object_references_only(scene_manager, scene)
-        
+
+        # Step 5: Always rebuild outliner hierarchy after undo/redo
+        # This ensures that chain deletions/restorations are reflected in the UI
+        # (domains may have been added/removed without molecule-level changes)
+        print("\nRebuilding outliner hierarchy...")
+        build_outliner_hierarchy(bpy.context)
+        print("========== UNDO/REDO HANDLER COMPLETE ==========\n")
+
     except Exception as e:
         print(f"Error in undo handler: {e}")
         import traceback
@@ -825,7 +876,13 @@ def build_outliner_hierarchy(context=None):
                         
                         if match_found:
                             chain_domains.append((domain_id, domain))
-                
+
+                # If this chain has no domains, remove the chain item and skip to next chain
+                if len(chain_domains) == 0:
+                    # Remove the chain item we just added
+                    scene.outliner_items.remove(len(scene.outliner_items) - 1)
+                    continue
+
                 # Mark if this chain has domains (for UI purposes)
                 if len(chain_domains) > 1:
                     chain_item.has_domains = True

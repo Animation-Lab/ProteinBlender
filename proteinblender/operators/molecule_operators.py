@@ -371,3 +371,94 @@ class MOLECULE_PB_OT_toggle_visibility(Operator):
             if domain.object:
                 domain.object.hide_viewport = new_state
         return {'FINISHED'}
+
+
+class MOLECULE_PB_OT_delete_chain(Operator):
+    """Delete a chain and all its domains from a protein"""
+    bl_idname = "molecule.delete_chain"
+    bl_label = "Delete Chain"
+    bl_description = "Delete this chain and all its domains"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    chain_id: StringProperty()
+    molecule_id: StringProperty()
+
+    def invoke(self, context, event):
+        # Show confirmation dialog
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+
+        if not molecule:
+            self.report({'ERROR'}, "Molecule not found")
+            return {'CANCELLED'}
+
+        # Capture state for undo (reuse existing pattern)
+        scene_manager._capture_molecule_state(self.molecule_id)
+
+        # Find all domains belonging to this chain
+        domains_to_delete = []
+        for domain_id, domain in molecule.domains.items():
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id):
+                domains_to_delete.append(domain_id)
+
+        if not domains_to_delete:
+            self.report({'WARNING'}, f"No domains found for chain {self.chain_id}")
+            return {'CANCELLED'}
+
+        # Delete each domain using cleanup (reuse existing cleanup method)
+        for domain_id in domains_to_delete:
+            domain = molecule.domains[domain_id]
+            # Call cleanup to remove object and node groups
+            domain.cleanup()
+            # Remove from molecule's domains dictionary
+            del molecule.domains[domain_id]
+
+        # Remove chain from puppet memberships
+        self._remove_chain_from_puppets(context, self.molecule_id, self.chain_id)
+
+        # Rebuild outliner (reuse existing function)
+        from ..utils.scene_manager import build_outliner_hierarchy
+        build_outliner_hierarchy(context)
+
+        self.report({'INFO'}, f"Deleted chain {self.chain_id} and {len(domains_to_delete)} domain(s)")
+        return {'FINISHED'}
+
+    def _remove_chain_from_puppets(self, context, molecule_id, chain_id):
+        """Remove chain from any puppet group memberships"""
+        # The chain's outliner ID is in the format "molecule_id_chain_X"
+        chain_outliner_id = f"{molecule_id}_chain_{chain_id}"
+
+        # Also check for individual domain IDs that might be in puppets
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(molecule_id)
+        if not molecule:
+            return
+
+        # Collect all domain IDs for this chain
+        domain_ids_in_chain = []
+        for domain_id, domain in molecule.domains.items():
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id):
+                domain_ids_in_chain.append(domain_id)
+
+        # Remove from puppet memberships
+        for item in context.scene.outliner_items:
+            if item.item_type == 'PUPPET' and item.puppet_memberships:
+                members = set(item.puppet_memberships.split(','))
+                modified = False
+
+                # Remove chain outliner ID
+                if chain_outliner_id in members:
+                    members.remove(chain_outliner_id)
+                    modified = True
+
+                # Remove any domain IDs from this chain
+                for domain_id in domain_ids_in_chain:
+                    if domain_id in members:
+                        members.remove(domain_id)
+                        modified = True
+
+                if modified:
+                    item.puppet_memberships = ','.join(members) if members else ""
