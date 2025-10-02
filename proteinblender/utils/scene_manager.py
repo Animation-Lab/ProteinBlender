@@ -131,6 +131,10 @@ class ProteinBlenderScene:
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
+        # Set protein pivot to center of mass and move to world origin
+        print("Setting protein pivot to center of mass...")
+        molecule.set_protein_pivot_to_center_of_mass(bpy.context)
+
         # Create domains for each chain
         self._create_domains_for_each_chain(molecule.identifier)
         # Add to UI list

@@ -631,8 +631,8 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # Create the new domains
         created_domains = []
         created_outliner_ids = []  # Track outliner IDs for group updates
-        
-        
+        all_created_domain_ids = []  # Track all created domain IDs in order for pivot setting
+
         for i, (start, end) in enumerate(domains):
             domain_name = f"Residues {start}-{end}"  # More descriptive name
             
@@ -669,17 +669,23 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     # Domain IDs already include molecule ID, use them directly
                     for domain_id in created_domain_ids:
                         created_outliner_ids.append(domain_id)
+                        all_created_domain_ids.append(domain_id)
                     self.report({'INFO'}, f"Created {domain_name}")
                 else:
                     self.report({'WARNING'}, f"Failed to create domain {start}-{end}")
         
+        # Set intelligent pivots for the split domains
+        if len(all_created_domain_ids) >= 2:
+            self.report({'INFO'}, f"Setting intelligent pivots for {len(all_created_domain_ids)} split domains")
+            molecule.set_domain_split_pivots(bpy.context, all_created_domain_ids, self.chain_id)
+
         # Update group memberships BEFORE rebuilding outliner
         # IMPORTANT: We keep the chain in the group, not individual domains
         # The hierarchy will show domains under the chain
         if chain_groups:
             self.report({'INFO'}, f"Found {len(chain_groups)} groups containing the chain")
             self.report({'INFO'}, f"Chain will remain in groups, with domains shown as children")
-            
+
             # We don't need to update group memberships here because:
             # 1. The chain stays in the group
             # 2. The domains will be shown as children of the chain in the group view

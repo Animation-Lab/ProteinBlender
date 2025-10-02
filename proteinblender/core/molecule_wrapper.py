@@ -393,18 +393,39 @@ class MoleculeWrapper:
         
         # Ensure the domain's node network uses the same structure as the preview domain
         self._setup_domain_network(domain, chain_id, start, end)
-        
-        # --- Set the initial pivot using the new robust method --- 
-        if domain.object: # Check again if object exists before setting pivot
-            start_aa_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START') # Call internal method
-            
-            if start_aa_pos:
-                if not self._set_domain_origin_and_update_matrix(bpy.context, domain, start_aa_pos): # Call internal method
-                     # Optionally report a warning if setting pivot failed, though the helper logs errors
-                     pass 
+
+        # --- Set the initial pivot intelligently based on domain type ---
+        if domain.object:
+            # Determine if this is a full chain domain
+            chain_min_res, chain_max_res = self.chain_residue_ranges.get(mapped_chain, (start, end))
+            is_full_chain = (start == chain_min_res and end == chain_max_res)
+
+            pivot_pos = None
+            if is_full_chain:
+                # For full chain domains, use center of mass
+                pivot_pos = self._calculate_center_of_mass(bpy.context, domain.object,
+                                                           chain_id=mapped_chain,
+                                                           start_res=start,
+                                                           end_res=end)
+                if pivot_pos:
+                    print(f"Setting full chain domain pivot to center of mass")
+                else:
+                    # Fallback to start residue if center of mass calculation fails
+                    pivot_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START')
+                    if pivot_pos:
+                        print(f"Center of mass calculation failed, using start residue for pivot")
             else:
-                 # Optionally report a warning if Cα not found, though the helper logs errors
-                 pass
+                # For partial domains, use start residue (existing behavior)
+                pivot_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START')
+                if pivot_pos:
+                    print(f"Setting partial domain pivot to start residue")
+
+            # Apply the pivot position
+            if pivot_pos:
+                if not self._set_domain_origin_and_update_matrix(bpy.context, domain, pivot_pos):
+                    print(f"Warning: Failed to set pivot for domain {domain_id}")
+            else:
+                print(f"Warning: Could not determine pivot position for domain {domain_id}")
         # --- End initial pivot setting --- 
 
         # Update residue assignments
@@ -853,9 +874,241 @@ class MoleculeWrapper:
             import traceback
             traceback.print_exc()
             return None
-    # --- End Moved Helper --- 
+    # --- End Moved Helper ---
 
-    # --- Moved Helper: Set Origin and Update Matrix --- 
+    # --- Helper: Calculate Center of Mass ---
+    def _calculate_center_of_mass(self, context, obj, chain_id=None, start_res=None, end_res=None):
+        """
+        Calculate center of mass based on alpha carbons.
+
+        Args:
+            context: Blender context
+            obj: Blender object to calculate center of mass for
+            chain_id: Optional chain ID to filter by
+            start_res: Optional start residue to filter by
+            end_res: Optional end residue to filter by
+
+        Returns:
+            Vector: World space position of center of mass, or None if calculation fails
+        """
+        try:
+            import numpy as np
+
+            if not obj or not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
+                return None
+
+            # Get the mesh data with evaluated modifiers
+            depsgraph = context.evaluated_depsgraph_get()
+            eval_obj = obj.evaluated_get(depsgraph)
+            mesh = eval_obj.data
+            attrs = mesh.attributes
+
+            # Check for required attributes
+            if "is_alpha_carbon" not in attrs or "position" not in attrs:
+                # Fallback to bounding box center
+                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+                if bbox:
+                    return sum(bbox, Vector()) / len(bbox)
+                return None
+
+            # Get alpha carbon mask
+            is_alpha_attr = attrs["is_alpha_carbon"]
+            is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
+            is_alpha_attr.data.foreach_get("value", is_alpha)
+
+            # Get vertex positions
+            positions = np.zeros(len(mesh.vertices) * 3)
+            mesh.vertices.foreach_get("co", positions)
+            positions = positions.reshape(-1, 3)
+
+            # Apply chain and residue filters if specified
+            if chain_id is not None or start_res is not None or end_res is not None:
+                # Get chain and residue data
+                filter_mask = is_alpha.copy()
+
+                if chain_id is not None and "chain_id" in attrs:
+                    chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                    attrs["chain_id"].data.foreach_get("value", chain_ids)
+
+                    # Get possible chain IDs (handle different ID formats)
+                    search_chain_ids = [chain_id]
+                    if isinstance(chain_id, str) and chain_id.isdigit():
+                        search_chain_ids.append(int(chain_id))
+
+                    chain_mask = np.isin(chain_ids, search_chain_ids)
+                    filter_mask &= chain_mask
+
+                if (start_res is not None or end_res is not None) and "res_id" in attrs:
+                    res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                    attrs["res_id"].data.foreach_get("value", res_ids)
+
+                    if start_res is not None:
+                        filter_mask &= (res_ids >= start_res)
+                    if end_res is not None:
+                        filter_mask &= (res_ids <= end_res)
+
+                # Filter positions
+                alpha_positions = positions[filter_mask]
+            else:
+                # Just use all alpha carbons
+                alpha_positions = positions[is_alpha]
+
+            if len(alpha_positions) == 0:
+                # Fallback to bounding box center
+                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+                if bbox:
+                    return sum(bbox, Vector()) / len(bbox)
+                return None
+
+            # Calculate center of mass (simple average of alpha carbons)
+            # Using carbon mass (12.01) for all alpha carbons
+            center_local = np.mean(alpha_positions, axis=0)
+            center_world = obj.matrix_world @ Vector(center_local)
+
+            return center_world
+
+        except Exception as e:
+            print(f"Error calculating center of mass: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    # --- End Helper ---
+
+    # --- Helper: Set Protein Pivot and Center ---
+    def set_protein_pivot_to_center_of_mass(self, context):
+        """
+        Set protein's pivot to center of mass and move protein to world origin.
+        This is called automatically on protein import.
+
+        Args:
+            context: Blender context
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.molecule or not self.molecule.object:
+            return False
+
+        try:
+            obj = self.molecule.object
+
+            # Calculate center of mass for entire protein
+            center_of_mass = self._calculate_center_of_mass(context, obj)
+
+            if not center_of_mass:
+                print("Warning: Could not calculate center of mass, using origin_set")
+                # Fallback to Blender's built-in center of volume
+                bpy.ops.object.select_all(action='DESELECT')
+                obj.select_set(True)
+                context.view_layer.objects.active = obj
+                bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_VOLUME')
+                obj.location = (0, 0, 0)
+                return True
+
+            # Store original cursor location
+            orig_cursor_loc = context.scene.cursor.location.copy()
+
+            # Set 3D cursor to center of mass
+            context.scene.cursor.location = center_of_mass
+
+            # Select protein object
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+
+            # Set origin to cursor (center of mass)
+            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+
+            # Move protein to world origin
+            obj.location = (0, 0, 0)
+
+            # Restore cursor
+            context.scene.cursor.location = orig_cursor_loc
+
+            print(f"Set protein pivot to center of mass and moved to world origin")
+            return True
+
+        except Exception as e:
+            print(f"Error setting protein pivot: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    # --- End Helper ---
+
+    # --- Helper: Set Domain Split Pivots ---
+    def set_domain_split_pivots(self, context, domain_ids, chain_id):
+        """
+        Set intelligent pivots for domains created from a split operation.
+
+        For 2 domains: Set pivots at boundary
+        For 3+ domains: First at end, middle at beginning, last at center of mass
+
+        Args:
+            context: Blender context
+            domain_ids: List of domain IDs created from the split (in order)
+            chain_id: Chain ID for the domains
+
+        Returns:
+            bool: True if successful
+        """
+        if not domain_ids or len(domain_ids) < 2:
+            return False
+
+        try:
+            num_domains = len(domain_ids)
+
+            for i, domain_id in enumerate(domain_ids):
+                if domain_id not in self.domains:
+                    continue
+
+                domain = self.domains[domain_id]
+                if not domain.object:
+                    continue
+
+                pivot_pos = None
+
+                if num_domains == 2:
+                    # For 2 domains, set pivot at boundary between them
+                    if i == 0:
+                        # First domain: pivot at end (boundary)
+                        pivot_pos = self._find_residue_alpha_carbon_pos(context, domain, residue_target='END')
+                    else:
+                        # Second domain: pivot at start (same boundary)
+                        pivot_pos = self._find_residue_alpha_carbon_pos(context, domain, residue_target='START')
+
+                elif num_domains >= 3:
+                    # For 3+ domains
+                    if i == 0:
+                        # First domain: pivot at end
+                        pivot_pos = self._find_residue_alpha_carbon_pos(context, domain, residue_target='END')
+                    elif i == num_domains - 1:
+                        # Last domain: pivot at center of mass
+                        pivot_pos = self._calculate_center_of_mass(context, domain.object,
+                                                                   chain_id=domain.chain_id,
+                                                                   start_res=domain.start,
+                                                                   end_res=domain.end)
+                        if not pivot_pos:
+                            # Fallback to start if center of mass fails
+                            pivot_pos = self._find_residue_alpha_carbon_pos(context, domain, residue_target='START')
+                    else:
+                        # Middle domains: pivot at beginning
+                        pivot_pos = self._find_residue_alpha_carbon_pos(context, domain, residue_target='START')
+
+                # Apply the pivot
+                if pivot_pos:
+                    self._set_domain_origin_and_update_matrix(context, domain, pivot_pos)
+                    print(f"Set split pivot for domain {domain.name} (position {i+1}/{num_domains})")
+
+            return True
+
+        except Exception as e:
+            print(f"Error setting domain split pivots: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    # --- End Helper ---
+
+    # --- Moved Helper: Set Origin and Update Matrix ---
     def _set_domain_origin_and_update_matrix(self, context, domain: DomainDefinition, target_pos: Vector):
         """
         Sets the domain object's origin to target_pos and updates initial_matrix_local.
