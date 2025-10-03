@@ -568,15 +568,17 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # This includes both full-chain domains and partial domains that match our split range
         domains_to_remove = []
         chain_start, chain_end = self.get_chain_range(molecule)
-        
-        
+
+        # Track the parent domain's style before removal
+        parent_domain_style = None
+
         self.report({'INFO'}, f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
-        
+
         for domain_id, domain in molecule.domains.items():
             # Check if this domain belongs to our chain
             if hasattr(domain, 'chain_id'):
                 self.report({'INFO'}, f"Checking domain {domain_id}: chain_id={domain.chain_id}, range={domain.start}-{domain.end}")
-                
+
                 # Compare chain IDs as strings to handle type mismatches
                 if str(domain.chain_id) == str(self.chain_id):
                     # Remove domains that overlap with our split range
@@ -584,14 +586,42 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     # 1. Domains that span our entire split range (the domain being split)
                     # 2. Full-chain domains when splitting from chain level
                     # 3. Any domain that would conflict with our new domains
-                    
+
                     # Check if this domain contains or equals our split range
                     if (domain.start <= self.split_start and domain.end >= self.split_end):
+                        # Capture the style from the domain being split
+                        # First try to read from the property, then fallback to reading from geometry nodes
+                        if hasattr(domain, 'style'):
+                            parent_domain_style = domain.style
+                            self.report({'INFO'}, f"Captured style '{parent_domain_style}' from parent domain property")
+
+                        # If style property seems to be default, read actual style from geometry nodes
+                        if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
+                            from ..panels.visual_setup_panel import get_object_style
+                            actual_style = get_object_style(domain.object)
+                            if actual_style:
+                                parent_domain_style = actual_style
+                                self.report({'INFO'}, f"Read actual style '{parent_domain_style}' from parent domain's geometry nodes")
+
                         domains_to_remove.append(domain_id)
                         self.report({'INFO'}, f"Will remove domain that contains split range: {domain.name} ({domain.start}-{domain.end})")
                     # Also check for any domains that would overlap with our split
                     elif ((domain.start >= self.split_start and domain.start <= self.split_end) or
                           (domain.end >= self.split_start and domain.end <= self.split_end)):
+                        # Also capture style from overlapping domains
+                        if parent_domain_style is None:
+                            if hasattr(domain, 'style'):
+                                parent_domain_style = domain.style
+                                self.report({'INFO'}, f"Captured style '{parent_domain_style}' from overlapping domain property")
+
+                            # If style property seems to be default, read actual style from geometry nodes
+                            if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
+                                from ..panels.visual_setup_panel import get_object_style
+                                actual_style = get_object_style(domain.object)
+                                if actual_style:
+                                    parent_domain_style = actual_style
+                                    self.report({'INFO'}, f"Read actual style '{parent_domain_style}' from overlapping domain's geometry nodes")
+
                         domains_to_remove.append(domain_id)
                         self.report({'INFO'}, f"Will remove overlapping domain: {domain.name} ({domain.start}-{domain.end})")
         
@@ -663,13 +693,25 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     False,          # auto_fill_chain
                     None            # parent_domain_id
                 )
-                
+
                 if created_domain_ids:
                     created_domains.extend(created_domain_ids)
                     # Domain IDs already include molecule ID, use them directly
                     for domain_id in created_domain_ids:
                         created_outliner_ids.append(domain_id)
                         all_created_domain_ids.append(domain_id)
+
+                        # Apply the parent domain's style if we captured one
+                        if parent_domain_style and domain_id in molecule.domains:
+                            domain = molecule.domains[domain_id]
+                            domain.style = parent_domain_style
+                            self.report({'INFO'}, f"Applied inherited style '{parent_domain_style}' to {domain_name}")
+
+                            # Also apply the style to the visual object
+                            if domain.object:
+                                from ..panels.visual_setup_panel import apply_style_to_object
+                                apply_style_to_object(domain.object, parent_domain_style)
+
                     self.report({'INFO'}, f"Created {domain_name}")
                 else:
                     self.report({'WARNING'}, f"Failed to create domain {start}-{end}")

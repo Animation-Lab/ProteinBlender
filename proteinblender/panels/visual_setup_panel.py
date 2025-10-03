@@ -959,22 +959,27 @@ def apply_protein_style_direct(scene_manager, protein_item, style):
     molecule = scene_manager.molecules.get(protein_item.item_id)
     if not molecule:
         return
-    
+
     # Apply to main protein object if it exists
     if molecule.object:
         apply_style_to_object(molecule.object, style)
-    
+
+    # Update molecule.style property
+    molecule.style = style
+
     # Apply to all domains
     for domain in molecule.domains.values():
         if domain.object:
             apply_style_to_object(domain.object, style)
+        # Update domain.style property
+        domain.style = style
 
 
 def apply_chain_style_direct(scene_manager, chain_item, style):
     """Apply style to all domains in a chain"""
     # Find parent molecule
     parent_molecule = scene_manager.molecules.get(chain_item.parent_id)
-    
+
     if parent_molecule:
         # Extract chain identifier
         chain_id_str = chain_item.item_id.split('_chain_')[-1]
@@ -982,12 +987,12 @@ def apply_chain_style_direct(scene_manager, chain_item, style):
             chain_id = int(chain_id_str)
         except:
             chain_id = chain_id_str
-        
+
         # Apply to domains belonging to this chain
         for domain_id, domain in parent_molecule.domains.items():
             # Check if domain belongs to this chain
             domain_chain_id = getattr(domain, 'chain_id', None)
-            
+
             # Extract chain from domain name if needed
             if domain_chain_id is None and hasattr(domain, 'name'):
                 import re
@@ -998,15 +1003,17 @@ def apply_chain_style_direct(scene_manager, chain_item, style):
                     match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
                     if match2:
                         domain_chain_id = int(match2.group(1))
-            
+
             # Check if this domain belongs to the chain
             if domain_chain_id is not None:
                 domain_chain_str = str(domain_chain_id)
                 chain_str = str(chain_id)
-                
+
                 if domain_chain_str == chain_str or domain_chain_id == chain_id:
                     if domain.object:
                         apply_style_to_object(domain.object, style)
+                    # Update domain.style property
+                    domain.style = style
 
 
 def apply_domain_style_direct(scene_manager, domain_item, style):
@@ -1016,6 +1023,14 @@ def apply_domain_style_direct(scene_manager, domain_item, style):
         obj = bpy.data.objects.get(domain_item.object_name)
         if obj:
             apply_style_to_object(obj, style)
+
+        # Update domain.style property
+        # Find the domain in the scene_manager
+        for molecule_id, molecule in scene_manager.molecules.items():
+            if domain_item.item_id in molecule.domains:
+                domain = molecule.domains[domain_item.item_id]
+                domain.style = style
+                break
 
 
 def apply_style_to_object(obj, style):
