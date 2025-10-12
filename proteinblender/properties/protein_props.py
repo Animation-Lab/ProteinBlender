@@ -118,6 +118,13 @@ class ProteinOutlinerItem(PropertyGroup):
         default=False
     )
 
+    # Tooltip text for this item
+    tooltip: StringProperty(
+        name="Tooltip",
+        description="Tooltip text to display for this item",
+        default=""
+    )
+
 class ProteinProperties(bpy.types.PropertyGroup):
     import_method: EnumProperty(
         items=[

@@ -58,7 +58,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         member_ids = group_item.puppet_memberships.split(',') if group_item.puppet_memberships else []
         if not member_ids:
             return False
-        
+
         # Check each member
         for member_id in member_ids:
             member_selected = False
@@ -70,40 +70,151 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     break
             if not member_selected:
                 return False
-        
+
         return True
+
+    def _generate_tooltip(self, context, item):
+        """Generate tooltip text for an outliner item"""
+        try:
+            if item.item_type == 'PROTEIN':
+                # For proteins, show the molecule name
+                scene_manager = ProteinBlenderScene.get_instance()
+                if not scene_manager or not hasattr(scene_manager, 'molecules'):
+                    return None
+                molecule = scene_manager.molecules.get(item.item_id)
+                if molecule:
+                    tooltip_parts = [f"Protein: {item.name}"]
+                    # Add PDB ID if available
+                    if hasattr(molecule, 'identifier'):
+                        tooltip_parts.append(f"ID: {molecule.identifier}")
+                    return "\n".join(tooltip_parts)
+
+            elif item.item_type == 'CHAIN':
+                # For chains, show protein name, chain name, and residue range
+                scene_manager = ProteinBlenderScene.get_instance()
+                if not scene_manager or not hasattr(scene_manager, 'molecules'):
+                    return None
+
+                # Extract molecule ID and chain ID from item_id
+                # Format: "molecule_id_chain_X" or just domain_id for chain copies
+                if '_chain_' in item.item_id:
+                    parts = item.item_id.rsplit('_chain_', 1)
+                    if len(parts) == 2:
+                        molecule_id = parts[0]
+                        chain_id = parts[1]
+                        molecule = scene_manager.molecules.get(molecule_id)
+                        if molecule:
+                            tooltip_parts = []
+                            # Add protein name
+                            protein_name = getattr(molecule, 'name', molecule.identifier)
+                            tooltip_parts.append(f"Protein: {protein_name}")
+                            # Add chain name
+                            tooltip_parts.append(f"Chain: {item.name}")
+                            # Add residue range if available
+                            if item.chain_start > 0 and item.chain_end > 0:
+                                tooltip_parts.append(f"Residues: {item.chain_start}-{item.chain_end}")
+                            return "\n".join(tooltip_parts)
+                else:
+                    # This is a chain copy (item_id is a domain_id)
+                    for molecule_id, molecule in scene_manager.molecules.items():
+                        if item.item_id in molecule.domains:
+                            domain = molecule.domains[item.item_id]
+                            tooltip_parts = []
+                            # Add protein name
+                            protein_name = getattr(molecule, 'name', molecule.identifier)
+                            tooltip_parts.append(f"Protein: {protein_name}")
+                            # Add chain/domain name
+                            tooltip_parts.append(f"Chain: {item.name}")
+                            # Add residue range
+                            if hasattr(domain, 'start') and hasattr(domain, 'end'):
+                                tooltip_parts.append(f"Residues: {domain.start}-{domain.end}")
+                            return "\n".join(tooltip_parts)
+
+            elif item.item_type == 'DOMAIN':
+                # For domains, show protein name, chain name, domain name, and residue range
+                scene_manager = ProteinBlenderScene.get_instance()
+                if not scene_manager or not hasattr(scene_manager, 'molecules'):
+                    return None
+
+                # Find the domain in the molecules
+                for molecule_id, molecule in scene_manager.molecules.items():
+                    if item.item_id in molecule.domains:
+                        domain = molecule.domains[item.item_id]
+                        tooltip_parts = []
+
+                        # Add protein name
+                        protein_name = getattr(molecule, 'name', molecule.identifier)
+                        tooltip_parts.append(f"Protein: {protein_name}")
+
+                        # Add chain information if available
+                        if hasattr(domain, 'chain_id'):
+                            # Try to get the chain name from the molecule's chain mapping
+                            chain_name = None
+                            if hasattr(molecule, 'auth_chain_id_map') and molecule.auth_chain_id_map:
+                                chain_name = molecule.auth_chain_id_map.get(domain.chain_id)
+                            if not chain_name and hasattr(molecule, 'idx_to_label_asym_id_map') and molecule.idx_to_label_asym_id_map:
+                                chain_name = molecule.idx_to_label_asym_id_map.get(domain.chain_id)
+
+                            if chain_name:
+                                tooltip_parts.append(f"Chain: {chain_name}")
+                            else:
+                                tooltip_parts.append(f"Chain: {domain.chain_id}")
+
+                        # Add domain name
+                        tooltip_parts.append(f"Domain: {item.name}")
+
+                        # Add residue range
+                        if item.domain_start > 0 and item.domain_end > 0:
+                            tooltip_parts.append(f"Residues: {item.domain_start}-{item.domain_end}")
+                        elif hasattr(domain, 'start') and hasattr(domain, 'end'):
+                            tooltip_parts.append(f"Residues: {domain.start}-{domain.end}")
+
+                        return "\n".join(tooltip_parts)
+
+            elif item.item_type == 'PUPPET':
+                # For puppets, show group name and member count
+                member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
+                member_count = len([m for m in member_ids if m])  # Filter out empty strings
+                return f"Puppet Group: {item.name}\nMembers: {member_count}"
+
+        except Exception as e:
+            # If tooltip generation fails, just return None to use regular label
+            print(f"Tooltip generation error: {e}")
+            return None
+
+        return None  # No tooltip for other items
     
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         # Check if this is the separator
         if item.item_id == "puppets_separator":
             layout.label(text=item.name)
             return
-        
+
         # Override the active state - we don't use row selection
         # Make the row non-interactive by disabling highlight
         layout.use_property_split = False
         layout.use_property_decorate = False
-        
+
         # Visual hierarchy through indentation
         row = layout.row(align=True)
-        
+
         # Indentation based on hierarchy level
         for i in range(item.indent_level):
             row.separator(factor=2.0)
-        
+
         # Check if this is a reference item
         is_reference = item.item_id.startswith("group_") and "_ref_" in item.item_id
-        
+
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
-        
+
         if item.item_type in ['PROTEIN', 'PUPPET'] and not is_reference:
             show_expand = True
         elif item.item_type == 'CHAIN':
             # Show expand arrow for chains with domains (both original and reference items)
             # This allows collapsing/expanding domains in groups too
             show_expand = item.has_domains
-        
+
         if show_expand:
             if item.is_expanded:
                 icon = 'TRIA_DOWN'
@@ -113,9 +224,21 @@ class PROTEINBLENDER_UL_outliner(UIList):
             op.item_id = item.item_id
         else:
             row.label(text="", icon='BLANK1')  # Spacing
-            
-        # Item label with appropriate icon
-        row.label(text=item.name, icon=item.icon)
+
+        # Item label with appropriate icon and tooltip
+        # Check if this item has a tooltip stored (set during outliner build)
+        has_tooltip = hasattr(item, 'tooltip') and item.tooltip
+
+        # Use an operator for the label to show tooltip on hover
+        if has_tooltip:
+            try:
+                op = row.operator("proteinblender.outliner_item_info", text=item.name, icon=item.icon, emboss=False)
+                op.item_id = item.item_id
+            except Exception as e:
+                print(f"Error creating tooltip operator: {e}")
+                row.label(text=item.name, icon=item.icon)
+        else:
+            row.label(text=item.name, icon=item.icon)
         
         # Add some space before the controls
         row.separator()
@@ -648,6 +771,53 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                     self.update_children_visibility(scene, item.item_id, visibility)
 
 
+class PROTEINBLENDER_OT_outliner_item_info(Operator):
+    """Display information about this outliner item"""
+    bl_idname = "proteinblender.outliner_item_info"
+    bl_label = "Item Info"
+    bl_options = {'INTERNAL'}
+
+    item_id: StringProperty()
+    tooltip_text: StringProperty()
+
+    @classmethod
+    def description(cls, context, properties):
+        """Dynamic tooltip based on the item"""
+        try:
+            print(f"[Tooltip Debug] Getting description")
+            print(f"[Tooltip Debug] Has item_id: {hasattr(properties, 'item_id')}")
+
+            # Try to get the tooltip from the item_id by looking it up in the outliner
+            if hasattr(properties, 'item_id') and properties.item_id:
+                print(f"[Tooltip Debug] item_id = '{properties.item_id}'")
+                scene = context.scene
+                print(f"[Tooltip Debug] Searching {len(scene.outliner_items)} items")
+
+                for item in scene.outliner_items:
+                    if item.item_id == properties.item_id:
+                        print(f"[Tooltip Debug] Found item: {item.name}")
+                        if hasattr(item, 'tooltip'):
+                            print(f"[Tooltip Debug] Tooltip: '{item.tooltip}'")
+                            if item.tooltip:
+                                return item.tooltip
+                        break
+
+            # Fallback: try to use tooltip_text property if set
+            if hasattr(properties, 'tooltip_text') and properties.tooltip_text:
+                return properties.tooltip_text
+        except Exception as e:
+            print(f"Tooltip description error: {e}")
+            import traceback
+            traceback.print_exc()
+
+        print(f"[Tooltip Debug] Returning default")
+        return "Outliner item"
+
+    def execute(self, context):
+        # This operator is just for showing tooltips, so it does nothing when clicked
+        return {'FINISHED'}
+
+
 class PROTEINBLENDER_PT_outliner(Panel):
     """Protein outliner panel"""
     bl_label = "Protein Outliner"
@@ -696,6 +866,7 @@ CLASSES = [
     PROTEINBLENDER_OT_toggle_expand,
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
+    PROTEINBLENDER_OT_outliner_item_info,
     PROTEINBLENDER_PT_outliner,
 ]
 

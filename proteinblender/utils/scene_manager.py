@@ -736,7 +736,13 @@ def build_outliner_hierarchy(context=None):
             protein_item.is_selected = item_selection_states[molecule_id]
         if molecule_id in item_expansion_states:
             protein_item.is_expanded = item_expansion_states[molecule_id]
-        
+
+        # Generate and store tooltip for protein
+        tooltip_parts = [f"Protein: {protein_item.name}"]
+        if hasattr(molecule, 'identifier'):
+            tooltip_parts.append(f"ID: {molecule.identifier}")
+        protein_item.tooltip = "\n".join(tooltip_parts)
+
         # Get chains from the molecule
         if mol_object and "chain_id" in mol_object.data.attributes:
             chain_attr = mol_object.data.attributes["chain_id"]
@@ -781,7 +787,7 @@ def build_outliner_hierarchy(context=None):
                     chain_item.is_selected = item_selection_states[chain_item.item_id]
                 if chain_item.item_id in item_expansion_states:
                     chain_item.is_expanded = item_expansion_states[chain_item.item_id]
-                
+
                 # Get chain residue ranges
                 if hasattr(molecule, 'chain_residue_ranges') and molecule.chain_residue_ranges:
                     # chain_residue_ranges is keyed by label_asym_id (like 'A', 'B', etc)
@@ -818,7 +824,16 @@ def build_outliner_hierarchy(context=None):
                         print(f"  Available keys in chain_residue_ranges: {list(molecule.chain_residue_ranges.keys())}")
                         if hasattr(molecule, 'idx_to_label_asym_id_map'):
                             print(f"  idx_to_label_asym_id_map: {molecule.idx_to_label_asym_id_map}")
-                
+
+                # Generate and store tooltip for chain (after residue ranges are set)
+                tooltip_parts = []
+                protein_name = getattr(molecule, 'name', molecule.identifier)
+                tooltip_parts.append(f"Protein: {protein_name}")
+                tooltip_parts.append(f"Chain: {chain_item.name}")
+                if chain_item.chain_start > 0 and chain_item.chain_end > 0:
+                    tooltip_parts.append(f"Chain Residues: {chain_item.chain_start}-{chain_item.chain_end}")
+                chain_item.tooltip = "\n".join(tooltip_parts)
+
                 # Debug output (commented out for production)
                 # print(f"\nProcessing chain {chain_name} (id={chain_id}):")
                 # print(f"Available domains in molecule: {list(molecule.domains.keys())}")
@@ -932,6 +947,20 @@ def build_outliner_hierarchy(context=None):
                         # Restore selection state
                         if domain_id in item_selection_states:
                             domain_item.is_selected = item_selection_states[domain_id]
+
+                        # Generate and store tooltip for domain
+                        tooltip_parts = []
+                        protein_name = getattr(molecule, 'name', molecule.identifier)
+                        tooltip_parts.append(f"Protein: {protein_name}")
+
+                        # Add chain information - use parent chain's display name
+                        tooltip_parts.append(f"Chain: {chain_item.name.replace('Chain ', '')}")
+
+                        # Only show domain residues if available
+                        if domain_item.domain_start > 0 and domain_item.domain_end > 0:
+                            tooltip_parts.append(f"Domain Residues: {domain_item.domain_start}-{domain_item.domain_end}")
+
+                        domain_item.tooltip = "\n".join(tooltip_parts)
             
             # After processing all regular chains, add chain copies as separate chain items
             # These are full-chain domain copies that should appear at the chain level
