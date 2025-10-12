@@ -165,9 +165,43 @@ def get_blender_path():
     return blender_path
 
 
+def ensure_dev_mode_disabled() -> None:
+    """Ensure DEV_MODE is set to False in __init__.py before building for release."""
+    init_path = "proteinblender/__init__.py"
+
+    print("Checking DEV_MODE setting in __init__.py...")
+
+    with open(init_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    original_content = content
+
+    # Replace any DEV_MODE = True with False
+    content = content.replace(
+        "DEV_MODE = True",
+        "DEV_MODE = False"
+    )
+
+    # Replace the environment variable check with hardcoded False
+    content = content.replace(
+        "DEV_MODE = os.environ.get('PROTEINBLENDER_DEV_MODE', 'false').lower() == 'true'",
+        "DEV_MODE = False  # Automatically set to False by build.py for release"
+    )
+
+    if content != original_content:
+        with open(init_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("✓ Set DEV_MODE = False for release build")
+    else:
+        print("✓ DEV_MODE already set to False")
+
+
 def build_extension(split: bool = True) -> None:
     for suffix in [".blend1", ".MNSession"]:
         clean_files(suffix=suffix)
+
+    # Ensure DEV_MODE is disabled for release builds
+    ensure_dev_mode_disabled()
 
     blender_path = get_blender_path()
     if split:

@@ -15,6 +15,10 @@ import gc
 import time
 from typing import Dict, Set
 
+# Development mode flag - set to True to skip dependency checks for faster reloads
+# build.py automatically sets this to False when building for release
+DEV_MODE = True  # Change to False for production, or set PROTEINBLENDER_DEV_MODE env var
+
 # Set up logging
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -22,6 +26,9 @@ formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+if DEV_MODE:
+    logger.info("🔧 DEV_MODE enabled - skipping dependency checks for faster reloads")
 
 # Add user site-packages to sys.path if not already present
 user_site = site.getusersitepackages()
@@ -412,7 +419,13 @@ REQUIRED_PACKAGES = {
 }
 
 # --- Dependency Management ---
-dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
+if DEV_MODE:
+    # In development mode, skip dependency checks for faster reloads
+    logger.info("Skipping dependency check in DEV_MODE")
+    dependencies_installed = True
+else:
+    # Normal mode: check and install dependencies
+    dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
 
 # Dynamically set warning if dependencies failed
 if not dependencies_installed:

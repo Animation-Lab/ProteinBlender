@@ -1,10 +1,235 @@
 """Keyframe operators for animation functionality"""
 
 import bpy
+import json
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
+
+# ============================================================================
+# Keyframe Metadata Storage Functions
+# ============================================================================
+
+def get_keyframe_metadata(controller_obj, frame):
+    """Retrieve stored keyframe settings for a specific frame.
+
+    Args:
+        controller_obj: The puppet controller Empty object
+        frame: The frame number to retrieve metadata for
+
+    Returns:
+        Dictionary with keyframe settings, or None if not found
+    """
+    if not controller_obj or 'pb_keyframe_metadata' not in controller_obj:
+        return None
+
+    try:
+        metadata_str = controller_obj['pb_keyframe_metadata']
+        metadata = json.loads(metadata_str)
+        return metadata.get(str(frame), None)
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        print(f"Warning: Failed to load keyframe metadata: {e}")
+        return None
+
+
+def save_keyframe_metadata(controller_obj, frame, settings):
+    """Save keyframe settings to controller object as custom property.
+
+    Args:
+        controller_obj: The puppet controller Empty object
+        frame: The frame number to save metadata for
+        settings: PuppetKeyframeSettings object with checkbox states
+    """
+    if not controller_obj:
+        return
+
+    # Get existing metadata or create new dictionary
+    if 'pb_keyframe_metadata' in controller_obj:
+        try:
+            metadata_str = controller_obj['pb_keyframe_metadata']
+            metadata = json.loads(metadata_str)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            metadata = {}
+    else:
+        metadata = {}
+
+    # Store settings for this frame
+    metadata[str(frame)] = {
+        'use_puppet': settings.use_puppet,
+        'location': settings.keyframe_location,
+        'rotation': settings.keyframe_rotation,
+        'scale': settings.keyframe_scale,
+        'pose': settings.keyframe_pose,
+        'color': settings.keyframe_color,
+    }
+
+    # Save back to object as custom property (automatically saved in .blend file)
+    controller_obj['pb_keyframe_metadata'] = json.dumps(metadata)
+
+
+def check_existing_keyframes(controller_obj, domain_objects, frame):
+    """Check which properties actually have keyframes at the specified frame.
+
+    This queries Blender's F-Curves to detect what's actually keyframed,
+    which can be used to validate stored metadata.
+
+    Args:
+        controller_obj: The puppet controller Empty object
+        domain_objects: List of domain objects belonging to this puppet
+        frame: The frame number to check
+
+    Returns:
+        Dictionary with boolean values for each property type
+    """
+    keyframe_state = {
+        'location': False,
+        'rotation': False,
+        'scale': False,
+        'pose': False,
+        'color': False
+    }
+
+    # Check controller object F-Curves
+    if controller_obj and controller_obj.animation_data and controller_obj.animation_data.action:
+        action = controller_obj.animation_data.action
+        for fcurve in action.fcurves:
+            # Check if any keyframe exists at this frame
+            for kf in fcurve.keyframe_points:
+                if abs(kf.co.x - frame) < 0.01:  # Frame match (with float tolerance)
+                    if 'location' in fcurve.data_path:
+                        keyframe_state['location'] = True
+                    elif 'rotation' in fcurve.data_path:
+                        keyframe_state['rotation'] = True
+                    elif 'scale' in fcurve.data_path:
+                        keyframe_state['scale'] = True
+                    break
+
+    # Check domain objects for pose keyframes (local transforms)
+    for domain_obj in domain_objects:
+        if domain_obj.animation_data and domain_obj.animation_data.action:
+            action = domain_obj.animation_data.action
+            for fcurve in action.fcurves:
+                for kf in fcurve.keyframe_points:
+                    if abs(kf.co.x - frame) < 0.01:
+                        # Any keyframe on domain objects indicates pose keyframing
+                        keyframe_state['pose'] = True
+                        break
+                if keyframe_state['pose']:
+                    break
+        if keyframe_state['pose']:
+            break
+
+    # Check for color keyframes in geometry nodes
+    for domain_obj in domain_objects:
+        if has_color_keyframe(domain_obj, frame):
+            keyframe_state['color'] = True
+            break
+
+    return keyframe_state
+
+
+def has_color_keyframe(obj, frame):
+    """Check if a color keyframe exists at the specified frame.
+
+    Args:
+        obj: Domain object to check
+        frame: Frame number to check
+
+    Returns:
+        True if color keyframe found, False otherwise
+    """
+    # Find the MolecularNodes modifier
+    mod = None
+    for modifier in obj.modifiers:
+        if modifier.type == 'NODES':
+            mod = modifier
+            break
+
+    if not mod or not mod.node_group:
+        return False
+
+    node_tree = mod.node_group
+
+    # Check Custom Combine Color node for RGB keyframes
+    for node in node_tree.nodes:
+        if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
+            # Check if RGB inputs have animation data
+            for input_name in ['Red', 'Green', 'Blue']:
+                try:
+                    # Note: Node inputs don't have animation_data directly
+                    # We need to check the node group's animation data
+                    if node_tree.animation_data and node_tree.animation_data.action:
+                        for fcurve in node_tree.animation_data.action.fcurves:
+                            # Check if this fcurve targets this node's input
+                            if node.name in fcurve.data_path and input_name.lower() in fcurve.data_path.lower():
+                                for kf in fcurve.keyframe_points:
+                                    if abs(kf.co.x - frame) < 0.01:
+                                        return True
+                except Exception as e:
+                    pass
+            break
+
+    # Also check material alpha keyframes
+    style_node = None
+    for node in node_tree.nodes:
+        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
+            style_node = node
+            break
+
+    if style_node:
+        material_input = style_node.inputs.get("Material")
+        if material_input and material_input.default_value:
+            mat = material_input.default_value
+            if mat.use_nodes and mat.node_tree:
+                for mat_node in mat.node_tree.nodes:
+                    if mat_node.type == 'BSDF_PRINCIPLED':
+                        # Check for alpha keyframes
+                        if mat.node_tree.animation_data and mat.node_tree.animation_data.action:
+                            for fcurve in mat.node_tree.animation_data.action.fcurves:
+                                if 'Alpha' in fcurve.data_path:
+                                    for kf in fcurve.keyframe_points:
+                                        if abs(kf.co.x - frame) < 0.01:
+                                            return True
+                        break
+
+    return False
+
+
+def validate_keyframe_metadata(controller_obj, domain_objects, frame, stored_settings):
+    """Validate stored metadata against actual F-Curves.
+
+    Args:
+        controller_obj: The puppet controller Empty object
+        domain_objects: List of domain objects
+        frame: Frame number to validate
+        stored_settings: Dictionary of stored settings
+
+    Returns:
+        List of discrepancy messages (empty if everything matches)
+    """
+    if not stored_settings:
+        return []
+
+    actual_state = check_existing_keyframes(controller_obj, domain_objects, frame)
+    discrepancies = []
+
+    # Check each property
+    for key in ['location', 'rotation', 'scale', 'pose', 'color']:
+        stored_value = stored_settings.get(key, False)
+        actual_value = actual_state.get(key, False)
+
+        if stored_value and not actual_value:
+            discrepancies.append(f"{key.capitalize()} metadata indicates keyframe, but none found in timeline")
+        elif not stored_value and actual_value:
+            discrepancies.append(f"{key.capitalize()} keyframe found in timeline, but metadata says unchecked")
+
+    return discrepancies
+
+
+# ============================================================================
+# Property Groups and Operators
+# ============================================================================
 
 class PuppetKeyframeSettings(PropertyGroup):
     """Property group for puppet keyframe settings"""
@@ -301,13 +526,13 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
     
     def invoke(self, context, event):
         scene = context.scene
-        
+
         # Clear previous items
         self.puppet_items.clear()
-        
+
         # Set frame to current frame
         self.frame_number = scene.frame_current
-        
+
         # Add all puppets from the outliner
         if hasattr(scene, 'outliner_items'):
             for item in scene.outliner_items:
@@ -319,13 +544,39 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                         puppet_item.puppet_id = item.item_id
                         puppet_item.puppet_name = item.name
                         puppet_item.controller_object_name = item.controller_object_name
-                        puppet_item.use_puppet = False  # Unchecked by default
-                        puppet_item.keyframe_location = True
-                        puppet_item.keyframe_rotation = True
-                        puppet_item.keyframe_scale = True
-                        puppet_item.keyframe_color = True
-                        puppet_item.keyframe_pose = True
-        
+
+                        # Try to load existing keyframe metadata for this frame
+                        controller_obj = bpy.data.objects.get(item.controller_object_name)
+                        existing_settings = get_keyframe_metadata(controller_obj, self.frame_number)
+
+                        if existing_settings:
+                            # Restore previous settings from metadata
+                            puppet_item.use_puppet = existing_settings.get('use_puppet', False)
+                            puppet_item.keyframe_location = existing_settings.get('location', True)
+                            puppet_item.keyframe_rotation = existing_settings.get('rotation', True)
+                            puppet_item.keyframe_scale = existing_settings.get('scale', True)
+                            puppet_item.keyframe_color = existing_settings.get('color', True)
+                            puppet_item.keyframe_pose = existing_settings.get('pose', True)
+
+                            # Validate metadata against actual F-Curves
+                            domain_objects = self.get_puppet_objects(context, item.item_id)
+                            discrepancies = validate_keyframe_metadata(
+                                controller_obj, domain_objects, self.frame_number, existing_settings
+                            )
+
+                            if discrepancies:
+                                print(f"⚠ Keyframe metadata validation warnings for '{item.name}' at frame {self.frame_number}:")
+                                for msg in discrepancies:
+                                    print(f"  - {msg}")
+                        else:
+                            # No metadata found - use defaults
+                            puppet_item.use_puppet = False  # Unchecked by default
+                            puppet_item.keyframe_location = True
+                            puppet_item.keyframe_rotation = True
+                            puppet_item.keyframe_scale = True
+                            puppet_item.keyframe_color = True
+                            puppet_item.keyframe_pose = True
+
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
     
@@ -405,11 +656,16 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 color_row.prop(item, "keyframe_color", text="")
         
         layout.separator()
-        
+
         # Select all/none buttons
         row = layout.row(align=True)
         row.operator("proteinblender.keyframe_select_all_puppets", text="Select All")
         row.operator("proteinblender.keyframe_select_none_puppets", text="Select None")
+
+        # Add sync button for rebuilding metadata from timeline
+        layout.separator()
+        row = layout.row()
+        row.operator("proteinblender.sync_keyframe_metadata", text="Sync from Timeline", icon='FILE_REFRESH')
     
     def execute(self, context):
         scene = context.scene
@@ -546,17 +802,24 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 total_keyframed += 1
             
             keyframed_puppets.append(puppet_name)
-        
+
+        # Save keyframe metadata for all processed puppets
+        for puppet_item in self.puppet_items:
+            controller_obj = bpy.data.objects.get(puppet_item.controller_object_name)
+            if controller_obj:
+                save_keyframe_metadata(controller_obj, self.frame_number, puppet_item)
+                print(f"💾 Saved keyframe metadata for '{puppet_item.puppet_name}' at frame {self.frame_number}")
+
         # Restore original frame
         if original_frame != self.frame_number:
             scene.frame_set(original_frame)
-        
+
         if keyframed_puppets:
             puppet_names = ", ".join(keyframed_puppets)
             self.report({'INFO'}, f"Keyframed {total_keyframed} objects from puppets: {puppet_names} at frame {self.frame_number}")
         else:
             self.report({'WARNING'}, "No objects were keyframed")
-        
+
         return {'FINISHED'}
 
 
@@ -615,9 +878,64 @@ class PROTEINBLENDER_OT_keyframe_select_none(Operator):
     """Deprecated - use keyframe_select_none_poses"""
     bl_idname = "proteinblender.keyframe_select_none"
     bl_label = "Select None (Deprecated)"
-    
+
     def execute(self, context):
         return bpy.ops.proteinblender.keyframe_select_none_poses()
+
+
+class PROTEINBLENDER_OT_sync_keyframe_metadata(Operator):
+    """Sync keyframe metadata from timeline for current frame"""
+    bl_idname = "proteinblender.sync_keyframe_metadata"
+    bl_label = "Sync Keyframe Metadata from Timeline"
+    bl_description = "Rebuild keyframe metadata by reading actual keyframes from the timeline at current frame"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        current_frame = scene.frame_current
+        synced_count = 0
+
+        # Process all puppets
+        if hasattr(scene, 'outliner_items'):
+            for item in scene.outliner_items:
+                if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
+                    if item.controller_object_name:
+                        controller_obj = bpy.data.objects.get(item.controller_object_name)
+                        if not controller_obj:
+                            continue
+
+                        # Get puppet's domain objects
+                        from ..operators.keyframe_operators import PROTEINBLENDER_OT_create_keyframe
+                        temp_op = PROTEINBLENDER_OT_create_keyframe()
+                        domain_objects = temp_op.get_puppet_objects(context, item.item_id)
+
+                        # Check what's actually keyframed
+                        actual_state = check_existing_keyframes(controller_obj, domain_objects, current_frame)
+
+                        # Create a temporary settings object to save
+                        class TempSettings:
+                            def __init__(self):
+                                self.use_puppet = any(actual_state.values())  # True if any property is keyframed
+                                self.keyframe_location = actual_state.get('location', False)
+                                self.keyframe_rotation = actual_state.get('rotation', False)
+                                self.keyframe_scale = actual_state.get('scale', False)
+                                self.keyframe_pose = actual_state.get('pose', False)
+                                self.keyframe_color = actual_state.get('color', False)
+
+                        temp_settings = TempSettings()
+
+                        # Only save metadata if at least one property is keyframed
+                        if temp_settings.use_puppet:
+                            save_keyframe_metadata(controller_obj, current_frame, temp_settings)
+                            synced_count += 1
+                            print(f"🔄 Synced metadata for '{item.name}' at frame {current_frame}")
+
+        if synced_count > 0:
+            self.report({'INFO'}, f"Synced keyframe metadata for {synced_count} puppet(s) at frame {current_frame}")
+        else:
+            self.report({'INFO'}, f"No keyframes found at frame {current_frame}")
+
+        return {'FINISHED'}
 
 
 def register():

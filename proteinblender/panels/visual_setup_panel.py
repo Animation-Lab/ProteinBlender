@@ -796,122 +796,142 @@ _is_syncing_style = False
 def sync_color_to_selection(context):
     """Sync the color picker to match the first selected item's color"""
     global _is_syncing_color, _is_syncing_style
+
+    # Safety wrapper to prevent crashes during addon reload
+    try:
+        scene = context.scene
+
+        # Check if scene_manager is ready
+        try:
+            scene_manager = ProteinBlenderScene.get_instance()
+            if not scene_manager or not hasattr(scene_manager, 'molecules'):
+                print("sync_color_to_selection: scene_manager not ready yet")
+                return
+        except Exception as e:
+            print(f"sync_color_to_selection: Failed to get scene_manager: {e}")
+            return
+
+        # Find first selected item
+        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        if not selected_items:
+            # No selection - don't change the color picker
+            print("sync_color_to_selection: No items selected")
+            return
     
-    scene = context.scene
-    scene_manager = ProteinBlenderScene.get_instance()
+        print(f"sync_color_to_selection: {len(selected_items)} items selected, first: {selected_items[0].name}")
     
-    # Find first selected item
-    selected_items = [item for item in scene.outliner_items if item.is_selected]
-    if not selected_items:
-        # No selection - don't change the color picker
-        print("sync_color_to_selection: No items selected")
-        return
+        first_item = selected_items[0]
+        obj = None
     
-    print(f"sync_color_to_selection: {len(selected_items)} items selected, first: {selected_items[0].name}")
-    
-    first_item = selected_items[0]
-    obj = None
-    
-    # Get the object based on item type
-    if first_item.item_type == 'PROTEIN':
-        molecule = scene_manager.molecules.get(first_item.item_id)
-        if molecule and molecule.object:
-            obj = molecule.object
-    elif first_item.item_type == 'CHAIN':
-        # Find first domain in this chain
-        # First check if this is a domain ID (for chain copies)
-        domain_id = None
-        is_chain_copy = False
+        # Get the object based on item type
+        if first_item.item_type == 'PROTEIN':
+            molecule = scene_manager.molecules.get(first_item.item_id)
+            if molecule and molecule.object:
+                obj = molecule.object
+        elif first_item.item_type == 'CHAIN':
+            # Find first domain in this chain
+            # First check if this is a domain ID (for chain copies)
+            domain_id = None
+            is_chain_copy = False
         
-        # Check if item_id is directly a domain_id (for chain copies)
-        for molecule_id, molecule in scene_manager.molecules.items():
-            if first_item.item_id in molecule.domains:
-                domain_id = first_item.item_id
-                is_chain_copy = True
-                break
-        
-        if is_chain_copy and domain_id:
-            # It's a chain copy - get the domain object directly
+            # Check if item_id is directly a domain_id (for chain copies)
             for molecule_id, molecule in scene_manager.molecules.items():
-                if domain_id in molecule.domains:
-                    domain = molecule.domains[domain_id]
-                    if hasattr(domain, 'object'):
-                        obj = domain.object
-                    elif hasattr(domain, 'object_name'):
-                        obj = bpy.data.objects.get(domain.object_name)
+                if first_item.item_id in molecule.domains:
+                    domain_id = first_item.item_id
+                    is_chain_copy = True
                     break
-        else:
-            # Regular chain - find first domain in this chain
-            parent_molecule = scene_manager.molecules.get(first_item.parent_id)
-            if parent_molecule:
-                chain_id_str = first_item.item_id.split('_chain_')[-1]
-                for domain_id, domain in parent_molecule.domains.items():
-                    # Check if domain belongs to this chain
-                    domain_chain_id = getattr(domain, 'chain_id', None)
-                    if domain_chain_id is not None and str(domain_chain_id) == chain_id_str:
+        
+            if is_chain_copy and domain_id:
+                # It's a chain copy - get the domain object directly
+                for molecule_id, molecule in scene_manager.molecules.items():
+                    if domain_id in molecule.domains:
+                        domain = molecule.domains[domain_id]
                         if hasattr(domain, 'object'):
                             obj = domain.object
                         elif hasattr(domain, 'object_name'):
                             obj = bpy.data.objects.get(domain.object_name)
-                        if obj:
-                            break
-    elif first_item.item_type == 'DOMAIN':
-        # For domains, first try to find it in the scene_manager
-        domain_found = False
-        for molecule_id, molecule in scene_manager.molecules.items():
-            if first_item.item_id in molecule.domains:
-                domain = molecule.domains[first_item.item_id]
-                if hasattr(domain, 'object'):
-                    obj = domain.object
-                elif hasattr(domain, 'object_name'):
-                    obj = bpy.data.objects.get(domain.object_name)
-                domain_found = True
-                break
+                        break
+            else:
+                # Regular chain - find first domain in this chain
+                parent_molecule = scene_manager.molecules.get(first_item.parent_id)
+                if parent_molecule:
+                    chain_id_str = first_item.item_id.split('_chain_')[-1]
+                    for domain_id, domain in parent_molecule.domains.items():
+                        # Check if domain belongs to this chain
+                        domain_chain_id = getattr(domain, 'chain_id', None)
+                        if domain_chain_id is not None and str(domain_chain_id) == chain_id_str:
+                            if hasattr(domain, 'object'):
+                                obj = domain.object
+                            elif hasattr(domain, 'object_name'):
+                                obj = bpy.data.objects.get(domain.object_name)
+                            if obj:
+                                break
+        elif first_item.item_type == 'DOMAIN':
+            # For domains, first try to find it in the scene_manager
+            domain_found = False
+            for molecule_id, molecule in scene_manager.molecules.items():
+                if first_item.item_id in molecule.domains:
+                    domain = molecule.domains[first_item.item_id]
+                    if hasattr(domain, 'object'):
+                        obj = domain.object
+                    elif hasattr(domain, 'object_name'):
+                        obj = bpy.data.objects.get(domain.object_name)
+                    domain_found = True
+                    break
         
-        # Fallback to using object_name from the item
-        if not domain_found and first_item.object_name:
-            obj = bpy.data.objects.get(first_item.object_name)
+            # Fallback to using object_name from the item
+            if not domain_found and first_item.object_name:
+                obj = bpy.data.objects.get(first_item.object_name)
     
-    # Get color and style from the object and update the visual setup panel
-    if obj:
-        # Get and set color
-        color = get_object_color(obj)
-        print(f"Syncing color to picker: R={color[0]:.2f}, G={color[1]:.2f}, B={color[2]:.2f}, A={color[3]:.2f}")
+        # Get color and style from the object and update the visual setup panel
+        if obj:
+            # Get and set color
+            color = get_object_color(obj)
+            print(f"Syncing color to picker: R={color[0]:.2f}, G={color[1]:.2f}, B={color[2]:.2f}, A={color[3]:.2f}")
         
-        # Set a flag to prevent feedback loop
-        _is_syncing_color = True
-        try:
-            # Directly set the color property - ensure it's a tuple with 4 components
-            if len(color) == 3:
-                color = (color[0], color[1], color[2], 1.0)
+            # Set a flag to prevent feedback loop
+            _is_syncing_color = True
+            try:
+                # Directly set the color property - ensure it's a tuple with 4 components
+                if len(color) == 3:
+                    color = (color[0], color[1], color[2], 1.0)
             
-            # Set the color property using list assignment to ensure all components are set
-            scene.visual_setup_color[0] = color[0]  # R
-            scene.visual_setup_color[1] = color[1]  # G
-            scene.visual_setup_color[2] = color[2]  # B
-            scene.visual_setup_color[3] = color[3] if len(color) > 3 else 1.0  # A
+                # Set the color property using list assignment to ensure all components are set
+                scene.visual_setup_color[0] = color[0]  # R
+                scene.visual_setup_color[1] = color[1]  # G
+                scene.visual_setup_color[2] = color[2]  # B
+                scene.visual_setup_color[3] = color[3] if len(color) > 3 else 1.0  # A
             
-            # Also get and set the style
-            _is_syncing_style = True
-            style = get_object_style(obj)
-            if style:
-                scene.visual_setup_style = style
-                print(f"Syncing style to panel: {style}")
-            _is_syncing_style = False
+                # Also get and set the style
+                _is_syncing_style = True
+                style = get_object_style(obj)
+                if style:
+                    scene.visual_setup_style = style
+                    print(f"Syncing style to panel: {style}")
+                _is_syncing_style = False
             
-            # Force UI update
-            for area in context.screen.areas:
-                if area.type in ['PROPERTIES', 'VIEW_3D']:
-                    area.tag_redraw()
+                # Force UI update
+                for area in context.screen.areas:
+                    if area.type in ['PROPERTIES', 'VIEW_3D']:
+                        area.tag_redraw()
             
-            # Also try to update the region
-            if context.region:
-                context.region.tag_redraw()
+                # Also try to update the region
+                if context.region:
+                    context.region.tag_redraw()
                 
-        finally:
-            _is_syncing_color = False
-    else:
-        print(f"sync_color_to_selection: Could not find object for {first_item.item_type}: {first_item.name}")
+            finally:
+                _is_syncing_color = False
+        else:
+            print(f"sync_color_to_selection: Could not find object for {first_item.item_type}: {first_item.name}")
+
+    except Exception as e:
+        # Catch all exceptions to prevent crashes during addon reload
+        print(f"Error in sync_color_to_selection: {e}")
+        import traceback
+        traceback.print_exc()
+        # Reset flags
+        _is_syncing_color = False
+        _is_syncing_style = False
 
 
 def update_color(self, context):

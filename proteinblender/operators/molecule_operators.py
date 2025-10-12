@@ -373,6 +373,351 @@ class MOLECULE_PB_OT_toggle_visibility(Operator):
         return {'FINISHED'}
 
 
+class MOLECULE_PB_OT_center_protein(Operator):
+    """Center protein at origin using center of mass"""
+    bl_idname = "molecule.center_protein"
+    bl_label = "Center Protein"
+    bl_description = "Move protein pivot to center of mass and place at world origin"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+
+        if not molecule:
+            self.report({'ERROR'}, "Molecule not found")
+            return {'CANCELLED'}
+
+        # Call the existing center of mass method
+        success = molecule.set_protein_pivot_to_center_of_mass(context)
+
+        if success:
+            self.report({'INFO'}, f"Centered protein '{molecule.identifier}' at origin")
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, "Failed to center protein")
+            return {'CANCELLED'}
+
+
+class MOLECULE_PB_OT_duplicate_protein(Operator):
+    """Create an exact duplicate of the protein with all domains and properties"""
+    bl_idname = "molecule.duplicate_protein"
+    bl_label = "Duplicate Protein"
+    bl_description = "Create a complete copy of this protein including all domains, colors, styles, and transforms"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        from mathutils import Vector
+        scene_manager = ProteinBlenderScene.get_instance()
+        source_molecule = scene_manager.molecules.get(self.molecule_id)
+
+        if not source_molecule or not source_molecule.object:
+            self.report({'ERROR'}, "Source molecule not found")
+            return {'CANCELLED'}
+
+        try:
+            # 1. Generate unique identifier for the duplicate
+            base_id = source_molecule.identifier
+            counter = 1
+            new_identifier = f"{base_id}_copy_{counter}"
+            while new_identifier in scene_manager.molecules:
+                counter += 1
+                new_identifier = f"{base_id}_copy_{counter}"
+
+            print(f"Duplicating protein '{base_id}' as '{new_identifier}'")
+
+            # 2. Duplicate the main protein object and its mesh data
+            source_obj = source_molecule.object
+            new_protein_obj = source_obj.copy()
+            new_protein_obj.data = source_obj.data.copy()
+            new_protein_obj.name = f"{new_identifier}_protein"
+
+            # Link to scene (use same collection as source)
+            if source_obj.users_collection:
+                source_obj.users_collection[0].objects.link(new_protein_obj)
+            else:
+                context.scene.collection.objects.link(new_protein_obj)
+
+            # 3. Copy modifiers from source protein
+            new_protein_obj.modifiers.clear()
+            for mod in source_obj.modifiers:
+                new_mod = new_protein_obj.modifiers.new(name=mod.name, type=mod.type)
+                # Copy modifier properties
+                for prop in mod.bl_rna.properties:
+                    if not prop.is_readonly:
+                        try:
+                            setattr(new_mod, prop.identifier, getattr(mod, prop.identifier))
+                        except:
+                            pass
+
+            # 4. Create new MoleculeWrapper
+            # We need to create a Molecule object first
+            from ..utils.molecularnodes.entities.molecule.molecule import Molecule
+            from ..core.molecule_wrapper import MoleculeWrapper
+
+            # Create a minimal Molecule object wrapping the new protein
+            new_mol_obj = Molecule(new_protein_obj.name)
+            new_mol_obj.object = new_protein_obj
+            new_mol_obj.array = source_molecule.molecule.array  # Share the same biotite array
+
+            # Create MoleculeWrapper
+            new_molecule = MoleculeWrapper(new_mol_obj, new_identifier)
+            new_molecule.style = source_molecule.style
+
+            # 5. Save source domain WORLD transforms before creating new domains
+            # This is crucial because create_domain() will set new pivots which changes coordinate systems
+            source_domain_world_data = {}
+            for source_domain_id, source_domain in source_molecule.get_sorted_domains().items():
+                if source_domain.object:
+                    source_domain_world_data[source_domain_id] = {
+                        'world_location': source_domain.object.matrix_world.translation.copy(),
+                        'world_rotation': source_domain.object.matrix_world.to_euler(),
+                        'world_scale': source_domain.object.matrix_world.to_scale(),
+                        'name': source_domain.name,
+                        'chain_id': source_domain.chain_id,
+                        'start': source_domain.start,
+                        'end': source_domain.end,
+                        'color': source_domain.color,
+                        'style': source_domain.style,
+                    }
+
+            # 6. Copy all domains with their properties
+            domain_mapping = {}  # Maps source_domain_id -> new_domain_id
+
+            for source_domain_id, world_data in source_domain_world_data.items():
+                source_domain = source_molecule.domains[source_domain_id]
+
+                print(f"  Copying domain: {world_data['name']}")
+
+                # Create new domain with same parameters
+                # Need to convert chain_id to numeric format for create_domain
+                numeric_chain_id = str(world_data['chain_id'])
+                if not numeric_chain_id.isdigit():
+                    # Find numeric equivalent
+                    for num_id, auth_id in source_molecule.chain_mapping.items():
+                        if auth_id == world_data['chain_id']:
+                            numeric_chain_id = str(num_id)
+                            break
+
+                result = new_molecule.create_domain(
+                    chain_id=numeric_chain_id,
+                    start=world_data['start'],
+                    end=world_data['end'],
+                    name=world_data['name']
+                )
+
+                # create_domain returns a list of domain IDs (due to auto-fill), take the first one
+                if not result:
+                    print(f"    Warning: Failed to create domain {source_domain.name}")
+                    continue
+
+                # Handle both list and string return types
+                if isinstance(result, list):
+                    new_domain_id = result[0] if result else None
+                else:
+                    new_domain_id = result
+
+                if not new_domain_id:
+                    print(f"    Warning: No domain ID returned for {source_domain.name}")
+                    continue
+
+                domain_mapping[source_domain_id] = new_domain_id
+                new_domain = new_molecule.domains[new_domain_id]
+
+                # 7. Copy color and style properties
+                new_domain.color = world_data['color']
+                new_domain.style = world_data['style']
+
+                # 8. Set WORLD transforms to match source (not local transforms)
+                # This works regardless of pivot locations
+                from mathutils import Matrix
+
+                # Build world matrix from saved world transforms
+                world_matrix = Matrix.LocRotScale(
+                    world_data['world_location'],
+                    world_data['world_rotation'],
+                    world_data['world_scale']
+                )
+
+                # Apply world matrix to new domain
+                new_domain.object.matrix_world = world_matrix
+
+                # Now set parent relationship - this will automatically update matrix_parent_inverse
+                new_domain.object.parent = new_protein_obj
+
+                # 9. Copy color from geometry nodes (RGB values and alpha)
+                self._copy_domain_color(source_domain.object, new_domain.object)
+
+                # 10. Apply style to the domain's node group
+                if new_domain.style != 'ribbon':  # ribbon is default, only change if different
+                    try:
+                        from ..utils.molecularnodes.blender.nodes import styles_mapping, append, swap
+                        # Find the style node in the new domain's node group
+                        if new_domain.node_group:
+                            for node in new_domain.node_group.nodes:
+                                if (node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name):
+                                    if new_domain.style in styles_mapping:
+                                        style_node_name = styles_mapping[new_domain.style]
+                                        swap(node, append(style_node_name))
+                                    break
+                    except Exception as e:
+                        print(f"    Warning: Could not apply style {new_domain.style}: {e}")
+
+                # 11. Copy custom properties
+                if hasattr(source_domain, 'is_copy'):
+                    new_domain.is_copy = source_domain.is_copy
+                if hasattr(source_domain, 'copy_number'):
+                    new_domain.copy_number = source_domain.copy_number
+                if hasattr(source_domain, 'original_domain_id'):
+                    new_domain.original_domain_id = source_domain.original_domain_id
+
+                print(f"    ✓ Copied domain '{source_domain.name}' -> '{new_domain_id}'")
+
+            # 12. Force scene update to ensure all objects are properly initialized
+            context.view_layer.update()
+
+            # 13. Set protein pivot to center of mass and move to origin
+            # Note: set_protein_pivot_to_center_of_mass() does BOTH:
+            # - Sets pivot to center of mass
+            # - Moves protein to world origin (0,0,0)
+            # Domains will follow automatically since they're parented to the protein
+            try:
+                print("Setting duplicated protein pivot to center of mass and moving to origin...")
+                new_molecule.set_protein_pivot_to_center_of_mass(context)
+                print("✓ Duplicated protein now at origin with pivot at center of mass")
+            except Exception as e:
+                print(f"Warning: Could not set pivot to center of mass: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # 14. Force another update after moving everything
+            context.view_layer.update()
+
+            # 15. Add to scene manager (directly to molecules dict since MoleculeManager doesn't have add_molecule)
+            scene_manager.molecules[new_identifier] = new_molecule
+
+            # 16. Rebuild outliner to show the new protein
+            from ..utils.scene_manager import build_outliner_hierarchy
+            build_outliner_hierarchy(context)
+
+            self.report({'INFO'}, f"Duplicated protein '{base_id}' with {len(domain_mapping)} domains")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to duplicate protein: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+    def _copy_domain_color(self, source_obj, target_obj):
+        """Copy color from source domain's geometry nodes to target domain"""
+        try:
+            # Find source geometry nodes modifier
+            source_mod = None
+            for mod in source_obj.modifiers:
+                if mod.type == 'NODES' and mod.node_group:
+                    source_mod = mod
+                    break
+
+            # Find target geometry nodes modifier
+            target_mod = None
+            for mod in target_obj.modifiers:
+                if mod.type == 'NODES' and mod.node_group:
+                    target_mod = mod
+                    break
+
+            if not source_mod or not target_mod:
+                return
+
+            source_tree = source_mod.node_group
+            target_tree = target_mod.node_group
+
+            # Look for Custom Combine Color node in source
+            source_color_node = None
+            for node in source_tree.nodes:
+                if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
+                    source_color_node = node
+                    break
+
+            # Look for or create Custom Combine Color node in target
+            target_color_node = None
+            for node in target_tree.nodes:
+                if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
+                    target_color_node = node
+                    break
+
+            if source_color_node and target_color_node:
+                # Copy RGB values
+                target_color_node.inputs['Red'].default_value = source_color_node.inputs['Red'].default_value
+                target_color_node.inputs['Green'].default_value = source_color_node.inputs['Green'].default_value
+                target_color_node.inputs['Blue'].default_value = source_color_node.inputs['Blue'].default_value
+
+            # Also copy alpha from material if present
+            self._copy_material_alpha(source_obj, target_obj, source_tree, target_tree)
+
+        except Exception as e:
+            print(f"Warning: Could not copy domain color: {e}")
+
+    def _copy_material_alpha(self, source_obj, target_obj, source_tree, target_tree):
+        """Copy alpha value from source material to target material"""
+        try:
+            # Find Style node in both trees
+            source_style_node = None
+            target_style_node = None
+
+            for node in source_tree.nodes:
+                if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
+                    source_style_node = node
+                    break
+
+            for node in target_tree.nodes:
+                if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
+                    target_style_node = node
+                    break
+
+            if not source_style_node or not target_style_node:
+                return
+
+            # Get materials
+            source_mat_input = source_style_node.inputs.get("Material")
+            target_mat_input = target_style_node.inputs.get("Material")
+
+            if not source_mat_input or not target_mat_input:
+                return
+
+            source_mat = source_mat_input.default_value
+            target_mat = target_mat_input.default_value
+
+            if not source_mat or not target_mat:
+                return
+
+            # Find Principled BSDF in both materials
+            if source_mat.use_nodes and target_mat.use_nodes:
+                source_bsdf = None
+                target_bsdf = None
+
+                for node in source_mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        source_bsdf = node
+                        break
+
+                for node in target_mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        target_bsdf = node
+                        break
+
+                if source_bsdf and target_bsdf:
+                    # Copy alpha value
+                    target_bsdf.inputs['Alpha'].default_value = source_bsdf.inputs['Alpha'].default_value
+
+        except Exception as e:
+            print(f"Warning: Could not copy material alpha: {e}")
+
+
 class MOLECULE_PB_OT_delete_chain(Operator):
     """Delete a chain and all its domains from a protein"""
     bl_idname = "molecule.delete_chain"

@@ -14,6 +14,8 @@ from .molecule_operators import (
     MOLECULE_PB_OT_snap_protein_pivot_center,
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
     MOLECULE_PB_OT_toggle_visibility,
+    MOLECULE_PB_OT_center_protein,
+    MOLECULE_PB_OT_duplicate_protein,
 )
 from .operator_import_protein import MOLECULE_OT_import_protein
 from .operator_import_local import MOLECULE_OT_import_local
@@ -62,6 +64,7 @@ from .keyframe_operators import (
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
     PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
     PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
+    PROTEINBLENDER_OT_sync_keyframe_metadata,
     register as register_keyframe_operators,
     unregister as unregister_keyframe_operators,
 )
@@ -88,6 +91,8 @@ CLASSES = (
     MOLECULE_PB_OT_snap_protein_pivot_center,
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
     MOLECULE_PB_OT_toggle_visibility,
+    MOLECULE_PB_OT_center_protein,
+    MOLECULE_PB_OT_duplicate_protein,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_copy_domain,
     MOLECULE_PB_OT_delete_domain,
@@ -125,6 +130,7 @@ CLASSES = (
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
     PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
     PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
+    PROTEINBLENDER_OT_sync_keyframe_metadata,
     # Pivot operators
     PROTEINBLENDER_OT_set_pivot_first,
     PROTEINBLENDER_OT_set_pivot_last,

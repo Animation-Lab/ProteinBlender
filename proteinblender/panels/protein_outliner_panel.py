@@ -224,8 +224,18 @@ class PROTEINBLENDER_UL_outliner(UIList):
                                 delete_op.domain_id = domain_id
                         break
         
-        # First: Delete button for proteins and groups
+        # First: Buttons for proteins
         elif item.item_type == 'PROTEIN':
+            # Center button (move to origin at center of mass)
+            center_op = row.operator("molecule.center_protein", text="", icon='OBJECT_ORIGIN', emboss=False)
+            if center_op:
+                center_op.molecule_id = item.item_id
+
+            # Duplicate button (create exact copy)
+            duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
+            if duplicate_op:
+                duplicate_op.molecule_id = item.item_id
+
             # Delete button (trash can) - use the existing molecule.delete operator
             delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
             if delete_op:

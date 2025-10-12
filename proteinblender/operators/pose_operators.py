@@ -159,7 +159,8 @@ class MOLECULE_PB_OT_apply_pose(Operator):
             
             applied_count += 1
         
-        # Reset domains that don't have stored transforms in this pose to their initial state
+        # Handle domains that don't have stored transforms in this pose
+        # These are domains created AFTER the pose was saved
         reset_count = 0
         for domain_id, domain in molecule.domains.items():
             # Skip domains that were handled above
@@ -168,20 +169,35 @@ class MOLECULE_PB_OT_apply_pose(Operator):
             # Skip domains without objects
             if not domain.object:
                 continue
-            # Reset to default transforms (identity)
-            domain.object.location = (0, 0, 0)
-            domain.object.rotation_euler = (0, 0, 0)
-            domain.object.scale = (1, 1, 1)
-            # Attempt to restore from initial_matrix_local if available
-            try:
-                if "initial_matrix_local" in domain.object:
-                    from mathutils import Matrix
-                    stored_matrix_list = domain.object["initial_matrix_local"]
-                    initial_matrix = Matrix(stored_matrix_list)
-                    domain.object.matrix_local = initial_matrix
-            except Exception as e:
-                print(f"Warning: Could not restore initial matrix for {domain.name}: {e}")
-            reset_count += 1
+
+            # Check if this domain has a parent object that IS in the pose
+            # If so, keep its local transforms (relative position to parent)
+            # This handles domains created by splitting chains after pose creation
+            parent_in_pose = False
+            if domain.object.parent:
+                # Check if parent is one of the domains in this pose
+                for transform in pose.domain_transforms:
+                    parent_domain = molecule.domains.get(transform.domain_id)
+                    if parent_domain and parent_domain.object == domain.object.parent:
+                        parent_in_pose = True
+                        print(f"Domain '{domain_id}' has parent in pose - keeping local transforms")
+                        break
+
+            if not parent_in_pose:
+                # No parent in pose - reset to default transforms (identity)
+                domain.object.location = (0, 0, 0)
+                domain.object.rotation_euler = (0, 0, 0)
+                domain.object.scale = (1, 1, 1)
+                # Attempt to restore from initial_matrix_local if available
+                try:
+                    if "initial_matrix_local" in domain.object:
+                        from mathutils import Matrix
+                        stored_matrix_list = domain.object["initial_matrix_local"]
+                        initial_matrix = Matrix(stored_matrix_list)
+                        domain.object.matrix_local = initial_matrix
+                except Exception as e:
+                    print(f"Warning: Could not restore initial matrix for {domain.name}: {e}")
+                reset_count += 1
         
         report_message = f"Applied pose '{pose.name}' to {applied_count} domains"
         if reset_count > 0:
