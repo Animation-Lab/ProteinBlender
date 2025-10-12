@@ -618,6 +618,11 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
 
+            # 18. Re-center the duplicated protein at origin (as if user clicked the re-center button)
+            print(f"Re-centering duplicated protein '{new_identifier}' at origin...")
+            bpy.ops.molecule.center_protein(molecule_id=new_identifier)
+            print(f"  ✓ Duplicated protein centered at origin")
+
             self.report({'INFO'}, f"Duplicated protein '{base_id}' with {len(domain_mapping)} domains")
             return {'FINISHED'}
 
