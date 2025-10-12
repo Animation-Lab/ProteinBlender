@@ -937,36 +937,56 @@ def sync_color_to_selection(context):
 def update_color(self, context):
     """Live update callback for color property"""
     global _is_syncing_color
-    
+
     # Skip if we're syncing from selection to prevent feedback loop
     if _is_syncing_color:
         return
-    
+
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
-    
+
     # Store current active object
     active_obj = context.view_layer.objects.active
-    
+
     # Find selected items in outliner
     selected_items = [item for item in scene.outliner_items if item.is_selected]
-    
+
     if not selected_items:
         return
-    
-    # Apply color based on selection context
+
+    # BUGFIX: Filter out chain selections if any of their child domains are also selected
+    # This prevents accidentally applying color to all domains in a chain when only
+    # specific domains are selected
+    filtered_items = []
     for item in selected_items:
+        if item.item_type == 'CHAIN':
+            # Check if any child domains of this chain are selected
+            has_selected_domain_child = False
+            for child_item in selected_items:
+                if child_item.item_type == 'DOMAIN' and child_item.parent_id == item.item_id:
+                    has_selected_domain_child = True
+                    break
+
+            # Only include the chain if no child domains are selected
+            if not has_selected_domain_child:
+                filtered_items.append(item)
+        else:
+            # Always include proteins and domains
+            filtered_items.append(item)
+
+    # Apply color based on selection context
+    for item in filtered_items:
         if item.item_type == 'PROTEIN':
             apply_protein_color_direct(scene_manager, item, scene.visual_setup_color)
         elif item.item_type == 'CHAIN':
             apply_chain_color_direct(scene_manager, item, scene.visual_setup_color)
         elif item.item_type == 'DOMAIN':
             apply_domain_color_direct(scene_manager, item, scene.visual_setup_color)
-    
+
     # Restore active object
     if active_obj:
         context.view_layer.objects.active = active_obj
-    
+
     # Update viewport
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -1121,40 +1141,60 @@ def apply_style_to_object(obj, style):
 def update_style(self, context):
     """Live update callback for style property"""
     global _is_syncing_style
-    
+
     # Skip if we're syncing from selection to prevent feedback loop
     if _is_syncing_style:
         return
-    
+
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
-    
+
     # Skip if empty value (multiple selections)
     if not scene.visual_setup_style:
         return
-    
+
     # Store current active object
     active_obj = context.view_layer.objects.active
-    
+
     # Find selected items in outliner
     selected_items = [item for item in scene.outliner_items if item.is_selected]
-    
+
     if not selected_items:
         return
-    
-    # Apply style based on selection context
+
+    # BUGFIX: Filter out chain selections if any of their child domains are also selected
+    # This prevents accidentally applying style to all domains in a chain when only
+    # specific domains are selected
+    filtered_items = []
     for item in selected_items:
+        if item.item_type == 'CHAIN':
+            # Check if any child domains of this chain are selected
+            has_selected_domain_child = False
+            for child_item in selected_items:
+                if child_item.item_type == 'DOMAIN' and child_item.parent_id == item.item_id:
+                    has_selected_domain_child = True
+                    break
+
+            # Only include the chain if no child domains are selected
+            if not has_selected_domain_child:
+                filtered_items.append(item)
+        else:
+            # Always include proteins and domains
+            filtered_items.append(item)
+
+    # Apply style based on selection context
+    for item in filtered_items:
         if item.item_type == 'PROTEIN':
             apply_protein_style_direct(scene_manager, item, scene.visual_setup_style)
         elif item.item_type == 'CHAIN':
             apply_chain_style_direct(scene_manager, item, scene.visual_setup_style)
         elif item.item_type == 'DOMAIN':
             apply_domain_style_direct(scene_manager, item, scene.visual_setup_style)
-    
+
     # Restore active object
     if active_obj:
         context.view_layer.objects.active = active_obj
-    
+
     # Update viewport
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
