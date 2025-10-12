@@ -432,6 +432,12 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
 
             # 2. Duplicate the main protein object and its mesh data
             source_obj = source_molecule.object
+
+            # Save source object's transform data before copying
+            source_location = source_obj.location.copy()
+            source_rotation = source_obj.rotation_euler.copy()
+            source_scale = source_obj.scale.copy()
+
             new_protein_obj = source_obj.copy()
             new_protein_obj.data = source_obj.data.copy()
             new_protein_obj.name = f"{new_identifier}_protein"
@@ -441,6 +447,11 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                 source_obj.users_collection[0].objects.link(new_protein_obj)
             else:
                 context.scene.collection.objects.link(new_protein_obj)
+
+            # Ensure new protein has exact same transform as source
+            new_protein_obj.location = source_location
+            new_protein_obj.rotation_euler = source_rotation
+            new_protein_obj.scale = source_scale
 
             # 3. Copy modifiers from source protein
             new_protein_obj.modifiers.clear()
@@ -468,46 +479,59 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             new_molecule = MoleculeWrapper(new_mol_obj, new_identifier)
             new_molecule.style = source_molecule.style
 
-            # 5. Save source domain WORLD transforms before creating new domains
-            # This is crucial because create_domain() will set new pivots which changes coordinate systems
-            source_domain_world_data = {}
+            # 5. CRITICAL: Store the offset between source protein location and origin
+            # We'll temporarily move the new protein to match source protein's position
+            # during domain creation, then move everything together to preserve exact transforms
+            source_to_origin_offset = source_location.copy()
+
+            # Move new protein to source location BEFORE creating domains
+            # This ensures domains are created with correct relative positions
+            new_protein_obj.location = source_location
+            context.view_layer.update()
+
+            print(f"  Temporarily positioned new protein at source location: {source_location}")
+
+            # 6. Save source domain data (we'll use LOCAL transforms since parent will match)
+            source_domain_data = {}
             for source_domain_id, source_domain in source_molecule.get_sorted_domains().items():
                 if source_domain.object:
-                    source_domain_world_data[source_domain_id] = {
-                        'world_location': source_domain.object.matrix_world.translation.copy(),
-                        'world_rotation': source_domain.object.matrix_world.to_euler(),
-                        'world_scale': source_domain.object.matrix_world.to_scale(),
+                    # Save domain properties and LOCAL transforms (relative to parent)
+                    source_domain_data[source_domain_id] = {
                         'name': source_domain.name,
                         'chain_id': source_domain.chain_id,
                         'start': source_domain.start,
                         'end': source_domain.end,
                         'color': source_domain.color,
                         'style': source_domain.style,
+                        'local_location': source_domain.object.location.copy(),
+                        'local_rotation': source_domain.object.rotation_euler.copy(),
+                        'local_scale': source_domain.object.scale.copy(),
+                        'matrix_parent_inverse': source_domain.object.matrix_parent_inverse.copy(),
                     }
 
-            # 6. Copy all domains with their properties
+            # 7. Copy all domains with their properties
             domain_mapping = {}  # Maps source_domain_id -> new_domain_id
 
-            for source_domain_id, world_data in source_domain_world_data.items():
+            for source_domain_id, domain_data in source_domain_data.items():
                 source_domain = source_molecule.domains[source_domain_id]
 
-                print(f"  Copying domain: {world_data['name']}")
+                print(f"  Copying domain: {domain_data['name']}")
 
                 # Create new domain with same parameters
                 # Need to convert chain_id to numeric format for create_domain
-                numeric_chain_id = str(world_data['chain_id'])
+                numeric_chain_id = str(domain_data['chain_id'])
                 if not numeric_chain_id.isdigit():
                     # Find numeric equivalent
                     for num_id, auth_id in source_molecule.chain_mapping.items():
-                        if auth_id == world_data['chain_id']:
+                        if auth_id == domain_data['chain_id']:
                             numeric_chain_id = str(num_id)
                             break
 
                 result = new_molecule.create_domain(
                     chain_id=numeric_chain_id,
-                    start=world_data['start'],
-                    end=world_data['end'],
-                    name=world_data['name']
+                    start=domain_data['start'],
+                    end=domain_data['end'],
+                    name=domain_data['name']
                 )
 
                 # create_domain returns a list of domain IDs (due to auto-fill), take the first one
@@ -528,31 +552,23 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                 domain_mapping[source_domain_id] = new_domain_id
                 new_domain = new_molecule.domains[new_domain_id]
 
-                # 7. Copy color and style properties
-                new_domain.color = world_data['color']
-                new_domain.style = world_data['style']
+                # 8. Copy color and style properties
+                new_domain.color = domain_data['color']
+                new_domain.style = domain_data['style']
 
-                # 8. Set WORLD transforms to match source (not local transforms)
-                # This works regardless of pivot locations
-                from mathutils import Matrix
+                # 9. Copy LOCAL transforms from source domain
+                # Since both parent proteins are at the same location, local transforms should match
+                new_domain.object.location = domain_data['local_location']
+                new_domain.object.rotation_euler = domain_data['local_rotation']
+                new_domain.object.scale = domain_data['local_scale']
 
-                # Build world matrix from saved world transforms
-                world_matrix = Matrix.LocRotScale(
-                    world_data['world_location'],
-                    world_data['world_rotation'],
-                    world_data['world_scale']
-                )
+                # Also copy the matrix_parent_inverse to ensure exact transform preservation
+                new_domain.object.matrix_parent_inverse = domain_data['matrix_parent_inverse']
 
-                # Apply world matrix to new domain
-                new_domain.object.matrix_world = world_matrix
-
-                # Now set parent relationship - this will automatically update matrix_parent_inverse
-                new_domain.object.parent = new_protein_obj
-
-                # 9. Copy color from geometry nodes (RGB values and alpha)
+                # 10. Copy color from geometry nodes (RGB values and alpha)
                 self._copy_domain_color(source_domain.object, new_domain.object)
 
-                # 10. Apply style to the domain's node group
+                # 11. Apply style to the domain's node group
                 if new_domain.style != 'ribbon':  # ribbon is default, only change if different
                     try:
                         from ..utils.molecularnodes.blender.nodes import styles_mapping, append, swap
@@ -567,7 +583,7 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                     except Exception as e:
                         print(f"    Warning: Could not apply style {new_domain.style}: {e}")
 
-                # 11. Copy custom properties
+                # 12. Copy custom properties
                 if hasattr(source_domain, 'is_copy'):
                     new_domain.is_copy = source_domain.is_copy
                 if hasattr(source_domain, 'copy_number'):
@@ -577,30 +593,28 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
 
                 print(f"    ✓ Copied domain '{source_domain.name}' -> '{new_domain_id}'")
 
-            # 12. Force scene update to ensure all objects are properly initialized
+            # 13. Force scene update to ensure all objects are properly initialized
             context.view_layer.update()
 
-            # 13. Set protein pivot to center of mass and move to origin
-            # Note: set_protein_pivot_to_center_of_mass() does BOTH:
-            # - Sets pivot to center of mass
-            # - Moves protein to world origin (0,0,0)
-            # Domains will follow automatically since they're parented to the protein
-            try:
-                print("Setting duplicated protein pivot to center of mass and moving to origin...")
-                new_molecule.set_protein_pivot_to_center_of_mass(context)
-                print("✓ Duplicated protein now at origin with pivot at center of mass")
-            except Exception as e:
-                print(f"Warning: Could not set pivot to center of mass: {e}")
-                import traceback
-                traceback.print_exc()
+            # 14. Final verification - protein should still be at source location
+            print(f"✓ Duplicated protein '{new_identifier}' created at same location as source")
+            print(f"  Source location: {source_location}")
+            print(f"  New protein location: {new_protein_obj.location}")
 
-            # 14. Force another update after moving everything
+            # Verify location is correct
+            current_location = new_protein_obj.location.copy()
+            if (current_location - source_location).length > 0.0001:
+                print(f"  Warning: Small location drift detected ({(current_location - source_location).length:.6f} units)")
+            else:
+                print(f"  ✓ Location verified: exactly matches source")
+
+            # 15. Force final scene update
             context.view_layer.update()
 
-            # 15. Add to scene manager (directly to molecules dict since MoleculeManager doesn't have add_molecule)
+            # 16. Add to scene manager (directly to molecules dict since MoleculeManager doesn't have add_molecule)
             scene_manager.molecules[new_identifier] = new_molecule
 
-            # 16. Rebuild outliner to show the new protein
+            # 17. Rebuild outliner to show the new protein
             from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
 
