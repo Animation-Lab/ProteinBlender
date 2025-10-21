@@ -17,7 +17,7 @@ from typing import Dict, Set
 
 # Development mode flag - set to True to skip dependency checks for faster reloads
 # build.py automatically sets this to False when building for release
-DEV_MODE = True  # Change to False for production, or set PROTEINBLENDER_DEV_MODE env var
+DEV_MODE = False  # Change to False for production, or set PROTEINBLENDER_DEV_MODE env var
 
 # Set up logging
 logger = logging.getLogger(__name__)

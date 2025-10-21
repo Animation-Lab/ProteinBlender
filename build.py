@@ -44,6 +44,54 @@ WHL_PATH = "./proteinblender/wheels"
 PYPROJ_PATH = "./pyproject.toml"
 
 
+def get_current_version() -> str:
+    """Read the current version from blender_manifest.toml"""
+    with open(TOML_PATH, "r") as file:
+        manifest = tomlkit.parse(file.read())
+    return manifest.get("version", "0.0.0")
+
+
+def suggest_next_version(current_version: str) -> str:
+    """Suggest the next patch version"""
+    parts = current_version.split(".")
+    if len(parts) == 3:
+        major, minor, patch = parts
+        next_patch = int(patch) + 1
+        return f"{major}.{minor}.{next_patch}"
+    return current_version
+
+
+def update_version(new_version: str) -> None:
+    """Update the version in blender_manifest.toml"""
+    with open(TOML_PATH, "r") as file:
+        manifest = tomlkit.parse(file.read())
+
+    manifest["version"] = new_version
+
+    with open(TOML_PATH, "w") as file:
+        file.write(
+            tomlkit.dumps(manifest)
+            .replace('["', '[\n\t"')
+            .replace("\\\\", "/")
+            .replace('", "', '",\n\t"')
+            .replace('"]', '",\n]')
+        )
+
+
+def prompt_for_version() -> str:
+    """Prompt user for version number, suggesting the next version"""
+    current = get_current_version()
+    suggested = suggest_next_version(current)
+
+    print(f"\nCurrent version: {current}")
+    print(f"Suggested version: {suggested}")
+    user_input = input(f"Enter version number (press Enter for {suggested}): ").strip()
+
+    if not user_input:
+        return suggested
+    return user_input
+
+
 @dataclass
 class Platform:
     pypi_suffix: str
@@ -203,6 +251,9 @@ def build_extension(split: bool = True) -> None:
     # Ensure DEV_MODE is disabled for release builds
     ensure_dev_mode_disabled()
 
+    # Create dist folder if it doesn't exist
+    os.makedirs("dist", exist_ok=True)
+
     blender_path = get_blender_path()
     if split:
         command = [
@@ -210,14 +261,14 @@ def build_extension(split: bool = True) -> None:
             "--command", "extension", "build",
             "--split-platforms",
             "--source-dir", "proteinblender",
-            "--output-dir", "."
+            "--output-dir", "dist"
         ]
     else:
         command = [
             blender_path,
             "--command", "extension", "build",
             "--source-dir", "proteinblender",
-            "--output-dir", "."
+            "--output-dir", "dist"
         ]
     print(f"Running command: {command}")
     subprocess.run(command)
@@ -230,6 +281,11 @@ def build(platform) -> None:
 
 
 def main():
+    # Prompt for version first
+    new_version = prompt_for_version()
+    update_version(new_version)
+    print(f"✓ Version set to {new_version}\n")
+
     # for platform in build_platforms:
     #     build(platform)
     build(build_platforms)
