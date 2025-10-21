@@ -1,0 +1,34 @@
+title: ProteinBlender Documentation
+description: Create stunning protein visualizations and animations in Blender
+theme: jekyll-theme-cayman
+baseurl: "/proteinblender"
+url: "https://ORGNAME.github.io"
+
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: true
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Navigation
+navigation:
+  - title: Home
+    url: /
+  - title: Installation
+    url: /installation
+  - title: Import Proteins
+    url: /import
+  - title: Update Visuals
+    url: /visuals
+  - title: Puppets
+    url: /puppets
+  - title: Poses
+    url: /poses
+  - title: Keyframes
+    url: /keyframes
