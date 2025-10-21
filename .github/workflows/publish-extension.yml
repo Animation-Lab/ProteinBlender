@@ -1,0 +1,64 @@
+name: Publish Blender Extension
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create extensions directory for hosting
+          mkdir -p extensions
+
+          # Get all releases and download their .zip assets
+          gh release list --limit 100 | while read -r line; do
+            tag=$(echo "$line" | awk '{print $3}')
+            echo "Processing release: $tag"
+
+            # Download all .zip files from this release
+            gh release download "$tag" -p "*.zip" -D extensions/ || echo "No zips for $tag"
+          done
+
+          ls -lah extensions/
+
+      - name: Set up Blender
+        run: |
+          # Download Blender 4.2+ (required for extension command)
+          wget -q https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
+          tar -xf blender-4.2.0-linux-x64.tar.xz
+          echo "$(pwd)/blender-4.2.0-linux-x64" >> $GITHUB_PATH
+
+      - name: Generate extension repository index
+        run: |
+          # Use Blender to generate the index.json
+          ./blender-4.2.0-linux-x64/blender --background --command extension server-generate --repo-dir=extensions/
+
+          # Verify the index was created
+          if [ -f extensions/index.json ]; then
+            echo "✓ index.json generated successfully"
+            cat extensions/index.json
+          else
+            echo "✗ Failed to generate index.json"
+            exit 1
+          fi
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./extensions
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "Update extension repository - ${{ github.event.release.tag_name }}"

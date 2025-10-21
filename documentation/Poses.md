@@ -1,219 +1,114 @@
-# Pose System Documentation
+# Pose System
 
 ## Overview
 
-A **pose** in ProteinBlender is a saved configuration that records the spatial positions of groups (collections of chains/domains) relative to their parent protein's alpha carbon center. Poses are fundamental to the animation workflow, allowing users to save, manage, and transition between different protein conformations.
-
-## Core Concepts
+A **pose** in ProteinBlender is a saved configuration that captures the spatial arrangement of protein puppets (collections of chains and/or domains). Poses are fundamental to the animation workflow, allowing users to save, manage, and transition between different protein conformations.
 
 ### What is a Pose?
 
 A pose consists of:
-1. **Groups**: Specific collections of protein chains and/or domains
-2. **Relative Positions**: Spatial coordinates of each group relative to the protein's alpha carbon center
-3. **Visual Snapshot**: A screenshot showing only the groups in that pose
-4. **Metadata**: Name, creation time, and group associations
+1. **Puppets**: Specific collections of protein chains and/or domains
+2. **Positions**: Spatial coordinates (location, rotation, scale) of objects in selected puppets
+3. **Metadata**: Name and list of included puppets
 
-### Why Alpha Carbon Relative Positioning?
+### Why Puppet-Based?
 
-Positions are stored relative to the parent protein's **alpha carbon center of mass** rather than the protein's pivot point because:
-- **Pivot Independence**: A protein's pivot point can change during editing, but the alpha carbon center remains constant
-- **Biological Relevance**: Alpha carbons form the protein backbone and provide a stable reference frame
-- **Animation Stability**: Ensures poses remain valid even after pivot adjustments
-- **Consistency**: Provides a universal reference point across all proteins
+The current implementation uses a **puppet-based system** rather than molecule-based:
+- **Simplicity**: Poses work directly with puppets without molecule dependencies
+- **Flexibility**: Any puppets in the scene can be included in a pose
+- **Clarity**: Direct puppet-to-pose relationship, no complex validation needed
 
-### Default Pose
+## Current Implementation
 
-When a protein is first imported into ProteinBlender:
-- A **"default" pose** is automatically created
-- This pose captures the initial conformation from the PDB/structure file
-- Serves as the baseline reference for all subsequent poses
-- Cannot be deleted (only modified)
+### Scene-Level Storage
 
-## User Interface Design
+Poses are stored at the scene level in `bpy.context.scene.pose_library`. Each pose captures transforms for all objects in selected puppets.
 
-### Pose Grid View
+### User Interface
 
-The main pose interface displays poses as a **grid of thumbnails**:
-- Each thumbnail shows a screenshot of the pose's groups
-- All non-pose elements are hidden in the screenshot
-- Thumbnails are clickable for interaction
-- Visual indicators show the currently active pose
-- Grid layout adapts to panel width
+The **Pose Library Panel** provides a grid-based interface with pose cards showing:
+- Pose name
+- Puppets included
+- Screenshot placeholder
+- Action buttons (Apply, Capture, Delete)
 
-### Pose Interaction Panel
+## Usage Guide
 
-Clicking a pose thumbnail opens a control panel with four primary actions:
+### Creating a Pose
 
-#### 1. Edit
-- **Purpose**: Modify pose composition and properties
-- **Functions**:
-  - Add or remove groups from the pose
-  - Rename the pose
-  - Update pose description/notes
-- **UI Elements**:
-  - Group selection checklist
-  - Text field for pose name
-  - Save/Cancel buttons
+1. **Create puppets** using the Protein Puppet Maker panel
+2. **Position puppets** as desired in the viewport
+3. **Click "Create Pose"** button
+4. **Select which puppets** to include in the pose
+5. **Name the pose** and save
 
-#### 2. Capture Positions
-- **Purpose**: Record current positions of all groups in the pose
-- **Process**:
-  1. Calculate each group's position relative to alpha carbon center
-  2. Store transformation matrices (location, rotation, scale)
-  3. Update pose timestamp
-  4. Regenerate thumbnail screenshot
-- **Feedback**: Visual confirmation when positions are captured
+### Applying a Pose
 
-#### 3. Apply
-- **Purpose**: Restore groups to their saved positions
-- **Actions**:
-  - Snap all pose groups to stored positions
-  - Maintain relative positioning to alpha carbon
-  - Trigger viewport update
-- **Use Cases**:
-  - Animation keyframing
-  - Resetting after manual adjustments
-  - Comparing different conformations
+1. **Click "Apply"** button on a pose card
+2. Objects are moved to their saved positions
+3. Scene updates immediately
 
-#### 4. Delete
-- **Purpose**: Remove a pose from the system
-- **Constraints**:
-  - Cannot delete the default pose
-  - Requires confirmation dialog
-  - Removes associated screenshots and data
+### Updating a Pose (Capturing New Positions)
+
+1. **Adjust puppet positions** in the viewport
+2. **Click "Capture"** button on the existing pose
+3. Current positions overwrite stored positions
 
 ## Technical Implementation
+
+### Files
+
+- **Panel**: `proteinblender/panels/pose_library_panel.py`
+- **Properties**: `proteinblender/properties/pose_props.py`
+- **Registration**: `proteinblender/panels/__init__.py` and `proteinblender/addon.py`
 
 ### Data Structure
 
 ```python
-class Pose:
-    # Identification
-    pose_id: str           # Unique identifier
-    name: str              # User-friendly name
-    protein_id: str        # Parent protein reference
-    
-    # Composition
-    group_ids: List[str]   # Groups included in this pose
-    
-    # Spatial Data (per group)
-    positions: Dict[str, Matrix4x4]  # Group ID -> Transform matrix
-    # Transform matrix includes:
-    # - Translation relative to alpha carbon
-    # - Rotation (quaternion or euler)
-    # - Scale factors
-    
-    # Metadata
-    screenshot_path: str   # Thumbnail image location
-    created_at: datetime   # Creation timestamp
-    modified_at: datetime  # Last modification time
-    is_default: bool      # True for the default pose
+class ScenePose(PropertyGroup):
+    name: StringProperty()           # Pose name
+    puppet_ids: StringProperty()     # Comma-separated puppet IDs
+    puppet_names: StringProperty()   # Comma-separated puppet names for display
+    transforms: CollectionProperty(type=PuppetTransform)  # Object transforms
 ```
 
-### Coordinate System
+### Operators
 
-1. **Reference Point Calculation**:
-   - Identify all alpha carbons (CA atoms) in the parent protein
-   - Calculate center of mass of alpha carbons
-   - Use as origin for relative positioning
+- **`proteinblender.create_pose`**: Select puppets and save their positions
+- **`proteinblender.apply_pose`**: Restore puppets to saved positions
+- **`proteinblender.capture_pose`**: Update pose with current positions
+- **`proteinblender.delete_pose`**: Remove pose from library
 
-2. **Position Storage**:
-   ```python
-   # For each group in pose
-   relative_position = group.world_position - alpha_carbon_center
-   relative_rotation = group.world_rotation
-   relative_scale = group.world_scale
-   ```
+## Implementation History
 
-3. **Position Application**:
-   ```python
-   # When applying a pose
-   group.world_position = alpha_carbon_center + stored_relative_position
-   group.world_rotation = stored_relative_rotation
-   group.world_scale = stored_relative_scale
-   ```
+### Evolution: Domain-Based → Puppet-Based
 
-### Screenshot Generation
+**Original Design (deprecated):**
+- Poses tied to specific molecules
+- Required molecule selection to function
+- Complex dual-system architecture
+- Alpha carbon relative positioning
 
-- **Visibility Control**: Hide all scene elements except pose groups
-- **Camera Setup**: Frame groups optimally for thumbnail
-- **Resolution**: Standardized thumbnail size (e.g., 256x256)
-- **Storage**: Save as PNG with pose ID as filename
+**Current Design (simplified):**
+- Poses work directly with puppets
+- No molecule selection required
+- Scene-level pose storage
+- Direct puppet-to-pose relationship
+- World-space transforms (simpler, more flexible)
 
-## Animation Integration
+## Future Enhancements
 
-### Keyframe Workflow
-
-1. **Setup**: Create poses for key conformations
-2. **Timeline**: Apply poses at specific frames
-3. **Interpolation**: Blender handles transitions between poses
-4. **Export**: Poses provide reproducible animation states
-
-### Best Practices
-
-- **Naming Convention**: Use descriptive names (e.g., "Open Conformation", "Substrate Bound")
-- **Group Organization**: Keep related structural elements in the same pose
-- **Version Control**: Capture positions before major edits
-- **Documentation**: Add notes about biological significance
-
-## Future Considerations
-
-### Planned Enhancements
-
-1. **Pose Interpolation**: Smooth transitions between poses
-2. **Pose Libraries**: Share poses between projects
-3. **Batch Operations**: Apply poses to multiple proteins
-4. **Undo/Redo Support**: Full history for pose modifications
-5. **Animation Curves**: Custom easing between poses
-
-### API Extensions
-
-```python
-# Proposed API methods
-pose_manager.create_pose(name, group_ids)
-pose_manager.duplicate_pose(pose_id)
-pose_manager.interpolate_poses(pose_a, pose_b, factor)
-pose_manager.export_pose(pose_id, format='json')
-pose_manager.import_pose(file_path)
-```
-
-## Error Handling
-
-### Common Issues and Solutions
-
-1. **Missing Groups**: Groups deleted after pose creation
-   - Solution: Mark pose as incomplete, prompt for update
-
-2. **Alpha Carbon Changes**: Protein structure modified
-   - Solution: Recalculate reference point, update positions
-
-3. **Coordinate System Mismatch**: Import/export between versions
-   - Solution: Version markers in pose data, migration utilities
-
-## Developer Notes
-
-### Key Files
-
-- `panels/pose_library_panel.py`: UI implementation
-- `operators/pose_operators.py`: Core pose operations
-- `utils/pose_manager.py`: Pose data management
-- `properties.py`: Pose property definitions
-
-### Testing Checklist
-
-- [ ] Default pose creation on protein import
-- [ ] Position capture with various group configurations
-- [ ] Apply pose maintains relative positioning
-- [ ] Screenshot generation and display
-- [ ] Edit functionality updates all references
-- [ ] Delete confirmation and cleanup
-- [ ] Pivot change doesn't affect poses
-- [ ] Multiple proteins with independent poses
+1. **Actual Screenshot Thumbnails**: Capture viewport images instead of placeholders
+2. **Puppet Editing**: Modify which puppets are included in a pose after creation
+3. **Interpolation**: Smooth transitions between poses for animation
+4. **Import/Export**: Share pose libraries between projects
+5. **Better Object Resolution**: Improve how puppet members map to Blender objects
 
 ## Glossary
 
-- **Alpha Carbon (CA)**: The central carbon atom in an amino acid, forming the protein backbone
-- **Group**: A collection of protein chains and/or domains treated as a unit
-- **Conformation**: A specific 3D arrangement of a protein structure
-- **Transform Matrix**: Mathematical representation of position, rotation, and scale
+- **Pose**: A saved configuration of puppet positions
+- **Puppet**: A collection of protein chains and/or domains (item type 'PUPPET' in outliner)
+- **Transform**: Location, rotation, and scale of an object
+- **Capture**: Save current object positions to a pose
+- **Apply**: Restore objects to positions stored in a pose
+- **Puppet Membership**: Which items (chains/domains) belong to a puppet (stored in `item.puppet_memberships`)

@@ -116,9 +116,10 @@ def update_outliner_from_blender_selection():
 - Selects protein object and ALL child domains
 - Cascades through entire hierarchy
 
-**PUPPET** (Group):
+**PUPPET**:
 - Selects/deselects Empty controller object
 - Members remain independent
+- Puppet is a collection of chains and/or domains
 
 ## Key Mechanisms
 
@@ -205,15 +206,15 @@ Each domain maintains independent color through unique node trees:
 
 ## Special Cases
 
-### 1. Puppet (Group) Items
-- Groups have Empty controller objects
+### 1. Puppet Items
+- Puppets have Empty controller objects
 - Selection controls Empty visibility/selection
 - Members maintain independent selection state
-- No cascading to group members
+- No cascading to puppet members
 
 ### 2. Reference Items
-- Created for items displayed within groups
-- Format: `{group_id}_ref_{original_id}`
+- Created for items displayed within puppets
+- Format: `{puppet_id}_ref_{original_id}`
 - Selection state mirrors original item
 - One-way sync from original to reference
 

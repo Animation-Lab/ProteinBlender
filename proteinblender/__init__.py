@@ -394,8 +394,8 @@ def _reload_modules(packages: Dict[str, str]) -> None:
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
-    "version": (1, 1, 0),
-    "blender": (4, 0, 0),
+    "version": (0, 1, 2),  # Synced with blender_manifest.toml
+    "blender": (4, 2, 0),  # Updated to match manifest requirement
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
     "warning": "",  # Will be set dynamically if dependencies fail

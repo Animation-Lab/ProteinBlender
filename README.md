@@ -12,14 +12,34 @@ ProteinBlender is a powerful Blender addon for biochemists and researchers that 
 - Dedicated workspace with specialized panels for molecular editing
 
 ## Requirements
-- Blender 4.0 or newer
+- Blender 4.2 or newer
 - MolecularNodes (included)
 
 ## Installation
-1. Download the ProteinBlender addon
-2. In Blender, go to Edit > Preferences > Add-ons
-3. Click "Install" and select the downloaded zip file
-4. Enable the addon by checking the box next to "3D View: ProteinBlender"
+
+### Option 1: Extension Repository (Recommended - Auto-Updates!)
+
+Get automatic update notifications directly in Blender:
+
+1. Open Blender 4.2+
+2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
+3. Click `+` → `Add Remote Repository`
+4. Enter:
+   - **Name**: `ProteinBlender`
+   - **URL**: `https://PLACEHOLDER_URL_HERE/index.json` _(will be updated after repo transfer)_
+5. Browse extensions and install ProteinBlender
+6. Enable "Check for Updates on Start" for automatic update notifications
+
+See [EXTENSION_REPOSITORY.md](EXTENSION_REPOSITORY.md) for detailed instructions.
+
+### Option 2: Manual Installation
+
+1. Download the latest `.zip` from [Releases](https://github.com/dillonleelab/proteinblender/releases)
+2. In Blender, go to `Edit` → `Preferences` → `Get Extensions`
+3. Click `Install from Disk` and select the downloaded zip file
+4. Restart Blender
+
+**Note**: Manual installation does not provide automatic update notifications.
 
 ## Project Structure
 The addon is organized into several key components:

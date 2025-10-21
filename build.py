@@ -42,6 +42,7 @@ except ModuleNotFoundError:
 TOML_PATH = "proteinblender/blender_manifest.toml"
 WHL_PATH = "./proteinblender/wheels"
 PYPROJ_PATH = "./pyproject.toml"
+INIT_PATH = "proteinblender/__init__.py"
 
 
 def get_current_version() -> str:
@@ -62,12 +63,18 @@ def suggest_next_version(current_version: str) -> str:
 
 
 def update_version(new_version: str) -> None:
-    """Update the version in blender_manifest.toml"""
+    """Update the version in all three files: blender_manifest.toml, pyproject.toml, and __init__.py"""
+    # Parse version into tuple format for __init__.py
+    parts = new_version.split(".")
+    if len(parts) == 3:
+        version_tuple = f"({parts[0]}, {parts[1]}, {parts[2]})"
+    else:
+        raise ValueError(f"Version must be in format X.Y.Z, got: {new_version}")
+
+    # Update blender_manifest.toml
     with open(TOML_PATH, "r") as file:
         manifest = tomlkit.parse(file.read())
-
     manifest["version"] = new_version
-
     with open(TOML_PATH, "w") as file:
         file.write(
             tomlkit.dumps(manifest)
@@ -76,6 +83,32 @@ def update_version(new_version: str) -> None:
             .replace('", "', '",\n\t"')
             .replace('"]', '",\n]')
         )
+
+    # Update pyproject.toml
+    with open(PYPROJ_PATH, "r") as file:
+        pyproject = tomlkit.parse(file.read())
+    pyproject["project"]["version"] = new_version
+    with open(PYPROJ_PATH, "w") as file:
+        file.write(tomlkit.dumps(pyproject))
+
+    # Update __init__.py bl_info version
+    with open(INIT_PATH, "r", encoding="utf-8") as file:
+        content = file.read()
+
+    # Replace the version tuple in bl_info
+    import re
+    # Match: "version": (any, numbers, here), with optional comment
+    pattern = r'("version":\s*)\([^)]+\)(\s*(?:#.*)?)'
+    replacement = rf'\1{version_tuple}\2'
+    content = re.sub(pattern, replacement, content)
+
+    with open(INIT_PATH, "w", encoding="utf-8") as file:
+        file.write(content)
+
+    print(f"✓ Updated version to {new_version} in:")
+    print(f"  - {TOML_PATH}")
+    print(f"  - {PYPROJ_PATH}")
+    print(f"  - {INIT_PATH}")
 
 
 def prompt_for_version() -> str:
@@ -284,7 +317,7 @@ def main():
     # Prompt for version first
     new_version = prompt_for_version()
     update_version(new_version)
-    print(f"✓ Version set to {new_version}\n")
+    print()  # Extra newline after version update messages
 
     # for platform in build_platforms:
     #     build(platform)
