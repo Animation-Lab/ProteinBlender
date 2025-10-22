@@ -81,33 +81,58 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
                     if fallback_position is None:
                         fallback_position = obj.location
                     continue
-                
-                # Get the mesh data with evaluated modifiers
-                depsgraph = bpy.context.evaluated_depsgraph_get()
-                eval_obj = obj.evaluated_get(depsgraph)
-                mesh = eval_obj.data
-                
+
+                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
+                # This ensures alpha carbon positions are consistent regardless of style
+                mesh = obj.data
+
                 # Get alpha carbon mask
                 is_alpha_attr = mesh.attributes["is_alpha_carbon"]
                 is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
                 is_alpha_attr.data.foreach_get("value", is_alpha)
-                
+
+                # Check if we need to filter by chain_id
+                # The mesh might contain all chains, so we need to filter to this object's chain
+                chain_mask = None
+                if "chain_id" in mesh.attributes:
+                    # Extract chain ID from object name
+                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
+                    import re
+                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
+                    if chain_match:
+                        obj_chain_id = int(chain_match.group(1))
+
+                        # Get chain_id attribute
+                        chain_id_attr = mesh.attributes["chain_id"]
+                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                        chain_id_attr.data.foreach_get("value", chain_ids)
+
+                        # Create mask for this chain only
+                        chain_mask = (chain_ids == obj_chain_id)
+
                 # Get vertex positions
                 positions = np.zeros(len(mesh.vertices) * 3)
                 mesh.vertices.foreach_get("co", positions)
                 positions = positions.reshape(-1, 3)
-                
-                # Filter for alpha carbons
-                alpha_positions = positions[is_alpha]
-                
+
+                # Combine alpha carbon mask with chain mask if needed
+                if chain_mask is not None:
+                    combined_mask = is_alpha & chain_mask
+                else:
+                    combined_mask = is_alpha
+
+                # Filter for alpha carbons (optionally filtered by chain)
+                alpha_positions = positions[combined_mask]
+
                 if len(alpha_positions) > 0:
                     # Check for residue IDs
                     if "res_id" in mesh.attributes:
                         res_id_attr = mesh.attributes["res_id"]
                         res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
                         res_id_attr.data.foreach_get("value", res_ids)
-                        alpha_res_ids = res_ids[is_alpha]
-                        
+                        # Apply the same mask to residue IDs
+                        alpha_res_ids = res_ids[combined_mask]
+
                         # Convert to world space and add to our collection
                         for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
                             world_pos = obj.matrix_world @ Vector(ca_pos)
@@ -248,33 +273,58 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
                     if fallback_position is None:
                         fallback_position = obj.location
                     continue
-                
-                # Get the mesh data with evaluated modifiers
-                depsgraph = bpy.context.evaluated_depsgraph_get()
-                eval_obj = obj.evaluated_get(depsgraph)
-                mesh = eval_obj.data
-                
+
+                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
+                # This ensures alpha carbon positions are consistent regardless of style
+                mesh = obj.data
+
                 # Get alpha carbon mask
                 is_alpha_attr = mesh.attributes["is_alpha_carbon"]
                 is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
                 is_alpha_attr.data.foreach_get("value", is_alpha)
-                
+
+                # Check if we need to filter by chain_id
+                # The mesh might contain all chains, so we need to filter to this object's chain
+                chain_mask = None
+                if "chain_id" in mesh.attributes:
+                    # Extract chain ID from object name
+                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
+                    import re
+                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
+                    if chain_match:
+                        obj_chain_id = int(chain_match.group(1))
+
+                        # Get chain_id attribute
+                        chain_id_attr = mesh.attributes["chain_id"]
+                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                        chain_id_attr.data.foreach_get("value", chain_ids)
+
+                        # Create mask for this chain only
+                        chain_mask = (chain_ids == obj_chain_id)
+
                 # Get vertex positions
                 positions = np.zeros(len(mesh.vertices) * 3)
                 mesh.vertices.foreach_get("co", positions)
                 positions = positions.reshape(-1, 3)
-                
-                # Filter for alpha carbons
-                alpha_positions = positions[is_alpha]
-                
+
+                # Combine alpha carbon mask with chain mask if needed
+                if chain_mask is not None:
+                    combined_mask = is_alpha & chain_mask
+                else:
+                    combined_mask = is_alpha
+
+                # Filter for alpha carbons (optionally filtered by chain)
+                alpha_positions = positions[combined_mask]
+
                 if len(alpha_positions) > 0:
                     # Check for residue IDs
                     if "res_id" in mesh.attributes:
                         res_id_attr = mesh.attributes["res_id"]
                         res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
                         res_id_attr.data.foreach_get("value", res_ids)
-                        alpha_res_ids = res_ids[is_alpha]
-                        
+                        # Apply the same mask to residue IDs
+                        alpha_res_ids = res_ids[combined_mask]
+
                         # Convert to world space and add to our collection
                         for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
                             world_pos = obj.matrix_world @ Vector(ca_pos)
@@ -392,19 +442,25 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
         """Calculate the center of mass of alpha carbons across all selected domain objects"""
         if not objects:
             return None
-        
+
         import numpy as np
-        
+
         all_alpha_positions = []
         all_masses = []
-        
+
+        print(f"\n=== Center Pivot Calculation ===")
+        print(f"Processing {len(objects)} object(s)")
+
         for obj in objects:
+            print(f"\nProcessing object: {obj.name}")
             # Check if this is a molecular object with attributes
             if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
                 # Fallback to bounding box center if not a proper molecular object
+                print(f"  No mesh data or attributes - using bounding box")
                 bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                 if bbox:
                     center = sum(bbox, Vector()) / len(bbox)
+                    print(f"  Bbox center: {center}")
                     all_alpha_positions.append(center)
                     all_masses.append(1.0)  # Default mass
                 continue
@@ -413,54 +469,101 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 # Check if alpha carbon attribute exists
                 if "is_alpha_carbon" not in obj.data.attributes:
                     # No alpha carbon data, use bounding box center
+                    print(f"  No is_alpha_carbon attribute - using bounding box")
                     bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                     if bbox:
                         center = sum(bbox, Vector()) / len(bbox)
+                        print(f"  Bbox center: {center}")
                         all_alpha_positions.append(center)
                         all_masses.append(1.0)
                     continue
-                
-                # Get the mesh data with evaluated modifiers
-                depsgraph = bpy.context.evaluated_depsgraph_get()
-                eval_obj = obj.evaluated_get(depsgraph)
-                mesh = eval_obj.data
-                
+
+                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
+                # This ensures alpha carbon positions are consistent regardless of style
+                mesh = obj.data
+                print(f"  Using original mesh with {len(mesh.vertices)} vertices")
+                print(f"  Mesh data name: {mesh.name}")
+                print(f"  Mesh users: {mesh.users}")
+                print(f"  Object location: {obj.location}")
+                print(f"  Object matrix_world translation: {obj.matrix_world.translation}")
+
                 # Get alpha carbon mask
                 is_alpha_attr = mesh.attributes["is_alpha_carbon"]
                 is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
                 is_alpha_attr.data.foreach_get("value", is_alpha)
-                
+
+                # Check if we need to filter by chain_id
+                # The mesh might contain all chains, so we need to filter to this object's chain
+                chain_mask = None
+                if "chain_id" in mesh.attributes:
+                    # Extract chain ID from object name
+                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
+                    import re
+                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
+                    if chain_match:
+                        obj_chain_id = int(chain_match.group(1))
+                        print(f"  Detected chain ID from object name: {obj_chain_id}")
+
+                        # Get chain_id attribute
+                        chain_id_attr = mesh.attributes["chain_id"]
+                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
+                        chain_id_attr.data.foreach_get("value", chain_ids)
+
+                        # Create mask for this chain only
+                        chain_mask = (chain_ids == obj_chain_id)
+                        print(f"  Filtering to chain {obj_chain_id}: {np.sum(chain_mask)} vertices")
+
                 # Get vertex positions
                 positions = np.zeros(len(mesh.vertices) * 3)
                 mesh.vertices.foreach_get("co", positions)
                 positions = positions.reshape(-1, 3)
-                
-                # Filter for alpha carbons
-                alpha_positions = positions[is_alpha]
-                
+
+                # Combine alpha carbon mask with chain mask if needed
+                if chain_mask is not None:
+                    combined_mask = is_alpha & chain_mask
+                else:
+                    combined_mask = is_alpha
+
+                # Filter for alpha carbons (optionally filtered by chain)
+                alpha_positions = positions[combined_mask]
+                print(f"  Found {len(alpha_positions)} alpha carbons for this chain")
+
                 if len(alpha_positions) > 0:
                     # Convert to world space and add to list
                     for ca_pos in alpha_positions:
                         world_pos = obj.matrix_world @ Vector(ca_pos)
                         all_alpha_positions.append(world_pos)
                         all_masses.append(12.01)  # Carbon mass
+
+                    # Calculate local center for debugging
+                    local_center = np.mean(alpha_positions, axis=0)
+                    world_center = obj.matrix_world @ Vector(local_center)
+                    print(f"  Object's alpha carbon center (world): {world_center}")
                 else:
                     # No alpha carbons, use bounding box center
+                    print(f"  No alpha carbons found - using bounding box")
                     bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                     if bbox:
                         center = sum(bbox, Vector()) / len(bbox)
+                        print(f"  Bbox center: {center}")
                         all_alpha_positions.append(center)
                         all_masses.append(1.0)
                     
             except Exception as e:
                 # If any error occurs, fallback to bounding box
-                print(f"Error getting alpha carbons for {obj.name}: {e}")
+                print(f"  ERROR: {e}")
+                import traceback
+                traceback.print_exc()
                 bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                 if bbox:
                     center = sum(bbox, Vector()) / len(bbox)
+                    print(f"  Fallback bbox center: {center}")
                     all_alpha_positions.append(center)
                     all_masses.append(1.0)
-        
+
+        print(f"\n=== Final Calculation ===")
+        print(f"Total positions collected: {len(all_alpha_positions)}")
+
         if all_alpha_positions:
             # Calculate center of mass
             total_mass = sum(all_masses)
@@ -468,11 +571,16 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 weighted_sum = Vector((0, 0, 0))
                 for pos, mass in zip(all_alpha_positions, all_masses):
                     weighted_sum += pos * mass
-                return weighted_sum / total_mass
+                final_center = weighted_sum / total_mass
+                print(f"Final center of mass: {final_center}")
+                return final_center
             else:
                 # Simple average if mass calculation fails
-                return sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
-        
+                final_center = sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
+                print(f"Final average center: {final_center}")
+                return final_center
+
+        print("No positions found - returning None")
         return None
     
     def set_object_origin(self, obj, new_origin):
