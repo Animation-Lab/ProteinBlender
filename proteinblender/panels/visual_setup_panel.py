@@ -284,8 +284,12 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         col_right = row.column(align=True)
         col_right.prop(scene, "visual_setup_style", text="")
         
-        # Pivot Point controls - only show when exactly 1 chain or domain is selected
-        if len(selected_items) == 1 and selected_items[0].item_type in ['CHAIN', 'DOMAIN']:
+        # Pivot Point controls - show when exactly 1 chain OR exactly 1 domain is selected
+        # Note: When a domain is selected, its parent chain might also auto-select
+        # So we prioritize: if any domains are selected, ignore chain count
+        show_pivot = (domains == 1) or (domains == 0 and chains == 1)
+
+        if show_pivot:
             # Separator between color/style and pivot controls
             box.separator()
 

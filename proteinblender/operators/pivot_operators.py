@@ -8,6 +8,37 @@ from ..utils.scene_manager import ProteinBlenderScene
 from bpy.app.handlers import persistent
 
 
+def extract_chain_id_from_object_name(obj_name):
+    """Extract chain ID from object name.
+
+    Handles multiple naming patterns:
+    - "Chain A_0_1_197" -> chain_id = 0
+    - "3b75_001_0_1_197_Chain_A" -> chain_id = 0
+    - "Domain_A_5_50" -> chain_id = 0 (if A maps to 0)
+
+    Returns:
+        int or None: The chain ID if found, None otherwise
+    """
+    import re
+
+    # Pattern 1: Standard chain/domain pattern with numeric chain ID
+    # Matches: "Chain A_0_1_197" or "3b75_001_0_1_197_anything"
+    match = re.search(r'_(\d+)_\d+_\d+', obj_name)
+    if match:
+        return int(match.group(1))
+
+    # Pattern 2: Try to find any numeric ID after underscore
+    # This is a more general fallback
+    parts = obj_name.split('_')
+    for i, part in enumerate(parts):
+        if part.isdigit() and i + 2 < len(parts):
+            # Check if next two parts are also digits (residue range pattern)
+            if parts[i+1].isdigit() and parts[i+2].isdigit():
+                return int(part)
+
+    return None
+
+
 class PROTEINBLENDER_OT_set_pivot_first(Operator):
     """Set pivot point to first residue (N-terminal)"""
     bl_idname = "proteinblender.set_pivot_first"
@@ -96,12 +127,8 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
                 chain_mask = None
                 if "chain_id" in mesh.attributes:
                     # Extract chain ID from object name
-                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
-                    import re
-                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
-                    if chain_match:
-                        obj_chain_id = int(chain_match.group(1))
-
+                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
+                    if obj_chain_id is not None:
                         # Get chain_id attribute
                         chain_id_attr = mesh.attributes["chain_id"]
                         chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
@@ -288,12 +315,8 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
                 chain_mask = None
                 if "chain_id" in mesh.attributes:
                     # Extract chain ID from object name
-                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
-                    import re
-                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
-                    if chain_match:
-                        obj_chain_id = int(chain_match.group(1))
-
+                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
+                    if obj_chain_id is not None:
                         # Get chain_id attribute
                         chain_id_attr = mesh.attributes["chain_id"]
                         chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
@@ -448,19 +471,13 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
         all_alpha_positions = []
         all_masses = []
 
-        print(f"\n=== Center Pivot Calculation ===")
-        print(f"Processing {len(objects)} object(s)")
-
         for obj in objects:
-            print(f"\nProcessing object: {obj.name}")
             # Check if this is a molecular object with attributes
             if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
                 # Fallback to bounding box center if not a proper molecular object
-                print(f"  No mesh data or attributes - using bounding box")
                 bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                 if bbox:
                     center = sum(bbox, Vector()) / len(bbox)
-                    print(f"  Bbox center: {center}")
                     all_alpha_positions.append(center)
                     all_masses.append(1.0)  # Default mass
                 continue
@@ -469,11 +486,9 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 # Check if alpha carbon attribute exists
                 if "is_alpha_carbon" not in obj.data.attributes:
                     # No alpha carbon data, use bounding box center
-                    print(f"  No is_alpha_carbon attribute - using bounding box")
                     bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                     if bbox:
                         center = sum(bbox, Vector()) / len(bbox)
-                        print(f"  Bbox center: {center}")
                         all_alpha_positions.append(center)
                         all_masses.append(1.0)
                     continue
@@ -481,11 +496,6 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 # Use the ORIGINAL mesh data (before geometry nodes evaluation)
                 # This ensures alpha carbon positions are consistent regardless of style
                 mesh = obj.data
-                print(f"  Using original mesh with {len(mesh.vertices)} vertices")
-                print(f"  Mesh data name: {mesh.name}")
-                print(f"  Mesh users: {mesh.users}")
-                print(f"  Object location: {obj.location}")
-                print(f"  Object matrix_world translation: {obj.matrix_world.translation}")
 
                 # Get alpha carbon mask
                 is_alpha_attr = mesh.attributes["is_alpha_carbon"]
@@ -497,13 +507,8 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 chain_mask = None
                 if "chain_id" in mesh.attributes:
                     # Extract chain ID from object name
-                    # Object names are like "Chain A_0_1_197" where the first number is the chain index
-                    import re
-                    chain_match = re.search(r'_(\d+)_\d+_\d+', obj.name)
-                    if chain_match:
-                        obj_chain_id = int(chain_match.group(1))
-                        print(f"  Detected chain ID from object name: {obj_chain_id}")
-
+                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
+                    if obj_chain_id is not None:
                         # Get chain_id attribute
                         chain_id_attr = mesh.attributes["chain_id"]
                         chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
@@ -511,7 +516,6 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
 
                         # Create mask for this chain only
                         chain_mask = (chain_ids == obj_chain_id)
-                        print(f"  Filtering to chain {obj_chain_id}: {np.sum(chain_mask)} vertices")
 
                 # Get vertex positions
                 positions = np.zeros(len(mesh.vertices) * 3)
@@ -526,7 +530,6 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
 
                 # Filter for alpha carbons (optionally filtered by chain)
                 alpha_positions = positions[combined_mask]
-                print(f"  Found {len(alpha_positions)} alpha carbons for this chain")
 
                 if len(alpha_positions) > 0:
                     # Convert to world space and add to list
@@ -534,35 +537,22 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                         world_pos = obj.matrix_world @ Vector(ca_pos)
                         all_alpha_positions.append(world_pos)
                         all_masses.append(12.01)  # Carbon mass
-
-                    # Calculate local center for debugging
-                    local_center = np.mean(alpha_positions, axis=0)
-                    world_center = obj.matrix_world @ Vector(local_center)
-                    print(f"  Object's alpha carbon center (world): {world_center}")
                 else:
                     # No alpha carbons, use bounding box center
-                    print(f"  No alpha carbons found - using bounding box")
                     bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                     if bbox:
                         center = sum(bbox, Vector()) / len(bbox)
-                        print(f"  Bbox center: {center}")
                         all_alpha_positions.append(center)
                         all_masses.append(1.0)
-                    
+
             except Exception as e:
                 # If any error occurs, fallback to bounding box
-                print(f"  ERROR: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"Error getting alpha carbons for {obj.name}: {e}")
                 bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                 if bbox:
                     center = sum(bbox, Vector()) / len(bbox)
-                    print(f"  Fallback bbox center: {center}")
                     all_alpha_positions.append(center)
                     all_masses.append(1.0)
-
-        print(f"\n=== Final Calculation ===")
-        print(f"Total positions collected: {len(all_alpha_positions)}")
 
         if all_alpha_positions:
             # Calculate center of mass
@@ -571,16 +561,11 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 weighted_sum = Vector((0, 0, 0))
                 for pos, mass in zip(all_alpha_positions, all_masses):
                     weighted_sum += pos * mass
-                final_center = weighted_sum / total_mass
-                print(f"Final center of mass: {final_center}")
-                return final_center
+                return weighted_sum / total_mass
             else:
                 # Simple average if mass calculation fails
-                final_center = sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
-                print(f"Final average center: {final_center}")
-                return final_center
+                return sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
 
-        print("No positions found - returning None")
         return None
     
     def set_object_origin(self, obj, new_origin):
