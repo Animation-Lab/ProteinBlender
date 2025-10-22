@@ -117,17 +117,21 @@ def register() -> None:
     # Schedule workspace creation after a short delay
     bpy.app.timers.register(create_workspace_callback, first_interval=WORKSPACE_TIMER_INTERVAL)
 
+    # Register persistent workspace handler (survives Ctrl+N)
+    from .handlers import load_handlers
+    load_handlers.register_load_handlers()
+
     # Register undo/redo handlers to sync and restore molecules
     from .utils.scene_manager import sync_molecule_list_after_undo
     if sync_molecule_list_after_undo not in bpy.app.handlers.undo_post:
         bpy.app.handlers.undo_post.append(sync_molecule_list_after_undo)
     if sync_molecule_list_after_undo not in bpy.app.handlers.redo_post:
         bpy.app.handlers.redo_post.append(sync_molecule_list_after_undo)
-    
+
     # Register selection sync handlers
     from .handlers import selection_sync
     selection_sync.register()
-    
+
     # Register frame change handler for color animation
     from .handlers import frame_change_handler
     frame_change_handler.register()
@@ -142,6 +146,13 @@ def unregister() -> None:
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)
 
+    # Unregister persistent workspace handler
+    try:
+        from .handlers import load_handlers
+        load_handlers.unregister_load_handlers()
+    except Exception as e:
+        logger.debug(f"Failed to unregister load handlers: {e}")
+
     # Unregister undo/redo handlers
     try:
         from .utils.scene_manager import sync_molecule_list_after_undo
@@ -151,14 +162,14 @@ def unregister() -> None:
             bpy.app.handlers.redo_post.remove(sync_molecule_list_after_undo)
     except Exception as e:
         logger.debug(f"Failed to unregister undo/redo handler: {e}")
-    
+
     # Unregister selection sync handlers
     try:
         from .handlers import selection_sync
         selection_sync.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister selection sync handler: {e}")
-    
+
     # Unregister frame change handler
     try:
         from .handlers import frame_change_handler
