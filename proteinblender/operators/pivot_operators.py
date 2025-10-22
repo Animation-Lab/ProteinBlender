@@ -700,7 +700,10 @@ def finalize_custom_pivot():
     # Clean up stored data
     if "custom_pivot_target_items" in scene:
         del scene["custom_pivot_target_items"]
-    
+
+    # Deselect all objects to hide the transform gizmo
+    bpy.ops.object.select_all(action='DESELECT')
+
     # Switch back to select tool to hide the move gizmo
     for area in bpy.context.screen.areas:
         if area.type == 'VIEW_3D':
