@@ -406,26 +406,71 @@ bl_info = {
 
 # --- Constants ---
 REQUIRED_PACKAGES = {
-    "biotite": "==1.2.0",
-    "databpy": "==0.0.15",
+    # Core scientific packages - must be installed first with compatible versions
+    "numpy": ">=1.24.0,<2.0",  # databpy requires <2.0, biotite needs >=1.25
+    "scipy": ">=1.13",  # Required by biotite and MDAnalysis
+
+    # Main dependencies with relaxed version constraints
+    "biotite": ">=1.2.0",  # Use >= instead of == to allow minor updates
+    "databpy": ">=0.0.15",  # Use >= instead of == to allow patches
     "MDAnalysis": ">=2.7.0",
+
+    # File format handlers
     "mrcfile": "",
     "starfile": "",
     "PyYAML": "",
-    # Critical dependencies that might be corrupted
-    "msgpack": "",  # Required by MDAnalysis, often corrupted on Windows
-    "scipy": "",  # Required by MDAnalysis, needs BLAS DLLs
-    "numpy": "",  # Required by scipy, needs to be compatible version
+
+    # Critical sub-dependencies (often corrupted on Windows)
+    "msgpack": ">=0.5.6",  # Required by MDAnalysis and biotite
 }
 
 # --- Dependency Management ---
+# Cache file to avoid checking dependencies on every startup
+import json
+from pathlib import Path
+
+_cache_file = Path(__file__).parent / ".dependency_cache.json"
+_cache_validity_hours = 24  # Check dependencies once per day
+
+def _should_check_dependencies():
+    """Check if we need to verify dependencies based on cache"""
+    if not _cache_file.exists():
+        return True
+
+    try:
+        with open(_cache_file, 'r') as f:
+            cache_data = json.load(f)
+
+        last_check = cache_data.get('last_check', 0)
+        import time
+        hours_since_check = (time.time() - last_check) / 3600
+
+        return hours_since_check > _cache_validity_hours
+    except:
+        return True
+
+def _update_dependency_cache():
+    """Update the cache file with current timestamp"""
+    try:
+        import time
+        with open(_cache_file, 'w') as f:
+            json.dump({'last_check': time.time()}, f)
+    except Exception as e:
+        logger.debug(f"Could not update dependency cache: {e}")
+
 if DEV_MODE:
     # In development mode, skip dependency checks for faster reloads
     logger.info("Skipping dependency check in DEV_MODE")
     dependencies_installed = True
 else:
-    # Normal mode: check and install dependencies
-    dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
+    # Normal mode: check and install dependencies (but cache results)
+    if _should_check_dependencies():
+        dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
+        if dependencies_installed:
+            _update_dependency_cache()
+    else:
+        logger.info("Dependencies checked recently, skipping verification")
+        dependencies_installed = True
 
 # Dynamically set warning if dependencies failed
 if not dependencies_installed:

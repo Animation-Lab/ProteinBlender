@@ -67,3 +67,4 @@ docs/_build/
 *.tmp
 [0-9]*.[0-9]*
 extensions/
+proteinblender/.dependency_cache.json
