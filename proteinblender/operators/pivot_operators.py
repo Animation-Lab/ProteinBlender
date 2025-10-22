@@ -685,11 +685,17 @@ def finalize_custom_pivot():
                     icon='INFO'
                 )
     
-    # Clean up the empty object
+    # Clean up the empty object - ensure it's properly removed from all collections
     try:
+        # First unlink from all collections
+        for collection in pivot_empty.users_collection:
+            collection.objects.unlink(pivot_empty)
+
+        # Then remove the object data
         bpy.data.objects.remove(pivot_empty, do_unlink=True)
-    except:
-        pass  # Already removed
+    except Exception as e:
+        # Already removed or error
+        pass
     
     # Clean up stored data
     if "custom_pivot_target_items" in scene:
@@ -777,9 +783,16 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
             return {'FINISHED'}
         
         # Clean up any existing pivot gizmos first
-        for obj in bpy.data.objects:
+        for obj in list(bpy.data.objects):  # Use list() to avoid iteration issues
             if obj.name.startswith("PROTEINBLENDER_PIVOT_GIZMO"):
-                bpy.data.objects.remove(obj, do_unlink=True)
+                try:
+                    # Unlink from all collections first
+                    for collection in obj.users_collection:
+                        collection.objects.unlink(obj)
+                    # Then remove
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                except:
+                    pass
         
         # Get selected items
         selected_items = [item for item in scene.outliner_items if item.is_selected]
@@ -815,8 +828,11 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         pivot_empty = bpy.data.objects.new("PROTEINBLENDER_PIVOT_GIZMO", None)
         pivot_empty.empty_display_type = 'SPHERE'
         pivot_empty.empty_display_size = 0.5
-        pivot_empty.location = first_obj.location.copy()
-        
+
+        # Get the actual current origin (pivot point) of the object in world space
+        # The origin is at the object's world matrix location
+        pivot_empty.location = first_obj.matrix_world.translation.copy()
+
         # Make the sphere a bright color so it's visible
         pivot_empty.color = (1.0, 0.5, 0.0, 1.0)  # Orange color
         pivot_empty.show_in_front = True  # Always show on top

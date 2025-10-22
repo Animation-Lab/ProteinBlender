@@ -301,6 +301,7 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
             row.scale_y = 1.2
             row.operator("proteinblender.set_pivot_first", text="First")
             row.operator("proteinblender.set_pivot_center", text="Center")
+            row.operator("proteinblender.set_pivot_custom", text="Custom")
             row.operator("proteinblender.set_pivot_last", text="Last")
 
         # Add bottom spacing
