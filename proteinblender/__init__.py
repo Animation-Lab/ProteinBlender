@@ -132,6 +132,32 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
         return True  # Package not found or error checking, needs install
 
 
+def _can_import_core_packages():
+    """Quick check if all core packages can be imported without errors.
+
+    This is used to skip pip installation attempts when packages are already
+    working, which prevents permission errors during addon updates.
+
+    Returns:
+        bool: True if all core packages can be imported successfully
+    """
+    import importlib
+
+    core_packages = ['biotite', 'databpy', 'MDAnalysis', 'numpy', 'scipy', 'mrcfile', 'starfile']
+
+    for package in core_packages:
+        try:
+            # Map package names to their import names if different
+            import_name = 'yaml' if package == 'PyYAML' else package
+            importlib.import_module(import_name)
+        except ImportError:
+            logger.debug(f"Core package {package} cannot be imported")
+            return False
+
+    logger.debug("All core packages are importable")
+    return True
+
+
 def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0) -> bool:
     """Execute pip install command with retry logic for permission errors.
 
@@ -150,6 +176,14 @@ def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0)
             subprocess.check_call(command)
             return True
         except subprocess.CalledProcessError as e:
+            # Check if this is a permission error (common during addon updates)
+            error_output = str(e)
+            if "Permission denied" in error_output or "PermissionError" in error_output:
+                if is_windows:
+                    logger.info("Some files are locked (likely during addon update). Skipping for now.")
+                    logger.info("Dependencies will be verified on next Blender restart.")
+                    return False  # Not an error - just defer to next restart
+
             if is_windows and attempt < max_retries - 1:
                 # On Windows, might be a temporary lock
                 logger.warning(f"Installation attempt {attempt + 1} failed. Retrying...")
@@ -159,12 +193,9 @@ def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0)
                 raise
         except PermissionError as e:
             if is_windows:
-                logger.error(f"Permission denied accessing files. This usually means Blender has locked DLL files.")
-                logger.error("Please restart Blender and try installing the addon again.")
-                _show_error_popup(
-                    "Installation blocked by locked files. Please restart Blender and reinstall the addon."
-                )
-                return False
+                logger.info("Some package files are locked (addon update in progress).")
+                logger.info("Dependencies will be verified on next Blender restart.")
+                return False  # Not an error - just defer to next restart
             else:
                 raise
 
@@ -394,7 +425,7 @@ def _reload_modules(packages: Dict[str, str]) -> None:
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
-    "version": (0, 1, 2),  # Synced with blender_manifest.toml
+    "version": (0, 1, 3),  # Synced with blender_manifest.toml
     "blender": (4, 2, 0),  # Updated to match manifest requirement
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
@@ -463,11 +494,20 @@ if DEV_MODE:
     logger.info("Skipping dependency check in DEV_MODE")
     dependencies_installed = True
 else:
-    # Normal mode: check and install dependencies (but cache results)
-    if _should_check_dependencies():
+    # Normal mode: Smart dependency checking to avoid permission errors during updates
+    # Step 1: Quick check if all packages are importable (no pip operations)
+    if _can_import_core_packages():
+        logger.info("All core packages importable, skipping installation")
+        dependencies_installed = True
+        # Update cache to prevent check on next startup
+        _update_dependency_cache()
+    # Step 2: Only run full pip install if imports fail AND cache expired
+    elif _should_check_dependencies():
+        logger.info("Core packages missing or cache expired, verifying dependencies...")
         dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
         if dependencies_installed:
             _update_dependency_cache()
+    # Step 3: Trust the cache if it's still valid
     else:
         logger.info("Dependencies checked recently, skipping verification")
         dependencies_installed = True
