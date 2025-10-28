@@ -301,6 +301,9 @@ def _is_object_valid(obj):
     """Check if Blender object reference is still valid"""
     try:
         return obj and obj.name in bpy.data.objects
+    except ReferenceError:
+        # Object reference was freed - return False but this can be recovered
+        return False
     except Exception:
         return False
 
@@ -310,18 +313,44 @@ def _is_molecule_valid(molecule):
     try:
         if not molecule:
             return False
+
+        # Get the molecule's object - might be molecule.object or molecule.molecule.object
         obj = getattr(molecule, 'object', None)
+
+        # Try to get object name, handling ReferenceError if object was freed
+        obj_name = None
+        try:
+            if obj:
+                obj_name = obj.name
+        except ReferenceError:
+            # Object was freed, try to get from object_name attribute
+            obj_name = getattr(molecule, 'object_name', '')
+
+        # If we don't have a valid object reference, try to recover it
         if not _is_object_valid(obj):
-            name = getattr(molecule, 'object_name', '')
-            if name and name in bpy.data.objects:
+            # Try to find the object by name
+            if not obj_name:
+                obj_name = getattr(molecule, 'object_name', '')
+
+            if obj_name and obj_name in bpy.data.objects:
+                # Recover the object reference
+                recovered_obj = bpy.data.objects[obj_name]
+                # MoleculeWrapper.object is a read-only property that returns molecule.molecule.object
+                # So we need to set the underlying molecule.molecule.object instead
                 if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
-                    molecule.molecule.object = bpy.data.objects[name]
-                molecule.object = bpy.data.objects[name]
-                return True
-            return False
+                    molecule.molecule.object = recovered_obj
+                    return True
+                else:
+                    # Fallback - shouldn't normally happen but handle gracefully
+                    return False
+            else:
+                # Can't find the object - molecule is truly invalid
+                return False
+
         return True
-    except Exception:
+    except Exception as e:
         # Handle MolecularNodes databpy LinkedObjectError and other exceptions
+        print(f"Error checking molecule validity: {e}")
         return False
 
 
