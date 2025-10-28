@@ -726,10 +726,19 @@ def build_outliner_hierarchy(context=None):
         elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
             mol_object = molecule.molecule.object
         
-        protein_item.object_name = mol_object.name if mol_object else ""
+        # Safely get object name and visibility
+        try:
+            protein_item.object_name = mol_object.name if mol_object else ""
+        except (ReferenceError, AttributeError):
+            protein_item.object_name = ""
+
         protein_item.indent_level = 0
         protein_item.icon = 'MESH_DATA'
-        protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True
+
+        try:
+            protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True
+        except (ReferenceError, AttributeError):
+            protein_item.is_visible = True
         
         # Restore selection and expansion states
         if molecule_id in item_selection_states:
@@ -928,12 +937,18 @@ def build_outliner_hierarchy(context=None):
 
                         # If domain spans full chain, make chain item reference the domain's object
                         if domain_spans_full_chain and domain.object:
-                            chain_item.object_name = domain.object.name
+                            try:
+                                chain_item.object_name = domain.object.name
+                            except ReferenceError:
+                                chain_item.object_name = ""
                     else:
                         # Can't determine chain range, assume it's a full chain domain
                         chain_item.has_domains = False
                         if domain.object:
-                            chain_item.object_name = domain.object.name
+                            try:
+                                chain_item.object_name = domain.object.name
+                            except ReferenceError:
+                                chain_item.object_name = ""
 
                 # Add domain items if they should be shown and chain is expanded
                 if should_show_domains and chain_item.is_expanded:
@@ -959,12 +974,23 @@ def build_outliner_hierarchy(context=None):
                                     domain_display_name = f"Residues {domain.start}-{domain.end}"
                         
                         domain_item.name = domain_display_name
-                        domain_item.object_name = domain.object.name if domain.object else ""
+
+                        # Safely get object name - handle case where object is freed/invalid
+                        try:
+                            domain_item.object_name = domain.object.name if domain.object else ""
+                        except ReferenceError:
+                            domain_item.object_name = ""
+
                         domain_item.domain_start = getattr(domain, 'start', 0)
                         domain_item.domain_end = getattr(domain, 'end', 0)
                         domain_item.indent_level = 2
                         domain_item.icon = 'GROUP_VERTEX'
-                        domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+
+                        # Safely get visibility - handle case where object is freed/invalid
+                        try:
+                            domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+                        except ReferenceError:
+                            domain_item.is_visible = True
                         
                         # Restore selection state
                         if domain_id in item_selection_states:
@@ -1018,8 +1044,18 @@ def build_outliner_hierarchy(context=None):
                                 chain_copy_item.chain_id = str(domain.chain_id)
                                 chain_copy_item.indent_level = 1
                                 chain_copy_item.icon = 'LINKED'
-                                chain_copy_item.object_name = domain.object.name if domain.object else ""
-                                chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+
+                                # Safely get object name and visibility
+                                try:
+                                    chain_copy_item.object_name = domain.object.name if domain.object else ""
+                                except ReferenceError:
+                                    chain_copy_item.object_name = ""
+
+                                try:
+                                    chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
+                                except ReferenceError:
+                                    chain_copy_item.is_visible = True
+
                                 chain_copy_item.chain_start = domain.start
                                 chain_copy_item.chain_end = domain.end
                                 
@@ -1199,13 +1235,19 @@ def update_outliner_visibility(item_id, visible):
         # Update protein and all its domains
         molecule = scene_manager.molecules.get(item_id)
         if molecule and molecule.object:
-            molecule.object.hide_set(not visible, view_layer=view_layer)
-            molecule.object.hide_render = not visible
+            try:
+                molecule.object.hide_set(not visible, view_layer=view_layer)
+                molecule.object.hide_render = not visible
+            except ReferenceError:
+                pass  # Object was freed
             # Update all domains
             for domain in molecule.domains.values():
                 if domain.object:
-                    domain.object.hide_set(not visible, view_layer=view_layer)
-                    domain.object.hide_render = not visible
+                    try:
+                        domain.object.hide_set(not visible, view_layer=view_layer)
+                        domain.object.hide_render = not visible
+                    except ReferenceError:
+                        pass  # Object was freed
                     
     elif item.item_type == 'CHAIN':
         # Update all domains belonging to this chain
@@ -1242,17 +1284,23 @@ def update_outliner_visibility(item_id, visible):
                     
                     if domain_chain_str == chain_str or domain_chain_id == chain_id:
                         if domain.object:
-                            domain.object.hide_set(not visible, view_layer=view_layer)
-                            domain.object.hide_render = not visible
+                            try:
+                                domain.object.hide_set(not visible, view_layer=view_layer)
+                                domain.object.hide_render = not visible
+                            except ReferenceError:
+                                pass  # Object was freed
                     
     elif item.item_type == 'DOMAIN':
         # Update just the domain
         if item.object_name:
             obj = bpy.data.objects.get(item.object_name)
             if obj:
-                obj.hide_set(not visible, view_layer=view_layer)
-                # Also hide from render when hidden in viewport
-                obj.hide_render = not visible
+                try:
+                    obj.hide_set(not visible, view_layer=view_layer)
+                    # Also hide from render when hidden in viewport
+                    obj.hide_render = not visible
+                except ReferenceError:
+                    pass  # Object was freed
                 
     elif item.item_type == 'PUPPET':
         # Update the puppet's controller object visibility
