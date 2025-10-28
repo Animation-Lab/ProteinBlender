@@ -516,6 +516,138 @@ def _refresh_object_references_only(scene_manager, scene):
     scene_manager._refresh_ui()
 
 
+def _is_molecular_nodes_protein(obj):
+    """Check if object is a MolecularNodes protein"""
+    try:
+        # Check for MolecularNodes modifier
+        if not obj.modifiers.get("MolecularNodes"):
+            return False
+
+        # Check for protein-specific attributes
+        if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
+            return False
+
+        # Proteins have chain_id and res_id attributes
+        attrs = obj.data.attributes
+        return ("chain_id" in attrs and "res_id" in attrs)
+    except (AttributeError, ReferenceError):
+        return False
+
+
+def _extract_molecule_id_from_object(obj):
+    """Extract molecule identifier from MolecularNodes object name"""
+    try:
+        # MolecularNodes objects are named like "3b75", "3b75_001", "4hhb", etc.
+        # Remove Blender's duplicate suffixes (.001, .002, etc.)
+        base_name = obj.name.split('.')[0]
+        return base_name
+    except (AttributeError, ReferenceError):
+        return None
+
+
+def _recreate_molecule_wrapper_from_object(molecule_id, obj):
+    """Recreate MoleculeWrapper from existing Blender object"""
+    try:
+        from ..core.molecule_wrapper import MoleculeWrapper
+        import biotite.structure as struc
+        import numpy as np
+
+        # Create a minimal mock Molecule object that wraps the existing Blender object
+        # We can't use the real Molecule class because it requires a file path
+        class MockMolecule:
+            """Minimal mock of MolecularNodes Molecule for wrapping existing objects"""
+            def __init__(self, blender_obj):
+                self.object = blender_obj
+                # Extract array data from object attributes if available
+                self.array = self._extract_array_from_object(blender_obj)
+
+            def _extract_array_from_object(self, obj):
+                """Extract biotite array from Blender object attributes"""
+                try:
+                    # Get mesh data
+                    if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
+                        return None
+
+                    attrs = obj.data.attributes
+                    num_atoms = len(obj.data.vertices)
+
+                    # Create a simple AtomArray from the chain_id and res_id
+                    # This is a minimal array just for initialization
+                    array = struc.AtomArray(num_atoms)
+
+                    # Extract chain mapping from object custom property
+                    chain_mapping = {}
+                    if hasattr(obj, 'data') and hasattr(obj.data, 'get'):
+                        mapping_str = obj.data.get("chain_mapping_str", "")
+                        if mapping_str:
+                            # Parse the mapping string: "0:A,1:B,2:C"
+                            for pair in mapping_str.split(","):
+                                if ":" in pair:
+                                    k, v = pair.split(":")
+                                    chain_mapping[int(k)] = v
+
+                    # Try to extract chain IDs (these are numeric in Blender)
+                    if "chain_id" in attrs:
+                        chain_data = np.zeros(num_atoms, dtype=np.int32)
+                        attrs["chain_id"].data.foreach_get("value", chain_data)
+
+                        # Map numeric chain IDs to string labels using chain_mapping
+                        if chain_mapping:
+                            # Convert each numeric ID to its string label
+                            chain_labels = np.array([chain_mapping.get(cid, str(cid)) for cid in chain_data])
+                            array.chain_id = chain_labels
+                        else:
+                            # Fallback: just convert numbers to strings
+                            array.chain_id = chain_data.astype(str)
+
+                    # Try to extract residue IDs
+                    if "res_id" in attrs:
+                        res_data = np.zeros(num_atoms, dtype=np.int32)
+                        attrs["res_id"].data.foreach_get("value", res_data)
+                        array.res_id = res_data
+
+                    return array
+                except Exception as e:
+                    print(f"    Warning: Could not extract array data: {e}")
+                    # Return a minimal empty array as fallback
+                    return struc.AtomArray(0)
+
+        # Create mock molecule
+        mock_molecule = MockMolecule(obj)
+
+        # Wrap it with MoleculeWrapper
+        wrapper = MoleculeWrapper(mock_molecule, molecule_id)
+        wrapper.object_name = obj.name
+
+        return wrapper
+    except Exception as e:
+        print(f"Failed to recreate wrapper for {molecule_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _find_orphaned_protein_objects():
+    """Find MolecularNodes protein objects that aren't tracked in scene_manager"""
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    orphaned = []
+
+    for obj in bpy.data.objects:
+        # Check if it's a MolecularNodes protein
+        if not _is_molecular_nodes_protein(obj):
+            continue
+
+        # Extract potential molecule ID from object name
+        potential_id = _extract_molecule_id_from_object(obj)
+
+        # Check if it's already tracked
+        if potential_id and potential_id not in scene_manager.molecules:
+            orphaned.append((potential_id, obj))
+
+    return orphaned
+
+
 def sync_molecule_list_after_undo(*args):
     """Sync molecule state after undo/redo operations"""
     try:
@@ -605,7 +737,28 @@ def sync_molecule_list_after_undo(*args):
                 if restored_obj:  # Object exists, so this should be restored
                     print(f"  -> Adding to restore list")
                     molecules_to_restore.append((molecule_id, saved_state))
-        
+
+        # Step 2.5: Detect orphaned protein objects (e.g., after redo past import)
+        print("\nStep 2.5: Checking for orphaned protein objects...")
+        orphaned_proteins = _find_orphaned_protein_objects()
+        if orphaned_proteins:
+            print(f"Found {len(orphaned_proteins)} orphaned protein(s)")
+            for molecule_id, obj in orphaned_proteins:
+                print(f"  Detected orphaned protein: {molecule_id} (object: {obj.name})")
+                # Re-create molecule wrapper from existing object
+                molecule_wrapper = _recreate_molecule_wrapper_from_object(molecule_id, obj)
+                if molecule_wrapper:
+                    # Add to scene_manager
+                    scene_manager.molecules[molecule_id] = molecule_wrapper
+                    # Finalize import (domains, UI, etc.) - reuse existing code
+                    try:
+                        scene_manager._finalize_imported_molecule(molecule_wrapper)
+                        print(f"    -> Successfully restored {molecule_id}")
+                    except Exception as e:
+                        print(f"    -> Failed to finalize {molecule_id}: {e}")
+        else:
+            print("  No orphaned proteins found")
+
         # Step 3: Restore missing molecules
         print(f"\nRestoring {len(molecules_to_restore)} molecules")
         for molecule_id, saved_state in molecules_to_restore:
