@@ -295,44 +295,78 @@ class MOLECULE_PB_OT_delete_domain(Operator):
     bl_label = "Delete Domain"
     bl_description = "Delete the selected domain"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     domain_id: StringProperty()
-    
+    molecule_id: StringProperty()
+
     def invoke(self, context, event):
         # Show confirmation dialog
         return context.window_manager.invoke_confirm(self, event)
-    
+
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
 
         # Find which molecule owns this domain
         molecule = None
-        for mol_id, mol in scene_manager.molecules.items():
-            if self.domain_id in mol.domains:
-                molecule = mol
-                break
+        mol_id = None
+
+        # If molecule_id is provided, use it directly
+        if self.molecule_id:
+            molecule = scene_manager.molecules.get(self.molecule_id)
+            mol_id = self.molecule_id
+        else:
+            # Otherwise search for the molecule that contains this domain
+            for m_id, mol in scene_manager.molecules.items():
+                if self.domain_id in mol.domains:
+                    molecule = mol
+                    mol_id = m_id
+                    break
 
         if not molecule:
             self.report({'ERROR'}, "Domain not found in any molecule")
             return {'CANCELLED'}
 
-        # Delete the domain and get the ID of the domain that replaced it (if any)
-        new_domain_id = molecule.delete_domain(self.domain_id)
+        # Capture the chain_id before deletion for potential chain cleanup
+        domain_to_delete = molecule.domains.get(self.domain_id)
+        if not domain_to_delete:
+            self.report({'ERROR'}, "Domain not found")
+            return {'CANCELLED'}
 
-        # If there's a replacement domain, select it to maintain UI continuity
-        if new_domain_id and new_domain_id in molecule.domains:
-            domain = molecule.domains.get(new_domain_id)
-            if domain and domain.object:
-                # Make the domain object the active object to help with UI continuity
-                context.view_layer.objects.active = domain.object
+        chain_id = domain_to_delete.chain_id
+
+        # Capture state for undo
+        scene_manager._capture_molecule_state(mol_id)
+
+        # Delete the domain and check if chain should be removed
+        result = molecule.delete_domain(self.domain_id)
+
+        # If this was the last domain on the chain, clean up puppet memberships
+        if result == "DELETE_CHAIN":
+            self._remove_chain_from_puppets(context, mol_id, chain_id)
+            self.report({'INFO'}, f"Deleted last domain on chain {chain_id}")
+        else:
+            self.report({'INFO'}, "Domain deleted successfully")
 
         # Rebuild outliner to reflect the deletion
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
 
-        self.report({'INFO'}, f"Domain deleted successfully")
         return {'FINISHED'}
+
+    def _remove_chain_from_puppets(self, context, molecule_id, chain_id):
+        """Remove chain from any puppet group memberships"""
+        chain_outliner_id = f"{molecule_id}_chain_{chain_id}"
+
+        # Remove from puppet memberships
+        for item in context.scene.outliner_items:
+            if item.item_type == 'PUPPET' and item.puppet_memberships:
+                members = set(item.puppet_memberships.split(','))
+
+                # Remove chain outliner ID
+                if chain_outliner_id in members:
+                    members.remove(chain_outliner_id)
+                    item.puppet_memberships = ','.join(members) if members else ""
 
 class MOLECULE_PB_OT_keyframe_protein(Operator):
     bl_idname = "molecule.keyframe_protein"

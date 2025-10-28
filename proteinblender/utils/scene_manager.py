@@ -902,19 +902,41 @@ def build_outliner_hierarchy(context=None):
                     scene.outliner_items.remove(len(scene.outliner_items) - 1)
                     continue
 
-                # Mark if this chain has domains (for UI purposes)
+                # Determine if we should show domains in the outliner
+                # Show domains if:
+                # 1. There's more than one domain (chain has been split), OR
+                # 2. There's exactly one domain that doesn't span the entire chain
+                should_show_domains = False
+
                 if len(chain_domains) > 1:
+                    # Multiple domains - always show them
+                    should_show_domains = True
                     chain_item.has_domains = True
                 elif len(chain_domains) == 1:
-                    # If there's exactly one domain for this chain, the chain item should reference that domain's object
+                    # Single domain - check if it spans the entire chain
                     domain_id, domain = chain_domains[0]
-                    if domain.object:
-                        chain_item.object_name = domain.object.name
-                    
-                # Only add domains if there's more than one for this chain
-                # OR if the domain doesn't span the entire chain
-                # AND only if the chain is expanded
-                if len(chain_domains) > 1 and chain_item.is_expanded:
+
+                    # Get the chain's residue range
+                    chain_min = chain_item.chain_start if hasattr(chain_item, 'chain_start') and chain_item.chain_start > 0 else None
+                    chain_max = chain_item.chain_end if hasattr(chain_item, 'chain_end') and chain_item.chain_end > 0 else None
+
+                    # If domain doesn't span the entire chain, show it
+                    if chain_min and chain_max:
+                        domain_spans_full_chain = (domain.start == chain_min and domain.end == chain_max)
+                        should_show_domains = not domain_spans_full_chain
+                        chain_item.has_domains = should_show_domains
+
+                        # If domain spans full chain, make chain item reference the domain's object
+                        if domain_spans_full_chain and domain.object:
+                            chain_item.object_name = domain.object.name
+                    else:
+                        # Can't determine chain range, assume it's a full chain domain
+                        chain_item.has_domains = False
+                        if domain.object:
+                            chain_item.object_name = domain.object.name
+
+                # Add domain items if they should be shown and chain is expanded
+                if should_show_domains and chain_item.is_expanded:
                     for domain_id, domain in chain_domains:
                         domain_item = scene.outliner_items.add()
                         domain_item.item_type = 'DOMAIN'

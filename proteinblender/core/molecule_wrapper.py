@@ -1421,33 +1421,31 @@ class MoleculeWrapper:
     def delete_domain(self, domain_id: str, is_cleanup_call: bool = False) -> Optional[str]:
         """Delete a domain and its object.
 
-        If the domain is the only one on its chain, deletion is prevented by the UI.
-        If multiple domains exist on the chain, deleting one will cause an adjacent
-        domain (preferring the one with a lower start residue) to expand and fill the gap.
-        
+        If the domain is the last one on its chain, returns "DELETE_CHAIN" to signal
+        that the entire chain should be removed.
+        Otherwise, deletes only the specified domain without modifying other domains.
+
         Args:
             domain_id (str): The ID of the domain to delete.
             is_cleanup_call (bool): True if called during full molecule cleanup, to suppress UI messages.
-        
+
         Returns:
-            Optional[str]: The ID of the domain that filled the gap, if any.
+            Optional[str]: "DELETE_CHAIN" if this was the last domain on the chain, None otherwise.
         """
         if domain_id not in self.domains:
             print(f"Warning: Domain {domain_id} not found for deletion.")
             return None
-        
+
         # During cleanup (molecule deletion), just delete domains directly without merging
         if is_cleanup_call:
             print(f"Cleanup mode: directly deleting domain {domain_id}")
             self._delete_domain_direct(domain_id)
             return None
-        
-        # Normal deletion logic with merging follows...
+
+        # Get domain info before deletion
         domain_to_delete = self.domains[domain_id]
         chain_id = domain_to_delete.chain_id
-        start_del = domain_to_delete.start
-        end_del = domain_to_delete.end
-        deleted_domain_name = domain_to_delete.name # For logging
+        deleted_domain_name = domain_to_delete.name
         original_parent_id = getattr(domain_to_delete, 'parent_domain_id', None)
 
         # Count domains on the same chain
@@ -1455,114 +1453,31 @@ class MoleculeWrapper:
         for d_id, d_obj in self.domains.items():
             if d_obj.chain_id == chain_id:
                 domains_on_this_chain.append((d_id, d_obj))
-        
-        # UI should prevent deleting the last domain on a chain, but double check here
-        if len(domains_on_this_chain) <= 1 and domain_id in [d[0] for d in domains_on_this_chain] and not is_cleanup_call:
-            print(f"Deletion of domain {domain_id} prevented as it's the last on chain {chain_id}.")
-            if not is_cleanup_call: # Only show message if not part of a full cleanup
-                bpy.ops.wm.call_message_box(message=f"Cannot delete the last domain ({deleted_domain_name}) on chain {chain_id}.", title="Deletion Prevented", icon='ERROR')
-            return None # Should not happen if UI is working correctly
 
+        # Check if this is the last domain on the chain
+        if len(domains_on_this_chain) <= 1 and domain_id in [d[0] for d in domains_on_this_chain]:
+            print(f"Last domain on chain {chain_id}. Signaling chain deletion.")
+            # Delete the domain first
+            self._delete_domain_direct(domain_id)
+            # Return special flag to signal chain deletion
+            return "DELETE_CHAIN"
+
+        # Find child domains that need reparenting
         children_to_reparent = []
         for child_id, child_domain in self.domains.items():
             if hasattr(child_domain, 'parent_domain_id') and child_domain.parent_domain_id == domain_id:
                 children_to_reparent.append(child_id)
-            
-        # --- Find adjacent domains on the same chain --- 
-        domain_before = None # Tuple: (id, domain_obj) ending right before 'start_del'
-        domain_after = None  # Tuple: (id, domain_obj) starting right after 'end_del'
 
-        for adj_domain_id, adj_domain in domains_on_this_chain:
-            if adj_domain_id == domain_id: # Skip the domain being deleted
-                continue
-            if adj_domain.end == start_del - 1:
-                    domain_before = (adj_domain_id, adj_domain)
-            elif adj_domain.start == end_del + 1:
-                    domain_after = (adj_domain_id, adj_domain)
-        
-        # --- Determine update target and range BEFORE deletion --- 
-        update_target_id = None
-        update_new_start = -1
-        update_new_end = -1
-        final_reparent_target_id = original_parent_id
-
-        # Determine which domain to expand or if merging is more complex
-        if domain_before and domain_after:
-            # Scenario: A - B(del) - C.  Expand A to cover B. C remains separate.
-            # update_target_id becomes domain_before.
-            # domain_after is NOT deleted in this specific step, domain_before just expands.
-            update_target_id = domain_before[0]
-            update_new_start = domain_before[1].start
-            update_new_end = end_del # Expand domain_before to cover the deleted domain
-            print(f"Planning to expand {update_target_id} (ending at {domain_before[1].end}) to cover deleted range, new end: {update_new_end}. Domain {domain_after[0]} remains.")
-        elif domain_before:
-            # Scenario: A - B(del). Expand A to cover B.
-            update_target_id = domain_before[0]
-            update_new_start = domain_before[1].start
-            update_new_end = end_del
-            print(f"Planning to expand {update_target_id} to cover deleted range: {update_new_start}-{update_new_end}")
-        elif domain_after:
-            # Scenario: B(del) - C. Expand C to cover B.
-            update_target_id = domain_after[0]
-            update_new_start = start_del
-            update_new_end = domain_after[1].end
-            print(f"Planning to expand {update_target_id} to cover deleted range: {update_new_start}-{update_new_end}")
-        else:
-            # No adjacent domains on this chain to expand. 
-            print(f"No adjacent domains to merge with {domain_id} on chain {chain_id}. It will be deleted directly.")
-
-        if update_target_id:
-             final_reparent_target_id = update_target_id 
-
-        # --- Perform Deletion of the primary domain FIRST --- 
-        print(f"Deleting original domain {deleted_domain_name} ({domain_id}).")
+        # Delete the domain directly without merging or modifying adjacent domains
+        print(f"Deleting domain {deleted_domain_name} ({domain_id}).")
         self._delete_domain_direct(domain_id)
-        
-        # If domain_before and domain_after existed (A-B(del)-C case):
-        # The old logic was: merge all three into domain_before, and delete domain_after.
-        # New logic: domain_before expands to cover B. domain_after is untouched here.
-        # So, we no longer need to explicitly delete domain_after here as part of a three-way merge.
-        # if domain_before and domain_after and domain_after[0] in self.domains:
-        #     print(f"Old logic would have deleted merged domain {domain_after[0]}. New logic keeps it separate.")
-            # self._delete_domain_direct(domain_after[0]) # REMOVED: domain_after is not deleted now
 
-        # --- Perform Update AFTER Deletion(s) --- 
-        updated_domain_id_result = None
-        if update_target_id is not None and update_target_id in self.domains: # Check if target still exists
-            print(f"Executing update for domain {update_target_id} to range {update_new_start}-{update_new_end}")
-            updated_domain_id_result = self.update_domain(update_target_id, chain_id, update_new_start, update_new_end)
-            final_reparent_target_id = updated_domain_id_result # Ensure reparenting uses the potentially new ID from update_domain
-            # Normalization is handled by update_domain if successful, or by _create_domain_with_params if new ones are made.
-            # If update_domain itself returns a new ID, that new ID would have been normalized.
-            # If it returns the same ID, it will normalize that one.
-            # So, no explicit call to _normalize_domain_name here for updated_domain_id_result is needed,
-            # as update_domain should handle it.
-        elif update_target_id:
-            print(f"Warning: Update target domain {update_target_id} was not found after deletions. Cannot expand.")
-        else:
-             print("No adjacent domain found to update or merge with.")
+        # Reparent child domains to the original parent
+        if children_to_reparent:
+            print(f"Reparenting {len(children_to_reparent)} child domain(s) to {original_parent_id}")
+            self._reparent_child_domains(children_to_reparent, original_parent_id)
 
-        # --- Final Steps --- 
-        print(f"Reparenting children of {deleted_domain_name} to target: {final_reparent_target_id}")
-        self._reparent_child_domains(children_to_reparent, final_reparent_target_id)
-        
-        # After deletion and potential merge, re-normalize names of all remaining domains on the affected chain
-        # This is because their status (e.g. sole domain) might have changed.
-        # Need to use the original chain_id of the deleted domain.
-        affected_chain_id = chain_id # This was `domain_to_delete.chain_id` (author chain id)
-        
-        # Create a list of domain IDs on this chain to iterate over, as self.domains might change during normalization
-        # if object names/etc., are modified in a way that affects ID generation (though less likely with current setup)
-        ids_on_chain_to_normalize = []
-        for d_id, d_obj in self.domains.items():
-            if d_obj.chain_id == affected_chain_id:
-                ids_on_chain_to_normalize.append(d_id)
-        
-        for id_to_norm in ids_on_chain_to_normalize:
-            if id_to_norm in self.domains: # Check if it still exists (e.g. wasn't the merged 'after' domain)
-                self._normalize_domain_name(id_to_norm)
-                
-        return updated_domain_id_result
+        return None
 
     def _reparent_child_domains(self, child_domain_ids: List[str], new_parent_id: Optional[str]):
         """Reparent child domains to a new parent

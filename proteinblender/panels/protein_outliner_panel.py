@@ -323,28 +323,27 @@ class PROTEINBLENDER_UL_outliner(UIList):
             else:
                 # For domains, use the item_id directly as domain_id
                 domain_id = item.item_id
-                # Need to check if this domain is a copy to show delete button
                 scene_manager = ProteinBlenderScene.get_instance()
                 # Find which molecule this domain belongs to
                 for molecule_id, molecule in scene_manager.molecules.items():
                     if domain_id in molecule.domains:
                         domain = molecule.domains[domain_id]
-                        
+
                         # Add reset transform button
                         reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
                         if reset_op:
                             reset_op.domain_id = domain_id
-                        
+
                         # Add copy button
                         copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
                         if copy_op:
                             copy_op.domain_id = domain_id
-                        
-                        # Add delete button only if this is a copy
-                        if hasattr(domain, 'is_copy') and domain.is_copy:
-                            delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
-                            if delete_op:
-                                delete_op.domain_id = domain_id
+
+                        # Add delete button for all domains
+                        delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
+                        if delete_op:
+                            delete_op.domain_id = domain_id
+                            delete_op.molecule_id = molecule_id
                         break
         
         # First: Buttons for proteins
