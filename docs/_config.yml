@@ -1,10 +1,11 @@
 title: ProteinBlender Documentation
 description: Create stunning protein visualizations and animations in Blender
-theme: jekyll-theme-cayman
+remote_theme: pages-themes/cayman@v0.2.0
 baseurl: "/proteinblender"
-url: "https://ORGNAME.github.io"
+url: "https://animation-lab.github.io"
 
 plugins:
+  - jekyll-remote-theme
   - jekyll-relative-links
 
 relative_links:
