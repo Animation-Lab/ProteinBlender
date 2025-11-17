@@ -425,7 +425,7 @@ def _reload_modules(packages: Dict[str, str]) -> None:
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
-    "version": (0, 1, 3),  # Synced with blender_manifest.toml
+    "version": (0, 1, 7),  # Synced with blender_manifest.toml
     "blender": (4, 2, 0),  # Updated to match manifest requirement
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
@@ -439,10 +439,10 @@ bl_info = {
 REQUIRED_PACKAGES = {
     # Core scientific packages - must be installed first with compatible versions
     "numpy": ">=1.24.0,<2.0",  # databpy requires <2.0, biotite needs >=1.25
-    "scipy": ">=1.13",  # Required by biotite and MDAnalysis
+    "scipy": ">=1.13,<1.15",  # Required by biotite and MDAnalysis; <1.15 for NumPy 1.x compatibility
 
     # Main dependencies with relaxed version constraints
-    "biotite": ">=1.2.0",  # Use >= instead of == to allow minor updates
+    "biotite": ">=1.2.0,<1.3.0",  # Use >= instead of == to allow minor updates; <1.3.0 for NumPy 1.x compatibility
     "databpy": ">=0.0.15",  # Use >= instead of == to allow patches
     "MDAnalysis": ">=2.7.0",
 

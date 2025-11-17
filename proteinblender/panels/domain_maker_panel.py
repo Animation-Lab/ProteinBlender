@@ -74,16 +74,16 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         """Show panel when chains or domains are selected"""
         scene = context.scene
         selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
+
         # Must have at least one selection
         if len(selected_items) == 0:
             return False
-        
+
         # All selections must be chains or domains
         for item in selected_items:
             if item.item_type not in ['CHAIN', 'DOMAIN']:
                 return False
-        
+
         return True
     
     def check_domains_adjacent(self, domains):
@@ -143,15 +143,29 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        
+
         # Create a box for the entire panel content
         main_box = layout.box()
-        
+
         # Add panel title inside the box
         main_box.label(text="Domain Maker", icon='MESH_DATA')
         main_box.separator()
         scene_manager = ProteinBlenderScene.get_instance()
-        
+
+        # Check if multiple chains are selected
+        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        selected_chains = [item for item in selected_items if item.item_type == 'CHAIN']
+        multiple_chains_selected = len(selected_chains) > 1
+
+        # Disable the entire panel if multiple chains are selected
+        if multiple_chains_selected:
+            main_box.enabled = False
+            info_box = main_box.box()
+            info_box.label(text="Multiple chains selected", icon='INFO')
+            info_box.label(text="Select a single chain or domains from the same chain")
+            layout.separator()
+            return
+
         # Get the selected item - prioritize domains over chains
         selected_item = None
         selected_chain = None
@@ -162,11 +176,11 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
                     break  # Domain takes priority
                 elif item.item_type == 'CHAIN' and selected_chain is None:
                     selected_chain = item
-        
+
         # If no domain selected, use the chain
         if selected_item is None:
             selected_item = selected_chain
-        
+
         if not selected_item:
             main_box.label(text="Select a chain or domain", icon='INFO')
             layout.separator()  # Add bottom spacing
