@@ -53,12 +53,12 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 
 **Full documentation available at:** https://Animation-Lab.github.io/proteinblender
 
-- [Installation Guide](https://Animation-Lab.github.io/proteinblender/installation.html)
-- [Import Proteins](https://Animation-Lab.github.io/proteinblender/import.html)
-- [Update Visuals](https://Animation-Lab.github.io/proteinblender/visuals.html)
-- [Create Puppets](https://Animation-Lab.github.io/proteinblender/puppets.html)
-- [Manage Poses](https://Animation-Lab.github.io/proteinblender/poses.html)
-- [Keyframe Animation](https://Animation-Lab.github.io/proteinblender/keyframes.html)
+- [Installation Guide](https://animation-lab.github.io/ProteinBlender/installation.html)
+- [Import Proteins](https://animation-lab.github.io/ProteinBlender/import.html)
+- [Update Visuals](https://animation-lab.github.io/ProteinBlender/visuals.html)
+- [Create Puppets](https://animation-lab.github.io/ProteinBlender//puppets.html)
+- [Manage Poses](hhttps://animation-lab.github.io/ProteinBlender/poses.html)
+- [Keyframe Animation](https://animation-lab.github.io/ProteinBlender/keyframes.html)
 
 ## Examples
 
