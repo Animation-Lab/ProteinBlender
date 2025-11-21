@@ -89,6 +89,8 @@ After restarting Blender:
 
 If you see the panels, installation was successful!
 
+{% include youtube.html id="JLMbpiywVxQ" %}
+
 ## Troubleshooting
 
 ### Extension Doesn't Appear
@@ -138,4 +140,5 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
