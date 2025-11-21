@@ -89,6 +89,8 @@ After restarting Blender:
 
 If you see the panels, installation was successful!
 
+    {% include youtube.html id="FpLOwE0MfCk" %} 
+
 ## Troubleshooting
 
 ### Extension Doesn't Appear
