@@ -30,13 +30,13 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 1. Open Blender 4.2+
 2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
 3. Click `+` → `Add Remote Repository`
-4. Enter the repository URL (see [releases](https://github.com/ORGNAME/proteinblender/releases) for current URL)
+4. Enter the repository URL (see [releases](https://github.com/Animation-Lab/proteinblender/releases) for current URL)
 5. Install ProteinBlender from the extensions list
 6. Restart Blender
 
 **Option 2: Manual Installation**
 
-1. Download the latest `.zip` from [Releases](https://github.com/ORGNAME/proteinblender/releases)
+1. Download the latest `.zip` from [Releases](https://github.com/Animation-Lab/proteinblender/releases)
 2. In Blender: `Edit` → `Preferences` → `Get Extensions` → `Install from Disk`
 3. Select the downloaded zip file
 4. Restart Blender
@@ -51,14 +51,14 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 
 ## Documentation
 
-**Full documentation available at:** https://ORGNAME.github.io/proteinblender
+**Full documentation available at:** https://Animation-Lab.github.io/proteinblender
 
-- [Installation Guide](https://ORGNAME.github.io/proteinblender/installation.html)
-- [Import Proteins](https://ORGNAME.github.io/proteinblender/import.html)
-- [Update Visuals](https://ORGNAME.github.io/proteinblender/visuals.html)
-- [Create Puppets](https://ORGNAME.github.io/proteinblender/puppets.html)
-- [Manage Poses](https://ORGNAME.github.io/proteinblender/poses.html)
-- [Keyframe Animation](https://ORGNAME.github.io/proteinblender/keyframes.html)
+- [Installation Guide](https://Animation-Lab.github.io/proteinblender/installation.html)
+- [Import Proteins](https://Animation-Lab.github.io/proteinblender/import.html)
+- [Update Visuals](https://Animation-Lab.github.io/proteinblender/visuals.html)
+- [Create Puppets](https://Animation-Lab.github.io/proteinblender/puppets.html)
+- [Manage Poses](https://Animation-Lab.github.io/proteinblender/poses.html)
+- [Keyframe Animation](https://Animation-Lab.github.io/proteinblender/keyframes.html)
 
 ## Examples
 
@@ -80,8 +80,8 @@ GPL-3.0-or-later
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/ORGNAME/proteinblender/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ORGNAME/proteinblender/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Animation-Lab/proteinblender/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Animation-Lab/proteinblender/discussions)
 
 ---
 
