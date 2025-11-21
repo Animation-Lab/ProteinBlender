@@ -89,7 +89,12 @@ After restarting Blender:
 
 If you see the panels, installation was successful!
 
-{% include youtube.html id="JLMbpiywVxQ" %}
+attempt 1
+[![Final video of fixing issues in your code in VS Code](https://img.youtube.com/vi/FpLOwE0MfCk/maxresdefault.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk)
+
+
+attempt 2
+{% include youtube.html id="FpLOwE0MfCk" %}
 
 ## Troubleshooting
 
@@ -140,5 +145,6 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
 
