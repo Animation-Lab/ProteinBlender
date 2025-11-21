@@ -51,7 +51,7 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 
 ## Documentation
 
-**Full documentation available at:** https://Animation-Lab.github.io/proteinblender
+**Full documentation available at:** https://Animation-Lab.github.io/ProteinBlender
 
 - [Installation Guide](https://animation-lab.github.io/ProteinBlender/installation.html)
 - [Import Proteins](https://animation-lab.github.io/ProteinBlender/import.html)
