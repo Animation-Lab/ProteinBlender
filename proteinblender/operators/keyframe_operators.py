@@ -5,6 +5,13 @@ import json
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.animation import (
+    keyframe_transforms,
+    delete_transform_keyframes,
+    keyframe_color_properties,
+    remove_color_keyframes,
+    has_color_keyframe
+)
 
 
 # ============================================================================
@@ -129,71 +136,6 @@ def check_existing_keyframes(controller_obj, domain_objects, frame):
     return keyframe_state
 
 
-def has_color_keyframe(obj, frame):
-    """Check if a color keyframe exists at the specified frame.
-
-    Args:
-        obj: Domain object to check
-        frame: Frame number to check
-
-    Returns:
-        True if color keyframe found, False otherwise
-    """
-    # Find the MolecularNodes modifier
-    mod = None
-    for modifier in obj.modifiers:
-        if modifier.type == 'NODES':
-            mod = modifier
-            break
-
-    if not mod or not mod.node_group:
-        return False
-
-    node_tree = mod.node_group
-
-    # Check Custom Combine Color node for RGB keyframes
-    for node in node_tree.nodes:
-        if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-            # Check if RGB inputs have animation data
-            for input_name in ['Red', 'Green', 'Blue']:
-                try:
-                    # Note: Node inputs don't have animation_data directly
-                    # We need to check the node group's animation data
-                    if node_tree.animation_data and node_tree.animation_data.action:
-                        for fcurve in node_tree.animation_data.action.fcurves:
-                            # Check if this fcurve targets this node's input
-                            if node.name in fcurve.data_path and input_name.lower() in fcurve.data_path.lower():
-                                for kf in fcurve.keyframe_points:
-                                    if abs(kf.co.x - frame) < 0.01:
-                                        return True
-                except Exception as e:
-                    pass
-            break
-
-    # Also check material alpha keyframes
-    style_node = None
-    for node in node_tree.nodes:
-        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
-            style_node = node
-            break
-
-    if style_node:
-        material_input = style_node.inputs.get("Material")
-        if material_input and material_input.default_value:
-            mat = material_input.default_value
-            if mat.use_nodes and mat.node_tree:
-                for mat_node in mat.node_tree.nodes:
-                    if mat_node.type == 'BSDF_PRINCIPLED':
-                        # Check for alpha keyframes
-                        if mat.node_tree.animation_data and mat.node_tree.animation_data.action:
-                            for fcurve in mat.node_tree.animation_data.action.fcurves:
-                                if 'Alpha' in fcurve.data_path:
-                                    for kf in fcurve.keyframe_points:
-                                        if abs(kf.co.x - frame) < 0.01:
-                                            return True
-                        break
-
-    return False
 
 
 def validate_keyframe_metadata(controller_obj, domain_objects, frame, stored_settings):
@@ -291,146 +233,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         description="Collection of puppets to keyframe"
     )
     
-    def remove_geometry_node_color_keyframes(self, obj, frame):
-        """Remove color keyframes from the geometry nodes modifier and alpha from material"""
-        # Find the MolecularNodes modifier
-        mod = None
-        for modifier in obj.modifiers:
-            if modifier.type == 'NODES':
-                mod = modifier
-                break
 
-        if not mod or not mod.node_group:
-            return False
-
-        node_tree = mod.node_group
-        removed_rgb = False
-        removed_alpha = False
-
-        # Look for the Custom Combine Color node
-        for node in node_tree.nodes:
-            if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-                # Remove keyframes from the RGB input values
-                try:
-                    node.inputs['Red'].keyframe_delete("default_value", frame=frame)
-                    node.inputs['Green'].keyframe_delete("default_value", frame=frame)
-                    node.inputs['Blue'].keyframe_delete("default_value", frame=frame)
-                    removed_rgb = True
-                except:
-                    pass  # No keyframes to remove
-                break
-
-        # Remove alpha keyframe from the Style node's material
-        style_node = None
-        for node in node_tree.nodes:
-            if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
-                style_node = node
-                break
-
-        if style_node:
-            material_input = style_node.inputs.get("Material")
-            if material_input and material_input.default_value:
-                mat = material_input.default_value
-                if mat.use_nodes and mat.node_tree:
-                    for mat_node in mat.node_tree.nodes:
-                        if mat_node.type == 'BSDF_PRINCIPLED':
-                            try:
-                                # Remove keyframe from alpha value
-                                mat_node.inputs['Alpha'].keyframe_delete("default_value", frame=frame)
-                                removed_alpha = True
-                            except:
-                                pass  # No keyframe to remove
-                            break
-
-        if removed_rgb or removed_alpha:
-            print(f"  ✗ Removed domain '{obj.name}' color keyframes")
-            return True
-
-        return False
-
-    def keyframe_geometry_node_color(self, obj, frame):
-        """Keyframe the color inputs in the geometry nodes modifier and alpha in material"""
-        # Find the MolecularNodes modifier
-        mod = None
-        for modifier in obj.modifiers:
-            if modifier.type == 'NODES':
-                mod = modifier
-                break
-
-        if not mod or not mod.node_group:
-            print(f"  Warning: No geometry nodes modifier found on {obj.name}")
-            return False
-
-        node_tree = mod.node_group
-        keyframed_rgb = False
-        keyframed_alpha = False
-
-        # Look for the Custom Combine Color node that holds our color values
-        for node in node_tree.nodes:
-            if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-                # Keyframe the RGB input values
-                try:
-                    # These are the actual properties that need to be keyframed
-                    node.inputs['Red'].keyframe_insert("default_value", frame=frame)
-                    node.inputs['Green'].keyframe_insert("default_value", frame=frame)
-                    node.inputs['Blue'].keyframe_insert("default_value", frame=frame)
-                    keyframed_rgb = True
-                except Exception as e:
-                    print(f"  Error keyframing RGB nodes for {obj.name}: {e}")
-                break
-
-        # If no Custom Combine Color node exists, try to get and store the color
-        if not keyframed_rgb:
-            from ..panels.visual_setup_panel import get_object_color, apply_color_to_object
-            color = get_object_color(obj)
-            if color:
-                # Apply the color (this creates the Custom Combine Color node)
-                apply_color_to_object(obj, color)
-                # Now try to keyframe again
-                for node in node_tree.nodes:
-                    if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-                        try:
-                            node.inputs['Red'].keyframe_insert("default_value", frame=frame)
-                            node.inputs['Green'].keyframe_insert("default_value", frame=frame)
-                            node.inputs['Blue'].keyframe_insert("default_value", frame=frame)
-                            keyframed_rgb = True
-                        except Exception as e:
-                            print(f"  Error keyframing RGB nodes for {obj.name}: {e}")
-                        break
-
-        # Now keyframe the alpha value in the Style node's material
-        style_node = None
-        for node in node_tree.nodes:
-            if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
-                style_node = node
-                break
-
-        if style_node:
-            material_input = style_node.inputs.get("Material")
-            if material_input and material_input.default_value:
-                mat = material_input.default_value
-                if mat.use_nodes and mat.node_tree:
-                    for mat_node in mat.node_tree.nodes:
-                        if mat_node.type == 'BSDF_PRINCIPLED':
-                            try:
-                                # Keyframe the alpha value
-                                mat_node.inputs['Alpha'].keyframe_insert("default_value", frame=frame)
-                                keyframed_alpha = True
-                            except Exception as e:
-                                print(f"  Error keyframing alpha for {obj.name}: {e}")
-                            break
-
-        if keyframed_rgb and keyframed_alpha:
-            print(f"  ✓ Keyframed domain '{obj.name}' color (RGBA)")
-        elif keyframed_rgb:
-            print(f"  ✓ Keyframed domain '{obj.name}' color (RGB only)")
-        elif keyframed_alpha:
-            print(f"  ✓ Keyframed domain '{obj.name}' alpha only")
-        else:
-            print(f"  Warning: Could not keyframe color for {obj.name}")
-            return False
-
-        return True
 
     def get_puppet_objects(self, context, puppet_id):
         """Get all Blender objects that belong to a puppet group"""
@@ -732,42 +535,30 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
 
                 # Location
                 if puppet_item.keyframe_location:
-                    controller_obj.keyframe_insert(data_path="location", frame=self.frame_number)
+                    keyframe_transforms(controller_obj, self.frame_number, location=True, rotation=False, scale=False)
                     keyframed_properties.append("location")
                     print(f"  ✓ Keyframed controller location at frame {self.frame_number}")
                 else:
-                    # Remove existing keyframe if checkbox is unchecked
-                    try:
-                        controller_obj.keyframe_delete(data_path="location", frame=self.frame_number)
-                        print(f"  ✗ Removed controller location keyframe at frame {self.frame_number}")
-                    except:
-                        pass  # No keyframe exists to remove
+                    delete_transform_keyframes(controller_obj, self.frame_number, location=True, rotation=False, scale=False)
+                    print(f"  ✗ Removed controller location keyframe at frame {self.frame_number}")
 
                 # Rotation
                 if puppet_item.keyframe_rotation:
-                    controller_obj.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
+                    keyframe_transforms(controller_obj, self.frame_number, location=False, rotation=True, scale=False)
                     keyframed_properties.append("rotation")
                     print(f"  ✓ Keyframed controller rotation at frame {self.frame_number}")
                 else:
-                    # Remove existing keyframe if checkbox is unchecked
-                    try:
-                        controller_obj.keyframe_delete(data_path="rotation_euler", frame=self.frame_number)
-                        print(f"  ✗ Removed controller rotation keyframe at frame {self.frame_number}")
-                    except:
-                        pass  # No keyframe exists to remove
+                    delete_transform_keyframes(controller_obj, self.frame_number, location=False, rotation=True, scale=False)
+                    print(f"  ✗ Removed controller rotation keyframe at frame {self.frame_number}")
 
                 # Scale
                 if puppet_item.keyframe_scale:
-                    controller_obj.keyframe_insert(data_path="scale", frame=self.frame_number)
+                    keyframe_transforms(controller_obj, self.frame_number, location=False, rotation=False, scale=True)
                     keyframed_properties.append("scale")
                     print(f"  ✓ Keyframed controller scale at frame {self.frame_number}")
                 else:
-                    # Remove existing keyframe if checkbox is unchecked
-                    try:
-                        controller_obj.keyframe_delete(data_path="scale", frame=self.frame_number)
-                        print(f"  ✗ Removed controller scale keyframe at frame {self.frame_number}")
-                    except:
-                        pass  # No keyframe exists to remove
+                    delete_transform_keyframes(controller_obj, self.frame_number, location=False, rotation=False, scale=True)
+                    print(f"  ✗ Removed controller scale keyframe at frame {self.frame_number}")
 
                 if keyframed_properties:
                     print(f"  Controller: Keyframed {', '.join(keyframed_properties)}")
@@ -777,27 +568,29 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             for domain_obj in domain_objects:
                 if puppet_item.keyframe_pose:
                     # Keyframe local transforms when pose checkbox is checked
-                    domain_obj.keyframe_insert(data_path="location", frame=self.frame_number)
-                    domain_obj.keyframe_insert(data_path="rotation_euler", frame=self.frame_number)
-                    domain_obj.keyframe_insert(data_path="scale", frame=self.frame_number)
+                    keyframe_transforms(domain_obj, self.frame_number)
                     print(f"  ✓ Keyframed domain '{domain_obj.name}' pose (local transforms)")
                 else:
                     # Remove existing keyframes if pose checkbox is unchecked
-                    try:
-                        domain_obj.keyframe_delete(data_path="location", frame=self.frame_number)
-                        domain_obj.keyframe_delete(data_path="rotation_euler", frame=self.frame_number)
-                        domain_obj.keyframe_delete(data_path="scale", frame=self.frame_number)
-                        print(f"  ✗ Removed domain '{domain_obj.name}' pose keyframes")
-                    except:
-                        pass  # No keyframes exist to remove
+                    delete_transform_keyframes(domain_obj, self.frame_number)
+                    print(f"  ✗ Removed domain '{domain_obj.name}' pose keyframes")
                 
                 # Keyframe color if requested
                 if puppet_item.keyframe_color:
                     # Keyframe the actual geometry node color inputs
-                    self.keyframe_geometry_node_color(domain_obj, self.frame_number)
+                    if not keyframe_color_properties(domain_obj, self.frame_number):
+                        # Try to apply color if it failed (meaning node probably didn't exist)
+                        try:
+                            from ..panels.visual_setup_panel import get_object_color, apply_color_to_object
+                            color = get_object_color(domain_obj)
+                            if color:
+                                apply_color_to_object(domain_obj, color)
+                                keyframe_color_properties(domain_obj, self.frame_number)
+                        except ImportError:
+                            pass
                 else:
                     # Remove color keyframes if checkbox is unchecked
-                    self.remove_geometry_node_color_keyframes(domain_obj, self.frame_number)
+                    remove_color_keyframes(domain_obj, self.frame_number)
                 
                 total_keyframed += 1
             
