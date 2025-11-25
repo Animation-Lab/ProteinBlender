@@ -236,7 +236,11 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         box.separator()
         
         # Check if anything is selected
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        # Filter out reference items (in puppets) to avoid double-counting
+        selected_items = [
+            item for item in scene.outliner_items 
+            if item.is_selected and "_ref_" not in item.item_id
+        ]
         
         if not selected_items:
             box.label(text="Select items to apply settings to all selected", icon='INFO')
@@ -247,7 +251,7 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         info_box = box.box()
         col = info_box.column(align=True)
         
-        # Count selection types
+        # Count selection types (excluding puppet references)
         proteins = sum(1 for item in selected_items if item.item_type == 'PROTEIN')
         chains = sum(1 for item in selected_items if item.item_type == 'CHAIN')
         domains = sum(1 for item in selected_items if item.item_type == 'DOMAIN')

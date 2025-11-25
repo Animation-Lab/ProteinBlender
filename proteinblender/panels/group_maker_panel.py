@@ -107,8 +107,14 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         layout = self.layout
         layout.prop(self, "puppet_name")
         
-        # Show what will be puppeted
-        selected_items = [item for item in context.scene.outliner_items if item.is_selected]
+        # Show what will be puppeted (filter out reference items to avoid double-counting)
+        selected_items = [
+            item for item in context.scene.outliner_items 
+            if item.is_selected 
+            and item.item_type not in ['PUPPET', 'PROTEIN']
+            and item.item_id != "puppets_separator"
+            and "_ref_" not in item.item_id
+        ]
         layout.label(text=f"Creating puppet from {len(selected_items)} items", icon='INFO')
     
     def execute(self, context):

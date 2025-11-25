@@ -73,7 +73,11 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
     def poll(cls, context):
         """Show panel when chains or domains are selected"""
         scene = context.scene
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        # Filter out reference items (in puppets) to avoid double-counting
+        selected_items = [
+            item for item in scene.outliner_items 
+            if item.is_selected and "_ref_" not in item.item_id
+        ]
 
         # Must have at least one selection
         if len(selected_items) == 0:
@@ -153,7 +157,11 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         scene_manager = ProteinBlenderScene.get_instance()
 
         # Check if multiple chains are selected
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
+        # Filter out reference items (in puppets) to avoid double-counting
+        selected_items = [
+            item for item in scene.outliner_items 
+            if item.is_selected and "_ref_" not in item.item_id
+        ]
         selected_chains = [item for item in selected_items if item.item_type == 'CHAIN']
         multiple_chains_selected = len(selected_chains) > 1
 
