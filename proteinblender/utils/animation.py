@@ -1,26 +1,133 @@
-import bpy
-import random
-from mathutils import Vector, Quaternion
-import json
+"""Animation utilities for ProteinBlender.
 
-def keyframe_transforms(obj, frame, location=True, rotation=True, scale=True):
-    """Insert keyframes for standard transforms."""
+This module provides centralized keyframe functions using quaternion rotation
+for proper shortest-path interpolation.
+"""
+
+import bpy
+from mathutils import Vector, Quaternion
+
+
+def ensure_quaternion_mode(obj):
+    """Ensure object uses quaternion rotation mode for proper interpolation.
+    
+    Quaternions avoid the "long way around" rotation issue that occurs with
+    Euler angles when interpolating between keyframes.
+    """
     if not obj:
         return
+    if obj.rotation_mode != 'QUATERNION':
+        # Convert current Euler to Quaternion before switching
+        current_euler = obj.rotation_euler.copy()
+        obj.rotation_mode = 'QUATERNION'
+        obj.rotation_quaternion = current_euler.to_quaternion()
+        
+        # Clean up any old Euler keyframes that might interfere
+        if obj.animation_data and obj.animation_data.action:
+            action = obj.animation_data.action
+            euler_fcurves = [fc for fc in action.fcurves if fc.data_path == "rotation_euler"]
+            for fc in euler_fcurves:
+                action.fcurves.remove(fc)
+
+
+def _get_previous_quaternion_keyframe(obj, current_frame):
+    """Get the quaternion value from the previous keyframe before current_frame."""
+    if not obj.animation_data or not obj.animation_data.action:
+        return None
+    
+    action = obj.animation_data.action
+    
+    # Find the W component fcurve for rotation_quaternion
+    w_fcurve = None
+    x_fcurve = None
+    y_fcurve = None
+    z_fcurve = None
+    
+    for fcurve in action.fcurves:
+        if fcurve.data_path == "rotation_quaternion":
+            if fcurve.array_index == 0:
+                w_fcurve = fcurve
+            elif fcurve.array_index == 1:
+                x_fcurve = fcurve
+            elif fcurve.array_index == 2:
+                y_fcurve = fcurve
+            elif fcurve.array_index == 3:
+                z_fcurve = fcurve
+    
+    if not all([w_fcurve, x_fcurve, y_fcurve, z_fcurve]):
+        return None
+    
+    # Find the keyframe just before current_frame
+    prev_frame = None
+    for kp in w_fcurve.keyframe_points:
+        if kp.co.x < current_frame:
+            if prev_frame is None or kp.co.x > prev_frame:
+                prev_frame = kp.co.x
+    
+    if prev_frame is None:
+        return None
+    
+    # Get quaternion values at that frame
+    w = w_fcurve.evaluate(prev_frame)
+    x = x_fcurve.evaluate(prev_frame)
+    y = y_fcurve.evaluate(prev_frame)
+    z = z_fcurve.evaluate(prev_frame)
+    
+    return Quaternion((w, x, y, z))
+
+
+def _ensure_shortest_path_quaternion(obj, frame):
+    """Ensure the current quaternion takes the shortest path from previous keyframe.
+    
+    Quaternions q and -q represent the same rotation, but interpolating between
+    q1 and q2 vs q1 and -q2 can result in different paths. If dot(q1, q2) < 0,
+    we should negate q2 to ensure shortest path interpolation.
+    """
+    prev_quat = _get_previous_quaternion_keyframe(obj, frame)
+    if prev_quat is None:
+        # First keyframe - nothing to compare against
+        return
+    
+    current_quat = obj.rotation_quaternion.copy()
+    
+    # Calculate dot product
+    dot = prev_quat.dot(current_quat)
+    
+    # If dot product is negative, quaternions are on opposite hemispheres
+    # Negate the current quaternion to ensure shortest path
+    if dot < 0:
+        obj.rotation_quaternion = Quaternion((-current_quat.w, -current_quat.x, -current_quat.y, -current_quat.z))
+
+
+def keyframe_transforms(obj, frame, location=True, rotation=True, scale=True):
+    """Insert keyframes for standard transforms using quaternion rotation.
+    
+    Uses quaternion rotation mode to ensure shortest-path interpolation
+    between rotation keyframes.
+    """
+    if not obj:
+        return
+    
+    # Ensure quaternion mode for proper shortest-path rotation interpolation
+    if rotation:
+        ensure_quaternion_mode(obj)
+        # Ensure shortest path by checking quaternion hemisphere
+        _ensure_shortest_path_quaternion(obj, frame)
         
     if location:
         obj.keyframe_insert(data_path="location", frame=frame)
     if rotation:
-        obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+        obj.keyframe_insert(data_path="rotation_quaternion", frame=frame)
     if scale:
         obj.keyframe_insert(data_path="scale", frame=frame)
 
-    # Adjust interpolation to BEZIER for smoother animation by default
+    # Adjust interpolation to BEZIER for smoother animation
     if obj.animation_data and obj.animation_data.action:
         for fcurve in obj.animation_data.action.fcurves:
             for kp in fcurve.keyframe_points:
                 if abs(kp.co.x - frame) < 0.001:
                     kp.interpolation = 'BEZIER'
+
 
 def delete_transform_keyframes(obj, frame, location=True, rotation=True, scale=True):
     """Delete keyframes for standard transforms at a specific frame."""
@@ -28,17 +135,21 @@ def delete_transform_keyframes(obj, frame, location=True, rotation=True, scale=T
         return
 
     data_paths = []
-    if location: data_paths.append("location")
-    if rotation: 
+    if location:
+        data_paths.append("location")
+    if rotation:
+        # Handle both rotation types for backwards compatibility
         data_paths.append("rotation_euler")
         data_paths.append("rotation_quaternion")
-    if scale: data_paths.append("scale")
+    if scale:
+        data_paths.append("scale")
     
     for path in data_paths:
         try:
             obj.keyframe_delete(data_path=path, frame=frame)
         except:
-            pass # Keyframe might not exist
+            pass  # Keyframe might not exist
+
 
 def delete_transform_keyframes_in_range(objects, start_frame, end_frame, step=1):
     """Safely delete keyframes in a frame range."""
@@ -46,14 +157,12 @@ def delete_transform_keyframes_in_range(objects, start_frame, end_frame, step=1)
         return
         
     for f in range(start_frame, end_frame, step):
-        if f >= end_frame:
-            break
         for obj in objects:
             delete_transform_keyframes(obj, f)
 
+
 def keyframe_color_properties(obj, frame):
     """Keyframe color properties for MolecularNodes/ProteinBlender domains."""
-    # Find the MolecularNodes modifier
     mod = None
     for modifier in obj.modifiers:
         if modifier.type == 'NODES':
@@ -101,6 +210,7 @@ def keyframe_color_properties(obj, frame):
                         break
                         
     return keyframed_rgb or keyframed_alpha
+
 
 def remove_color_keyframes(obj, frame):
     """Remove color keyframes from MolecularNodes/ProteinBlender domains."""
@@ -150,6 +260,7 @@ def remove_color_keyframes(obj, frame):
                         break
     return removed
 
+
 def has_color_keyframe(obj, frame):
     """Check if a color keyframe exists at the specified frame."""
     mod = None
@@ -166,11 +277,8 @@ def has_color_keyframe(obj, frame):
     # Check Custom Combine Color node for RGB keyframes
     for node in node_tree.nodes:
         if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-            # Check if RGB inputs have animation data
-            # Note: We need to check the node group's animation data
             if node_tree.animation_data and node_tree.animation_data.action:
                 for fcurve in node_tree.animation_data.action.fcurves:
-                    # Check if this fcurve targets this node's input
                     if node.name in fcurve.data_path:
                         for kf in fcurve.keyframe_points:
                             if abs(kf.co.x - frame) < 0.01:
@@ -197,90 +305,6 @@ def has_color_keyframe(obj, frame):
                                     return True
     return False
 
-def bake_brownian(op, context, molecule, start_frame, end_frame, intensity, frequency, seed, resolution):
-    """Bake Brownian motion keyframes between two frames using linear interpolation + jitter."""
-    random.seed(seed)
-    scene = context.scene
-    
-    # Collect all objects to animate: protein + all domain objects
-    objects_to_animate = []
-    if molecule.object:
-        objects_to_animate.append(molecule.object)
-    
-    # Add all domain objects
-    for domain_id, domain in molecule.domains.items():
-        if domain.object:
-            objects_to_animate.append(domain.object)
-    
-    # For each object, store starting and ending transforms
-    object_transforms = {}
-    
-    # Helper to capture transform
-    def capture_transform(obj):
-        return {
-            'loc': obj.location.copy(),
-            'rot': obj.rotation_euler.copy(),
-            'scale': obj.scale.copy()
-        }
-
-    # Sample starting transforms
-    scene.frame_set(start_frame)
-    for obj in objects_to_animate:
-        object_transforms[obj.name] = {'start': capture_transform(obj)}
-    
-    # Sample ending transforms
-    scene.frame_set(end_frame)
-    for obj in objects_to_animate:
-        object_transforms[obj.name]['end'] = capture_transform(obj)
-    
-    duration = end_frame - start_frame
-    
-    # Iterate and apply brownian motion
-    for f in range(start_frame + resolution, end_frame, resolution):
-        t = (f - start_frame) / duration
-        scene.frame_set(f)
-        
-        for obj in objects_to_animate:
-            transforms = object_transforms[obj.name]
-            start = transforms['start']
-            end = transforms['end']
-            
-            # Linear interpolation
-            loc = start['loc'].lerp(end['loc'], t)
-            
-            # Use Slerp (Spherical Linear Interpolation) for rotation
-            # This avoids the "long way around" issue by taking the shortest path on the sphere
-            q_start = start['rot'].to_quaternion()
-            q_end = end['rot'].to_quaternion()
-            q_interp = q_start.slerp(q_end, t)
-            
-            # Convert back to Euler, preserving original rotation order
-            rot = q_interp.to_euler(start['rot'].order)
-            
-            scale = start['scale'].lerp(end['scale'], t)
-            
-            # Jitter (use different random values for each object)
-            # Use a deterministic seed based on object name and frame to avoid jitter jumping if re-run
-            obj_seed = seed + hash(obj.name) + f 
-            random.seed(obj_seed)
-            
-            loc += Vector((random.uniform(-intensity, intensity),
-                           random.uniform(-intensity, intensity),
-                           random.uniform(-intensity, intensity)))
-            
-            rot.x += random.uniform(-intensity, intensity)
-            rot.y += random.uniform(-intensity, intensity)
-            rot.z += random.uniform(-intensity, intensity)
-            
-            # Apply and keyframe
-            obj.location = loc
-            obj.rotation_euler = rot
-            obj.scale = scale
-            
-            keyframe_transforms(obj, f)
-    
-    # Restore end frame
-    scene.frame_set(end_frame)
 
 def refresh_timeline():
     """Force refresh of Blender's timeline and UI."""
@@ -290,6 +314,5 @@ def refresh_timeline():
             if area.type in ['TIMELINE', 'DOPESHEET_EDITOR', 'GRAPH_EDITOR', 'VIEW_3D', 'PROPERTIES']:
                 area.tag_redraw()
     
-    # Also update the scene frame to trigger refresh
     current_frame = bpy.context.scene.frame_current
     bpy.context.scene.frame_set(current_frame)

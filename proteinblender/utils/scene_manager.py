@@ -391,15 +391,9 @@ def _refresh_molecule_ui(scene_manager, scene):
             if len(item.keyframes) > 0:
                 existing_keyframes[item.identifier] = []
                 for kf in item.keyframes:
-                    # Store keyframe data
                     kf_data = {
                         'name': kf.name,
                         'frame': kf.frame,
-                        'use_brownian_motion': kf.use_brownian_motion,
-                        'intensity': kf.intensity,
-                        'frequency': kf.frequency,
-                        'seed': kf.seed,
-                        'resolution': kf.resolution
                     }
                     existing_keyframes[item.identifier].append(kf_data)
             
@@ -458,11 +452,6 @@ def _refresh_molecule_ui(scene_manager, scene):
                     new_kf = item.keyframes.add()
                     new_kf.name = kf_data['name']
                     new_kf.frame = kf_data['frame']
-                    new_kf.use_brownian_motion = kf_data['use_brownian_motion']
-                    new_kf.intensity = kf_data['intensity']
-                    new_kf.frequency = kf_data['frequency']
-                    new_kf.seed = kf_data['seed']
-                    new_kf.resolution = kf_data['resolution']
             
             # Restore poses for this molecule if they existed
             if identifier in existing_poses:
@@ -628,21 +617,40 @@ def _recreate_molecule_wrapper_from_object(molecule_id, obj):
 
 
 def _find_orphaned_protein_objects():
-    """Find MolecularNodes protein objects that aren't tracked in scene_manager"""
-    from ..utils.scene_manager import ProteinBlenderScene
+    """Find MolecularNodes protein objects that aren't tracked in scene_manager.
+    
+    Only returns truly orphaned TOP-LEVEL protein objects, not domain objects
+    that are children of tracked molecules.
+    """
     scene_manager = ProteinBlenderScene.get_instance()
     orphaned = []
+    
+    # Build a set of all tracked object names (molecules AND their domains)
+    tracked_object_names = set()
+    for molecule in scene_manager.molecules.values():
+        if molecule.object:
+            tracked_object_names.add(molecule.object.name)
+        for domain in molecule.domains.values():
+            if domain.object:
+                tracked_object_names.add(domain.object.name)
 
     for obj in bpy.data.objects:
+        # Skip if already tracked
+        if obj.name in tracked_object_names:
+            continue
+            
         # Check if it's a MolecularNodes protein
         if not _is_molecular_nodes_protein(obj):
+            continue
+        
+        # Skip objects that are children of other objects (likely domains)
+        if obj.parent is not None:
             continue
 
         # Extract potential molecule ID from object name
         potential_id = _extract_molecule_id_from_object(obj)
-
-        # Check if it's already tracked
-        if potential_id and potential_id not in scene_manager.molecules:
+        
+        if potential_id:
             orphaned.append((potential_id, obj))
 
     return orphaned
@@ -813,6 +821,7 @@ def build_outliner_hierarchy(context=None):
     item_memberships = {}  # Store which groups each item belongs to
     item_selection_states = {}  # Store selection states for all items
     item_expansion_states = {}  # Store expansion states for all items
+    # Note: visibility is read directly from Blender objects, no need to store/restore
     
     # Temporarily disable selection sync during rebuild
     from ..handlers import selection_sync
@@ -842,7 +851,7 @@ def build_outliner_hierarchy(context=None):
                 valid_item_ids.add(f"{molecule_id}_chain_{chain_id}")
 
     for item in scene.outliner_items:
-        # Store selection state for all items
+        # Store selection and expansion states for all items
         if item.item_id and item.item_id != "puppets_separator":
             item_selection_states[item.item_id] = item.is_selected
             item_expansion_states[item.item_id] = item.is_expanded
@@ -1391,112 +1400,3 @@ def build_outliner_hierarchy(context=None):
 
     if context.area:
         context.area.tag_redraw()
-
-
-def update_outliner_visibility(item_id, visible):
-    """Update visibility for an outliner item and its corresponding objects"""
-    scene = bpy.context.scene
-    scene_manager = ProteinBlenderScene.get_instance()
-    view_layer = bpy.context.view_layer
-    
-    # Find the item
-    item = None
-    for outliner_item in scene.outliner_items:
-        if outliner_item.item_id == item_id:
-            item = outliner_item
-            break
-    
-    if not item:
-        return
-    
-    # Update item visibility state
-    item.is_visible = visible
-    
-    # Update object visibility based on item type
-    if item.item_type == 'PROTEIN':
-        # Update protein and all its domains
-        molecule = scene_manager.molecules.get(item_id)
-        if molecule and molecule.object:
-            try:
-                molecule.object.hide_set(not visible, view_layer=view_layer)
-                molecule.object.hide_render = not visible
-            except ReferenceError:
-                pass  # Object was freed
-            # Update all domains
-            for domain in molecule.domains.values():
-                if domain.object:
-                    try:
-                        domain.object.hide_set(not visible, view_layer=view_layer)
-                        domain.object.hide_render = not visible
-                    except ReferenceError:
-                        pass  # Object was freed
-                    
-    elif item.item_type == 'CHAIN':
-        # Update all domains belonging to this chain
-        # Extract molecule_id from chain's parent
-        molecule = scene_manager.molecules.get(item.parent_id)
-        if molecule:
-            # Extract chain identifier from item_id (format: "molecule_id_chain_X")
-            chain_id_str = item.item_id.split('_chain_')[-1]
-            try:
-                chain_id = int(chain_id_str)
-            except:
-                chain_id = chain_id_str
-            
-            # Update visibility for all domains of this chain
-            for domain_id, domain in molecule.domains.items():
-                # Check if domain belongs to this chain (similar logic as in build_outliner_hierarchy)
-                domain_chain_id = getattr(domain, 'chain_id', None)
-                
-                # Extract chain from domain name if needed
-                if domain_chain_id is None and hasattr(domain, 'name'):
-                    import re
-                    match = re.search(r'Chain_([A-Z])', domain.name)
-                    if match:
-                        domain_chain_id = match.group(1)
-                    elif '_' in domain.name:
-                        match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                        if match2:
-                            domain_chain_id = int(match2.group(1))
-                
-                # Check if this domain belongs to the chain
-                if domain_chain_id is not None:
-                    domain_chain_str = str(domain_chain_id)
-                    chain_str = str(chain_id)
-                    
-                    if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                        if domain.object:
-                            try:
-                                domain.object.hide_set(not visible, view_layer=view_layer)
-                                domain.object.hide_render = not visible
-                            except ReferenceError:
-                                pass  # Object was freed
-                    
-    elif item.item_type == 'DOMAIN':
-        # Update just the domain
-        if item.object_name:
-            obj = bpy.data.objects.get(item.object_name)
-            if obj:
-                try:
-                    obj.hide_set(not visible, view_layer=view_layer)
-                    # Also hide from render when hidden in viewport
-                    obj.hide_render = not visible
-                except ReferenceError:
-                    pass  # Object was freed
-                
-    elif item.item_type == 'PUPPET':
-        # Update the puppet's controller object visibility
-        if item.controller_object_name:
-            controller_obj = bpy.data.objects.get(item.controller_object_name)
-            if controller_obj:
-                controller_obj.hide_set(not visible, view_layer=view_layer)
-                controller_obj.hide_render = not visible
-
-        # Update all items that are members of this group
-        member_ids = item.puppet_memberships.split(',') if item.puppet_memberships else []
-        for member_id in member_ids:
-            # Find the actual member item
-            for member_item in scene.outliner_items:
-                if member_item.item_id == member_id:
-                    update_outliner_visibility(member_id, visible)
-                    break

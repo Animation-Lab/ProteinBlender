@@ -491,8 +491,7 @@ class MOLECULE_PB_OT_apply_pose_and_keyframe(Operator):
         # Then create a keyframe
         keyframe_result = bpy.ops.molecule.keyframe_protein(
             keyframe_name=self.keyframe_name,
-            frame_number=context.scene.frame_current,
-            use_brownian_motion=False  # Default to no Brownian motion for pose keyframes
+            frame_number=context.scene.frame_current
         )
         if keyframe_result != {'FINISHED'}:
             self.report({'WARNING'}, "Pose applied but keyframing failed")

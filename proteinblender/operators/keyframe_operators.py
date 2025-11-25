@@ -513,6 +513,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             
             # Apply any active poses for the puppet's domains
             # This preserves domain arrangements
+            from ..utils.animation import ensure_quaternion_mode
             for item in scene.molecule_list_items:
                 if hasattr(item, 'active_pose_index') and hasattr(item, 'poses'):
                     if item.active_pose_index >= 0 and item.active_pose_index < len(item.poses):
@@ -525,7 +526,9 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                                    domain_obj.name.endswith(f"_{transform.domain_id}"):
                                     print(f"  Applying pose transform to {domain_obj.name}")
                                     domain_obj.location = transform.location
-                                    domain_obj.rotation_euler = transform.rotation
+                                    # Use quaternion mode for proper keyframe interpolation
+                                    ensure_quaternion_mode(domain_obj)
+                                    domain_obj.rotation_quaternion = transform.rotation.to_quaternion()
                                     domain_obj.scale = transform.scale
             
             # Keyframe the Empty controller based on checkboxes

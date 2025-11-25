@@ -464,7 +464,13 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
 
                     if controller_obj:
                         # Apply transforms RELATIVE to the puppet controller
-                        from mathutils import Matrix, Vector, Euler
+                        from mathutils import Matrix, Vector, Euler, Quaternion
+
+                        # Store the previous quaternion BEFORE applying the new pose
+                        # This is needed to ensure shortest-path interpolation
+                        prev_quat = None
+                        if obj.rotation_mode == 'QUATERNION':
+                            prev_quat = obj.rotation_quaternion.copy()
 
                         # Build the relative transformation matrix
                         relative_matrix = Matrix()
@@ -480,16 +486,35 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                         # Apply relative to controller's current world position
                         world_matrix = controller_obj.matrix_world @ relative_matrix
                         obj.matrix_world = world_matrix
-
-                        print(f"  Applied RELATIVE transform:")
-                        print(f"    Controller at: {list(controller_obj.location)}")
-                        print(f"    Relative location: {list(transform.location)}")
-                        print(f"    Result world location: {list(obj.location)}")
+                        
+                        # Ensure quaternion mode
+                        if obj.rotation_mode != 'QUATERNION':
+                            obj.rotation_mode = 'QUATERNION'
+                        
+                        # Ensure shortest path: if we have a previous quaternion,
+                        # make sure the new one is on the same hemisphere
+                        new_quat = obj.rotation_quaternion.copy()
+                        if prev_quat is not None:
+                            dot = prev_quat.dot(new_quat)
+                            if dot < 0:
+                                # Flip to same hemisphere as previous
+                                obj.rotation_quaternion = Quaternion((-new_quat.w, -new_quat.x, -new_quat.y, -new_quat.z))
                     else:
                         # Fallback to absolute positioning if no controller
+                        from mathutils import Quaternion, Euler
                         print(f"  WARNING: No controller found, applying absolute transform")
                         obj.location = transform.location
-                        obj.rotation_euler = transform.rotation_euler
+                        
+                        # Convert to quaternion for consistent animation
+                        if obj.rotation_mode != 'QUATERNION':
+                            obj.rotation_mode = 'QUATERNION'
+                        obj.rotation_quaternion = Euler(transform.rotation_euler).to_quaternion()
+                        
+                        # Normalize to positive W hemisphere
+                        if obj.rotation_quaternion.w < 0:
+                            q = obj.rotation_quaternion
+                            obj.rotation_quaternion = Quaternion((-q.w, -q.x, -q.y, -q.z))
+                        
                         obj.scale = transform.scale
                         print(f"  Applied absolute transform - new location: {list(obj.location)}")
 

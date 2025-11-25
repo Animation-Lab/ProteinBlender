@@ -19,10 +19,6 @@ class PROTEINBLENDER_UL_keyframe_list(UIList):
                 row.label(text=item.name)
             else:
                 row.label(text="(unnamed)")
-            
-            # Brownian motion indicator
-            if item.use_brownian_motion:
-                row.label(text="", icon='FORCE_TURBULENCE')
         
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'

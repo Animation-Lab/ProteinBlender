@@ -187,21 +187,11 @@ def register():
         name="Outliner Index",
         default=-1  # Default to -1 to indicate no row selection
     )
-    
-    # Register placeholder property for animation panel
-    bpy.types.Scene.placeholder_brownian = BoolProperty(
-        name="Brownian Motion",
-        description="Placeholder for Brownian motion option",
-        default=False
-    )
 
 def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
-    if hasattr(bpy.types.Scene, "placeholder_brownian"):
-        del bpy.types.Scene.placeholder_brownian
-        
     if hasattr(bpy.types.Scene, "outliner_index"):
         del bpy.types.Scene.outliner_index
     
