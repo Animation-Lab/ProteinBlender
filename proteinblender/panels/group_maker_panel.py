@@ -13,6 +13,27 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
     bl_label = "Create New Puppet"
     bl_options = {'REGISTER', 'UNDO'}
     
+    @staticmethod
+    def _is_valid_puppet_item(item):
+        """Check if item can be added to a puppet.
+        
+        Only chains and domains (non-Empty objects) can be in puppets.
+        Excludes: puppets, proteins, separators, reference items, and Empty objects.
+        """
+        # Exclude puppets, proteins, separators, and reference items
+        if (item.item_type in ['PUPPET', 'PROTEIN'] or
+            item.item_id == "puppets_separator" or
+            "_ref_" in item.item_id):
+            return False
+        
+        # Exclude Empty objects (puppet controllers)
+        if item.object_name:
+            obj = bpy.data.objects.get(item.object_name)
+            if obj and obj.type == 'EMPTY':
+                return False
+        
+        return True
+    
     @classmethod
     def description(cls, context, properties):
         """Dynamic tooltip based on selection state"""
@@ -20,10 +41,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         
         # Get selected items
         selected_items = [item for item in scene.outliner_items if item.is_selected]
-        valid_items = [item for item in selected_items
-                      if item.item_type not in ['PUPPET', 'PROTEIN']
-                      and item.item_id != "puppets_separator"
-                      and "_ref_" not in item.item_id]
+        valid_items = [item for item in selected_items if cls._is_valid_puppet_item(item)]
         
         if not valid_items:
             return "Select chains or domains to create a puppet"
@@ -107,15 +125,12 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         layout = self.layout
         layout.prop(self, "puppet_name")
         
-        # Show what will be puppeted (filter out reference items to avoid double-counting)
-        selected_items = [
-            item for item in context.scene.outliner_items 
-            if item.is_selected 
-            and item.item_type not in ['PUPPET', 'PROTEIN']
-            and item.item_id != "puppets_separator"
-            and "_ref_" not in item.item_id
+        # Show what will be puppeted (filter out invalid items)
+        valid_items = [
+            item for item in context.scene.outliner_items
+            if item.is_selected and self._is_valid_puppet_item(item)
         ]
-        layout.label(text=f"Creating puppet from {len(selected_items)} items", icon='INFO')
+        layout.label(text=f"Creating puppet from {len(valid_items)} items", icon='INFO')
     
     def execute(self, context):
         scene = context.scene
@@ -136,20 +151,23 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         domain_objects = []  # Collect actual Blender objects to parent
         
         for item in selected_items:
-            # Exclude puppets, proteins, separators, and reference items
-            if (item.item_type not in ['PUPPET', 'PROTEIN'] and
-                item.item_id != "puppets_separator" and
-                "_ref_" not in item.item_id):
-                # Check if already in a puppet
-                if item.puppet_memberships:
-                    items_already_puppeted.append(item.name)
-                else:
-                    items_to_puppet.append(item)
-                    # Collect the actual Blender objects for parenting
-                    if item.object_name:
-                        obj = bpy.data.objects.get(item.object_name)
-                        if obj:
-                            domain_objects.append(obj)
+            # Skip invalid items (puppets, proteins, Empty objects, etc.)
+            if not self._is_valid_puppet_item(item):
+                continue
+            
+            # Get the object for parenting (already validated as non-Empty)
+            obj = None
+            if item.object_name:
+                obj = bpy.data.objects.get(item.object_name)
+            
+            # Check if already in a puppet
+            if item.puppet_memberships:
+                items_already_puppeted.append(item.name)
+            else:
+                items_to_puppet.append(item)
+                # Collect the actual Blender objects for parenting
+                if obj:
+                    domain_objects.append(obj)
         
         # If any items are already in puppets, don't proceed
         if items_already_puppeted:

@@ -13,6 +13,52 @@ class ProteinBlenderScene:
             cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def reset(cls):
+        """Reset the singleton instance for a fresh start.
+        
+        This should be called when a new file is loaded/created to ensure
+        clean state and prevent stale references to deleted objects.
+        
+        Following Blender addon best practices:
+        - Clean up all resources before resetting
+        - Handle errors gracefully (objects may already be deleted by Blender)
+        - Ensure no memory leaks from stale references
+        - Always reset even if cleanup fails (fail-safe)
+        """
+        if cls._instance is not None:
+            # Clean up any resources before resetting
+            try:
+                # Clear all molecules (this will trigger cleanup in MoleculeManager)
+                # Use list() to create a copy since we're modifying during iteration
+                molecule_ids = list(cls._instance.molecules.keys())
+                for molecule_id in molecule_ids:
+                    try:
+                        # Only try to remove if molecule still exists
+                        # (objects may already be deleted by Blender on File->New)
+                        if molecule_id in cls._instance.molecules:
+                            cls._instance.molecule_manager.remove_molecule(molecule_id)
+                    except (ReferenceError, KeyError, AttributeError) as e:
+                        # Expected errors when objects are already deleted
+                        # Log at debug level, not warning
+                        pass
+                    except Exception as e:
+                        # Unexpected errors - log but don't fail
+                        print(f"ProteinBlender: Warning cleaning up molecule {molecule_id}: {e}")
+                
+                # Clear saved states
+                cls._instance._saved_states.clear()
+                
+                # Reset instance variables
+                cls._instance.active_molecule = None
+                cls._instance.display_settings = {}
+            except Exception as e:
+                # Even if cleanup fails, reset the instance to prevent corruption
+                print(f"ProteinBlender: Warning during scene manager cleanup: {e}")
+            finally:
+                # Always reset the instance (fail-safe)
+                cls._instance = None
+
     def __init__(self):
         # Initialize the singleton instance
         self.molecule_manager = MoleculeManager()
