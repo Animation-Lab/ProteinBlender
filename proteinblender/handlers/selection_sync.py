@@ -137,26 +137,21 @@ def update_outliner_from_blender_selection():
     # Build set of selected object names for quick lookup
     selected_names = {obj.name for obj in selected_objects}
     
-    # First check if any puppet Empty controllers are selected
-    # Store current puppet selection states to preserve them if needed
-    puppet_states = {}
+    # Update puppet selection based ONLY on their controller Empty objects
+    # Puppets without controllers should always be deselected
     for item in scene.outliner_items:
         if item.item_type == 'PUPPET':
-            puppet_states[item.item_id] = item.is_selected
-
             if item.controller_object_name:
                 # Check if the Empty controller is selected
-                if item.controller_object_name in selected_names:
-                    item.is_selected = True
+                empty_obj = bpy.data.objects.get(item.controller_object_name)
+                if empty_obj:
+                    item.is_selected = empty_obj.select_get()
                 else:
-                    # Only deselect if we're sure the Empty is not selected
-                    # Check if the Empty object actually exists
-                    empty_obj = bpy.data.objects.get(item.controller_object_name)
-                    if empty_obj and not empty_obj.select_get():
-                        item.is_selected = False
-                    elif not empty_obj:
-                        # Empty doesn't exist, clear selection
-                        item.is_selected = False
+                    # Controller doesn't exist, deselect puppet
+                    item.is_selected = False
+            else:
+                # No controller assigned, puppet should be deselected
+                item.is_selected = False
     
     # Update outliner selection state for other items
     for item in scene.outliner_items:
@@ -210,12 +205,11 @@ def update_outliner_from_blender_selection():
     # Update all reference items to match their originals
     # This is a one-way sync from original to reference only
     for item in scene.outliner_items:
-        if "_ref_" in item.item_id and item.puppet_memberships:
+        if "_ref_" in item.item_id and item.reference_target_id:
             # Find the original item
             for orig_item in scene.outliner_items:
-                if orig_item.item_id == item.puppet_memberships:
-                    if item.is_selected != orig_item.is_selected:
-                        item.is_selected = orig_item.is_selected
+                if orig_item.item_id == item.reference_target_id:
+                    item.is_selected = orig_item.is_selected
                     break
     
     # Puppets no longer cascade their selection to members
@@ -253,8 +247,8 @@ def sync_outliner_to_blender_selection(context, item_id):
         if "_ref_" in item_id:
             # Find the reference item to get the actual ID
             for ref_item in scene.outliner_items:
-                if ref_item.item_id == item_id and ref_item.puppet_memberships:
-                    actual_item_id = ref_item.puppet_memberships
+                if ref_item.item_id == item_id and ref_item.reference_target_id:
+                    actual_item_id = ref_item.reference_target_id
                     break
         
         # Find the item

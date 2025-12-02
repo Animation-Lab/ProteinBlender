@@ -8,6 +8,95 @@ import bpy
 from mathutils import Vector, Quaternion
 
 
+# Blender 5.0 (4.4+) changed the animation API - fcurves are now in slots/layers/strips
+BLENDER_VERSION = bpy.app.version
+USE_SLOTTED_ACTIONS = BLENDER_VERSION >= (4, 4, 0)
+
+
+def _get_channelbag(action, animation_data=None):
+    """Get the channelbag from a slotted action (Blender 4.4+).
+    
+    Args:
+        action: The bpy.types.Action object
+        animation_data: Optional animation_data for getting the correct slot
+    
+    Returns:
+        The channelbag object, or None if not found
+    """
+    if not action:
+        return None
+    
+    try:
+        # Get slot from animation_data or fallback to first slot
+        slot = None
+        if animation_data and hasattr(animation_data, 'action_slot'):
+            slot = animation_data.action_slot
+        if not slot and hasattr(action, 'slots') and len(action.slots) > 0:
+            slot = action.slots[0]
+        
+        if not slot:
+            return None
+        
+        # Navigate to channelbag through layers and strips
+        if hasattr(action, 'layers') and len(action.layers) > 0:
+            layer = action.layers[0]
+            if hasattr(layer, 'strips') and len(layer.strips) > 0:
+                strip = layer.strips[0]
+                if hasattr(strip, 'channelbag'):
+                    return strip.channelbag(slot)
+        return None
+    except (AttributeError, TypeError, IndexError):
+        return None
+
+
+def get_fcurves_from_action(action, animation_data=None):
+    """Get fcurves from an action, handling Blender 4.4+ API changes.
+    
+    In Blender 4.4+, actions use slots, layers, and strips instead of direct fcurves.
+    This helper provides backward compatibility.
+    
+    Args:
+        action: The bpy.types.Action object
+        animation_data: Optional animation_data for getting the correct slot (Blender 4.4+)
+    
+    Returns:
+        An iterable of fcurves, or empty list if none found
+    """
+    if not action:
+        return []
+    
+    if USE_SLOTTED_ACTIONS:
+        channelbag = _get_channelbag(action, animation_data)
+        if channelbag and hasattr(channelbag, 'fcurves'):
+            return channelbag.fcurves
+        return []
+    else:
+        return action.fcurves if hasattr(action, 'fcurves') else []
+
+
+def remove_fcurve_from_action(action, fcurve, animation_data=None):
+    """Remove an fcurve from an action, handling Blender 4.4+ API changes.
+    
+    Args:
+        action: The bpy.types.Action object
+        fcurve: The fcurve to remove
+        animation_data: Optional animation_data for getting the correct slot (Blender 4.4+)
+    """
+    if not action or not fcurve:
+        return
+    
+    if USE_SLOTTED_ACTIONS:
+        channelbag = _get_channelbag(action, animation_data)
+        if channelbag and hasattr(channelbag, 'fcurves'):
+            try:
+                channelbag.fcurves.remove(fcurve)
+            except (AttributeError, TypeError) as e:
+                print(f"Warning: Could not remove fcurve: {e}")
+    else:
+        if hasattr(action, 'fcurves'):
+            action.fcurves.remove(fcurve)
+
+
 def ensure_quaternion_mode(obj):
     """Ensure object uses quaternion rotation mode for proper interpolation.
     
@@ -25,9 +114,10 @@ def ensure_quaternion_mode(obj):
         # Clean up any old Euler keyframes that might interfere
         if obj.animation_data and obj.animation_data.action:
             action = obj.animation_data.action
-            euler_fcurves = [fc for fc in action.fcurves if fc.data_path == "rotation_euler"]
+            fcurves = get_fcurves_from_action(action, obj.animation_data)
+            euler_fcurves = [fc for fc in fcurves if fc.data_path == "rotation_euler"]
             for fc in euler_fcurves:
-                action.fcurves.remove(fc)
+                remove_fcurve_from_action(action, fc, obj.animation_data)
 
 
 def _get_previous_quaternion_keyframe(obj, current_frame):
@@ -43,7 +133,8 @@ def _get_previous_quaternion_keyframe(obj, current_frame):
     y_fcurve = None
     z_fcurve = None
     
-    for fcurve in action.fcurves:
+    fcurves = get_fcurves_from_action(action, obj.animation_data)
+    for fcurve in fcurves:
         if fcurve.data_path == "rotation_quaternion":
             if fcurve.array_index == 0:
                 w_fcurve = fcurve
@@ -123,7 +214,8 @@ def keyframe_transforms(obj, frame, location=True, rotation=True, scale=True):
 
     # Adjust interpolation to BEZIER for smoother animation
     if obj.animation_data and obj.animation_data.action:
-        for fcurve in obj.animation_data.action.fcurves:
+        fcurves = get_fcurves_from_action(obj.animation_data.action, obj.animation_data)
+        for fcurve in fcurves:
             for kp in fcurve.keyframe_points:
                 if abs(kp.co.x - frame) < 0.001:
                     kp.interpolation = 'BEZIER'
@@ -278,7 +370,8 @@ def has_color_keyframe(obj, frame):
     for node in node_tree.nodes:
         if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
             if node_tree.animation_data and node_tree.animation_data.action:
-                for fcurve in node_tree.animation_data.action.fcurves:
+                fcurves = get_fcurves_from_action(node_tree.animation_data.action, node_tree.animation_data)
+                for fcurve in fcurves:
                     if node.name in fcurve.data_path:
                         for kf in fcurve.keyframe_points:
                             if abs(kf.co.x - frame) < 0.01:
@@ -298,7 +391,8 @@ def has_color_keyframe(obj, frame):
             mat = material_input.default_value
             if mat.use_nodes and mat.node_tree:
                 if mat.node_tree.animation_data and mat.node_tree.animation_data.action:
-                    for fcurve in mat.node_tree.animation_data.action.fcurves:
+                    fcurves = get_fcurves_from_action(mat.node_tree.animation_data.action, mat.node_tree.animation_data)
+                    for fcurve in fcurves:
                         if 'Alpha' in fcurve.data_path:
                             for kf in fcurve.keyframe_points:
                                 if abs(kf.co.x - frame) < 0.01:

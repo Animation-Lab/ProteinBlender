@@ -1343,8 +1343,8 @@ def build_outliner_hierarchy(context=None):
             ref_item.domain_start = original_item.domain_start
             ref_item.domain_end = original_item.domain_end
             ref_item.has_domains = original_item.has_domains
-            # Store the original item ID for reference
-            ref_item.puppet_memberships = member_id  # Store original ID
+            # Store the original item ID for reference (use dedicated field, not puppet_memberships)
+            ref_item.reference_target_id = member_id
 
             # If this is a chain, always add its domain children (UI will filter based on expansion)
             # ONLY add domains that are group members

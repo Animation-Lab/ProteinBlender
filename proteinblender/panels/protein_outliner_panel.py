@@ -52,26 +52,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     return self._should_show_item_by_parent(items, parent_idx)
         
         return True
-    
-    def _are_all_group_members_selected(self, scene, group_item):
-        """Check if all members of a group are selected"""
-        member_ids = group_item.puppet_memberships.split(',') if group_item.puppet_memberships else []
-        if not member_ids:
-            return False
-
-        # Check each member
-        for member_id in member_ids:
-            member_selected = False
-            for item in scene.outliner_items:
-                if item.item_id == member_id:
-                    if not item.is_selected:
-                        return False
-                    member_selected = True
-                    break
-            if not member_selected:
-                return False
-
-        return True
 
     def _generate_tooltip(self, context, item):
         """Generate tooltip text for an outliner item"""
@@ -467,8 +447,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             for item in scene.outliner_items:
                 if item.item_id == self.item_id:
                     reference_item = item
-                    if item.puppet_memberships:
-                        actual_item_id = item.puppet_memberships  # Original ID stored here
+                    if item.reference_target_id:
+                        actual_item_id = item.reference_target_id
                     break
 
         # Find the actual item to select
@@ -498,12 +478,12 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             # A reference was clicked - already updated both reference and original above
             # Now update any other references to the same item
             for ref_item in scene.outliner_items:
-                if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id and ref_item.item_id != self.item_id:
+                if "_ref_" in ref_item.item_id and ref_item.reference_target_id == actual_item_id and ref_item.item_id != self.item_id:
                     ref_item.is_selected = new_selection_state
         else:
             # The original was clicked - update all its references
             for ref_item in scene.outliner_items:
-                if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == actual_item_id:
+                if "_ref_" in ref_item.item_id and ref_item.reference_target_id == actual_item_id:
                     ref_item.is_selected = new_selection_state
         
         # Handle hierarchical selection
@@ -644,7 +624,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                     sync_outliner_to_blender_selection(bpy.context, item.item_id)
                     # Update all references to this item (one-way only)
                     for ref_item in scene.outliner_items:
-                        if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == item.item_id:
+                        if "_ref_" in ref_item.item_id and ref_item.reference_target_id == item.item_id:
                             ref_item.is_selected = select_state
                     # Recursively select children
                     self.select_children(scene, item.item_id, select_state)
@@ -670,8 +650,8 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         actual_item_id = self.item_id
         if "_ref_" in self.item_id:
             for ref_item in scene.outliner_items:
-                if ref_item.item_id == self.item_id and ref_item.puppet_memberships:
-                    actual_item_id = ref_item.puppet_memberships
+                if ref_item.item_id == self.item_id and ref_item.reference_target_id:
+                    actual_item_id = ref_item.reference_target_id
                     break
         
         # Find the item

@@ -9,7 +9,7 @@ ProteinBlender is a Blender addon for visualizing and animating protein structur
 ## Development Setup
 
 ### Prerequisites
-- Blender 4.4 or higher
+- Blender 4.2 or higher (including Blender 5.0)
 - Python 3.11 (matching Blender's Python version)
 - You must use Blender's Python environment to test and build code
 - VS Code (recommended) with Blender extension

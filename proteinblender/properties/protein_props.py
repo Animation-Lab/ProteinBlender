@@ -98,10 +98,17 @@ class ProteinOutlinerItem(PropertyGroup):
         description="For domain items, end residue"
     )
     
-    # Puppet memberships (items can belong to multiple puppets)
+    # For PUPPET items only: comma-separated list of member item IDs
     puppet_memberships: StringProperty(
-        name="Puppet Memberships",
-        description="Comma-separated list of puppet IDs this item belongs to",
+        name="Puppet Members",
+        description="For PUPPET items: comma-separated list of member item IDs",
+        default=""
+    )
+    
+    # For reference items (shown under puppets): ID of the original item this references
+    reference_target_id: StringProperty(
+        name="Reference Target",
+        description="For reference items: the item_id of the original item this references",
         default=""
     )
     

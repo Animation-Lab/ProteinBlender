@@ -169,7 +169,7 @@ class SelectionManager:
     def _update_references(scene, item_id: str, state: bool) -> None:
         """Update all reference items to match original"""
         for ref_item in scene.outliner_items:
-            if "_ref_" in ref_item.item_id and ref_item.puppet_memberships == item_id:
+            if "_ref_" in ref_item.item_id and ref_item.reference_target_id == item_id:
                 ref_item.is_selected = state
     
     @staticmethod

@@ -416,6 +416,76 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
     
     pose_index: IntProperty(name="Pose Index", default=0)
     
+    def get_puppet_objects(self, context, puppet_id):
+        """Get all objects that belong to a puppet (for validation)"""
+        objects = []
+        
+        # Find the puppet item
+        puppet_item = None
+        if hasattr(context.scene, 'outliner_items'):
+            for item in context.scene.outliner_items:
+                if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                    puppet_item = item
+                    break
+        
+        if not puppet_item or not puppet_item.puppet_memberships:
+            return objects
+        
+        # Import scene manager
+        from ..utils.scene_manager import ProteinBlenderScene
+        scene_manager = ProteinBlenderScene.get_instance()
+        
+        # Parse member IDs
+        member_ids = puppet_item.puppet_memberships.split(',')
+        
+        for member_id in member_ids:
+            if '_' not in member_id:
+                continue
+                
+            # Parse member_id to find molecule and domain
+            if '_chain_' in member_id:
+                parts = member_id.rsplit('_chain_', 1)
+                mol_id = parts[0]
+                domain_id = 'chain_' + parts[1]
+            else:
+                import re
+                match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
+                if match:
+                    mol_id = match.group(1)
+                    domain_id = match.group(2)
+                else:
+                    parts = member_id.rsplit('_', 1)
+                    if len(parts) == 2:
+                        mol_id = parts[0]
+                        domain_id = parts[1]
+                    else:
+                        continue
+            
+            # Find the domain object
+            if mol_id in scene_manager.molecules:
+                molecule = scene_manager.molecules[mol_id]
+                if domain_id in molecule.domains:
+                    domain = molecule.domains[domain_id]
+                    if domain.object:
+                        objects.append(domain.object)
+                elif domain_id.startswith('chain_'):
+                    chain_index = domain_id.replace('chain_', '')
+                    for dom_id, dom in molecule.domains.items():
+                        if dom_id.startswith(f"{mol_id}_{chain_index}_"):
+                            if dom.object:
+                                objects.append(dom.object)
+                            break
+            
+            # Fallback: check outliner items
+            for item in context.scene.outliner_items:
+                if item.item_id == member_id and item.object_name:
+                    obj = bpy.data.objects.get(item.object_name)
+                    if obj and obj not in objects:
+                        objects.append(obj)
+                    break
+        
+        return objects
+    
     def execute(self, context):
         scene = context.scene
 
@@ -431,8 +501,16 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
         applied_count = 0
         not_found = []
 
-        print(f"\nDebug: Applying pose '{pose.name}'")
-        print(f"Debug: Pose has {len(pose.transforms)} transforms")
+        print(f"\n{'='*60}")
+        print(f"DEBUG: Applying pose '{pose.name}' (index {self.pose_index})")
+        print(f"{'='*60}")
+        print(f"Pose puppet_ids: {pose.puppet_ids}")
+        print(f"Pose puppet_names: {pose.puppet_names}")
+        print(f"Pose has {len(pose.transforms)} transforms:")
+        
+        # List all transforms stored in this pose
+        for i, t in enumerate(pose.transforms):
+            print(f"  [{i}] puppet_id='{t.puppet_id}', object_name='{t.object_name}'")
 
         # Group transforms by puppet to find their controllers
         puppets = {}
@@ -440,6 +518,34 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
             if transform.puppet_id not in puppets:
                 puppets[transform.puppet_id] = {'controller': None, 'transforms': []}
             puppets[transform.puppet_id]['transforms'].append(transform)
+
+        print(f"\nPuppets referenced in pose: {list(puppets.keys())}")
+        
+        # Show current puppet membership for comparison
+        print(f"\nCurrent puppet membership (for comparison):")
+        for item in scene.outliner_items:
+            if item.item_type == 'PUPPET' and item.item_id in puppets:
+                print(f"  Puppet '{item.name}' (id={item.item_id}):")
+                print(f"    controller: {item.controller_object_name}")
+                print(f"    members: {item.puppet_memberships}")
+                
+                # Get current puppet objects for validation
+                current_objects = self.get_puppet_objects(context, item.item_id)
+                current_obj_names = {obj.name for obj in current_objects}
+                stored_obj_names = {t.object_name for t in puppets[item.item_id]['transforms']}
+                
+                # Check for mismatches
+                in_pose_not_puppet = stored_obj_names - current_obj_names
+                in_puppet_not_pose = current_obj_names - stored_obj_names
+                
+                if in_pose_not_puppet:
+                    print(f"    ⚠️  IN POSE BUT NOT IN CURRENT PUPPET: {in_pose_not_puppet}")
+                if in_puppet_not_pose:
+                    print(f"    ⚠️  IN CURRENT PUPPET BUT NOT IN POSE: {in_puppet_not_pose}")
+                if not in_pose_not_puppet and not in_puppet_not_pose:
+                    print(f"    ✓ Pose objects match current puppet membership")
+
+        print(f"\n--- Applying transforms ---")
 
         # Find controller for each puppet
         for puppet_id in puppets:

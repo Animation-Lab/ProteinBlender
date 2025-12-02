@@ -10,7 +10,8 @@ from ..utils.animation import (
     delete_transform_keyframes,
     keyframe_color_properties,
     remove_color_keyframes,
-    has_color_keyframe
+    has_color_keyframe,
+    get_fcurves_from_action
 )
 
 
@@ -100,7 +101,8 @@ def check_existing_keyframes(controller_obj, domain_objects, frame):
     # Check controller object F-Curves
     if controller_obj and controller_obj.animation_data and controller_obj.animation_data.action:
         action = controller_obj.animation_data.action
-        for fcurve in action.fcurves:
+        fcurves = get_fcurves_from_action(action, controller_obj.animation_data)
+        for fcurve in fcurves:
             # Check if any keyframe exists at this frame
             for kf in fcurve.keyframe_points:
                 if abs(kf.co.x - frame) < 0.01:  # Frame match (with float tolerance)
@@ -116,7 +118,8 @@ def check_existing_keyframes(controller_obj, domain_objects, frame):
     for domain_obj in domain_objects:
         if domain_obj.animation_data and domain_obj.animation_data.action:
             action = domain_obj.animation_data.action
-            for fcurve in action.fcurves:
+            fcurves = get_fcurves_from_action(action, domain_obj.animation_data)
+            for fcurve in fcurves:
                 for kf in fcurve.keyframe_points:
                     if abs(kf.co.x - frame) < 0.01:
                         # Any keyframe on domain objects indicates pose keyframing
