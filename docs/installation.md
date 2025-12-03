@@ -60,7 +60,7 @@ If you prefer to install manually or need to use an older version of Blender:
 
 ### Step 1: Download
 
-1. Go to the [Releases page](https://github.com/animation-lab/proteinblender/releases)
+1. Go to the [Releases page](https://github.com/Animation-Lab/proteinblender/releases)
 2. Download the latest .zip file for your platform:
    - proteinblender-X.X.X-windows-x64.zip (Windows)
    - proteinblender-X.X.X-linux-x64.zip (Linux)
@@ -109,7 +109,7 @@ If you see the panels, installation was successful!
 
 - Check Blender's system console for error messages
 - Try manual installation from zip file instead
-- Report issues at [GitHub Issues](https://github.com/animation-lab/proteinblender/issues)
+- Report issues at [GitHub Issues](https://github.com/Animation-Lab/proteinblender/issues)
 
 ### Dependencies Not Installing
 
@@ -140,3 +140,4 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
