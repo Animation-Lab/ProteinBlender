@@ -5,7 +5,7 @@ title: ProteinBlender Documentation
 
 # ProteinBlender Documentation
 
-Welcome to the ProteinBlender documentation! This guide will help you create stunning protein visualizations and animations in Blender.
+Welcome to the ProteinBlender documentation! This guide will help you create molecular animations in Blender.
 
 ## What is ProteinBlender?
 
@@ -40,5 +40,6 @@ ProteinBlender is built on [MolecularNodes](https://github.com/BradyAJohnston/Mo
 
 **Author**: Dillon Lee  
 **License**: GPL-3.0-or-later
+
 
 
