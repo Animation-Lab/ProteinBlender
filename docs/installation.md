@@ -15,6 +15,7 @@ ProteinBlender can be installed in two ways: through the extension repository (r
 - **Operating System**: Windows, macOS, or Linux  
 - **Internet connection** (for initial installation and updates)
 
+<!---
 ## Option 1: Extension Repository (Recommended)
 
 The extension repository provides automatic update notifications and one-click updates.
@@ -54,9 +55,13 @@ Click **OK** to save.
 
 Blender will now automatically notify you when updates are available.
 
-## Option 2: Manual Installation
+--->
 
+## Manual Installation
+
+<!---
 If you prefer to install manually or need to use an older version of Blender:
+--->
 
 ### Step 1: Download
 
@@ -140,4 +145,5 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
