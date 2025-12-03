@@ -11,6 +11,11 @@ Welcome to the ProteinBlender documentation! This guide will help you create stu
 
 ProteinBlender is a Blender addon designed for researchers, educators, and scientific communicators. It provides an intuitive interface for importing, visualizing, and animating protein structures with publication-quality results.
 
+## Tutorials
+Check out our tutorials on our [YouTube channel] (https://www.youtube.com/playlist?list=PLkW6xkyq5Q83ix0tGKf4Kdi2sBqND5bA3)!
+{% include youtube.html id="FpLOwE0MfCk" %} 
+{% include youtube.html id="XLPvo1Ax3G4" %} 
+
 ## Quick Navigation
 
 - [**Installation**](installation.html) - Get started with ProteinBlender
