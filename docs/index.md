@@ -13,7 +13,10 @@ ProteinBlender is a Blender addon designed for researchers, educators, and scien
 
 ## Tutorials
 
-Check out our tutorials on our [YouTube channel] (https://www.youtube.com/playlist?list=PLkW6xkyq5Q83ix0tGKf4Kdi2sBqND5bA3)!
+Check out our tutorials on our [YouTube channel](https://www.youtube.com/playlist?list=PLkW6xkyq5Q83ix0tGKf4Kdi2sBqND5bA3)!
+
+{% include youtube.html id="FpLOwE0MfCk" %} 
+
 {% include youtube.html id="FpLOwE0MfCk" %} 
 {% include youtube.html id="XLPvo1Ax3G4" %} 
 
@@ -37,3 +40,4 @@ ProteinBlender is built on [MolecularNodes](https://github.com/BradyAJohnston/Mo
 
 **Author**: Dillon Lee  
 **License**: GPL-3.0-or-later
+
