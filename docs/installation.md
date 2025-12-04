@@ -94,7 +94,8 @@ After restarting Blender:
 
 If you see the panels, installation was successful!
 
-{% include youtube.html id="FpLOwE0MfCk" %} 
+[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk)
+
 
 ## Troubleshooting
 
@@ -145,5 +146,6 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
 
