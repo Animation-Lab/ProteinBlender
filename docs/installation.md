@@ -97,6 +97,7 @@ After restarting Blender:
 If you see the panels, installation was successful!
 
 Click below to watch a tutorial on how to install ProteinBlender:
+
 [Installation tutorial video](https://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk)
 
 
@@ -149,6 +150,7 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
 
 
