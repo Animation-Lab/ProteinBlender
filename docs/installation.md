@@ -7,7 +7,9 @@ title: Installation
 
 [Back to Home](index.html)
 
+<!---
 ProteinBlender can be installed in two ways: through the extension repository (recommended) or manually from a zip file.
+--->
 
 ## Requirements
 
@@ -147,6 +149,7 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
 
 
 
