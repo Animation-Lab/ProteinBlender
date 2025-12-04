@@ -9,6 +9,10 @@ title: Import Proteins
 
 Learn how to load protein structures into Blender using ProteinBlender.
 
+Watch the full tutorial:
+
+[![ProteinBlender Tutorial](http://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](http://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+
 ## Overview
 
 ProteinBlender supports importing proteins from:
@@ -113,3 +117,4 @@ Now that you've imported a protein, learn how to:
 ---
 
 [Back to Home](index.html) | [Previous: Installation](installation.html) | [Next: Update Visuals](visuals.html)
+
