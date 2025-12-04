@@ -176,3 +176,4 @@ Now that you understand puppets, learn how to:
 
 [Back to Home](index.html) | [Previous: Update Visuals](visuals.html) | [Next: Manage Poses](poses.html)
 
+
