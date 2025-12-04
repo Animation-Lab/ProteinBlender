@@ -9,6 +9,10 @@ title: Protein Puppets
 
 Learn how to create and manage protein puppets for coordinated animation and manipulation.
 
+Watch the full tutorial:
+
+[![ProteinBlender Tutorial](http://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](http://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+
 ## What is a Puppet?
 
 A **puppet** is a collection of protein chains and/or domains grouped together. Puppets allow you to:
@@ -171,3 +175,4 @@ Now that you understand puppets, learn how to:
 ---
 
 [Back to Home](index.html) | [Previous: Update Visuals](visuals.html) | [Next: Manage Poses](poses.html)
+
