@@ -35,8 +35,8 @@ Animating with ProteinBlender:
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/ORGNAME/proteinblender/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ORGNAME/proteinblender/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Animation-Lab/proteinblender/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Animation-Lab/proteinblender/discussions)
 
 ## About
 
@@ -44,6 +44,7 @@ ProteinBlender is built on [MolecularNodes](https://github.com/BradyAJohnston/Mo
 
 **Author**: Dillon Lee  
 **License**: GPL-3.0-or-later
+
 
 
 
