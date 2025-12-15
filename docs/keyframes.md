@@ -9,6 +9,10 @@ title: Keyframe Animation
 
 Create animations by keyframing puppet positions, poses, and colors.
 
+Watch the full tutorial:
+
+[![ProteinBlender Tutorial](http://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](http://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+
 ## What is Keyframing?
 
 **Keyframing** is the process of defining specific values at specific points in time. Blender automatically interpolates between keyframes to create smooth animation.
@@ -257,3 +261,4 @@ For more advanced topics:
 ---
 
 [Back to Home](index.html) | [Previous: Manage Poses](poses.html)
+

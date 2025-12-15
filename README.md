@@ -1,8 +1,8 @@
 # ProteinBlender
 
-**Create stunning protein visualizations and animations in Blender**
+**Create molecular animations in Blender**
 
-ProteinBlender is a powerful Blender addon designed for researchers, educators, and scientific communicators who want to create publication-quality molecular visualizations and animations. Built on [MolecularNodes](https://github.com/BradyAJohnston/MolecularNodes), it provides an intuitive interface for working with protein structures directly in Blender's 3D environment.
+ProteinBlender is a powerful Blender addon designed for researchers, educators, and scientific communicators who want to create scientifically accurate molecular animations. Built on [MolecularNodes](https://github.com/BradyAJohnston/MolecularNodes), it provides an intuitive interface for working with protein structures directly in Blender's 3D environment.
 
 ## Key Features
 

@@ -7,7 +7,9 @@ title: Installation
 
 [Back to Home](index.html)
 
+<!---
 ProteinBlender can be installed in two ways: through the extension repository (recommended) or manually from a zip file.
+--->
 
 ## Requirements
 
@@ -15,6 +17,7 @@ ProteinBlender can be installed in two ways: through the extension repository (r
 - **Operating System**: Windows, macOS, or Linux  
 - **Internet connection** (for initial installation and updates)
 
+<!---
 ## Option 1: Extension Repository (Recommended)
 
 The extension repository provides automatic update notifications and one-click updates.
@@ -33,7 +36,7 @@ The extension repository provides automatic update notifications and one-click u
 Enter the following information:
 
 - **Name**: ProteinBlender
-- **URL**: https://ORGNAME.github.io/proteinblender/index.json
+- **URL**: https://animation-lab.github.io/proteinblender/index.json
 
 Click **OK** to save.
 
@@ -54,13 +57,17 @@ Click **OK** to save.
 
 Blender will now automatically notify you when updates are available.
 
-## Option 2: Manual Installation
+--->
 
+## Manual Installation
+
+<!---
 If you prefer to install manually or need to use an older version of Blender:
+--->
 
 ### Step 1: Download
 
-1. Go to the [Releases page](https://github.com/ORGNAME/proteinblender/releases)
+1. Go to the [Releases page](https://github.com/Animation-Lab/proteinblender/releases)
 2. Download the latest .zip file for your platform:
    - proteinblender-X.X.X-windows-x64.zip (Windows)
    - proteinblender-X.X.X-linux-x64.zip (Linux)
@@ -89,8 +96,9 @@ After restarting Blender:
 
 If you see the panels, installation was successful!
 
-Click the preview below to see a brief tutorial on how to install Protein Blender using this method!
-[![Installing Protein Blender](https://img.youtube.com/vi/FpLOwE0MfCk/maxresdefault.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk)
+Click below to watch a tutorial on how to install ProteinBlender:
+
+[![Installation tutorial video](https://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk)
 
 ## Troubleshooting
 
@@ -110,7 +118,7 @@ Click the preview below to see a brief tutorial on how to install Protein Blende
 
 - Check Blender's system console for error messages
 - Try manual installation from zip file instead
-- Report issues at [GitHub Issues](https://github.com/ORGNAME/proteinblender/issues)
+- Report issues at [GitHub Issues](https://github.com/Animation-Lab/proteinblender/issues)
 
 ### Dependencies Not Installing
 
@@ -141,6 +149,8 @@ Now that ProteinBlender is installed, learn how to:
 ---
 
 [Back to Home](index.html) | [Next: Import Proteins](import.html)
+
+
 
 
 
