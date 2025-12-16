@@ -17,11 +17,11 @@ Check out our tutorials on our [YouTube channel](https://www.youtube.com/playlis
 
 Installing ProteinBlender:
 
-[![Installation](http://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](http://www.youtube.com/watch?v=FpLOwE0MfCk "ProteinBlender Installation")
+[![Installation](https://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk "ProteinBlender Installation")
 
 Animating with ProteinBlender:
 
-[![ProteinBlender Tutorial](http://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](http://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+[![ProteinBlender Tutorial](https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](https://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
 
 
 ## Quick Navigation

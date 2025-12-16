@@ -11,7 +11,7 @@ Save and restore different protein conformations using the Pose Library.
 
 Watch the full tutorial:
 
-[![ProteinBlender Tutorial](http://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](http://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+[![ProteinBlender Tutorial](https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](https://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
 ## What is a Pose?
 
 A **pose** is a saved snapshot of puppet positions. Poses capture:
