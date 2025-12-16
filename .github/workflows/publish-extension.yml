@@ -3,6 +3,10 @@ name: Publish Blender Extension
 on:
   release:
     types: [published]
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
   workflow_dispatch:  # Allow manual triggering
 
 # Add permissions here
@@ -22,12 +26,28 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Ruby for Jekyll
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+          bundler-cache: true
+          working-directory: docs
+
+      - name: Build Jekyll site
+        run: |
+          cd docs
+          bundle install
+          bundle exec jekyll build --destination ../_site
+          cd ..
+          echo "✓ Jekyll site built successfully"
+          ls -lah _site/
+
       - name: Download release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Create extensions directory for hosting
-          mkdir -p extensions
+          # Create extensions directory inside the built site
+          mkdir -p _site/extensions
 
           # Get all releases and download their .zip assets
           gh release list --limit 100 | while read -r line; do
@@ -35,16 +55,14 @@ jobs:
             echo "Processing release: $tag"
 
             # Download all .zip files from this release
-            gh release download "$tag" -p "*.zip" -D extensions/ || echo "No zips for $tag"
+            gh release download "$tag" -p "*.zip" -D _site/extensions/ || echo "No zips for $tag"
           done
 
-          ls -lah extensions/
+          ls -lah _site/extensions/
 
       - name: Set up Blender
         run: |
           # Download Blender 4.2+ (required for extension command)
-          # Note: Using 4.2.0 as minimum required version. Blender 5.0 is available but
-          # the extension command format is the same, so 4.2.0 is sufficient for index generation.
           wget -q https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
           tar -xf blender-4.2.0-linux-x64.tar.xz
           echo "$(pwd)/blender-4.2.0-linux-x64" >> $GITHUB_PATH
@@ -52,12 +70,12 @@ jobs:
       - name: Generate extension repository index
         run: |
           # Use Blender to generate the index.json
-          ./blender-4.2.0-linux-x64/blender --background --command extension server-generate --repo-dir=extensions/
+          ./blender-4.2.0-linux-x64/blender --background --command extension server-generate --repo-dir=_site/extensions/
 
           # Verify the index was created
-          if [ -f extensions/index.json ]; then
+          if [ -f _site/extensions/index.json ]; then
             echo "✓ index.json generated successfully"
-            cat extensions/index.json
+            cat _site/extensions/index.json
           else
             echo "✗ Failed to generate index.json"
             exit 1
@@ -67,17 +85,15 @@ jobs:
         id: commit_msg
         run: |
           if [ -n "${{ github.event.release.tag_name }}" ]; then
-            echo "message=Update extension repository - ${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            echo "message=Update site and extensions - ${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           else
-            echo "message=Update extension repository (manual run #${{ github.run_number }})" >> $GITHUB_OUTPUT
+            echo "message=Update site and extensions (run #${{ github.run_number }})" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./extensions
+          publish_dir: ./_site
           publish_branch: gh-pages
-          destination_dir: extensions
-          keep_files: true
           commit_message: ${{ steps.commit_msg.outputs.message }}
