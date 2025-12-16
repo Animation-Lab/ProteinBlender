@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Manage Poses | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Manage Poses" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/poses.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/poses.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Manage Poses" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Manage Poses","url":"https://animation-lab.github.io/ProteinBlender/poses.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=527fed99b0c160b6a48ae3221ab5ec505fdc29b4">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Manage Poses</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="manage-poses">Manage Poses</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>Save and restore different protein conformations using the Pose Library.</p>
+
+<p>Watch the full tutorial:</p>
+
+<p><a href="https://www.youtube.com/watch?v=XLPvo1Ax3G4" title="ProteinBlender Tutorial"><img src="https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg" alt="ProteinBlender Tutorial" /></a></p>
+<h2 id="what-is-a-pose">What is a Pose?</h2>
+
+<p>A <strong>pose</strong> is a saved snapshot of puppet positions. Poses capture:</p>
+<ul>
+  <li>Location, rotation, and scale of objects in selected puppets</li>
+  <li>Multiple puppets can be included in a single pose</li>
+  <li>Poses can be applied to restore saved positions</li>
+</ul>
+
+<p>Think of poses as “bookmarks” for different protein conformations or arrangements.</p>
+
+<h2 id="creating-a-pose">Creating a Pose</h2>
+
+<h3 id="prerequisites">Prerequisites</h3>
+
+<p>Before creating poses, you need:</p>
+<ol>
+  <li>At least one puppet created (see <a href="puppets.html">Protein Puppets</a>)</li>
+  <li>Puppets positioned as desired in the 3D viewport</li>
+</ol>
+
+<h3 id="step-by-step">Step-by-Step</h3>
+
+<ol>
+  <li><strong>Position your puppets</strong> in the 3D viewport
+    <ul>
+      <li>Use transform tools (G for move, R for rotate, S for scale)</li>
+      <li>Arrange proteins to show the conformation you want to save</li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Open Pose Library</strong> panel</p>
+  </li>
+  <li>
+    <p>Click <strong>Create Pose</strong></p>
+  </li>
+  <li>In the dialog:
+    <ul>
+      <li><strong>Name the pose</strong> (e.g., “Open State”, “Bound”, “Closed”)</li>
+      <li><strong>Select which puppets</strong> to include</li>
+      <li>Check the boxes next to puppets you want to save</li>
+    </ul>
+  </li>
+  <li>Click <strong>OK</strong></li>
+</ol>
+
+<p>The new pose appears as a card in the Pose Library panel.</p>
+
+<h2 id="understanding-pose-cards">Understanding Pose Cards</h2>
+
+<p>Each pose is displayed as a card showing:</p>
+<ul>
+  <li><strong>Pose name</strong></li>
+  <li><strong>Included puppets</strong> (listed below name)</li>
+  <li><strong>Screenshot placeholder</strong> (for visual reference)</li>
+  <li><strong>Action buttons</strong>: Apply, Capture, Delete</li>
+</ul>
+
+<h2 id="applying-a-pose">Applying a Pose</h2>
+
+<p>To restore a saved pose:</p>
+
+<ol>
+  <li>Find the pose card in the Pose Library panel</li>
+  <li>Click the <strong>Apply</strong> button</li>
+  <li>All puppets in the pose snap to their saved positions</li>
+</ol>
+
+<p>This is useful for:</p>
+<ul>
+  <li>Switching between conformational states</li>
+  <li>Returning to a reference position</li>
+  <li>Creating keyframes at specific poses</li>
+</ul>
+
+<h2 id="updating-a-pose-capture">Updating a Pose (Capture)</h2>
+
+<p>If you’ve adjusted puppet positions and want to update an existing pose:</p>
+
+<ol>
+  <li><strong>Position puppets</strong> as desired</li>
+  <li>Find the pose card you want to update</li>
+  <li>Click the <strong>Capture</strong> button</li>
+  <li>Current positions overwrite the saved positions</li>
+</ol>
+
+<h2 id="deleting-a-pose">Deleting a Pose</h2>
+
+<p>To remove a pose from the library:</p>
+
+<ol>
+  <li>Find the pose card</li>
+  <li>Click the <strong>Delete</strong> (trash) button</li>
+  <li>The pose is removed permanently</li>
+</ol>
+
+<h2 id="multiple-poses-workflow">Multiple Poses Workflow</h2>
+
+<p>Create multiple poses to represent different states:</p>
+
+<h3 id="example-enzyme-catalytic-cycle">Example: Enzyme Catalytic Cycle</h3>
+
+<ol>
+  <li><strong>Pose 1: “Substrate Free”</strong> - Open active site</li>
+  <li><strong>Pose 2: “Substrate Bound”</strong> - Closed around substrate</li>
+  <li><strong>Pose 3: “Transition State”</strong> - Intermediate conformation</li>
+  <li><strong>Pose 4: “Product Release”</strong> - Reopening</li>
+</ol>
+
+<h3 id="example-protein-protein-interaction">Example: Protein-Protein Interaction</h3>
+
+<ol>
+  <li><strong>Pose 1: “Dissociated”</strong> - Proteins far apart</li>
+  <li><strong>Pose 2: “Approaching”</strong> - Proteins near each other</li>
+  <li><strong>Pose 3: “Bound”</strong> - Proteins in complex</li>
+</ol>
+
+<h2 id="poses-and-animation">Poses and Animation</h2>
+
+<p>Poses are designed to work with keyframe animation:</p>
+
+<ol>
+  <li>Create poses for key conformations</li>
+  <li>Apply a pose</li>
+  <li>Add a keyframe (see <a href="keyframes.html">Keyframe Animation</a>)</li>
+  <li>Move to next frame</li>
+  <li>Apply different pose</li>
+  <li>Add another keyframe</li>
+</ol>
+
+<p>Blender interpolates between poses automatically!</p>
+
+<h2 id="tips-and-best-practices">Tips and Best Practices</h2>
+
+<h3 id="naming">Naming</h3>
+
+<p>Use descriptive pose names that indicate the biological state:</p>
+<ul>
+  <li>“ATP_Bound”</li>
+  <li>“Open_Conformation”</li>
+  <li>“Active_State”</li>
+  <li>“Inhibitor_Complex”</li>
+</ul>
+
+<h3 id="organization">Organization</h3>
+
+<ul>
+  <li>Create poses for distinct conformational states</li>
+  <li>Save intermediate poses for smoother animations</li>
+  <li>Group related poses by naming (e.g., “Complex_1”, “Complex_2”)</li>
+</ul>
+
+<h3 id="testing">Testing</h3>
+
+<p>Before creating final poses:</p>
+<ul>
+  <li>Test that puppets return to correct positions when applied</li>
+  <li>Verify all needed puppets are included</li>
+  <li>Check that transformations look correct</li>
+</ul>
+
+<h2 id="pose-storage">Pose Storage</h2>
+
+<p>Poses are stored:</p>
+<ul>
+  <li><strong>Per-scene</strong>: Poses are saved with the Blender file</li>
+  <li><strong>Not per-file</strong>: Poses don’t transfer between different .blend files</li>
+  <li><strong>In blend file</strong>: Saving the .blend file preserves all poses</li>
+</ul>
+
+<p>To share poses between files, you would need to manually recreate them.</p>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3 id="pose-doesnt-apply-correctly">Pose Doesn’t Apply Correctly</h3>
+
+<ul>
+  <li><strong>Puppets deleted</strong>: If puppets in the pose no longer exist, application fails</li>
+  <li><strong>Puppets renamed</strong>: Pose references puppets by ID, not name</li>
+  <li><strong>Objects moved</strong>: Make sure you’re applying to the correct scene</li>
+</ul>
+
+<h3 id="cant-create-pose">Can’t Create Pose</h3>
+
+<ul>
+  <li><strong>No puppets exist</strong>: Create at least one puppet first</li>
+  <li><strong>No puppets selected</strong>: Check at least one puppet in the creation dialog</li>
+  <li><strong>Duplicate name</strong>: Pose names should be unique (though not enforced)</li>
+</ul>
+
+<h3 id="puppets-dont-move-when-applying-pose">Puppets Don’t Move When Applying Pose</h3>
+
+<ul>
+  <li>Check that the pose includes those puppets</li>
+  <li>Verify puppets still exist in the scene</li>
+  <li>Check Blender console for errors</li>
+</ul>
+
+<h2 id="advanced-usage">Advanced Usage</h2>
+
+<h3 id="partial-pose-application">Partial Pose Application</h3>
+
+<p>Currently, poses apply all included puppets at once. To apply only some puppets:</p>
+<ol>
+  <li>Create separate poses for different puppet groups</li>
+  <li>Apply poses selectively</li>
+</ol>
+
+<h3 id="pose-interpolation">Pose Interpolation</h3>
+
+<p>For smooth transitions between poses:</p>
+<ol>
+  <li>Create keyframes at two different poses</li>
+  <li>Blender interpolates positions automatically</li>
+  <li>Adjust interpolation curve in Graph Editor</li>
+</ol>
+
+<h2 id="next-steps">Next Steps</h2>
+
+<p>Now that you understand poses, learn how to:</p>
+
+<ul>
+  <li><a href="keyframes.html">Keyframe Animation</a> - Animate transitions between poses</li>
+  <li><a href="visuals.html">Update Visuals</a> - Combine pose changes with color animations</li>
+</ul>
+
+<hr />
+
+<table>
+  <tbody>
+    <tr>
+      <td><a href="index.html">Back to Home</a></td>
+      <td><a href="puppets.html">Previous: Create Puppets</a></td>
+      <td><a href="keyframes.html">Next: Keyframe Animation</a></td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Import Proteins | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Import Proteins" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/import.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/import.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Import Proteins" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Import Proteins","url":"https://animation-lab.github.io/ProteinBlender/import.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=527fed99b0c160b6a48ae3221ab5ec505fdc29b4">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Import Proteins</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="import-proteins">Import Proteins</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>Learn how to load protein structures into Blender using ProteinBlender.</p>
+
+<p>Watch the full tutorial:</p>
+
+<p><a href="https://www.youtube.com/watch?v=XLPvo1Ax3G4" title="ProteinBlender Tutorial"><img src="https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg" alt="ProteinBlender Tutorial" /></a></p>
+
+<h2 id="overview">Overview</h2>
+
+<p>ProteinBlender supports importing proteins from:</p>
+<ul>
+  <li>Local PDB or mmCIF files</li>
+  <li>RCSB Protein Data Bank (online)</li>
+  <li>AlphaFold Database (online)</li>
+</ul>
+
+<h2 id="opening-the-importer">Opening the Importer</h2>
+
+<ol>
+  <li>Open Blender and make sure ProteinBlender is installed</li>
+  <li>The ProteinBlender workspace should open automatically</li>
+  <li>Look for the <strong>Importer</strong> panel on the right side</li>
+  <li>If you don’t see it, press <strong>N</strong> in the 3D viewport to open the sidebar</li>
+</ol>
+
+<h2 id="import-from-file">Import from File</h2>
+
+<h3 id="step-by-step">Step-by-Step</h3>
+
+<ol>
+  <li>In the <strong>Importer</strong> panel, locate the <strong>Import from File</strong> section</li>
+  <li>Click the <strong>folder icon</strong> to browse for a file</li>
+  <li>Navigate to your PDB or mmCIF file</li>
+  <li>Select the file and click <strong>Import</strong></li>
+  <li>Wait for the import to complete (progress shown in bottom left)</li>
+</ol>
+
+<h3 id="supported-file-formats">Supported File Formats</h3>
+
+<ul>
+  <li><strong>.pdb</strong> - Protein Data Bank format</li>
+  <li><strong>.cif</strong> / <strong>.mmcif</strong> - Macromolecular Crystallographic Information File</li>
+</ul>
+
+<h2 id="import-from-online-database">Import from Online Database</h2>
+
+<h3 id="from-rcsb-pdb">From RCSB PDB</h3>
+
+<ol>
+  <li>In the <strong>Importer</strong> panel, find the <strong>Import from PDB</strong> section</li>
+  <li>Enter a <strong>4-character PDB ID</strong> (e.g., 1CRN, 6LU7, 7BV2)</li>
+  <li>Click <strong>Fetch from PDB</strong></li>
+  <li>The structure will be downloaded and imported automatically</li>
+</ol>
+
+<p><strong>Popular PDB IDs to try:</strong></p>
+<ul>
+  <li><strong>1CRN</strong> - Crambin (small protein, good for testing)</li>
+  <li><strong>6LU7</strong> - SARS-CoV-2 Main Protease</li>
+  <li><strong>1ATP</strong> - ATP Synthase</li>
+</ul>
+
+<h3 id="from-alphafold">From AlphaFold</h3>
+
+<ol>
+  <li>In the <strong>Importer</strong> panel, find the <strong>Import from AlphaFold</strong> section</li>
+  <li>Enter a <strong>UniProt ID</strong> (e.g., P69905, Q9Y6K9)</li>
+  <li>Click <strong>Fetch from AlphaFold</strong></li>
+  <li>The predicted structure will be downloaded and imported</li>
+</ol>
+
+<h2 id="after-import">After Import</h2>
+
+<p>Once imported, your protein will:</p>
+<ul>
+  <li>Appear in the 3D viewport</li>
+  <li>Be listed in the <strong>Protein Outliner</strong> panel</li>
+  <li>Be centered at the world origin</li>
+  <li>Display with default cartoon representation</li>
+</ul>
+
+<h2 id="managing-multiple-proteins">Managing Multiple Proteins</h2>
+
+<p>You can import multiple proteins into the same scene:</p>
+
+<ol>
+  <li>Simply import additional proteins using any method</li>
+  <li>Each protein appears as a separate entry in the Protein Outliner</li>
+  <li>Use the outliner to select and manage individual proteins</li>
+</ol>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3 id="import-fails">Import Fails</h3>
+
+<ul>
+  <li>Check your internet connection (for online imports)</li>
+  <li>Verify the PDB ID or UniProt ID is correct</li>
+  <li>Check the Blender console for error messages</li>
+</ul>
+
+<h3 id="protein-doesnt-appear">Protein Doesn’t Appear</h3>
+
+<ul>
+  <li>Check that you’re in the 3D viewport (not another editor)</li>
+  <li>Press Numpad . (period) to frame the imported protein</li>
+  <li>Look in the Protein Outliner to verify the protein was imported</li>
+</ul>
+
+<h3 id="very-slow-import">Very Slow Import</h3>
+
+<ul>
+  <li>Large proteins (1000+ residues) may take 30-60 seconds</li>
+  <li>Complex multi-chain assemblies take longer</li>
+  <li>Check progress in the bottom-left corner of Blender</li>
+</ul>
+
+<h2 id="understanding-the-protein-structure">Understanding the Protein Structure</h2>
+
+<p>After import, you’ll see:</p>
+
+<ul>
+  <li><strong>Chains</strong>: Individual polypeptide chains (labeled A, B, C, etc.)</li>
+  <li><strong>Domains</strong>: Full chain domains (you can split these later)</li>
+  <li><strong>Hierarchy</strong>: Organized in the Protein Outliner panel</li>
+</ul>
+
+<h2 id="next-steps">Next Steps</h2>
+
+<p>Now that you’ve imported a protein, learn how to:</p>
+
+<ul>
+  <li><a href="visuals.html">Update Visuals</a> - Change colors and molecular styles</li>
+  <li><a href="puppets.html">Create Puppets</a> - Group parts for animation</li>
+</ul>
+
+<hr />
+
+<table>
+  <tbody>
+    <tr>
+      <td><a href="index.html">Back to Home</a></td>
+      <td><a href="installation.html">Previous: Installation</a></td>
+      <td><a href="visuals.html">Next: Update Visuals</a></td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Keyframe Animation | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Keyframe Animation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/keyframes.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/keyframes.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Keyframe Animation" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Keyframe Animation","url":"https://animation-lab.github.io/ProteinBlender/keyframes.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=527fed99b0c160b6a48ae3221ab5ec505fdc29b4">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Keyframe Animation</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="keyframe-animation">Keyframe Animation</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>Create animations by keyframing puppet positions, poses, and colors.</p>
+
+<p>Watch the full tutorial:</p>
+
+<p><a href="https://www.youtube.com/watch?v=XLPvo1Ax3G4" title="ProteinBlender Tutorial"><img src="https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg" alt="ProteinBlender Tutorial" /></a></p>
+
+<h2 id="what-is-keyframing">What is Keyframing?</h2>
+
+<p><strong>Keyframing</strong> is the process of defining specific values at specific points in time. Blender automatically interpolates between keyframes to create smooth animation.</p>
+
+<p>In ProteinBlender, you can keyframe:</p>
+<ul>
+  <li><strong>Puppet positions</strong> (location, rotation, scale)</li>
+  <li><strong>Poses</strong> (apply different conformations)</li>
+  <li><strong>Colors</strong> (change appearance over time)</li>
+</ul>
+
+<h2 id="animation-panel">Animation Panel</h2>
+
+<p>The <strong>Animation</strong> panel provides tools for creating keyframes.</p>
+
+<h3 id="panel-sections">Panel Sections</h3>
+
+<ul>
+  <li><strong>Puppet Selection</strong>: Choose which puppet to animate</li>
+  <li><strong>Keyframe Options</strong>: Select what to keyframe (Location, Rotation, Scale, Pose, Color)</li>
+  <li><strong>Create Keyframe</strong> button: Adds keyframe at current frame</li>
+</ul>
+
+<h2 id="creating-your-first-animation">Creating Your First Animation</h2>
+
+<h3 id="simple-position-animation">Simple Position Animation</h3>
+
+<ol>
+  <li>
+    <p><strong>Select a puppet</strong> from the dropdown in Animation panel</p>
+  </li>
+  <li><strong>Set first keyframe</strong> at frame 1:
+    <ul>
+      <li>Move to frame 1 in timeline (bottom of screen)</li>
+      <li>Position the puppet where you want it to start</li>
+      <li>Check <strong>Location</strong> in Keyframe Options</li>
+      <li>Click <strong>Create Keyframe</strong></li>
+    </ul>
+  </li>
+  <li><strong>Set second keyframe</strong> at frame 60:
+    <ul>
+      <li>Move to frame 60 in timeline</li>
+      <li>Move the puppet to a different position</li>
+      <li>Check <strong>Location</strong></li>
+      <li>Click <strong>Create Keyframe</strong></li>
+    </ul>
+  </li>
+  <li><strong>Play animation</strong>:
+    <ul>
+      <li>Press Spacebar or click Play in timeline</li>
+      <li>Watch the puppet move smoothly from start to end position</li>
+    </ul>
+  </li>
+</ol>
+
+<h2 id="keyframe-options">Keyframe Options</h2>
+
+<h3 id="location-rotation-scale">Location, Rotation, Scale</h3>
+
+<ul>
+  <li><strong>Location (L)</strong>: Keyframe position in 3D space</li>
+  <li><strong>Rotation (R)</strong>: Keyframe rotation angles</li>
+  <li><strong>Scale (S)</strong>: Keyframe size changes</li>
+</ul>
+
+<p>You can keyframe any combination:</p>
+<ul>
+  <li><strong>L + R</strong>: Movement and rotation</li>
+  <li><strong>L + R + S</strong>: Full transformation</li>
+  <li><strong>Just R</strong>: Rotation in place</li>
+</ul>
+
+<h3 id="pose">Pose</h3>
+
+<p>The <strong>Pose</strong> option works with your saved poses:</p>
+
+<ol>
+  <li>Create poses in Pose Library (see <a href="poses.html">Manage Poses</a>)</li>
+  <li>At keyframe 1: Apply Pose A, check Pose, create keyframe</li>
+  <li>At keyframe 60: Apply Pose B, check Pose, create keyframe</li>
+  <li>Blender interpolates between the two conformations!</li>
+</ol>
+
+<p><strong>Important</strong>: Pose must be applied BEFORE creating the keyframe.</p>
+
+<h3 id="color">Color</h3>
+
+<p>Animate color changes:</p>
+
+<ol>
+  <li>At keyframe 1: Set color in Visual Setup, check Color, create keyframe</li>
+  <li>At keyframe 60: Set different color, check Color, create keyframe</li>
+  <li>Domain smoothly transitions between colors</li>
+</ol>
+
+<h2 id="advanced-animation-workflows">Advanced Animation Workflows</h2>
+
+<h3 id="conformational-change-animation">Conformational Change Animation</h3>
+
+<ol>
+  <li><strong>Create poses</strong> for different states (e.g., Open, Closed)</li>
+  <li><strong>Timeline</strong>:
+    <ul>
+      <li>Frame 1: Apply “Open” pose, keyframe Pose</li>
+      <li>Frame 30: Apply “Closed” pose, keyframe Pose</li>
+      <li>Frame 60: Apply “Open” pose, keyframe Pose</li>
+    </ul>
+  </li>
+  <li><strong>Result</strong>: Protein opens and closes smoothly</li>
+</ol>
+
+<h3 id="multi-property-animation">Multi-Property Animation</h3>
+
+<p>Combine multiple properties for richer animations:</p>
+
+<p><strong>Frame 1:</strong></p>
+<ul>
+  <li>Position puppet at (0, 0, 0)</li>
+  <li>Apply “Unbound” pose</li>
+  <li>Set color to blue</li>
+  <li>Keyframe: Location + Pose + Color</li>
+</ul>
+
+<p><strong>Frame 60:</strong></p>
+<ul>
+  <li>Position puppet at (10, 0, 0)</li>
+  <li>Apply “Bound” pose</li>
+  <li>Set color to red</li>
+  <li>Keyframe: Location + Pose + Color</li>
+</ul>
+
+<p><strong>Result</strong>: Protein moves, changes conformation, and changes color simultaneously.</p>
+
+<h3 id="multi-puppet-coordination">Multi-Puppet Coordination</h3>
+
+<p>Animate multiple puppets in the same scene:</p>
+
+<ol>
+  <li><strong>Puppet A</strong> (Enzyme):
+    <ul>
+      <li>Keyframe at frames 1, 30, 60</li>
+    </ul>
+  </li>
+  <li><strong>Puppet B</strong> (Substrate):
+    <ul>
+      <li>Keyframe at frames 1, 30, 60</li>
+      <li>Coordinate timing to show binding</li>
+    </ul>
+  </li>
+  <li><strong>Result</strong>: Choreographed interaction between proteins</li>
+</ol>
+
+<h2 id="timeline-tips">Timeline Tips</h2>
+
+<h3 id="navigating-the-timeline">Navigating the Timeline</h3>
+
+<ul>
+  <li><strong>Scrub</strong>: Drag the blue playhead to preview</li>
+  <li><strong>Jump to frame</strong>: Click in timeline or type frame number</li>
+  <li><strong>Play</strong>: Spacebar</li>
+  <li><strong>Step forward/back</strong>: Left/Right arrow keys</li>
+</ul>
+
+<h3 id="frame-rate">Frame Rate</h3>
+
+<ul>
+  <li>Default: 24 frames per second (fps)</li>
+  <li>60 frames = 2.5 seconds of animation at 24fps</li>
+  <li>Adjust in Output Properties panel</li>
+</ul>
+
+<h2 id="editing-keyframes">Editing Keyframes</h2>
+
+<h3 id="graph-editor">Graph Editor</h3>
+
+<p>For precise control over interpolation:</p>
+
+<ol>
+  <li>Switch an editor to <strong>Graph Editor</strong></li>
+  <li>Select your puppet object</li>
+  <li>See keyframes as curves</li>
+  <li>Edit curves to control animation timing</li>
+</ol>
+
+<h3 id="dope-sheet">Dope Sheet</h3>
+
+<p>For overview of all keyframes:</p>
+
+<ol>
+  <li>Switch an editor to <strong>Dope Sheet</strong></li>
+  <li>See all keyframes across timeline</li>
+  <li>Move, copy, or delete keyframes</li>
+</ol>
+
+<h2 id="rendering-animation">Rendering Animation</h2>
+
+<p>Once you’re happy with the animation:</p>
+
+<ol>
+  <li>Set output format in Output Properties</li>
+  <li>Set frame range (start and end frames)</li>
+  <li>Choose output path</li>
+  <li>Render &gt; Render Animation (Ctrl+F12)</li>
+</ol>
+
+<h2 id="common-animation-scenarios">Common Animation Scenarios</h2>
+
+<h3 id="protein-folding">Protein Folding</h3>
+
+<ol>
+  <li>Create poses: Unfolded, Intermediate, Folded</li>
+  <li>Keyframe pose transitions</li>
+  <li>Add rotation for visual interest</li>
+</ol>
+
+<h3 id="enzyme-substrate-binding">Enzyme-Substrate Binding</h3>
+
+<ol>
+  <li><strong>Puppet 1</strong> (Enzyme): Static or small movement</li>
+  <li><strong>Puppet 2</strong> (Substrate): Approaches enzyme</li>
+  <li>Both change to “Bound” pose when close</li>
+  <li>Color changes to show activation</li>
+</ol>
+
+<h3 id="conformational-dynamics">Conformational Dynamics</h3>
+
+<ol>
+  <li>Create multiple poses representing motion</li>
+  <li>Keyframe through poses in sequence</li>
+  <li>Loop by returning to first pose at end</li>
+</ol>
+
+<h2 id="tips-and-best-practices">Tips and Best Practices</h2>
+
+<h3 id="planning">Planning</h3>
+
+<ul>
+  <li>Sketch out key moments before keyframing</li>
+  <li>Create all necessary poses first</li>
+  <li>Test timing with rough keyframes</li>
+</ul>
+
+<h3 id="timing">Timing</h3>
+
+<ul>
+  <li>Fast movements: Fewer frames between keyframes</li>
+  <li>Slow movements: More frames between keyframes</li>
+  <li>Hold pose: Create two keyframes at same position</li>
+</ul>
+
+<h3 id="smooth-vs-mechanical">Smooth vs. Mechanical</h3>
+
+<ul>
+  <li>Use Graph Editor to adjust curves for natural motion</li>
+  <li>Ease-in and ease-out for realistic acceleration</li>
+  <li>Linear interpolation for mechanical movements</li>
+</ul>
+
+<h3 id="performance">Performance</h3>
+
+<ul>
+  <li>Complex animations may slow viewport playback</li>
+  <li>Reduce viewport complexity while animating</li>
+  <li>Final render will be smoother</li>
+</ul>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3 id="keyframe-not-created">Keyframe Not Created</h3>
+
+<ul>
+  <li>Check that a puppet is selected</li>
+  <li>Make sure at least one option is checked (Location, Rotation, etc.)</li>
+  <li>Look for error messages in console</li>
+</ul>
+
+<h3 id="animation-jumps-instead-of-interpolating">Animation Jumps Instead of Interpolating</h3>
+
+<ul>
+  <li>Make sure you have keyframes at both start and end</li>
+  <li>Check that you’re keyframing the same properties</li>
+  <li>Verify puppet wasn’t deleted/recreated between keyframes</li>
+</ul>
+
+<h3 id="pose-changes-dont-animate-smoothly">Pose Changes Don’t Animate Smoothly</h3>
+
+<ul>
+  <li>Poses must have same puppets</li>
+  <li>Objects in poses must exist at both keyframes</li>
+  <li>Check that pose was applied before keyframing</li>
+</ul>
+
+<h3 id="color-doesnt-animate">Color Doesn’t Animate</h3>
+
+<ul>
+  <li>Color keyframes affect geometry node inputs</li>
+  <li>Make sure Color option is checked when keyframing</li>
+  <li>Verify domain has material</li>
+</ul>
+
+<h2 id="next-steps">Next Steps</h2>
+
+<p>You now have the tools to create complete protein animations!</p>
+
+<p>For more advanced topics:</p>
+<ul>
+  <li><a href="visuals.html">Update Visuals</a> - Advanced coloring techniques</li>
+  <li><a href="poses.html">Manage Poses</a> - Creating complex pose libraries</li>
+</ul>
+
+<h2 id="resources">Resources</h2>
+
+<ul>
+  <li><strong>Blender Animation Manual</strong>: https://docs.blender.org/manual/en/latest/animation/</li>
+  <li><strong>Graph Editor</strong>: https://docs.blender.org/manual/en/latest/editors/graph_editor/</li>
+  <li><strong>Rendering</strong>: https://docs.blender.org/manual/en/latest/render/</li>
+</ul>
+
+<hr />
+
+<table>
+  <tbody>
+    <tr>
+      <td><a href="index.html">Back to Home</a></td>
+      <td><a href="poses.html">Previous: Manage Poses</a></td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

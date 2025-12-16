@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Update Visuals | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Update Visuals" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/visuals.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/visuals.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Update Visuals" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Update Visuals","url":"https://animation-lab.github.io/ProteinBlender/visuals.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=527fed99b0c160b6a48ae3221ab5ec505fdc29b4">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Update Visuals</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="update-visuals">Update Visuals</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>Customize the appearance of your proteins with colors and molecular representation styles.</p>
+
+<h2 id="overview">Overview</h2>
+
+<p>The <strong>Visual Setup</strong> panel lets you:</p>
+<ul>
+  <li>Change protein colors</li>
+  <li>Switch between molecular representation styles</li>
+  <li>Apply changes to selected proteins, chains, or domains</li>
+</ul>
+
+<h2 id="accessing-visual-setup">Accessing Visual Setup</h2>
+
+<ol>
+  <li>Import a protein (see <a href="import.html">Import Proteins</a>)</li>
+  <li>Find the <strong>Visual Setup</strong> panel below the Protein Outliner</li>
+  <li>The panel shows color and style options</li>
+</ol>
+
+<h2 id="changing-colors">Changing Colors</h2>
+
+<h3 id="apply-color-to-selection">Apply Color to Selection</h3>
+
+<ol>
+  <li><strong>Select</strong> an item in the Protein Outliner (protein, chain, or domain)</li>
+  <li>In the <strong>Visual Setup</strong> panel, click the <strong>color picker</strong></li>
+  <li>Choose your desired color</li>
+  <li>Click <strong>Apply Color</strong></li>
+</ol>
+
+<p>The color will be applied based on your selection:</p>
+<ul>
+  <li><strong>Protein selected</strong>: All chains and domains get the color</li>
+  <li><strong>Chain selected</strong>: All domains in that chain get the color</li>
+  <li><strong>Domain selected</strong>: Only that specific domain gets the color</li>
+</ul>
+
+<h3 id="color-tips">Color Tips</h3>
+
+<ul>
+  <li><strong>Distinct chains</strong>: Use different colors for each chain</li>
+  <li><strong>Functional domains</strong>: Color active sites or binding sites differently</li>
+  <li><strong>Emphasis</strong>: Use bright colors for regions of interest</li>
+  <li><strong>Publication</strong>: Use standard color schemes (e.g., blue/red for charges)</li>
+</ul>
+
+<h2 id="changing-molecular-styles">Changing Molecular Styles</h2>
+
+<h3 id="available-styles">Available Styles</h3>
+
+<p>ProteinBlender supports multiple molecular representations:</p>
+
+<ul>
+  <li><strong>Cartoon</strong>: Classic ribbon/cartoon representation (default)</li>
+  <li><strong>Surface</strong>: Molecular surface (good for visualizing shape)</li>
+  <li><strong>Ribbon</strong>: Simplified backbone ribbon</li>
+  <li><strong>Ball and Stick</strong>: Atomic detail with bonds</li>
+  <li><strong>Spheres</strong>: Space-filling representation</li>
+  <li><strong>And more</strong>: Additional styles from MolecularNodes</li>
+</ul>
+
+<h3 id="apply-style-to-selection">Apply Style to Selection</h3>
+
+<ol>
+  <li><strong>Select</strong> an item in the Protein Outliner</li>
+  <li>In the <strong>Visual Setup</strong> panel, choose a <strong>Style</strong> from the dropdown</li>
+  <li>Click <strong>Apply Style</strong></li>
+</ol>
+
+<p>Like colors, styles are applied hierarchically based on selection.</p>
+
+<h2 id="independent-domain-styling">Independent Domain Styling</h2>
+
+<p>One of ProteinBlender’s powerful features is <strong>independent domain styling</strong>:</p>
+
+<ol>
+  <li>Split a chain into domains (see Domain Maker panel)</li>
+  <li>Select individual domains</li>
+  <li>Apply different colors and styles to each domain</li>
+</ol>
+
+<p>Example: Show an active site as ball-and-stick while keeping the rest as cartoon.</p>
+
+<h2 id="combining-colors-and-styles">Combining Colors and Styles</h2>
+
+<p>You can apply both colors and styles together:</p>
+
+<ol>
+  <li>Select your target (protein/chain/domain)</li>
+  <li>Choose a color</li>
+  <li>Choose a style</li>
+  <li>Apply both (or apply one at a time)</li>
+</ol>
+
+<h2 id="tips-and-best-practices">Tips and Best Practices</h2>
+
+<h3 id="for-publications">For Publications</h3>
+
+<ul>
+  <li>Use consistent color schemes</li>
+  <li>High contrast for clarity</li>
+  <li>Cartoon for overall structure, ball-and-stick for details</li>
+</ul>
+
+<h3 id="for-presentations">For Presentations</h3>
+
+<ul>
+  <li>Bold, distinct colors</li>
+  <li>Larger molecular styles (surface, spheres)</li>
+  <li>Color code by function or region</li>
+</ul>
+
+<h3 id="for-animations">For Animations</h3>
+
+<ul>
+  <li>Start with simpler styles (faster rendering)</li>
+  <li>Use color changes to highlight dynamics</li>
+  <li>Test render times before committing</li>
+</ul>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3 id="color-doesnt-change">Color Doesn’t Change</h3>
+
+<ul>
+  <li>Make sure you clicked <strong>Apply Color</strong> after selecting the color</li>
+  <li>Check that the correct item is selected in the outliner</li>
+  <li>If domain is in a puppet, color the puppet instead</li>
+</ul>
+
+<h3 id="style-doesnt-update">Style Doesn’t Update</h3>
+
+<ul>
+  <li>Styles may take a moment to update (especially surface)</li>
+  <li>Check Blender console for errors</li>
+  <li>Try switching to another style and back</li>
+</ul>
+
+<h3 id="colors-look-different-than-expected">Colors Look Different Than Expected</h3>
+
+<ul>
+  <li>Blender’s lighting affects color appearance</li>
+  <li>Adjust viewport shading (top-right of viewport)</li>
+  <li>Try Material Preview or Rendered view mode</li>
+</ul>
+
+<h2 id="advanced-custom-colors">Advanced: Custom Colors</h2>
+
+<p>For more advanced color control:</p>
+
+<ol>
+  <li>Select a domain</li>
+  <li>Use Blender’s shader editor to modify materials</li>
+  <li>ProteinBlender creates unique materials per domain</li>
+</ol>
+
+<p>Note: Manual material edits may be overwritten if you use Apply Color again.</p>
+
+<h2 id="next-steps">Next Steps</h2>
+
+<p>Now that you know how to style proteins, learn how to:</p>
+
+<ul>
+  <li><a href="puppets.html">Create Puppets</a> - Group parts for coordinated changes</li>
+  <li><a href="poses.html">Manage Poses</a> - Save different conformations</li>
+</ul>
+
+<hr />
+
+<table>
+  <tbody>
+    <tr>
+      <td><a href="index.html">Back to Home</a></td>
+      <td><a href="import.html">Previous: Import Proteins</a></td>
+      <td><a href="puppets.html">Next: Create Puppets</a></td>
+    </tr>
+  </tbody>
+</table>
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Protein Puppets | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Protein Puppets" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/puppets.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/puppets.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Protein Puppets" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Protein Puppets","url":"https://animation-lab.github.io/ProteinBlender/puppets.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=527fed99b0c160b6a48ae3221ab5ec505fdc29b4">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Protein Puppets</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="protein-puppets">Protein Puppets</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>Learn how to create and manage protein puppets for coordinated animation and manipulation.</p>
+
+<p>Watch the full tutorial:</p>
+
+<p><a href="https://www.youtube.com/watch?v=XLPvo1Ax3G4" title="ProteinBlender Tutorial"><img src="https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg" alt="ProteinBlender Tutorial" /></a></p>
+
+<h2 id="what-is-a-puppet">What is a Puppet?</h2>
+
+<p>A <strong>puppet</strong> is a collection of protein chains and/or domains grouped together. Puppets allow you to:</p>
+<ul>
+  <li>Move multiple parts as a single unit</li>
+  <li>Apply transformations to groups</li>
+  <li>Create coordinated animations</li>
+  <li>Organize complex multi-protein scenes</li>
+</ul>
+
+<p>Think of puppets as “handles” for controlling multiple protein parts at once.</p>
+
+<h2 id="creating-a-puppet">Creating a Puppet</h2>
+
+<h3 id="step-by-step">Step-by-Step</h3>
+
+<ol>
+  <li><strong>Select items</strong> in the Protein Outliner
+    <ul>
+      <li>Click checkboxes next to chains or domains you want to group</li>
+      <li>You can select multiple items from the same or different proteins</li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Open Protein Puppet Maker</strong> panel</p>
+  </li>
+  <li>
+    <p>Click <strong>Create New Puppet</strong></p>
+  </li>
+  <li>
+    <p><strong>Name your puppet</strong> in the dialog that appears</p>
+  </li>
+  <li>Click <strong>OK</strong></li>
+</ol>
+
+<p>The puppet will now appear in the outliner with all selected items as members.</p>
+
+<h2 id="puppet-membership-rules">Puppet Membership Rules</h2>
+
+<ul>
+  <li><strong>Exclusive membership</strong>: Each chain/domain can only belong to ONE puppet</li>
+  <li><strong>Cannot puppet proteins</strong>: Only chains and domains can be puppeted</li>
+  <li><strong>Cannot puppet other puppets</strong>: Puppets cannot contain other puppets</li>
+</ul>
+
+<p>If you try to create a puppet with items already in another puppet, you’ll see an error message.</p>
+
+<h2 id="managing-puppets">Managing Puppets</h2>
+
+<h3 id="selecting-a-puppet">Selecting a Puppet</h3>
+
+<ul>
+  <li>Click the checkbox next to the puppet name in the outliner</li>
+  <li>This selects the puppet’s Empty controller object</li>
+</ul>
+
+<h3 id="moving-a-puppet">Moving a Puppet</h3>
+
+<ol>
+  <li>Select the puppet in the outliner</li>
+  <li>Use Blender’s transform tools (G, R, S) or manipulators</li>
+  <li>All members move together</li>
+</ol>
+
+<h3 id="adding-members-to-a-puppet">Adding Members to a Puppet</h3>
+
+<p>Currently, you must:</p>
+<ol>
+  <li>Delete the existing puppet</li>
+  <li>Select all desired items (including new ones)</li>
+  <li>Create a new puppet</li>
+</ol>
+
+<p>(Future versions will support editing puppet membership)</p>
+
+<h3 id="removing-a-puppet">Removing a Puppet</h3>
+
+<ol>
+  <li>Find the puppet in the Protein Outliner</li>
+  <li>Click the <strong>delete (trash)</strong> icon next to the puppet name</li>
+  <li>Confirm deletion</li>
+</ol>
+
+<p><strong>Note</strong>: Deleting a puppet removes the grouping but keeps all member chains/domains.</p>
+
+<h2 id="puppet-hierarchy-in-outliner">Puppet Hierarchy in Outliner</h2>
+
+<p>Puppets appear in a special section at the bottom of the Protein Outliner:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Proteins
+├─ Protein A
+│  └─ Chain A
+│     └─ Domain 1
+└─ Protein B
+   └─ Chain B
+
+─── Puppets ───
+└─ My Puppet
+   ├─ Protein A &gt; Chain A &gt; Domain 1
+   └─ Protein B &gt; Chain B
+</code></pre></div></div>
+
+<p>Members shown under puppets are references - the originals remain in their protein hierarchy.</p>
+
+<h2 id="use-cases-for-puppets">Use Cases for Puppets</h2>
+
+<h3 id="multi-chain-complexes">Multi-Chain Complexes</h3>
+
+<p>Group all chains of a protein complex to move them as a unit:</p>
+<ol>
+  <li>Select all chains of the complex</li>
+  <li>Create a puppet called “Complex”</li>
+  <li>Animate the entire complex together</li>
+</ol>
+
+<h3 id="functional-units">Functional Units</h3>
+
+<p>Group domains by function:</p>
+<ul>
+  <li>“Active Site” puppet with catalytic residues</li>
+  <li>“Binding Domain” puppet with substrate-binding regions</li>
+  <li>“Regulatory Domain” puppet</li>
+</ul>
+
+<h3 id="comparative-views">Comparative Views</h3>
+
+<p>Create puppets of equivalent domains from different proteins to compare them side-by-side.</p>
+
+<h2 id="puppets-and-poses">Puppets and Poses</h2>
+
+<p>Puppets are essential for the pose system:</p>
+<ul>
+  <li>Poses save the positions of objects in puppets</li>
+  <li>You select which puppets to include in each pose</li>
+  <li>See <a href="poses.html">Manage Poses</a> for details</li>
+</ul>
+
+<h2 id="tips-and-best-practices">Tips and Best Practices</h2>
+
+<h3 id="naming-conventions">Naming Conventions</h3>
+
+<p>Use descriptive puppet names:</p>
+<ul>
+  <li>“Kinase_Domain”</li>
+  <li>“DNA_Binding_Region”</li>
+  <li>“Full_Complex”</li>
+  <li>“Chain_A_B_C”</li>
+</ul>
+
+<h3 id="organization">Organization</h3>
+
+<ul>
+  <li>Create puppets for functional units</li>
+  <li>Group related chains/domains</li>
+  <li>Use puppets to simplify complex scenes</li>
+</ul>
+
+<h3 id="animation-workflow">Animation Workflow</h3>
+
+<ol>
+  <li>Create puppets for parts that move together</li>
+  <li>Create poses for different conformations</li>
+  <li>Keyframe the poses for animation</li>
+</ol>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3 id="cannot-create-puppet">Cannot Create Puppet</h3>
+
+<ul>
+  <li><strong>Items already in puppet</strong>: Remove from existing puppet first</li>
+  <li><strong>Nothing selected</strong>: Select at least one chain or domain</li>
+  <li><strong>Protein selected</strong>: Cannot puppet entire proteins, select chains/domains</li>
+</ul>
+
+<h3 id="puppet-doesnt-move-members">Puppet Doesn’t Move Members</h3>
+
+<ul>
+  <li>Check that members are actually part of the puppet (look under puppet in outliner)</li>
+  <li>Make sure you’re moving the puppet controller (Empty object), not individual members</li>
+</ul>
+
+<h3 id="members-appear-twice">Members Appear Twice</h3>
+
+<p>This is normal - members appear both in their original protein hierarchy AND under the puppet (as references).</p>
+
+<h2 id="next-steps">Next Steps</h2>
+
+<p>Now that you understand puppets, learn how to:</p>
+
+<ul>
+  <li><a href="poses.html">Manage Poses</a> - Save and restore puppet positions</li>
+  <li><a href="keyframes.html">Keyframe Animation</a> - Animate your puppets</li>
+</ul>
+
+<hr />
+
+<table>
+  <tbody>
+    <tr>
+      <td><a href="index.html">Back to Home</a></td>
+      <td><a href="visuals.html">Previous: Update Visuals</a></td>
+      <td><a href="poses.html">Next: Manage Poses</a></td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>
