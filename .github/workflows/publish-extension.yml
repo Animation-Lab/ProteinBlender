@@ -42,33 +42,24 @@ jobs:
           echo "✓ Jekyll site built successfully"
           ls -lah _site/
 
-      - name: Download release assets
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate extension repository index
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Create extensions directory inside the built site
+          # Install dependencies
+          pip install tomli requests
+
+          # Generate index.json with URLs pointing to GitHub Releases
+          python .github/scripts/generate_index.py
+
+          # Move to site extensions directory
           mkdir -p _site/extensions
-
-          # Get all release tags using JSON output for reliable parsing
-          for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
-            echo "Processing release: $tag"
-            # Download all .zip files from this release
-            gh release download "$tag" -p "*.zip" -D _site/extensions/ || echo "No zips for $tag"
-          done
-
-          ls -lah _site/extensions/
-
-      - name: Set up Blender
-        run: |
-          # Download Blender 4.2+ (required for extension command)
-          wget -q https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
-          tar -xf blender-4.2.0-linux-x64.tar.xz
-          echo "$(pwd)/blender-4.2.0-linux-x64" >> $GITHUB_PATH
-
-      - name: Generate extension repository index
-        run: |
-          # Use Blender to generate the index.json
-          ./blender-4.2.0-linux-x64/blender --background --command extension server-generate --repo-dir=_site/extensions/
+          mv index.json _site/extensions/
 
           # Verify the index was created
           if [ -f _site/extensions/index.json ]; then

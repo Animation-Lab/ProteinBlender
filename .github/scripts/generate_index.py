@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""
+Generate Blender extension repository index.json from GitHub Releases.
+
+This script fetches release information from GitHub, downloads each extension zip
+to extract metadata from blender_manifest.toml, and generates an index.json file
+that references the GitHub Release download URLs directly.
+
+This avoids GitHub's 100MB file size limit for regular commits by keeping
+the large zip files in GitHub Releases while only committing the small index.json.
+"""
+
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
+
+try:
+    import tomli
+except ImportError:
+    import tomllib as tomli  # Python 3.11+
+
+import requests
+
+
+REPO_OWNER = "Animation-Lab"
+REPO_NAME = "ProteinBlender"
+GITHUB_API = "https://api.github.com"
+
+
+def get_releases():
+    """Fetch all releases from GitHub API."""
+    token = os.environ.get("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    releases = []
+    page = 1
+    while True:
+        url = f"{GITHUB_API}/repos/{REPO_OWNER}/{REPO_NAME}/releases?per_page=100&page={page}"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if not data:
+            break
+        releases.extend(data)
+        page += 1
+
+    return releases
+
+
+def download_file(url, dest_path, token=None):
+    """Download a file from URL to destination path."""
+    headers = {"Accept": "application/octet-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    response = requests.get(url, headers=headers, stream=True, allow_redirects=True)
+    response.raise_for_status()
+
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+
+def compute_sha256(file_path):
+    """Compute SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+
+def extract_manifest(zip_path):
+    """Extract and parse blender_manifest.toml from a zip file."""
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        # Look for blender_manifest.toml in the zip
+        manifest_names = [
+            "blender_manifest.toml",
+            "proteinblender/blender_manifest.toml",
+        ]
+        for name in zf.namelist():
+            if name.endswith("blender_manifest.toml"):
+                with zf.open(name) as f:
+                    return tomli.load(f)
+
+    raise FileNotFoundError("blender_manifest.toml not found in zip")
+
+
+def get_platform_from_filename(filename):
+    """Extract platform from filename like proteinblender-1.0.0-windows_x64.zip"""
+    # Map filename patterns to Blender platform identifiers
+    platform_map = {
+        "windows_x64": "windows-x64",
+        "windows-x64": "windows-x64",
+        "linux_x64": "linux-x64",
+        "linux-x64": "linux-x64",
+        "macos_x64": "macos-x64",
+        "macos-x64": "macos-x64",
+        "macos_arm64": "macos-arm64",
+        "macos-arm64": "macos-arm64",
+    }
+
+    filename_lower = filename.lower()
+    for pattern, platform in platform_map.items():
+        if pattern in filename_lower:
+            return platform
+
+    return None  # Unknown platform
+
+
+def build_extension_entry(manifest, archive_url, archive_size, archive_hash, platform):
+    """Build a single extension entry for the index.json data array."""
+    entry = {
+        "id": manifest.get("id", ""),
+        "name": manifest.get("name", ""),
+        "version": manifest.get("version", ""),
+        "tagline": manifest.get("tagline", ""),
+        "archive_url": archive_url,
+        "archive_size": archive_size,
+        "archive_hash": f"sha256:{archive_hash}",
+        "blender_version_min": manifest.get("blender_version_min", "4.2.0"),
+        "type": manifest.get("type", "add-on"),
+        "maintainer": manifest.get("maintainer", ""),
+        "license": manifest.get("license", []),
+        "website": manifest.get("website", ""),
+    }
+
+    # Add platform if specific
+    if platform:
+        entry["platforms"] = [platform]
+
+    # Add optional fields if present
+    if "tags" in manifest:
+        entry["tags"] = manifest["tags"]
+    if "permissions" in manifest:
+        entry["permissions"] = manifest["permissions"]
+    if "copyright" in manifest:
+        entry["copyright"] = manifest["copyright"]
+
+    return entry
+
+
+def main():
+    print("Fetching releases from GitHub...")
+    releases = get_releases()
+    print(f"Found {len(releases)} releases")
+
+    token = os.environ.get("GITHUB_TOKEN")
+    extensions = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for release in releases:
+            tag_name = release["tag_name"]
+            print(f"\nProcessing release: {tag_name}")
+
+            for asset in release.get("assets", []):
+                filename = asset["name"]
+                if not filename.endswith(".zip"):
+                    continue
+
+                print(f"  Processing asset: {filename}")
+
+                # Download the zip file
+                zip_path = Path(tmpdir) / filename
+                download_url = asset["browser_download_url"]
+
+                print(f"    Downloading from: {download_url}")
+                download_file(asset["url"], zip_path, token)
+
+                # Get file size and hash
+                archive_size = zip_path.stat().st_size
+                archive_hash = compute_sha256(zip_path)
+                print(f"    Size: {archive_size}, SHA256: {archive_hash[:16]}...")
+
+                # Extract manifest
+                try:
+                    manifest = extract_manifest(zip_path)
+                    print(f"    Manifest: {manifest.get('id')} v{manifest.get('version')}")
+                except FileNotFoundError as e:
+                    print(f"    Warning: {e}, skipping")
+                    continue
+
+                # Determine platform from filename
+                platform = get_platform_from_filename(filename)
+                print(f"    Platform: {platform or 'all'}")
+
+                # Build entry using the browser download URL (direct download, no auth needed)
+                entry = build_extension_entry(
+                    manifest=manifest,
+                    archive_url=download_url,
+                    archive_size=archive_size,
+                    archive_hash=archive_hash,
+                    platform=platform,
+                )
+                extensions.append(entry)
+
+    # Build the final index.json
+    index = {
+        "version": "v1",
+        "blocklist": [],
+        "data": extensions,
+    }
+
+    # Write index.json
+    output_path = Path("index.json")
+    with open(output_path, "w") as f:
+        json.dump(index, f, indent=2)
+
+    print(f"\nGenerated {output_path} with {len(extensions)} extensions")
+
+    # Print summary
+    if extensions:
+        print("\nExtensions included:")
+        for ext in extensions:
+            platform = ext.get("platforms", ["all"])[0] if "platforms" in ext else "all"
+            print(f"  - {ext['id']} v{ext['version']} ({platform})")
+
+
+if __name__ == "__main__":
+    main()
