@@ -430,8 +430,8 @@ bl_info = {
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
     "warning": "",  # Will be set dynamically if dependencies fail
-    "doc_url": "https://github.com/dillonleelab/proteinblender",
-    "tracker_url": "https://github.com/dillonleelab/proteinblender/issues",
+    "doc_url": "https://animation-lab.github.io/ProteinBlender/",
+    "tracker_url": "https://github.com/Animation-Lab/ProteinBlender/issues",
     "category": "3D View"
 }
 

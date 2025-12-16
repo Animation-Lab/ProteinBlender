@@ -7,7 +7,7 @@ tagline = "Visualize proteins in Blender"
 maintainer = "Dillon Lee <dlee123@gmail.com>"
 type = "add-on"
 
-website = "https://github.com/dillonl/ProteinBlender"
+website = "https://github.com/Animation-Lab/ProteinBlender"
 platforms = [
 	"windows-x64",
 	"linux-x64",

@@ -42,7 +42,7 @@ Animating with ProteinBlender:
 
 ProteinBlender is built on [MolecularNodes](https://github.com/BradyAJohnston/MolecularNodes) by Brady Johnston and uses scientific Python libraries including biotite and MDAnalysis.
 
-**Author**: Dillon Lee  
+**Author**: [Animation Lab](https://github.com/Animation-Lab)
 **License**: GPL-3.0-or-later
 
 

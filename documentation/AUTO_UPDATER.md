@@ -91,31 +91,16 @@ Created comprehensive documentation for users and developers.
 
 ## Repository URL
 
-**Current Status**: Using placeholder URL until repository transfer
+**URL**: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`
 
-**Placeholder**: `https://PLACEHOLDER_URL_HERE/index.json`
+## Setup Checklist
 
-**After transfer**, update to actual URL in these files:
-- `README.md` (line 29)
-- `EXTENSION_REPOSITORY.md` (line 24)
-- `.github/gh-pages-readme.md` (line 3)
-
-**Recommended URL formats**:
-- GitHub Pages: `https://<org>.github.io/<repo>/index.json`
-- Custom domain: `https://extensions.proteinblender.org/index.json`
-
-## Setup Checklist for New Organization
-
-After transferring the repository:
-
-- [ ] Enable GitHub Pages (Settings → Pages → Source: gh-pages branch)
+- [x] Enable GitHub Pages (Settings → Pages → Source: gh-pages branch)
 - [ ] Create a release with `.zip` files or manually run the workflow
 - [ ] Verify `index.json` is accessible at GitHub Pages URL
-- [ ] Replace `PLACEHOLDER_URL_HERE` in all documentation
 - [ ] Test adding repository in Blender 4.2+
 - [ ] Test installation from repository
 - [ ] Create a second release to test update notifications
-- [ ] Announce the repository URL to users
 
 ## File Structure
 
@@ -225,19 +210,6 @@ ProteinBlender/
 5. Upload `.zip` files from `dist/`
 6. Workflow runs automatically
 
-### Updating the Repository URL
-
-When transferring to organization:
-
-```bash
-# Find all placeholder URLs
-grep -r "PLACEHOLDER_URL_HERE" .
-
-# Replace with actual URL in:
-# - README.md
-# - EXTENSION_REPOSITORY.md
-# - .github/gh-pages-readme.md
-```
 
 ### Troubleshooting
 
@@ -278,13 +250,10 @@ ProteinBlender now has a **professional, zero-maintenance auto-updater** using B
 ---
 
 **Next Steps**:
-1. Transfer repository to organization
-2. Enable GitHub Pages
-3. Update placeholder URLs
-4. Test end-to-end workflow
-5. Announce to users
+1. Test end-to-end workflow
+2. Announce to users
 
 For questions or issues, see:
 - User docs: [EXTENSION_REPOSITORY.md](EXTENSION_REPOSITORY.md)
 - Setup docs: [.github/GITHUB_PAGES_SETUP.md](.github/GITHUB_PAGES_SETUP.md)
-- GitHub Issues: https://github.com/dillonleelab/proteinblender/issues
+- GitHub Issues: https://github.com/Animation-Lab/ProteinBlender/issues

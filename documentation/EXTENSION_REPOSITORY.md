@@ -29,8 +29,7 @@ Starting with Blender 4.2, extensions can be distributed through custom reposito
 Enter the following information:
 
 - **Name**: `ProteinBlender`
-- **URL**: `https://PLACEHOLDER_URL_HERE/index.json`
-  _(Replace with actual URL once repository is transferred)_
+- **URL**: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`
 
 Click `OK` to save.
 
@@ -63,7 +62,7 @@ When a new version is available:
 
 If you prefer not to use the extension repository or are using an older version of Blender:
 
-1. Download the latest `.zip` file from [GitHub Releases](https://github.com/dillonleelab/proteinblender/releases)
+1. Download the latest `.zip` file from [GitHub Releases](https://github.com/Animation-Lab/ProteinBlender/releases)
 2. In Blender, go to `Edit` → `Preferences` → `Get Extensions`
 3. Click `Install from Disk` (top-right corner)
 4. Select the downloaded `.zip` file
@@ -94,7 +93,7 @@ If you prefer not to use the extension repository or are using an older version 
 
 - Try installing from disk manually (see Alternative: Manual Installation above)
 - Check Blender's system console for error messages (`Window` → `Toggle System Console` on Windows)
-- Report issues at https://github.com/dillonleelab/proteinblender/issues
+- Report issues at https://github.com/Animation-Lab/ProteinBlender/issues
 
 ## For Developers
 
@@ -124,7 +123,7 @@ When a GitHub release is published, the workflow automatically:
 2. Generates the `index.json` repository index using Blender
 3. Deploys to GitHub Pages on the `gh-pages` branch
 
-Users accessing `https://PLACEHOLDER_URL_HERE/index.json` will see all available versions.
+Users accessing `https://animation-lab.github.io/ProteinBlender/extensions/index.json` will see all available versions.
 
 ### Manual Repository Generation
 
@@ -158,20 +157,8 @@ The `build.py` script ensures all three are updated together.
 
 ## Repository URL Notes
 
-**Current Status**: Using placeholder URL until repository transfer
-
-Once the repository is transferred to the ProteinBlender organization:
-
-1. Update the repository URL in this document
-2. Update any announcements or documentation
-3. Users with the old URL will need to update their repository settings (one-time change)
-
-**Recommended URL Structure**:
-- GitHub Pages: `https://<org>.github.io/<repo>/index.json`
-- Custom domain: `https://extensions.proteinblender.org/index.json`
-
 ## Support
 
-- **Issues**: https://github.com/dillonleelab/proteinblender/issues
-- **Documentation**: https://github.com/dillonleelab/proteinblender
-- **Releases**: https://github.com/dillonleelab/proteinblender/releases
+- **Issues**: https://github.com/Animation-Lab/ProteinBlender/issues
+- **Documentation**: https://animation-lab.github.io/ProteinBlender/
+- **Releases**: https://github.com/Animation-Lab/ProteinBlender/releases

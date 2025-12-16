@@ -70,7 +70,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## Credits
 
-- **Author**: Dillon Lee
+- **Author**: [Animation Lab](https://github.com/Animation-Lab)
 - **Built on**: [MolecularNodes](https://github.com/BradyAJohnston/MolecularNodes) by Brady Johnston
 - **Dependencies**: biotite, MDAnalysis, and other scientific Python libraries
 

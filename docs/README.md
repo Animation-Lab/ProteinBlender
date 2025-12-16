@@ -23,7 +23,7 @@ GitHub Pages will automatically build and deploy the site.
 No local preview setup is needed - the documentation is ready to deploy!
 
 After pushing to GitHub and enabling GitHub Pages (see Setup section above), the site will be live at:
-- `https://[your-org].github.io/proteinblender/`
+- `https://animation-lab.github.io/ProteinBlender/`
 
 ### Local Preview (Optional, Advanced)
 
@@ -47,7 +47,7 @@ After transferring to the organization, update:
 
 You can do this with find/replace:
 - Find: `ORGNAME`
-- Replace: `your-org-name`
+- Replace: `Animation-Lab`
 
 ## Pages
 
