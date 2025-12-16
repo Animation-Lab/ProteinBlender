@@ -2,15 +2,16 @@
 
 This is the automated extension repository for ProteinBlender.
 
-**Repository URL**: `https://PLACEHOLDER_URL_HERE/index.json`
+**Repository URL**: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`
 
 ## Adding to Blender
 
 1. Open Blender 4.2+
-2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
-3. Click `+` → `Add Remote Repository`
-4. Enter the repository URL above
-5. Browse and install ProteinBlender from the extensions list
+2. Go to `Edit` → `Preferences` → `Get Extensions`
+3. Click `Repositories` (top right) → `+` → `Add Remote Repository`
+4. Enter: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`
+5. Optionally enable "Check for Updates on Start"
+6. Browse and install ProteinBlender from the extensions list
 
 ## Available Extensions
 
@@ -18,13 +19,13 @@ This is the automated extension repository for ProteinBlender.
 
 ## Automatic Updates
 
-Enable "Check for Updates on Start" in the repository settings to receive automatic update notifications.
+Enable "Check for Updates on Start" in the repository settings to receive automatic update notifications when new versions are released.
 
 ## More Information
 
-- [Installation Guide](https://github.com/dillonleelab/proteinblender/blob/main/EXTENSION_REPOSITORY.md)
-- [GitHub Repository](https://github.com/dillonleelab/proteinblender)
-- [Report Issues](https://github.com/dillonleelab/proteinblender/issues)
+- [Documentation](https://animation-lab.github.io/ProteinBlender/)
+- [GitHub Repository](https://github.com/Animation-Lab/ProteinBlender)
+- [Report Issues](https://github.com/Animation-Lab/ProteinBlender/issues)
 
 ---
 

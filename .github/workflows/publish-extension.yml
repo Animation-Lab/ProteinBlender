@@ -78,5 +78,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./extensions
           publish_branch: gh-pages
-          force_orphan: true
+          destination_dir: extensions
+          keep_files: true
           commit_message: ${{ steps.commit_msg.outputs.message }}
