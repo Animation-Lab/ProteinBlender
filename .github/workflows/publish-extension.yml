@@ -49,11 +49,9 @@ jobs:
           # Create extensions directory inside the built site
           mkdir -p _site/extensions
 
-          # Get all releases and download their .zip assets
-          gh release list --limit 100 | while read -r line; do
-            tag=$(echo "$line" | awk '{print $3}')
+          # Get all release tags using JSON output for reliable parsing
+          for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
             echo "Processing release: $tag"
-
             # Download all .zip files from this release
             gh release download "$tag" -p "*.zip" -D _site/extensions/ || echo "No zips for $tag"
           done
