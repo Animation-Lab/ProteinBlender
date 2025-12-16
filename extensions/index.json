@@ -3,6 +3,7 @@
   "blocklist": [],
   "data": [
     {
+      "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
       "version": "1.0.0",
@@ -33,6 +34,7 @@
       ]
     },
     {
+      "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
       "version": "1.0.0",
@@ -63,6 +65,7 @@
       ]
     },
     {
+      "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
       "version": "1.0.0",
@@ -93,6 +96,7 @@
       ]
     },
     {
+      "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
       "version": "1.0.0",
