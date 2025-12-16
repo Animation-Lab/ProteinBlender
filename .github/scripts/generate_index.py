@@ -117,6 +117,7 @@ def get_platform_from_filename(filename):
 def build_extension_entry(manifest, archive_url, archive_size, archive_hash, platform):
     """Build a single extension entry for the index.json data array."""
     entry = {
+        "schema_version": manifest.get("schema_version", "1.0.0"),
         "id": manifest.get("id", ""),
         "name": manifest.get("name", ""),
         "version": manifest.get("version", ""),
