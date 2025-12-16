@@ -1,5 +1,126 @@
 {
   "version": "v1",
   "blocklist": [],
-  "data": []
+  "data": [
+    {
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.0.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-linux_x64.zip",
+      "archive_size": 152663815,
+      "archive_hash": "sha256:19ad50374820f875d2e83d2465eb0f51ff622ca229b33ce29ac118e3446bf80c",
+      "blender_version_min": "4.2.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "linux-x64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    },
+    {
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.0.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-macos_arm64.zip",
+      "archive_size": 114332625,
+      "archive_hash": "sha256:bace3db5c3ea8af351302991ababb79de5da9d98e26bf16fdfb56020c5ef4c40",
+      "blender_version_min": "4.2.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    },
+    {
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.0.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-macos_x64.zip",
+      "archive_size": 126195716,
+      "archive_hash": "sha256:27bd2e94f836008e0e3ad4ccba9c5f7d3f9840bfcc51d4fdaf27cd14baa24b78",
+      "blender_version_min": "4.2.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "macos-x64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    },
+    {
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.0.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-windows_x64.zip",
+      "archive_size": 125470050,
+      "archive_hash": "sha256:6e196a7f24930a1f729c1b3bcde5c80d616ce2b886ae924438e6df60e3ce6467",
+      "blender_version_min": "4.2.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "windows-x64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    }
+  ]
 }
