@@ -30,13 +30,15 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 1. Open Blender 4.2+
 2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
 3. Click `+` → `Add Remote Repository`
-4. Enter the repository URL (see [releases](https://github.com/Animation-Lab/proteinblender/releases) for current URL)
-5. Install ProteinBlender from the extensions list
+4. Enter URL: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`
+5. Click `OK`, then find and install ProteinBlender from the extensions list
 6. Restart Blender
+
+This method provides automatic update notifications when new versions are released.
 
 **Option 2: Manual Installation**
 
-1. Download the latest `.zip` from [Releases](https://github.com/Animation-Lab/proteinblender/releases)
+1. Download the latest `.zip` for your platform from [Releases](https://github.com/Animation-Lab/ProteinBlender/releases)
 2. In Blender: `Edit` → `Preferences` → `Get Extensions` → `Install from Disk`
 3. Select the downloaded zip file
 4. Restart Blender
@@ -80,9 +82,5 @@ GPL-3.0-or-later
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/Animation-Lab/proteinblender/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Animation-Lab/proteinblender/discussions)
-
----
-
-*Note: Replace ORGNAME with your actual GitHub organization name after repository transfer*
+- **Issues**: [GitHub Issues](https://github.com/Animation-Lab/ProteinBlender/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Animation-Lab/ProteinBlender/discussions)
