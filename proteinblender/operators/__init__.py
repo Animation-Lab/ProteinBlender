@@ -74,6 +74,10 @@ from .pivot_operators import (
     PROTEINBLENDER_OT_set_pivot_center,
     PROTEINBLENDER_OT_set_pivot_custom,
 )
+from .brownian_operators import (
+    PROTEINBLENDER_OT_brownian_settings,
+    PROTEINBLENDER_OT_brownian_disable,
+)
 
 CLASSES = (
     # PropertyGroups must be registered before operators that use them
@@ -136,6 +140,9 @@ CLASSES = (
     PROTEINBLENDER_OT_set_pivot_last,
     PROTEINBLENDER_OT_set_pivot_center,
     PROTEINBLENDER_OT_set_pivot_custom,
+    # Brownian motion operators
+    PROTEINBLENDER_OT_brownian_settings,
+    PROTEINBLENDER_OT_brownian_disable,
 )
 
 

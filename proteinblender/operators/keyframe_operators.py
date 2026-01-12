@@ -13,6 +13,11 @@ from ..utils.animation import (
     has_color_keyframe,
     get_fcurves_from_action
 )
+from ..utils.brownian import (
+    get_brownian_metadata,
+    save_brownian_metadata,
+    find_previous_keyframe,
+)
 
 
 # ============================================================================
@@ -216,6 +221,13 @@ class PuppetKeyframeSettings(PropertyGroup):
         default=True
     )
 
+    # Brownian motion settings
+    brownian_enabled: BoolProperty(
+        name="Brownian Motion",
+        description="Enable Brownian motion for this keyframe segment",
+        default=False
+    )
+
 
 class PROTEINBLENDER_OT_create_keyframe(Operator):
     """Create keyframes for puppet animations"""
@@ -383,6 +395,14 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                             puppet_item.keyframe_color = True
                             puppet_item.keyframe_pose = True
 
+                        # Load Brownian motion settings
+                        brownian_metadata = get_brownian_metadata(controller_obj)
+                        frame_key = str(self.frame_number)
+                        if frame_key in brownian_metadata:
+                            puppet_item.brownian_enabled = brownian_metadata[frame_key].get('enabled', False)
+                        else:
+                            puppet_item.brownian_enabled = False
+
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
     
@@ -420,7 +440,13 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             header_row.label(text="", icon='CON_ROTLIKE')  # Rotation icon
             header_row.label(text="", icon='CON_SIZELIKE')  # Scale icon
             header_row.label(text="", icon='COLOR')  # Color icon
-            
+
+            # Separator before Brownian motion column
+            header_row.separator(factor=1.0)
+
+            # Brownian motion header
+            header_row.label(text="", icon='MOD_NOISE')  # Brownian motion icon
+
             box.separator(factor=0.5)
             
             for item in self.puppet_items:
@@ -460,7 +486,28 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 color_row = row.row()
                 color_row.enabled = item.use_puppet
                 color_row.prop(item, "keyframe_color", text="")
-        
+
+                # Separator before Brownian motion
+                row.separator(factor=1.0)
+
+                # Brownian motion checkbox and settings button
+                brownian_col = row.row(align=True)
+                brownian_col.enabled = item.use_puppet
+
+                # Checkbox for enabling Brownian motion
+                brownian_col.prop(item, "brownian_enabled", text="")
+
+                # Settings button (gear icon) - only enabled when Brownian is checked
+                settings_op = brownian_col.operator(
+                    "proteinblender.brownian_settings",
+                    text="",
+                    icon='PREFERENCES'
+                )
+                settings_op.puppet_id = item.puppet_id
+                settings_op.puppet_name = item.puppet_name
+                settings_op.controller_object_name = item.controller_object_name
+                settings_op.frame_number = self.frame_number
+
         layout.separator()
 
         # Select all/none buttons
@@ -608,6 +655,46 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             if controller_obj:
                 save_keyframe_metadata(controller_obj, self.frame_number, puppet_item)
                 print(f"💾 Saved keyframe metadata for '{puppet_item.puppet_name}' at frame {self.frame_number}")
+
+                # Handle Brownian motion settings
+                if puppet_item.brownian_enabled:
+                    # Find previous keyframe for start frame
+                    prev_frame = find_previous_keyframe(controller_obj, self.frame_number)
+                    if prev_frame is not None:
+                        # Get existing Brownian settings or use defaults
+                        brownian_metadata = get_brownian_metadata(controller_obj)
+                        frame_key = str(self.frame_number)
+
+                        if frame_key in brownian_metadata:
+                            # Preserve existing settings, just ensure enabled
+                            brownian_metadata[frame_key]['enabled'] = True
+                            brownian_metadata[frame_key]['start_frame'] = prev_frame
+                        else:
+                            # Create default settings (user should open settings popup to customize)
+                            brownian_metadata[frame_key] = {
+                                'enabled': True,
+                                'intensity': 0.3,
+                                'time_scale': 0.5,
+                                'use_random_seed': True,
+                                'seed': None,
+                                'bias_x': 0.5,
+                                'bias_y': 0.5,
+                                'bias_z': 0.5,
+                                'start_frame': prev_frame,
+                                'puppet_id': puppet_item.puppet_id,
+                            }
+                        save_brownian_metadata(controller_obj, self.frame_number, brownian_metadata[frame_key])
+                        print(f"  🌊 Brownian motion enabled for frames {prev_frame}-{self.frame_number}")
+                    else:
+                        print(f"  ⚠ Cannot enable Brownian motion: no previous keyframe found")
+                else:
+                    # Disable Brownian motion for this frame
+                    brownian_metadata = get_brownian_metadata(controller_obj)
+                    frame_key = str(self.frame_number)
+                    if frame_key in brownian_metadata:
+                        brownian_metadata[frame_key]['enabled'] = False
+                        controller_obj['pb_brownian_metadata'] = json.dumps(brownian_metadata)
+                        print(f"  🌊 Brownian motion disabled for frame {self.frame_number}")
 
         # Restore original frame
         if original_frame != self.frame_number:
