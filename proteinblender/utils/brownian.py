@@ -14,7 +14,7 @@ Where:
 import math
 import random
 import json
-from mathutils import Vector
+from mathutils import Vector, Quaternion, Euler
 
 from .animation import get_fcurves_from_action
 
@@ -64,6 +64,44 @@ def calculate_brownian_displacement(intensity, time_scale, bias, seed, frame):
     dz += (bias[2] - 0.5) * bias_scale
 
     return Vector((dx, dy, dz))
+
+
+def calculate_brownian_rotation(intensity, time_scale, seed, frame):
+    """Calculate Brownian rotational displacement for a given frame.
+
+    Args:
+        intensity: Normalized intensity (0-1), maps to rotational diffusion
+        time_scale: Normalized time scale (0-1), affects jitter speed
+        seed: Random seed for reproducibility (None for random each time)
+        frame: Current frame number (used with seed for frame-specific randomness)
+
+    Returns:
+        Euler: Rotational displacement to add to base rotation (in radians)
+    """
+    if intensity <= 0:
+        return Euler((0, 0, 0))
+
+    # Rotational diffusion coefficient
+    # Scale is smaller than translation since rotation is more visually noticeable
+    D_rot = intensity * 0.1
+
+    # Time scale affects effective time step
+    dt = max(0.01, time_scale * 0.1)
+
+    # Standard deviation for rotational Gaussian distribution
+    sigma_rot = math.sqrt(2 * D_rot * dt)
+
+    # Set random seed for reproducibility
+    # Use a different offset than translation to get independent random values
+    if seed is not None:
+        random.seed(seed + frame * 31 + 7919)  # 7919 is a prime offset
+
+    # Generate random rotational displacement (3D Gaussian in radians)
+    rx = random.gauss(0, sigma_rot)
+    ry = random.gauss(0, sigma_rot)
+    rz = random.gauss(0, sigma_rot)
+
+    return Euler((rx, ry, rz))
 
 
 def get_brownian_metadata(controller_obj):
@@ -258,3 +296,50 @@ def has_brownian_motion_enabled(controller_obj, frame):
     """
     settings = get_brownian_settings_for_frame(controller_obj, frame)
     return settings is not None and settings.get('enabled', False)
+
+
+def get_keyframed_rotation_at_frame(controller_obj, frame):
+    """Get the keyframe-interpolated rotation at a specific frame.
+
+    This evaluates what Blender's keyframe interpolation would give us
+    at the specified frame, without any Brownian motion applied.
+
+    Args:
+        controller_obj: The puppet controller Empty object
+        frame: Frame number to evaluate
+
+    Returns:
+        Quaternion: Interpolated rotation, or None if no keyframes exist
+    """
+    if not controller_obj or not controller_obj.animation_data:
+        return None
+
+    action = controller_obj.animation_data.action
+    if not action:
+        return None
+
+    fcurves = get_fcurves_from_action(action, controller_obj.animation_data)
+
+    # Check for quaternion rotation keyframes first
+    quat = [None, None, None, None]
+    euler = [None, None, None]
+
+    for fcurve in fcurves:
+        if fcurve.data_path == 'rotation_quaternion':
+            idx = fcurve.array_index
+            if 0 <= idx <= 3:
+                quat[idx] = fcurve.evaluate(frame)
+        elif fcurve.data_path == 'rotation_euler':
+            idx = fcurve.array_index
+            if 0 <= idx <= 2:
+                euler[idx] = fcurve.evaluate(frame)
+
+    # Prefer quaternion if available
+    if all(v is not None for v in quat):
+        return Quaternion(quat)
+
+    # Fall back to euler
+    if all(v is not None for v in euler):
+        return Euler(euler).to_quaternion()
+
+    return None

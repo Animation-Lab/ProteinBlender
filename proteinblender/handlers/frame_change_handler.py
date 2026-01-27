@@ -3,12 +3,14 @@
 import bpy
 import random
 from bpy.app.handlers import persistent
-from mathutils import Vector
+from mathutils import Vector, Quaternion
 
 from ..utils.brownian import (
     get_brownian_settings_for_frame,
     calculate_brownian_displacement,
+    calculate_brownian_rotation,
     get_keyframed_location_at_frame,
+    get_keyframed_rotation_at_frame,
 )
 
 
@@ -86,8 +88,36 @@ def apply_brownian_motion(scene):
             intensity, time_scale, bias, seed, frame
         )
 
-        # Apply displacement additively
+        # Apply location displacement additively
         controller.location = base_location + displacement
+
+        # Calculate and apply rotational Brownian motion
+        rotation_displacement = calculate_brownian_rotation(
+            intensity, time_scale, seed, frame
+        )
+
+        # Get base rotation from keyframes
+        base_rotation = get_keyframed_rotation_at_frame(controller, frame)
+
+        if base_rotation is None:
+            # No keyframed rotation, use current rotation
+            if controller.rotation_mode == 'QUATERNION':
+                base_rotation = controller.rotation_quaternion.copy()
+            else:
+                base_rotation = controller.rotation_euler.to_quaternion()
+
+        # Convert rotation displacement (Euler) to quaternion and combine
+        rotation_quat = rotation_displacement.to_quaternion()
+
+        # Apply rotation: base_rotation @ rotation_displacement
+        # This applies the random rotation on top of the base
+        final_rotation = base_rotation @ rotation_quat
+
+        # Apply to controller (use quaternion mode for best interpolation)
+        if controller.rotation_mode == 'QUATERNION':
+            controller.rotation_quaternion = final_rotation
+        else:
+            controller.rotation_euler = final_rotation.to_euler(controller.rotation_mode)
 
 
 @persistent
