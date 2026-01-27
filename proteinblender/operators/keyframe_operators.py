@@ -424,105 +424,72 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             box.label(text="Create puppets using the Puppet Maker first")
         else:
             # Create a subtle header with icons
-            # Use a split layout to better control alignment
-            header_row = box.row(align=True)
+            header_row = box.row(align=False)
             header_row.scale_y = 0.8
+            header_row.label(text="")  # Empty space for checkbox column
 
-            # Main checkbox column - fixed width
-            chk_col = header_row.row()
-            chk_col.ui_units_x = 1.5
-            chk_col.label(text="")
+            # Puppet name label - left aligned to match actual puppet names
+            header_row.label(text="Puppet Name")
 
-            # Puppet name - flexible width
-            name_col = header_row.row()
-            name_col.label(text="  Puppet Name")
+            # Spacer to push transform icons to the right
+            header_row.separator(factor=2.0)
 
-            # Transform icons - each fixed width
-            pose_col = header_row.row()
-            pose_col.ui_units_x = 1.5
-            pose_col.label(text="", icon='ARMATURE_DATA')
-
-            loc_col = header_row.row()
-            loc_col.ui_units_x = 1.5
-            loc_col.label(text="", icon='CON_LOCLIKE')
-
-            rot_col = header_row.row()
-            rot_col.ui_units_x = 1.5
-            rot_col.label(text="", icon='CON_ROTLIKE')
-
-            scale_col = header_row.row()
-            scale_col.ui_units_x = 1.5
-            scale_col.label(text="", icon='CON_SIZELIKE')
-
-            color_col = header_row.row()
-            color_col.ui_units_x = 1.5
-            color_col.label(text="", icon='COLOR')
-
-            # Small separator
-            header_row.separator(factor=0.5)
-
-            # Brownian motion header
-            brownian_col = header_row.row()
-            brownian_col.ui_units_x = 1.5
-            brownian_col.label(text="", icon='MOD_NOISE')
-
-            settings_col = header_row.row()
-            settings_col.ui_units_x = 1.5
-            settings_col.label(text="")
+            # Transform type icons - Pose first (leftmost)
+            header_row.label(text="", icon='ARMATURE_DATA')  # Pose icon
+            header_row.label(text="", icon='CON_LOCLIKE')  # Location icon
+            header_row.label(text="", icon='CON_ROTLIKE')  # Rotation icon
+            header_row.label(text="", icon='CON_SIZELIKE')  # Scale icon
+            header_row.label(text="", icon='COLOR')  # Color icon
+            header_row.label(text="", icon='MOD_NOISE')  # Brownian icon
+            header_row.label(text="", icon='BLANK1')  # Space for settings button
 
             box.separator(factor=0.5)
 
             for item in self.puppet_items:
-                row = box.row(align=True)
-                row.scale_y = 1.2
+                row = box.row(align=False)
+                row.scale_y = 1.2  # Make rows slightly taller for better readability
 
-                # Main checkbox - fixed width to match header
-                chk_row = row.row()
-                chk_row.ui_units_x = 1.5
-                chk_row.prop(item, "use_puppet", text="")
+                # Checkbox for selecting the puppet
+                row.prop(item, "use_puppet", text="")
 
-                # Puppet name - flexible width
-                name_row = row.row()
+                # Puppet name with icon
+                name_col = row.column()
+                name_col.alignment = 'LEFT'
+                name_row = name_col.row(align=True)
                 name_row.label(text=item.puppet_name, icon='GROUP')
 
-                # Transform checkboxes - each fixed width to match header
+                # Add spacer to push transform checkboxes to the right
+                row.separator(factor=2.0)
+
+                # Transform checkboxes - enabled only when puppet is selected
+                # Pose first (leftmost)
                 pose_row = row.row()
-                pose_row.ui_units_x = 1.5
                 pose_row.enabled = item.use_puppet
                 pose_row.prop(item, "keyframe_pose", text="")
 
                 loc_row = row.row()
-                loc_row.ui_units_x = 1.5
                 loc_row.enabled = item.use_puppet
                 loc_row.prop(item, "keyframe_location", text="")
 
                 rot_row = row.row()
-                rot_row.ui_units_x = 1.5
                 rot_row.enabled = item.use_puppet
                 rot_row.prop(item, "keyframe_rotation", text="")
 
                 scale_row = row.row()
-                scale_row.ui_units_x = 1.5
                 scale_row.enabled = item.use_puppet
                 scale_row.prop(item, "keyframe_scale", text="")
 
                 color_row = row.row()
-                color_row.ui_units_x = 1.5
                 color_row.enabled = item.use_puppet
                 color_row.prop(item, "keyframe_color", text="")
 
-                # Small separator
-                row.separator(factor=0.5)
-
-                # Brownian motion checkbox - fixed width
+                # Brownian motion checkbox
                 brownian_row = row.row()
-                brownian_row.ui_units_x = 1.5
                 brownian_row.enabled = item.use_puppet
                 brownian_row.prop(item, "brownian_enabled", text="")
 
-                # Settings button - fixed width
+                # Settings button (gear icon)
                 settings_row = row.row()
-                settings_row.ui_units_x = 1.5
                 settings_row.enabled = item.use_puppet
                 settings_op = settings_row.operator(
                     "proteinblender.brownian_settings",
