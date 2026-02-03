@@ -43,23 +43,40 @@ class BrownianMotionSettings(PropertyGroup):
         default=False
     )
 
-    # Normalized parameters (0-1 range)
-    intensity: FloatProperty(
-        name="Intensity",
-        description="Overall magnitude of the Brownian motion (0 = none, 1 = maximum)",
-        min=0.0,
-        max=1.0,
-        default=0.3,
-        subtype='FACTOR'
-    )
-
-    time_scale: FloatProperty(
-        name="Time Scale",
-        description="How fast the jitter feels (0 = slow, 1 = fast)",
+    # Movement parameters
+    movement_speed: FloatProperty(
+        name="Movement Speed",
+        description="How fast the movement changes (0 = slow, gentle drift | 1 = fast, active motion)",
         min=0.0,
         max=1.0,
         default=0.5,
         subtype='FACTOR'
+    )
+
+    movement_distance: FloatProperty(
+        name="Movement Distance",
+        description="Maximum displacement from keyframed position (Blender units)",
+        min=0.0,
+        max=10.0,
+        default=1.0
+    )
+
+    # Rotation parameters
+    rotation_speed: FloatProperty(
+        name="Rotation Speed",
+        description="How fast the rotation changes (0 = slow, gentle tumbling | 1 = fast, active spinning)",
+        min=0.0,
+        max=1.0,
+        default=0.5,
+        subtype='FACTOR'
+    )
+
+    rotation_distance: FloatProperty(
+        name="Rotation Distance",
+        description="Maximum rotation deviation (degrees, max 60)",
+        min=0.0,
+        max=60.0,
+        default=30.0
     )
 
     # Random seed settings
@@ -74,34 +91,6 @@ class BrownianMotionSettings(PropertyGroup):
         description="Fixed seed for reproducible motion (only used when Random Seed is unchecked)",
         default=12345,
         min=0
-    )
-
-    # Directional bias (0.5 = no bias, 0 = negative bias, 1 = positive bias)
-    bias_x: FloatProperty(
-        name="Bias X",
-        description="Directional drift along X axis (0.5 = no drift)",
-        min=0.0,
-        max=1.0,
-        default=0.5,
-        subtype='FACTOR'
-    )
-
-    bias_y: FloatProperty(
-        name="Bias Y",
-        description="Directional drift along Y axis (0.5 = no drift)",
-        min=0.0,
-        max=1.0,
-        default=0.5,
-        subtype='FACTOR'
-    )
-
-    bias_z: FloatProperty(
-        name="Bias Z",
-        description="Directional drift along Z axis (0.5 = no drift)",
-        min=0.0,
-        max=1.0,
-        default=0.5,
-        subtype='FACTOR'
     )
 
 

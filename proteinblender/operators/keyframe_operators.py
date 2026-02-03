@@ -650,6 +650,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 print(f"💾 Saved keyframe metadata for '{puppet_item.puppet_name}' at frame {self.frame_number}")
 
                 # Handle Brownian motion settings
+                # The new system uses F-Curve Noise modifiers instead of per-frame displacement
                 if puppet_item.brownian_enabled:
                     # Find previous keyframe for start frame
                     prev_frame = find_previous_keyframe(controller_obj, self.frame_number)
@@ -659,34 +660,40 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                         frame_key = str(self.frame_number)
 
                         if frame_key in brownian_metadata:
-                            # Preserve existing settings, just ensure enabled
-                            brownian_metadata[frame_key]['enabled'] = True
-                            brownian_metadata[frame_key]['start_frame'] = prev_frame
+                            # Preserve existing settings, just ensure enabled and update start_frame
+                            settings = brownian_metadata[frame_key].copy()
+                            settings['enabled'] = True
+                            settings['start_frame'] = prev_frame
                         else:
                             # Create default settings (user should open settings popup to customize)
-                            brownian_metadata[frame_key] = {
+                            settings = {
                                 'enabled': True,
-                                'intensity': 0.3,
-                                'time_scale': 0.5,
+                                'movement_speed': 0.5,
+                                'movement_distance': 1.0,
+                                'rotation_speed': 0.5,
+                                'rotation_distance': 30.0,
                                 'use_random_seed': True,
                                 'seed': None,
-                                'bias_x': 0.5,
-                                'bias_y': 0.5,
-                                'bias_z': 0.5,
                                 'start_frame': prev_frame,
                                 'puppet_id': puppet_item.puppet_id,
                             }
-                        save_brownian_metadata(controller_obj, self.frame_number, brownian_metadata[frame_key])
+                        # save_brownian_metadata now also creates the F-Curve noise modifiers
+                        save_brownian_metadata(controller_obj, self.frame_number, settings)
                         print(f"  🌊 Brownian motion enabled for frames {prev_frame}-{self.frame_number}")
+                        print(f"     (F-Curve noise modifiers created)")
                     else:
                         print(f"  ⚠ Cannot enable Brownian motion: no previous keyframe found")
                 else:
                     # Disable Brownian motion for this frame
+                    # This removes the F-Curve noise modifiers for this segment
                     brownian_metadata = get_brownian_metadata(controller_obj)
                     frame_key = str(self.frame_number)
                     if frame_key in brownian_metadata:
-                        brownian_metadata[frame_key]['enabled'] = False
-                        controller_obj['pb_brownian_metadata'] = json.dumps(brownian_metadata)
+                        # Create disabled settings to remove modifiers
+                        settings = brownian_metadata[frame_key].copy()
+                        settings['enabled'] = False
+                        # save_brownian_metadata handles removing modifiers when disabled
+                        save_brownian_metadata(controller_obj, self.frame_number, settings)
                         print(f"  🌊 Brownian motion disabled for frame {self.frame_number}")
 
         # Restore original frame

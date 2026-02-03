@@ -1,123 +1,16 @@
-"""Frame change handler for updating animated properties"""
+"""Frame change handler for updating animated properties.
+
+Note: Brownian motion is now handled by F-Curve Noise modifiers (see utils/brownian.py)
+rather than per-frame displacement in handlers. This makes the motion:
+- Render-safe (no handler timing issues)
+- Temporally correlated (smooth wandering instead of jitter)
+- Deterministic for reproducible renders
+
+The handler here is kept for color animation and potential future features.
+"""
 
 import bpy
-import random
 from bpy.app.handlers import persistent
-from mathutils import Vector, Quaternion
-
-from ..utils.brownian import (
-    get_brownian_settings_for_frame,
-    calculate_brownian_displacement,
-    calculate_brownian_rotation,
-    get_keyframed_location_at_frame,
-    get_keyframed_rotation_at_frame,
-)
-
-
-# Cache to store base (keyframed) locations for Brownian motion
-# Key: object name, Value: base location Vector
-_brownian_base_cache = {}
-
-
-@persistent
-def clear_brownian_cache_on_load(dummy):
-    """Clear Brownian cache when a new file is loaded."""
-    global _brownian_base_cache
-    _brownian_base_cache.clear()
-
-
-@persistent
-def apply_brownian_motion(scene):
-    """Apply Brownian motion to puppets on frame change.
-
-    This handler runs after Blender has evaluated keyframes, allowing us to
-    add Brownian displacement on top of the interpolated position.
-    """
-    frame = scene.frame_current
-
-    # Check if we have outliner_items
-    if not hasattr(scene, 'outliner_items'):
-        return
-
-    for item in scene.outliner_items:
-        if item.item_type != 'PUPPET':
-            continue
-
-        if not item.controller_object_name:
-            continue
-
-        controller = bpy.data.objects.get(item.controller_object_name)
-        if not controller:
-            continue
-
-        # Get Brownian settings for current frame
-        settings = get_brownian_settings_for_frame(controller, frame)
-
-        if not settings or not settings.get('enabled', False):
-            # No Brownian motion for this frame - restore base location if cached
-            cache_key = controller.name
-            if cache_key in _brownian_base_cache:
-                # Don't restore - let Blender's animation system handle it
-                del _brownian_base_cache[cache_key]
-            continue
-
-        # Get the base location from keyframe interpolation
-        # We need to read this BEFORE applying our displacement
-        base_location = get_keyframed_location_at_frame(controller, frame)
-
-        if base_location is None:
-            # No keyframed location, use current location
-            base_location = controller.location.copy()
-
-        # Store the base location in cache
-        cache_key = controller.name
-        _brownian_base_cache[cache_key] = base_location
-
-        # Calculate Brownian displacement
-        intensity = settings.get('intensity', 0.3)
-        time_scale = settings.get('time_scale', 0.5)
-        use_random_seed = settings.get('use_random_seed', True)
-        seed = None if use_random_seed else settings.get('seed', 12345)
-        bias = (
-            settings.get('bias_x', 0.5),
-            settings.get('bias_y', 0.5),
-            settings.get('bias_z', 0.5)
-        )
-
-        displacement = calculate_brownian_displacement(
-            intensity, time_scale, bias, seed, frame
-        )
-
-        # Apply location displacement additively
-        controller.location = base_location + displacement
-
-        # Calculate and apply rotational Brownian motion
-        rotation_displacement = calculate_brownian_rotation(
-            intensity, time_scale, seed, frame
-        )
-
-        # Get base rotation from keyframes
-        base_rotation = get_keyframed_rotation_at_frame(controller, frame)
-
-        if base_rotation is None:
-            # No keyframed rotation, use current rotation
-            if controller.rotation_mode == 'QUATERNION':
-                base_rotation = controller.rotation_quaternion.copy()
-            else:
-                base_rotation = controller.rotation_euler.to_quaternion()
-
-        # Convert rotation displacement (Euler) to quaternion and combine
-        rotation_quat = rotation_displacement.to_quaternion()
-
-        # Apply rotation: base_rotation @ rotation_displacement
-        # This applies the random rotation on top of the base
-        final_rotation = base_rotation @ rotation_quat
-
-        # Apply to controller (use quaternion mode for best interpolation)
-        if controller.rotation_mode == 'QUATERNION':
-            controller.rotation_quaternion = final_rotation
-        else:
-            controller.rotation_euler = final_rotation.to_euler(controller.rotation_mode)
 
 
 @persistent
@@ -125,20 +18,20 @@ def update_colors_on_frame_change(scene):
     """Update object colors from custom properties when frame changes"""
     # Import here to avoid circular imports
     from ..panels.visual_setup_panel import apply_color_to_object
-    
+
     # Track which objects we've updated to avoid redundant updates
     updated_objects = set()
-    
+
     # Check all objects for color properties
     for obj in bpy.data.objects:
         # Skip if already updated or no color property
         if obj in updated_objects or "pb_color" not in obj:
             continue
-            
+
         # Get the interpolated color value at the current frame
         # Blender automatically interpolates custom properties if they're keyframed
         color = obj["pb_color"]
-        
+
         # Apply the color to the object's visual representation
         if color and len(color) >= 3:
             # Convert to tuple (RGBA)
@@ -146,12 +39,12 @@ def update_colors_on_frame_change(scene):
                 color = (*color, 1.0)  # Add alpha if not present
             else:
                 color = tuple(color[:4])  # Ensure we have exactly 4 components
-            
+
             apply_color_to_object(obj, color)
             updated_objects.add(obj)
-            
+
             # Debug output (can be removed later)
-            print(f"Frame {scene.frame_current}: Updated color for {obj.name} to {color}")
+            # print(f"Frame {scene.frame_current}: Updated color for {obj.name} to {color}")
 
 
 def register():
@@ -159,22 +52,15 @@ def register():
     # Remove any existing handlers to avoid duplicates
     unregister()
 
-    # Add the handlers
-    # Brownian motion should run first to modify positions
-    bpy.app.handlers.frame_change_post.append(apply_brownian_motion)
+    # Add the color update handler
     bpy.app.handlers.frame_change_post.append(update_colors_on_frame_change)
 
-    # Register load handler to clear cache when loading new files
-    bpy.app.handlers.load_post.append(clear_brownian_cache_on_load)
-
-    print("Registered frame change handlers (Brownian motion, color update)")
+    print("Registered frame change handlers (color update)")
+    print("Note: Brownian motion is now handled by F-Curve Noise modifiers")
 
 
 def unregister():
     """Unregister the frame change handlers"""
-    global _brownian_base_cache
-    _brownian_base_cache.clear()
-
     # Remove color update handler
     handlers_to_remove = [h for h in bpy.app.handlers.frame_change_post
                          if h.__name__ == "update_colors_on_frame_change"]
@@ -182,14 +68,14 @@ def unregister():
     for handler in handlers_to_remove:
         bpy.app.handlers.frame_change_post.remove(handler)
 
-    # Remove Brownian motion handler
+    # Also clean up any legacy Brownian handlers that might exist
     handlers_to_remove = [h for h in bpy.app.handlers.frame_change_post
                          if h.__name__ == "apply_brownian_motion"]
 
     for handler in handlers_to_remove:
         bpy.app.handlers.frame_change_post.remove(handler)
 
-    # Remove load handler
+    # Remove legacy load handler if it exists
     handlers_to_remove = [h for h in bpy.app.handlers.load_post
                          if h.__name__ == "clear_brownian_cache_on_load"]
 

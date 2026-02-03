@@ -77,6 +77,8 @@ from .pivot_operators import (
 from .brownian_operators import (
     PROTEINBLENDER_OT_brownian_settings,
     PROTEINBLENDER_OT_brownian_disable,
+    PROTEINBLENDER_OT_brownian_rebuild,
+    PROTEINBLENDER_OT_brownian_clear_all,
 )
 
 CLASSES = (
@@ -143,6 +145,8 @@ CLASSES = (
     # Brownian motion operators
     PROTEINBLENDER_OT_brownian_settings,
     PROTEINBLENDER_OT_brownian_disable,
+    PROTEINBLENDER_OT_brownian_rebuild,
+    PROTEINBLENDER_OT_brownian_clear_all,
 )
 
 
