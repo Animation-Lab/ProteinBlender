@@ -43,40 +43,31 @@ class BrownianMotionSettings(PropertyGroup):
         default=False
     )
 
-    # Movement parameters
-    movement_speed: FloatProperty(
-        name="Movement Speed",
-        description="How fast the movement changes (0 = slow, gentle drift | 1 = fast, active motion)",
-        min=0.0,
-        max=1.0,
-        default=0.5,
-        subtype='FACTOR'
+    # Jitter parameters
+    jitter_interval: IntProperty(
+        name="Interval",
+        description="Frames between jitter events (1 = every frame, 10 = every 10th frame)",
+        min=1,
+        max=10,
+        default=3
     )
 
-    movement_distance: FloatProperty(
-        name="Movement Distance",
-        description="Maximum displacement from keyframed position (Blender units)",
-        min=0.0,
+    jitter_max_distance: FloatProperty(
+        name="Max Distance",
+        description="Maximum displacement from interpolated path (Blender units). Protein appears anywhere within this sphere",
+        min=0.1,
         max=10.0,
         default=1.0
     )
 
-    # Rotation parameters
-    rotation_speed: FloatProperty(
-        name="Rotation Speed",
-        description="How fast the rotation changes (0 = slow, gentle tumbling | 1 = fast, active spinning)",
+    jitter_max_rotation: FloatProperty(
+        name="Max Rotation",
+        description="Maximum rotation per axis at each jitter event (degrees). Each axis is independently randomized",
         min=0.0,
-        max=1.0,
-        default=0.5,
-        subtype='FACTOR'
-    )
-
-    rotation_distance: FloatProperty(
-        name="Rotation Distance",
-        description="Maximum rotation deviation (degrees, max 60)",
-        min=0.0,
-        max=60.0,
-        default=30.0
+        max=360.0,
+        default=30.0,
+        step=100,
+        precision=0
     )
 
     # Random seed settings
@@ -91,6 +82,40 @@ class BrownianMotionSettings(PropertyGroup):
         description="Fixed seed for reproducible motion (only used when Random Seed is unchecked)",
         default=12345,
         min=0
+    )
+
+    # Physical parameterization mode
+    use_physical_params: BoolProperty(
+        name="Physical Mode",
+        description="Use physics-based parameters (molecular weight, temperature) instead of manual sliders",
+        default=False
+    )
+
+    molecular_weight: FloatProperty(
+        name="Molecular Weight",
+        description="Protein molecular weight in kilodaltons (kDa). Examples: Insulin=5.8, BSA=66, IgG=150",
+        min=1.0,
+        max=10000.0,
+        default=50.0,
+        precision=1
+    )
+
+    temperature: FloatProperty(
+        name="Temperature",
+        description="Simulation temperature in Kelvin (room temp = 298 K, body temp = 310 K)",
+        min=100.0,
+        max=500.0,
+        default=300.0,
+        precision=1
+    )
+
+    viscosity_factor: FloatProperty(
+        name="Viscosity Factor",
+        description="Multiplier for solvent viscosity (1.0 = water at 20C, higher = more viscous)",
+        min=0.1,
+        max=100.0,
+        default=1.0,
+        precision=2
     )
 
 

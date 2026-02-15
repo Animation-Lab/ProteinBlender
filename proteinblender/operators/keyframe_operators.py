@@ -11,7 +11,8 @@ from ..utils.animation import (
     keyframe_color_properties,
     remove_color_keyframes,
     has_color_keyframe,
-    get_fcurves_from_action
+    get_fcurves_from_action,
+    ensure_quaternion_mode,
 )
 from ..utils.brownian import (
     get_brownian_metadata,
@@ -556,7 +557,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             
             # Apply any active poses for the puppet's domains
             # This preserves domain arrangements
-            from ..utils.animation import ensure_quaternion_mode
             for item in scene.molecule_list_items:
                 if hasattr(item, 'active_pose_index') and hasattr(item, 'poses'):
                     if item.active_pose_index >= 0 and item.active_pose_index < len(item.poses):
@@ -650,8 +650,11 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 print(f"💾 Saved keyframe metadata for '{puppet_item.puppet_name}' at frame {self.frame_number}")
 
                 # Handle Brownian motion settings
-                # The new system uses F-Curve Noise modifiers instead of per-frame displacement
+                # The system bakes JITTER keyframes at even intervals
                 if puppet_item.brownian_enabled:
+                    # Ensure quaternion mode before Brownian motion
+                    ensure_quaternion_mode(controller_obj)
+
                     # Find previous keyframe for start frame
                     prev_frame = find_previous_keyframe(controller_obj, self.frame_number)
                     if prev_frame is not None:
@@ -668,33 +671,36 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                             # Create default settings (user should open settings popup to customize)
                             settings = {
                                 'enabled': True,
-                                'movement_speed': 0.5,
-                                'movement_distance': 1.0,
-                                'rotation_speed': 0.5,
-                                'rotation_distance': 30.0,
+                                'jitter_interval': 3,
+                                'jitter_max_distance': 1.0,
+                                'jitter_max_rotation': 30.0,
                                 'use_random_seed': True,
                                 'seed': None,
                                 'start_frame': prev_frame,
                                 'puppet_id': puppet_item.puppet_id,
+                                'use_physical_params': False,
+                                'molecular_weight': 50.0,
+                                'temperature': 300.0,
+                                'viscosity_factor': 1.0,
                             }
-                        # save_brownian_metadata now also creates the F-Curve noise modifiers
+                        # save_brownian_metadata bakes JITTER keyframes at even intervals
                         save_brownian_metadata(controller_obj, self.frame_number, settings)
-                        print(f"  🌊 Brownian motion enabled for frames {prev_frame}-{self.frame_number}")
-                        print(f"     (F-Curve noise modifiers created)")
+                        print(f"  Brownian motion enabled for frames {prev_frame}-{self.frame_number}")
+                        print(f"     (JITTER keyframes baked)")
                     else:
-                        print(f"  ⚠ Cannot enable Brownian motion: no previous keyframe found")
+                        print(f"  Cannot enable Brownian motion: no previous keyframe found")
                 else:
                     # Disable Brownian motion for this frame
-                    # This removes the F-Curve noise modifiers for this segment
+                    # This removes the baked JITTER keyframes for the segment
                     brownian_metadata = get_brownian_metadata(controller_obj)
                     frame_key = str(self.frame_number)
                     if frame_key in brownian_metadata:
-                        # Create disabled settings to remove modifiers
+                        # Create disabled settings to remove baked keyframes
                         settings = brownian_metadata[frame_key].copy()
                         settings['enabled'] = False
-                        # save_brownian_metadata handles removing modifiers when disabled
+                        # save_brownian_metadata handles clearing JITTER keyframes when disabled
                         save_brownian_metadata(controller_obj, self.frame_number, settings)
-                        print(f"  🌊 Brownian motion disabled for frame {self.frame_number}")
+                        print(f"  Brownian motion disabled for frame {self.frame_number}")
 
         # Restore original frame
         if original_frame != self.frame_number:
