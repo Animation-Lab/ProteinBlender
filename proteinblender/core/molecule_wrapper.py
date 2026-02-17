@@ -1,3 +1,12 @@
+"""MoleculeWrapper class for ProteinBlender.
+
+This module wraps MolecularNodes Molecule objects with ProteinBlender-specific
+functionality including domain management, chain mapping, and reference healing.
+
+The MoleculeWrapper uses ObjectRef for safe handling of Blender object references
+that can become invalid after undo/redo operations.
+"""
+
 from typing import Optional, Dict, List, Tuple
 import bpy
 import numpy as np
@@ -8,6 +17,7 @@ from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from ..utils.molecularnodes.blender import nodes
 from .domain import DomainDefinition
 from ..core.domain import ensure_domain_properties_registered
+from ..utils.blender_utils import ObjectRef, is_object_valid, get_object_safe
 
 class MoleculeWrapper:
     """
@@ -29,15 +39,13 @@ class MoleculeWrapper:
         working_array = molecule.array
         if isinstance(molecule.array, struc.AtomArrayStack):
             working_array = molecule.array[0]
-            print("DEBUG MoleculeWrapper.__init__: Detected AtomArrayStack, using first model for chain mapping")
-        
+
         # Ensure the working array has the necessary integer chain ID attribute
         existing_categories = working_array.get_annotation_categories()
         if "chain_id_int" not in existing_categories:
             working_array.add_annotation("chain_id_int", dtype=int)
             unique_chain_ids, int_indices = np.unique(working_array.chain_id, return_inverse=True)
             working_array.set_annotation("chain_id_int", int_indices)
-            print(f"DEBUG MoleculeWrapper.__init__: Added 'chain_id_int' annotation. Unique chains processed: {len(unique_chain_ids)}")
 
         # 1. Author-provided chain ID map (often from mmCIF _atom_site.auth_asym_id)
         # Biotite's chain_mapping_str() typically provides a map from an integer index to the auth_asym_id string.
@@ -45,19 +53,14 @@ class MoleculeWrapper:
         self.auth_chain_id_map: Dict[int, str] = {}
         if isinstance(raw_auth_map, dict):
             self.auth_chain_id_map = {k: v for k, v in raw_auth_map.items() if isinstance(k, int) and isinstance(v, str)}
-        print(f"DEBUG MoleculeWrapper.__init__: self.auth_chain_id_map (processed from chain_mapping_str): {self.auth_chain_id_map}")
 
         # 2. Map from internal integer chain index (0,1,2...) to _atom_site.label_asym_id ('A','B','C'...)
         # This uses working_array.chain_id which Biotite populates with label_asym_id for mmCIF.
         self.idx_to_label_asym_id_map: Dict[int, str] = {}
-        if hasattr(working_array, 'chain_id'): # This is label_asym_id from Biotite for mmCIF
+        if hasattr(working_array, 'chain_id'):  # This is label_asym_id from Biotite for mmCIF
             unique_label_asym_ids = sorted(list(np.unique(working_array.chain_id)))
-            print(f"DEBUG MoleculeWrapper.__init__: Unique label_asym_ids from working_array.chain_id: {unique_label_asym_ids}")
             for i, label_id_str in enumerate(unique_label_asym_ids):
-                self.idx_to_label_asym_id_map[i] = str(label_id_str) # Ensure it's a string
-        else:
-            print("Warning MoleculeWrapper.__init__: working_array.chain_id not found. Cannot create idx_to_label_asym_id_map.")
-        print(f"DEBUG MoleculeWrapper.__init__: self.idx_to_label_asym_id_map: {self.idx_to_label_asym_id_map}")
+                self.idx_to_label_asym_id_map[i] = str(label_id_str)  # Ensure it's a string
         
         # Store reference to working array for other methods
         self.working_array = working_array
@@ -165,9 +168,182 @@ class MoleculeWrapper:
         '''
         
     @property
-    def object(self) -> bpy.types.Object:
-        """Get the Blender object"""
-        return self.molecule.object
+    def object(self) -> Optional[bpy.types.Object]:
+        """Get the Blender object, healing reference if needed."""
+        obj = self.molecule.object if self.molecule else None
+
+        # Check if reference is still valid
+        if not is_object_valid(obj):
+            # Try to heal from stored name
+            if self.object_name and self.object_name in bpy.data.objects:
+                healed_obj = bpy.data.objects[self.object_name]
+                if self.molecule:
+                    self.molecule.object = healed_obj
+                return healed_obj
+            return None
+
+        return obj
+
+    def heal_references(self) -> bool:
+        """Heal all stale object references after undo/redo.
+
+        This method attempts to recover valid references for:
+        - The main molecule object
+        - All domain objects and node groups
+        - Node infrastructure references
+
+        Returns:
+            True if all critical references were healed successfully
+        """
+        all_valid = True
+
+        # Heal main object reference
+        obj = self.object  # Uses property which already heals
+        if not obj:
+            all_valid = False
+
+        # Heal all domain references
+        for domain_id, domain in self.domains.items():
+            if not domain.heal_references():
+                print(f"Warning: Could not heal domain {domain_id}")
+                all_valid = False
+
+        # Update object_name if we have a valid object
+        if obj:
+            try:
+                self.object_name = obj.name
+            except (ReferenceError, AttributeError):
+                pass
+
+        return all_valid
+
+    def is_valid(self) -> bool:
+        """Check if the molecule wrapper has valid references.
+
+        Returns:
+            True if the main object reference is valid
+        """
+        return is_object_valid(self.object)
+
+    @classmethod
+    def from_existing_object(
+        cls,
+        obj: bpy.types.Object,
+        identifier: str,
+        chain_mapping: Optional[Dict[int, str]] = None,
+        chain_residue_ranges: Optional[Dict[str, Tuple[int, int]]] = None
+    ) -> Optional['MoleculeWrapper']:
+        """Create a MoleculeWrapper from an existing Blender object.
+
+        This is used to reconstruct a wrapper after undo/redo or file load
+        when the runtime wrapper was lost but the Blender object still exists.
+
+        Args:
+            obj: The existing Blender protein object
+            identifier: The molecule identifier
+            chain_mapping: Optional chain index to ID mapping
+            chain_residue_ranges: Optional chain residue ranges
+
+        Returns:
+            A new MoleculeWrapper instance, or None if creation failed
+        """
+        try:
+            import biotite.structure as struc
+
+            # Create a minimal mock Molecule that wraps the existing object
+            class MockMolecule:
+                """Minimal mock of MolecularNodes Molecule for wrapping existing objects."""
+
+                def __init__(self, blender_obj):
+                    self.object = blender_obj
+                    self.array = cls._extract_array_from_object(blender_obj, chain_mapping)
+
+            mock = MockMolecule(obj)
+
+            # Create wrapper - this will set up chain mappings from the array
+            wrapper = cls(mock, identifier)
+
+            # Override with provided mappings if available (more reliable)
+            if chain_mapping:
+                wrapper.chain_mapping = chain_mapping
+                wrapper.auth_chain_id_map = chain_mapping
+
+            if chain_residue_ranges:
+                wrapper.chain_residue_ranges = chain_residue_ranges
+
+            return wrapper
+
+        except Exception as e:
+            print(f"Failed to create wrapper from existing object: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    @staticmethod
+    def _extract_array_from_object(
+        obj: bpy.types.Object,
+        chain_mapping: Optional[Dict[int, str]] = None
+    ):
+        """Extract a minimal biotite array from Blender object attributes.
+
+        Args:
+            obj: The Blender protein object
+            chain_mapping: Optional chain mapping to use
+
+        Returns:
+            A biotite AtomArray with chain_id and res_id populated
+        """
+        import biotite.structure as struc
+
+        try:
+            if not obj or not hasattr(obj, 'data') or not obj.data:
+                return struc.AtomArray(0)
+
+            attrs = obj.data.attributes
+            num_atoms = len(obj.data.vertices)
+
+            if num_atoms == 0:
+                return struc.AtomArray(0)
+
+            array = struc.AtomArray(num_atoms)
+
+            # Get chain mapping from object if not provided
+            if not chain_mapping:
+                mapping_str = obj.data.get("chain_mapping_str", "")
+                if mapping_str:
+                    chain_mapping = {}
+                    for pair in mapping_str.split(","):
+                        if ":" in pair:
+                            try:
+                                k, v = pair.split(":")
+                                chain_mapping[int(k)] = v
+                            except (ValueError, TypeError):
+                                continue
+
+            # Extract chain IDs
+            if "chain_id" in attrs:
+                chain_data = np.zeros(num_atoms, dtype=np.int32)
+                attrs["chain_id"].data.foreach_get("value", chain_data)
+
+                if chain_mapping:
+                    chain_labels = np.array([
+                        chain_mapping.get(cid, str(cid)) for cid in chain_data
+                    ])
+                    array.chain_id = chain_labels
+                else:
+                    array.chain_id = chain_data.astype(str)
+
+            # Extract residue IDs
+            if "res_id" in attrs:
+                res_data = np.zeros(num_atoms, dtype=np.int32)
+                attrs["res_id"].data.foreach_get("value", res_data)
+                array.res_id = res_data
+
+            return array
+
+        except Exception as e:
+            print(f"Warning: Could not extract array data: {e}")
+            return struc.AtomArray(0)
         
     def change_style(self, new_style: str) -> None:
         """Change the visualization style of the molecule"""
@@ -407,25 +583,16 @@ class MoleculeWrapper:
                                                            chain_id=mapped_chain,
                                                            start_res=start,
                                                            end_res=end)
-                if pivot_pos:
-                    print(f"Setting full chain domain pivot to center of mass")
-                else:
+                if not pivot_pos:
                     # Fallback to start residue if center of mass calculation fails
                     pivot_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START')
-                    if pivot_pos:
-                        print(f"Center of mass calculation failed, using start residue for pivot")
             else:
                 # For partial domains, use start residue (existing behavior)
                 pivot_pos = self._find_residue_alpha_carbon_pos(bpy.context, domain, residue_target='START')
-                if pivot_pos:
-                    print(f"Setting partial domain pivot to start residue")
 
             # Apply the pivot position
             if pivot_pos:
-                if not self._set_domain_origin_and_update_matrix(bpy.context, domain, pivot_pos):
-                    print(f"Warning: Failed to set pivot for domain {domain_id}")
-            else:
-                print(f"Warning: Could not determine pivot position for domain {domain_id}")
+                self._set_domain_origin_and_update_matrix(bpy.context, domain, pivot_pos)
         # --- End initial pivot setting --- 
 
         # Update residue assignments

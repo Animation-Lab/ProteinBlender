@@ -1,9 +1,24 @@
+"""Domain definition and management.
+
+This module defines the DomainDefinition class which represents a logical
+domain within a protein molecule. It manages its own Blender object and
+geometry nodes network.
+
+The module uses ObjectRef and NodeGroupRef from blender_utils for safe
+handling of Blender object references that can become invalid after
+undo/redo operations.
+"""
+
 from typing import Optional, Dict
 import bpy
 from bpy.types import PropertyGroup
-from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty, 
+from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty,
                       FloatVectorProperty, EnumProperty)
 from ..utils.molecularnodes.style import STYLE_ITEMS
+from ..utils.blender_utils import (
+    ObjectRef, NodeGroupRef, is_object_valid, is_node_group_valid,
+    get_object_safe, get_node_group_safe, safe_remove_object, safe_remove_node_group
+)
 
 class DomainProperties(PropertyGroup):
     """Complete domain properties class to encapsulate all domain data"""
@@ -47,7 +62,22 @@ class DomainProperties(PropertyGroup):
     node_group_name: StringProperty(description="Name of the node group for this domain")
 
 class DomainDefinition:
-    """Represents the logical definition of a domain with its own geometry nodes network"""
+    """Represents the logical definition of a domain with its own geometry nodes network.
+
+    This class uses ObjectRef and NodeGroupRef for safe handling of Blender
+    references that can become invalid after undo/redo operations. The heal_references()
+    method can be called to recover valid references from stored names.
+
+    Attributes:
+        chain_id: The chain this domain belongs to
+        start: Starting residue number
+        end: Ending residue number
+        name: Display name for the domain
+        domain_id: Unique identifier for the domain
+        object_name: Stored object name for reference healing
+        node_group_name: Stored node group name for reference healing
+    """
+
     def __init__(self, chain_id: str, start: int, end: int, name: Optional[str] = None):
         self.chain_id = chain_id
         self.start = start
@@ -55,18 +85,82 @@ class DomainDefinition:
         self.name = name or f"Domain_{chain_id}_{start}_{end}"
         self.parent_molecule_id = None  # Link to parent molecule
         self.parent_domain_id = None  # Link to parent domain
-        self.object = None  # Blender object reference
-        self.node_group = None  # Geometry nodes network
-        self.object_name = ""  # Track object name for undo restoration
-        self.node_group_name = ""  # Track node group name for undo restoration
+
+        # Use ObjectRef and NodeGroupRef for safe reference handling
+        self._object_ref = ObjectRef()
+        self._node_group_ref = NodeGroupRef()
+
         self._setup_complete = False
         self.color = (0.8, 0.1, 0.8, 1.0)  # Default purple color
         self.domain_id = f"{chain_id}_{start}_{end}"
         self.style = "ribbon"  # Default style
+
         # Properties for tracking copies
         self.is_copy = False  # Whether this domain is a copy
         self.copy_number = 0  # The copy number (1, 2, 3, etc.)
         self.original_domain_id = None  # ID of the original domain if this is a copy
+
+    # Property accessors that use safe references
+    @property
+    def object(self) -> Optional[bpy.types.Object]:
+        """Get the domain's Blender object, healing reference if needed."""
+        return self._object_ref.get()
+
+    @object.setter
+    def object(self, value: Optional[bpy.types.Object]):
+        """Set the domain's Blender object."""
+        self._object_ref.set(value)
+
+    @property
+    def object_name(self) -> str:
+        """Get the stored object name."""
+        return self._object_ref.name
+
+    @object_name.setter
+    def object_name(self, value: str):
+        """Set the stored object name."""
+        self._object_ref.name = value
+
+    @property
+    def node_group(self) -> Optional[bpy.types.NodeTree]:
+        """Get the domain's node group, healing reference if needed."""
+        return self._node_group_ref.get()
+
+    @node_group.setter
+    def node_group(self, value: Optional[bpy.types.NodeTree]):
+        """Set the domain's node group."""
+        self._node_group_ref.set(value)
+
+    @property
+    def node_group_name(self) -> str:
+        """Get the stored node group name."""
+        return self._node_group_ref.name
+
+    @node_group_name.setter
+    def node_group_name(self, value: str):
+        """Set the stored node group name."""
+        self._node_group_ref.name = value
+
+    def heal_references(self) -> bool:
+        """Attempt to heal invalid object and node group references.
+
+        This method should be called after undo/redo operations to recover
+        valid references from stored names.
+
+        Returns:
+            True if all references are valid after healing, False otherwise
+        """
+        obj_valid = self._object_ref.heal()
+        ng_valid = self._node_group_ref.heal()
+        return obj_valid and ng_valid
+
+    def is_valid(self) -> bool:
+        """Check if the domain has valid object and node group references.
+
+        Returns:
+            True if both object and node group are valid
+        """
+        return self._object_ref.is_valid() and self._node_group_ref.is_valid()
 
     def to_properties(self) -> Dict:
         """Convert domain definition to property dictionary for storing in PropertyGroup"""
@@ -239,63 +333,46 @@ class DomainDefinition:
             return False
 
     def cleanup(self):
-        """Remove domain object and node group"""
+        """Remove domain object and node group.
+
+        This method safely removes the domain's Blender object and node group,
+        handling cases where references may already be invalid.
+        """
         try:
-            # Clean up object
-            if self.object:
-                # Clean up node groups first
-                if self.object.modifiers:
-                    for modifier in self.object.modifiers:
-                        if modifier.type == 'NODES' and modifier.node_group:
-                            try:
-                                node_group = modifier.node_group
-                                if node_group and node_group.name in bpy.data.node_groups:
-                                    bpy.data.node_groups.remove(node_group, do_unlink=True)
-                            except ReferenceError:
-                                # Node group already removed, skip
-                                pass
-                
-                # Store object data
-                obj_data = self.object.data
-                
-                # Remove object
-                if self.object.name in bpy.data.objects:
-                    bpy.data.objects.remove(self.object, do_unlink=True)
-                
-                # Clean up object data if no other users
-                if obj_data and obj_data.users == 0:
-                    if isinstance(obj_data, bpy.types.Mesh):
-                        bpy.data.meshes.remove(obj_data, do_unlink=True)
-                
-                # Clear reference
-                self.object = None
-            
-            # Clean up node group
-            if self.node_group:
+            # Get current object (with healing if needed)
+            obj = self.object
+            if obj:
+                # Clean up node groups from modifiers first
                 try:
-                    if self.node_group.name in bpy.data.node_groups:
-                        bpy.data.node_groups.remove(self.node_group, do_unlink=True)
-                except ReferenceError:
-                    # Node group already removed, skip
+                    if obj.modifiers:
+                        for modifier in obj.modifiers:
+                            if modifier.type == 'NODES' and modifier.node_group:
+                                safe_remove_node_group(modifier.node_group)
+                except (ReferenceError, AttributeError):
                     pass
-                self.node_group = None
-                self.node_group_name = ""
-            
-            # Clean up any custom node trees
-            for node_group in list(bpy.data.node_groups):  # Create a copy of the list to avoid modification during iteration
+
+                # Remove the object and its data
+                safe_remove_object(obj, remove_data=True)
+
+            # Clean up main node group
+            ng = self.node_group
+            if ng:
+                safe_remove_node_group(ng)
+
+            # Clean up any custom node trees for this domain
+            for node_group in list(bpy.data.node_groups):
                 try:
                     if node_group.name.startswith(f"Color Common_{self.domain_id}"):
-                        bpy.data.node_groups.remove(node_group, do_unlink=True)
-                except ReferenceError:
-                    # Node group already removed, skip
+                        safe_remove_node_group(node_group)
+                except (ReferenceError, AttributeError):
                     pass
-            
-            # Reset properties
+
+            # Reset all references
+            self._object_ref = ObjectRef()
+            self._node_group_ref = NodeGroupRef()
             self._setup_complete = False
-            self.color = (0.8, 0.1, 0.8, 1.0)  # Reset to default color
-            self.object_name = ""
-            self.node_group_name = ""
-            
+            self.color = (0.8, 0.1, 0.8, 1.0)
+
         except Exception as e:
             print(f"Error during domain cleanup: {str(e)}")
             import traceback

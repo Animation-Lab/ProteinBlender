@@ -1,7 +1,22 @@
+"""ProteinBlender scene management.
+
+This module provides the ProteinBlenderScene singleton class which manages
+all molecule state in a Blender session. It handles:
+- Molecule import and deletion
+- Undo/redo state synchronization
+- UI list management
+- Lazy wrapper reconstruction
+
+The scene manager uses MoleculeListItem PropertyGroups as the primary
+persistent storage, with runtime MoleculeWrapper objects reconstructed
+on-demand.
+"""
+
 import json
 import bpy
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List, Set, Tuple
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
+from .blender_utils import is_object_valid, get_object_safe, refresh_ui_areas
 
 class ProteinBlenderScene:
     _instance = None
@@ -188,6 +203,10 @@ class ProteinBlenderScene:
         item = scene.molecule_list_items.add()
         item.identifier = molecule.identifier
         item.object_ptr = molecule.object
+        # Store object name and chain data for reference healing after undo/redo
+        if molecule.object:
+            item.object_name = molecule.object.name
+        item.sync_from_wrapper(molecule)
         scene.molecule_list_index = len(scene.molecule_list_items) - 1
         # Set as active molecule
         self.active_molecule = molecule.identifier
@@ -237,7 +256,10 @@ class ProteinBlenderScene:
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Error in create_molecule_from_id: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 
@@ -343,61 +365,21 @@ class ProteinBlenderScene:
         self._refresh_ui()
 
 
-def _is_object_valid(obj):
-    """Check if Blender object reference is still valid"""
-    try:
-        return obj and obj.name in bpy.data.objects
-    except ReferenceError:
-        # Object reference was freed - return False but this can be recovered
-        return False
-    except Exception:
-        return False
-
-
 def _is_molecule_valid(molecule):
-    """Check if molecule wrapper has a valid object reference"""
-    try:
-        if not molecule:
-            return False
+    """Check if molecule wrapper has a valid object reference.
 
-        # Get the molecule's object - might be molecule.object or molecule.molecule.object
-        obj = getattr(molecule, 'object', None)
-
-        # Try to get object name, handling ReferenceError if object was freed
-        obj_name = None
-        try:
-            if obj:
-                obj_name = obj.name
-        except ReferenceError:
-            # Object was freed, try to get from object_name attribute
-            obj_name = getattr(molecule, 'object_name', '')
-
-        # If we don't have a valid object reference, try to recover it
-        if not _is_object_valid(obj):
-            # Try to find the object by name
-            if not obj_name:
-                obj_name = getattr(molecule, 'object_name', '')
-
-            if obj_name and obj_name in bpy.data.objects:
-                # Recover the object reference
-                recovered_obj = bpy.data.objects[obj_name]
-                # MoleculeWrapper.object is a read-only property that returns molecule.molecule.object
-                # So we need to set the underlying molecule.molecule.object instead
-                if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
-                    molecule.molecule.object = recovered_obj
-                    return True
-                else:
-                    # Fallback - shouldn't normally happen but handle gracefully
-                    return False
-            else:
-                # Can't find the object - molecule is truly invalid
-                return False
-
-        return True
-    except Exception as e:
-        # Handle MolecularNodes databpy LinkedObjectError and other exceptions
-        print(f"Error checking molecule validity: {e}")
+    Uses the centralized is_object_valid from blender_utils.
+    Also attempts to heal the reference if possible.
+    """
+    if not molecule:
         return False
+
+    # Use wrapper's is_valid method if available (new approach)
+    if hasattr(molecule, 'is_valid'):
+        return molecule.is_valid()
+
+    # Fallback for compatibility
+    return is_object_valid(molecule.object)
 
 
 def _has_invalid_domains(molecule):
@@ -408,7 +390,7 @@ def _has_invalid_domains(molecule):
             return True
 
         for domain in molecule.domains.values():
-            if not _is_object_valid(domain.object):
+            if not is_object_valid(domain.object):
                 name = getattr(domain, 'object_name', '')
                 if name and name in bpy.data.objects:
                     domain.object = bpy.data.objects[name]
@@ -471,16 +453,16 @@ def _refresh_molecule_ui(scene_manager, scene):
     scene.molecule_list_items.clear()
 
     for identifier, molecule in scene_manager.molecules.items():
-        if not _is_object_valid(molecule.object):
+        if not is_object_valid(molecule.object):
             name = getattr(molecule, 'object_name', '')
             if name and name in bpy.data.objects:
                 molecule.object = bpy.data.objects[name]
                 if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
                     molecule.molecule.object = molecule.object
-        if _is_object_valid(molecule.object):
+        if is_object_valid(molecule.object):
             # Restore domain pointers if needed
             for domain in molecule.domains.values():
-                if not _is_object_valid(domain.object):
+                if not is_object_valid(domain.object):
                     name = getattr(domain, 'object_name', '')
                     if name and name in bpy.data.objects:
                         domain.object = bpy.data.objects[name]
@@ -529,7 +511,7 @@ def _refresh_object_references_only(scene_manager, scene):
     """Refresh object references without rebuilding the entire UI list"""
     for identifier, molecule in scene_manager.molecules.items():
         # Refresh molecule object reference
-        if not _is_object_valid(molecule.object):
+        if not is_object_valid(molecule.object):
             name = getattr(molecule, 'object_name', '')
             if name and name in bpy.data.objects:
                 molecule.object = bpy.data.objects[name]
@@ -538,7 +520,7 @@ def _refresh_object_references_only(scene_manager, scene):
         
         # Refresh domain object references
         for domain in molecule.domains.values():
-            if not _is_object_valid(domain.object):
+            if not is_object_valid(domain.object):
                 name = getattr(domain, 'object_name', '')
                 if name and name in bpy.data.objects:
                     domain.object = bpy.data.objects[name]
@@ -674,10 +656,10 @@ def _find_orphaned_protein_objects():
     # Build a set of all tracked object names (molecules AND their domains)
     tracked_object_names = set()
     for molecule in scene_manager.molecules.values():
-        if molecule.object:
+        if is_object_valid(molecule.object):
             tracked_object_names.add(molecule.object.name)
         for domain in molecule.domains.values():
-            if domain.object:
+            if is_object_valid(domain.object):
                 tracked_object_names.add(domain.object.name)
 
     for obj in bpy.data.objects:
@@ -702,143 +684,173 @@ def _find_orphaned_protein_objects():
     return orphaned
 
 
-def sync_molecule_list_after_undo(*args):
-    """Sync molecule state after undo/redo operations"""
-    try:
-        print("\n========== UNDO/REDO HANDLER STARTING ==========")
-        scene_manager = ProteinBlenderScene.get_instance()
-        scene = bpy.context.scene
+# =============================================================================
+# Undo/Redo Helper Functions (Simplified Approach)
+# =============================================================================
 
-        print(f"Current molecules in scene_manager: {list(scene_manager.molecules.keys())}")
-        print(f"Saved states available: {list(scene_manager._saved_states.keys())}")
+def _heal_all_wrapper_references(scene_manager):
+    """Heal all object references in existing wrappers.
 
-        # Step 1: Clean up molecules that have invalid objects (e.g., after undoing an import)
-        molecules_to_remove = []
-        for molecule_id, molecule in list(scene_manager.molecules.items()):
-            if not _is_molecule_valid(molecule):
-                print(f"----------- Molecule {molecule_id} is invalid, removing ------------")
-                # Don't try to capture state of invalid molecules - this causes errors
-                molecules_to_remove.append(molecule_id)
+    This is called first in the undo handler to recover references
+    that may have become valid again after undo.
+    """
+    for molecule_id, molecule in list(scene_manager.molecules.items()):
+        try:
+            if hasattr(molecule, 'heal_references'):
+                molecule.heal_references()
             else:
-                # Refresh domain object references for valid molecules after undo/redo
-                try:
-                    scene_manager._refresh_domain_object_references(molecule)
-                except Exception as e:
-                    print(f"Warning: Failed to refresh domain references for {molecule_id}: {e}")
+                # Fallback: manually refresh domain references
+                scene_manager._refresh_domain_object_references(molecule)
+        except Exception as e:
+            print(f"Warning: Failed to heal references for {molecule_id}: {e}")
 
-        for molecule_id in molecules_to_remove:
-            # Safely remove invalid molecules
+
+def _remove_invalid_wrappers(scene_manager, scene) -> List[str]:
+    """Remove wrappers for molecules whose objects no longer exist.
+
+    Returns:
+        List of removed molecule IDs
+    """
+    removed_ids = []
+
+    for molecule_id, molecule in list(scene_manager.molecules.items()):
+        if not _is_molecule_valid(molecule):
+            removed_ids.append(molecule_id)
+
+            # Remove from scene_manager
             if molecule_id in scene_manager.molecules:
                 del scene_manager.molecules[molecule_id]
             if molecule_id in scene_manager.molecule_manager.molecules:
                 del scene_manager.molecule_manager.molecules[molecule_id]
+
             # Remove from UI list
             for i, item in enumerate(scene.molecule_list_items):
                 if item.identifier == molecule_id:
                     scene.molecule_list_items.remove(i)
                     break
-        
-        # Step 2: Find molecules that should be restored (e.g., after undoing a delete)
-        molecules_to_restore = []
-        
-        for molecule_id, saved_state in list(scene_manager._saved_states.items()):
-            current_molecule = scene_manager.molecules.get(molecule_id)
 
-            print(f"\nProcessing saved state for molecule {molecule_id}")
-            print(f"  current_molecule exists: {current_molecule is not None}")
-            if current_molecule:
-                print(f"  current_molecule is valid: {_is_molecule_valid(current_molecule)}")
-                print(f"  current_molecule has invalid domains: {_has_invalid_domains(current_molecule)}")
-                print(f"  current_molecule.domains: {list(current_molecule.domains.keys())}")
+    return removed_ids
 
-            # Check if molecule exists and is valid
-            needs_restore = (
-                current_molecule is None or
-                not _is_molecule_valid(current_molecule) or
-                _has_invalid_domains(current_molecule)
+
+def _reconstruct_wrappers_from_properties(scene_manager, scene) -> List[str]:
+    """Reconstruct wrappers from PropertyGroups for restored objects.
+
+    When undo restores a deleted object, the PropertyGroup still exists
+    but the wrapper was removed. This function recreates the wrapper.
+
+    Returns:
+        List of reconstructed molecule IDs
+    """
+    restored_ids = []
+
+    for item in scene.molecule_list_items:
+        if not item.identifier:
+            continue
+
+        # Check if wrapper exists
+        if item.identifier in scene_manager.molecules:
+            continue
+
+        # Check if object exists (was restored by undo)
+        obj = item.get_valid_object() if hasattr(item, 'get_valid_object') else None
+        if not obj:
+            # Try by stored name
+            obj_name = item.object_name if hasattr(item, 'object_name') else ""
+            if obj_name and obj_name in bpy.data.objects:
+                obj = bpy.data.objects[obj_name]
+
+        if not obj:
+            continue
+
+        # Object exists but wrapper doesn't - reconstruct
+        try:
+            # Get stored chain data
+            chain_mapping = None
+            chain_ranges = None
+
+            if hasattr(item, 'get_chain_mapping'):
+                chain_mapping = item.get_chain_mapping()
+            if hasattr(item, 'get_chain_residue_ranges'):
+                chain_ranges = item.get_chain_residue_ranges()
+
+            # Create wrapper from existing object
+            wrapper = MoleculeWrapper.from_existing_object(
+                obj=obj,
+                identifier=item.identifier,
+                chain_mapping=chain_mapping,
+                chain_residue_ranges=chain_ranges
             )
 
-            print(f"  Initial needs_restore: {needs_restore}")
-            print(f"  saved_state has domains: {saved_state.domains_data is not None}")
-            if saved_state.domains_data:
-                print(f"  saved_state domains count: {len(saved_state.domains_data)}")
+            if wrapper:
+                scene_manager.molecules[item.identifier] = wrapper
+                scene_manager.molecule_manager.molecules[item.identifier] = wrapper
+                restored_ids.append(item.identifier)
 
-            # Also check if domains were deleted but their objects were restored by undo
-            # This happens when you delete a chain and then undo
-            if not needs_restore and current_molecule and saved_state.domains_data:
-                print(f"Checking for missing domains in molecule {molecule_id}")
-                print(f"  Current domains: {list(current_molecule.domains.keys())}")
-                print(f"  Saved domains: {list(saved_state.domains_data.keys())}")
-                # Check if any domain objects from the saved state exist in Blender
-                # but are missing from molecule.domains
-                for saved_domain_id, saved_domain_data in saved_state.domains_data.items():
-                    if saved_domain_id not in current_molecule.domains:
-                        # Domain is missing from molecule.domains
-                        # Check if its object was restored by undo
-                        domain_obj_name = saved_domain_data.get('object_name')
-                        print(f"  Domain {saved_domain_id} missing, checking for object {domain_obj_name}")
-                        if domain_obj_name and domain_obj_name in bpy.data.objects:
-                            # Object exists but domain entry doesn't - need to restore
-                            print(f"    -> Object exists! Setting needs_restore=True")
-                            needs_restore = True
-                            break
+        except Exception as e:
+            print(f"Warning: Failed to reconstruct wrapper for {item.identifier}: {e}")
 
-            print(f"Molecule {molecule_id}: needs_restore={needs_restore}")
+    return restored_ids
 
-            # Only restore if the object actually exists in Blender (was restored by undo)
-            if needs_restore and saved_state.molecule_data.get('object_name'):
-                restored_obj = bpy.data.objects.get(saved_state.molecule_data['object_name'])
-                if restored_obj:  # Object exists, so this should be restored
-                    print(f"  -> Adding to restore list")
-                    molecules_to_restore.append((molecule_id, saved_state))
 
-        # Step 2.5: Detect orphaned protein objects (e.g., after redo past import)
-        print("\nStep 2.5: Checking for orphaned protein objects...")
-        orphaned_proteins = _find_orphaned_protein_objects()
-        if orphaned_proteins:
-            print(f"Found {len(orphaned_proteins)} orphaned protein(s)")
-            for molecule_id, obj in orphaned_proteins:
-                print(f"  Detected orphaned protein: {molecule_id} (object: {obj.name})")
-                # Re-create molecule wrapper from existing object
-                molecule_wrapper = _recreate_molecule_wrapper_from_object(molecule_id, obj)
-                if molecule_wrapper:
-                    # Add to scene_manager
-                    scene_manager.molecules[molecule_id] = molecule_wrapper
-                    # Finalize import (domains, UI, etc.) - reuse existing code
-                    try:
-                        scene_manager._finalize_imported_molecule(molecule_wrapper)
-                        print(f"    -> Successfully restored {molecule_id}")
-                    except Exception as e:
-                        print(f"    -> Failed to finalize {molecule_id}: {e}")
-        else:
-            print("  No orphaned proteins found")
+def _handle_orphaned_proteins(scene_manager, scene) -> List[str]:
+    """Handle protein objects that exist but have no PropertyGroup entry.
 
-        # Step 3: Restore missing molecules
-        print(f"\nRestoring {len(molecules_to_restore)} molecules")
-        for molecule_id, saved_state in molecules_to_restore:
-            try:
-                print(f"Restoring molecule {molecule_id}...")
-                restored = saved_state.restore_to_scene(scene_manager)
-                print(f"  -> Restore result: {restored}")
-                # Once restored, clear its saved state
-                if restored and molecule_id in scene_manager._saved_states:
-                    del scene_manager._saved_states[molecule_id]
-            except Exception as e:
-                print(f"Warning: Failed to restore molecule {molecule_id}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # If we restored any molecules, mark the last one as selected
-        if molecules_to_restore:
-            last_id = molecules_to_restore[-1][0]
-            scene.selected_molecule_id = last_id
-        
-        # Step 4: Update UI - but be more careful about when to rebuild
-        # Only rebuild UI if we actually removed or restored molecules
-        if molecules_to_remove or molecules_to_restore:
+    This can happen after redo past an import operation.
+
+    Returns:
+        List of handled molecule IDs
+    """
+    handled_ids = []
+
+    orphaned = _find_orphaned_protein_objects()
+    for molecule_id, obj in orphaned:
+        try:
+            wrapper = _recreate_molecule_wrapper_from_object(molecule_id, obj)
+            if wrapper:
+                scene_manager.molecules[molecule_id] = wrapper
+                scene_manager._finalize_imported_molecule(wrapper)
+                handled_ids.append(molecule_id)
+        except Exception as e:
+            print(f"Warning: Failed to handle orphaned protein {molecule_id}: {e}")
+
+    return handled_ids
+
+
+def sync_molecule_list_after_undo(*args):
+    """Sync molecule state after undo/redo operations.
+
+    This handler runs after Blender's undo/redo to synchronize the runtime
+    MoleculeWrapper state with Blender's restored object state.
+
+    The strategy is:
+    1. Heal all existing wrapper references (objects may have been restored)
+    2. Remove wrappers for objects that no longer exist
+    3. Reconstruct wrappers for objects that exist in PropertyGroups but not in wrappers
+    4. Rebuild the UI
+
+    This approach uses PropertyGroups as the source of truth, which Blender
+    handles correctly across undo/redo operations.
+    """
+    try:
+        scene_manager = ProteinBlenderScene.get_instance()
+        scene = bpy.context.scene
+
+        # Step 1: Heal all existing wrapper references
+        _heal_all_wrapper_references(scene_manager)
+
+        # Step 2: Remove wrappers for deleted objects
+        removed_ids = _remove_invalid_wrappers(scene_manager, scene)
+
+        # Step 3: Reconstruct wrappers from PropertyGroups for restored objects
+        restored_ids = _reconstruct_wrappers_from_properties(scene_manager, scene)
+
+        # Step 4: Handle orphaned protein objects (objects without PropertyGroup entries)
+        orphan_ids = _handle_orphaned_proteins(scene_manager, scene)
+
+        # Step 5: Rebuild UI if anything changed
+        if removed_ids or restored_ids or orphan_ids:
             _refresh_molecule_ui(scene_manager, scene)
         else:
-            # Just refresh object references without rebuilding the entire UI
             _refresh_object_references_only(scene_manager, scene)
 
         # Step 5: Always rebuild outliner hierarchy after undo/redo
@@ -871,8 +883,8 @@ def build_outliner_hierarchy(context=None):
     
     # Temporarily disable selection sync during rebuild
     from ..handlers import selection_sync
-    old_depth = selection_sync._selection_update_depth
-    selection_sync._selection_update_depth = 999  # High value to prevent any updates during rebuild
+    old_in_progress = selection_sync._update_in_progress
+    selection_sync._update_in_progress = True  # Prevent any updates during rebuild
     
     # Get all valid molecule and domain IDs currently in the scene
     valid_item_ids = set()
@@ -1173,19 +1185,17 @@ def build_outliner_hierarchy(context=None):
                         chain_item.has_domains = should_show_domains
 
                         # If domain spans full chain, make chain item reference the domain's object
-                        if domain_spans_full_chain and domain.object:
-                            try:
-                                chain_item.object_name = domain.object.name
-                            except ReferenceError:
-                                chain_item.object_name = ""
+                        if domain_spans_full_chain and is_object_valid(domain.object):
+                            chain_item.object_name = domain.object.name
+                        else:
+                            chain_item.object_name = ""
                     else:
                         # Can't determine chain range, assume it's a full chain domain
                         chain_item.has_domains = False
-                        if domain.object:
-                            try:
-                                chain_item.object_name = domain.object.name
-                            except ReferenceError:
-                                chain_item.object_name = ""
+                        if is_object_valid(domain.object):
+                            chain_item.object_name = domain.object.name
+                        else:
+                            chain_item.object_name = ""
 
                 # Add domain items if they should be shown and chain is expanded
                 if should_show_domains and chain_item.is_expanded:
@@ -1213,9 +1223,9 @@ def build_outliner_hierarchy(context=None):
                         domain_item.name = domain_display_name
 
                         # Safely get object name - handle case where object is freed/invalid
-                        try:
-                            domain_item.object_name = domain.object.name if domain.object else ""
-                        except ReferenceError:
+                        if is_object_valid(domain.object):
+                            domain_item.object_name = domain.object.name
+                        else:
                             domain_item.object_name = ""
 
                         domain_item.domain_start = getattr(domain, 'start', 0)
@@ -1224,9 +1234,12 @@ def build_outliner_hierarchy(context=None):
                         domain_item.icon = 'GROUP_VERTEX'
 
                         # Safely get visibility - handle case where object is freed/invalid
-                        try:
-                            domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
-                        except ReferenceError:
+                        if is_object_valid(domain.object):
+                            try:
+                                domain_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer)
+                            except Exception:
+                                domain_item.is_visible = True
+                        else:
                             domain_item.is_visible = True
                         
                         # Restore selection state
@@ -1283,14 +1296,14 @@ def build_outliner_hierarchy(context=None):
                                 chain_copy_item.icon = 'LINKED'
 
                                 # Safely get object name and visibility
-                                try:
-                                    chain_copy_item.object_name = domain.object.name if domain.object else ""
-                                except ReferenceError:
+                                if is_object_valid(domain.object):
+                                    chain_copy_item.object_name = domain.object.name
+                                    try:
+                                        chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer)
+                                    except Exception:
+                                        chain_copy_item.is_visible = True
+                                else:
                                     chain_copy_item.object_name = ""
-
-                                try:
-                                    chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer) if domain.object else True
-                                except ReferenceError:
                                     chain_copy_item.is_visible = True
 
                                 chain_copy_item.chain_start = domain.start
@@ -1442,7 +1455,7 @@ def build_outliner_hierarchy(context=None):
     
     # Update outliner display
     # Re-enable selection sync
-    selection_sync._selection_update_depth = old_depth
+    selection_sync._update_in_progress = old_in_progress
 
     if context.area:
         context.area.tag_redraw()

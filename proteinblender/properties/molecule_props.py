@@ -2,16 +2,21 @@
 
 This module defines all the property groups and registration functions
 for molecule-related data in the ProteinBlender addon.
+
+The PropertyGroups defined here serve as the PRIMARY persistent storage
+for molecule and domain state. Runtime MoleculeWrapper objects are
+reconstructed from these properties after undo/redo and file load operations.
 """
 
 import bpy
-from bpy.props import (BoolProperty, StringProperty, CollectionProperty, 
+from bpy.props import (BoolProperty, StringProperty, CollectionProperty,
                       IntProperty, EnumProperty, FloatVectorProperty, FloatProperty, PointerProperty)
 from bpy.types import PropertyGroup
 
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.scene_manager import ProteinBlenderScene
 from ..core.domain import Domain
+from ..utils import chain_utils
 
 # Constants
 DEFAULT_DOMAIN_COLOR = (0.8, 0.1, 0.8, 1.0)  # Purple
@@ -25,7 +30,7 @@ _scene_manager_module = None
 def get_protein_blender_scene():
     global _scene_manager_module
     if _scene_manager_module is None:
-        from ..utils import scene_manager as sm # Adjusted import path
+        from ..utils import scene_manager as sm
         _scene_manager_module = sm
     return _scene_manager_module.ProteinBlenderScene.get_instance()
 
@@ -43,15 +48,11 @@ class ChainSelectionItem(PropertyGroup):
     )
 
 def get_chain_mapping_from_str(mapping_str):
-    """Convert stored string mapping back to dictionary"""
-    if not mapping_str:
-        return {}
-    mapping = {}
-    for pair in mapping_str.split(","):
-        if ":" in pair:
-            k, v = pair.split(":")
-            mapping[int(k)] = v
-    return mapping
+    """Convert stored string mapping back to dictionary.
+
+    Deprecated: Use chain_utils.get_chain_mapping_from_string() instead.
+    """
+    return chain_utils.get_chain_mapping_from_string(mapping_str)
 
 def get_chain_items(self, context):
     scene_manager = ProteinBlenderScene.get_instance()
@@ -125,23 +126,104 @@ class MoleculeKeyframe(PropertyGroup):
     frame: IntProperty(name="Frame Number", description="Frame number of the keyframe", default=0)
 
 class MoleculeListItem(PropertyGroup):
-    """Group of properties representing a molecule in the UI list."""
+    """Group of properties representing a molecule in the UI list.
+
+    This PropertyGroup serves as the PRIMARY persistent storage for molecule state.
+    Runtime MoleculeWrapper objects are reconstructed from these properties after
+    undo/redo and file load operations.
+
+    Key storage fields:
+    - identifier: Unique molecule ID (e.g., "1ABC_001")
+    - object_name: Blender object name for healing stale references
+    - chain_mapping_json: Serialized chain index -> author chain ID mapping
+    - chain_residue_ranges_json: Serialized chain ID -> (min, max) residue ranges
+    """
     identifier: StringProperty(
         name="Identifier",
         description="PDB ID or filename of the molecule",
         default=""
     )
+
+    # Object reference - may become stale after undo/redo
     object_ptr: PointerProperty(
         name="Object",
         description="Pointer to the Blender object for this molecule",
         type=bpy.types.Object,
     )
+
+    # Object name for healing stale references (NEW)
+    object_name: StringProperty(
+        name="Object Name",
+        description="Name of the Blender object for reference healing",
+        default=""
+    )
+
+    # Chain mappings stored as JSON for persistence (NEW)
+    chain_mapping_json: StringProperty(
+        name="Chain Mapping",
+        description="JSON serialized chain index to author chain ID mapping",
+        default="{}"
+    )
+
+    chain_residue_ranges_json: StringProperty(
+        name="Chain Residue Ranges",
+        description="JSON serialized chain ID to (min, max) residue range mapping",
+        default="{}"
+    )
+
     style: EnumProperty(
         name="Style",
         description="Visualization style for the molecule",
         items=STYLE_ITEMS,
         default="cartoon"
     )
+
+    # Methods for chain data access
+    def get_chain_mapping(self):
+        """Get chain mapping as dictionary."""
+        return chain_utils.deserialize_chain_mapping(self.chain_mapping_json)
+
+    def set_chain_mapping(self, mapping):
+        """Store chain mapping from dictionary."""
+        self.chain_mapping_json = chain_utils.serialize_chain_mapping(mapping)
+
+    def get_chain_residue_ranges(self):
+        """Get chain residue ranges as dictionary."""
+        return chain_utils.deserialize_residue_ranges(self.chain_residue_ranges_json)
+
+    def set_chain_residue_ranges(self, ranges):
+        """Store chain residue ranges from dictionary."""
+        self.chain_residue_ranges_json = chain_utils.serialize_residue_ranges(ranges)
+
+    def get_valid_object(self):
+        """Get valid object reference, healing from stored name if needed."""
+        from ..utils.blender_utils import get_object_safe
+        obj = get_object_safe(self.object_ptr, self.object_name)
+        if obj and self.object_ptr != obj:
+            self.object_ptr = obj
+        return obj
+
+    def sync_from_wrapper(self, wrapper):
+        """Sync stored properties from a MoleculeWrapper instance."""
+        if not wrapper:
+            return
+
+        self.identifier = wrapper.identifier
+
+        # Store object name for healing
+        if wrapper.object:
+            try:
+                self.object_name = wrapper.object.name
+                self.object_ptr = wrapper.object
+            except (ReferenceError, AttributeError):
+                pass
+
+        # Store chain mappings
+        if hasattr(wrapper, 'chain_mapping') and wrapper.chain_mapping:
+            self.set_chain_mapping(wrapper.chain_mapping)
+
+        if hasattr(wrapper, 'chain_residue_ranges') and wrapper.chain_residue_ranges:
+            self.set_chain_residue_ranges(wrapper.chain_residue_ranges)
     
     selected_chain_for_domain: EnumProperty(
         name="Chain",

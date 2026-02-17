@@ -1,45 +1,67 @@
-"""Selection synchronization handler for two-way binding between Blender and ProteinBlender outliner"""
+"""Selection synchronization handler for two-way binding between Blender and ProteinBlender outliner.
+
+This module handles synchronization between Blender's viewport selection and the
+ProteinBlender outliner checkboxes. It uses msgbus subscriptions for efficient
+notification of selection changes.
+
+Key improvements in this refactored version:
+- Fixed race condition by keeping depth counter incremented until timer fires
+- Simplified handler structure
+- Removed redundant depsgraph handler (now only uses msgbus)
+"""
 
 import bpy
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.blender_utils import is_object_valid
 
 
 # Global variables for selection tracking
-_selection_update_depth = 0  # Use depth counter to prevent recursion
+_update_pending = False  # Track if an update is already scheduled
+_update_in_progress = False  # Track if update is currently running
 _msgbus_owner = None  # Owner object for msgbus subscriptions
 _subscribed_objects = set()  # Track which objects we've subscribed to
 
 
 def on_selection_changed(*args):
-    """Callback for msgbus when selection changes"""
-    global _selection_update_depth
+    """Callback for msgbus when selection changes.
+
+    Schedules a deferred update to avoid issues during msgbus callback context.
+    Uses a pending flag instead of depth counter to properly handle the race condition.
+    """
+    global _update_pending, _update_in_progress
 
     # Prevent recursive updates
-    if _selection_update_depth > 0:
+    if _update_in_progress or _update_pending:
         return
 
-    _selection_update_depth += 1
-    try:
-        # Defer the actual update to avoid issues during msgbus callback
-        bpy.app.timers.register(lambda: deferred_selection_update(), first_interval=0.01, persistent=False)
-    finally:
-        _selection_update_depth -= 1
+    # Mark update as pending and schedule it
+    _update_pending = True
+    bpy.app.timers.register(_deferred_selection_update, first_interval=0.01, persistent=False)
 
 
-def deferred_selection_update():
-    """Deferred update to handle selection changes outside of msgbus callback context"""
-    global _selection_update_depth
+def _deferred_selection_update():
+    """Deferred update to handle selection changes outside of msgbus callback context.
 
-    if _selection_update_depth > 0:
-        return None  # Return None to stop the timer
+    This runs after a short delay to ensure Blender's selection state is fully updated.
+    """
+    global _update_pending, _update_in_progress
 
-    _selection_update_depth += 1
+    # Clear pending flag now that we're running
+    _update_pending = False
+
+    # Prevent recursive updates
+    if _update_in_progress:
+        return None
+
+    _update_in_progress = True
     try:
         update_outliner_from_blender_selection()
+    except Exception as e:
+        print(f"Error in selection sync: {e}")
     finally:
-        _selection_update_depth -= 1
+        _update_in_progress = False
 
-    return None  # Return None to stop the timer
+    return None  # Stop the timer
 
 
 def subscribe_to_object_selection(obj):
@@ -230,14 +252,18 @@ def update_outliner_from_blender_selection():
 
 
 def sync_outliner_to_blender_selection(context, item_id):
-    """Sync outliner selection to Blender objects"""
-    global _selection_update_depth
-    
+    """Sync outliner selection to Blender objects.
+
+    Called when user clicks on an outliner checkbox to propagate the selection
+    change to Blender's viewport.
+    """
+    global _update_in_progress
+
     # Prevent recursive updates
-    if _selection_update_depth > 2:  # Allow some depth for legitimate nested calls
+    if _update_in_progress:
         return
-    
-    _selection_update_depth += 1
+
+    _update_in_progress = True
     try:
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
@@ -412,9 +438,9 @@ def sync_outliner_to_blender_selection(context, item_id):
 
             # Don't cascade to members - puppet checkbox only controls the controller
             return
-    
+
     finally:
-        _selection_update_depth -= 1
+        _update_in_progress = False
 
 
 def update_outliner_selection_display(context):
@@ -425,42 +451,24 @@ def update_outliner_selection_display(context):
             area.tag_redraw()
 
 
-def on_depsgraph_update_post(scene, depsgraph):
-    """Handler for depsgraph updates to catch new objects and selection changes"""
-    # Safety check - ensure we have a valid context
-    if not hasattr(bpy.context, 'scene') or not bpy.context.scene:
-        return
-
-    try:
-        # Check if any new objects were added
-        for update in depsgraph.updates:
-            if isinstance(update.id, bpy.types.Object):
-                obj = update.id
-                if obj.name not in _subscribed_objects:
-                    subscribe_to_object_selection(obj)
-
-        # Also update selection state from viewport
-        # This ensures sync works even if msgbus fails
-        update_outliner_from_blender_selection()
-    except Exception as e:
-        # Silently handle errors during startup or when context is incomplete
-        # This is normal during Blender initialization
-        pass
-
-
 def on_load_post(dummy):
-    """Handler for file load to refresh subscriptions"""
+    """Handler for file load to refresh subscriptions."""
     refresh_object_subscriptions()
 
 
-def delayed_init():
-    """Delayed initialization to run after Blender is fully loaded"""
+def _delayed_init():
+    """Delayed initialization to run after Blender is fully loaded."""
     refresh_object_subscriptions()
     return None  # Stop the timer
 
 
 def register():
-    """Register all selection sync handlers"""
+    """Register all selection sync handlers.
+
+    Note: We no longer use depsgraph_update_post as it causes performance issues
+    and conflicts with the msgbus-based selection sync. The msgbus approach is
+    sufficient for tracking selection changes.
+    """
     # Clear any existing handlers
     clear_selection_handlers()
 
@@ -468,11 +476,7 @@ def register():
     refresh_object_subscriptions()
 
     # Schedule a delayed initialization in case Blender isn't fully ready yet
-    bpy.app.timers.register(delayed_init, first_interval=0.1, persistent=False)
-
-    # Register depsgraph handler to catch new objects
-    if on_depsgraph_update_post not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(on_depsgraph_update_post)
+    bpy.app.timers.register(_delayed_init, first_interval=0.1, persistent=False)
 
     # Register load handler to refresh subscriptions after file load
     if on_load_post not in bpy.app.handlers.load_post:
@@ -480,13 +484,9 @@ def register():
 
 
 def unregister():
-    """Unregister all selection sync handlers"""
+    """Unregister all selection sync handlers."""
     # Clear msgbus subscriptions
     clear_selection_handlers()
-
-    # Remove depsgraph handler
-    if on_depsgraph_update_post in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(on_depsgraph_update_post)
 
     # Remove load handler
     if on_load_post in bpy.app.handlers.load_post:

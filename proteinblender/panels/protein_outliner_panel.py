@@ -800,33 +800,21 @@ class PROTEINBLENDER_OT_outliner_item_info(Operator):
     def description(cls, context, properties):
         """Dynamic tooltip based on the item"""
         try:
-            print(f"[Tooltip Debug] Getting description")
-            print(f"[Tooltip Debug] Has item_id: {hasattr(properties, 'item_id')}")
-
             # Try to get the tooltip from the item_id by looking it up in the outliner
             if hasattr(properties, 'item_id') and properties.item_id:
-                print(f"[Tooltip Debug] item_id = '{properties.item_id}'")
                 scene = context.scene
-                print(f"[Tooltip Debug] Searching {len(scene.outliner_items)} items")
-
                 for item in scene.outliner_items:
                     if item.item_id == properties.item_id:
-                        print(f"[Tooltip Debug] Found item: {item.name}")
-                        if hasattr(item, 'tooltip'):
-                            print(f"[Tooltip Debug] Tooltip: '{item.tooltip}'")
-                            if item.tooltip:
-                                return item.tooltip
+                        if hasattr(item, 'tooltip') and item.tooltip:
+                            return item.tooltip
                         break
 
             # Fallback: try to use tooltip_text property if set
             if hasattr(properties, 'tooltip_text') and properties.tooltip_text:
                 return properties.tooltip_text
-        except Exception as e:
-            print(f"Tooltip description error: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            pass
 
-        print(f"[Tooltip Debug] Returning default")
         return "Outliner item"
 
     def execute(self, context):

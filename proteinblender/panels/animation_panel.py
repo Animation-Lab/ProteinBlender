@@ -3,6 +3,32 @@
 import bpy
 from bpy.types import Panel, UIList
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.animation import get_fcurves_from_action
+
+
+def has_keyframe_at_frame(context, frame):
+    """Check if any puppet controller has a keyframe at the specified frame.
+
+    Returns True if at least one puppet controller object has animation data
+    with a keyframe at the given frame.
+    """
+    scene = context.scene
+
+    # Check puppet controller objects for keyframes
+    if hasattr(scene, 'outliner_items'):
+        for item in scene.outliner_items:
+            if item.item_type == 'PUPPET' and item.controller_object_name:
+                controller_obj = bpy.data.objects.get(item.controller_object_name)
+                if controller_obj and controller_obj.animation_data and controller_obj.animation_data.action:
+                    action = controller_obj.animation_data.action
+                    # Use the helper function for Blender 4.4+/5.0 compatibility
+                    fcurves = get_fcurves_from_action(action, controller_obj.animation_data)
+                    for fcurve in fcurves:
+                        for keyframe in fcurve.keyframe_points:
+                            if int(keyframe.co[0]) == frame:
+                                return True
+
+    return False
 
 
 class PROTEINBLENDER_UL_keyframe_list(UIList):
@@ -58,10 +84,15 @@ class PROTEINBLENDER_PT_animation(Panel):
         keyframe_col.label(text="Keyframe Tools", icon='KEYFRAME')
         keyframe_col.separator()
         
-        # Create Keyframe button - the main feature
+        # Create/Edit Keyframe button - changes based on whether current frame has keyframes
         row = keyframe_col.row(align=True)
         row.scale_y = 1.5
-        row.operator("proteinblender.create_keyframe", text="Create Keyframe", icon='KEYFRAME_HLT')
+
+        # Check if there's a keyframe at the current frame
+        if has_keyframe_at_frame(context, scene.frame_current):
+            row.operator("proteinblender.create_keyframe", text="Edit Keyframe", icon='KEYFRAME')
+        else:
+            row.operator("proteinblender.create_keyframe", text="Create Keyframe", icon='KEYFRAME_HLT')
         
         keyframe_col.separator()
         

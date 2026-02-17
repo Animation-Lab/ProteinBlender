@@ -390,18 +390,13 @@ def apply_domain_color_direct(scene_manager, domain_item, color):
                     if (hasattr(domain, 'object') and domain.object and
                         domain.object.name == domain_item.object_name):
                         # Use the molecule's update method which handles node uniqueness
-                        success = molecule.update_domain_color(domain_id, color)
-                        if success:
-                            print(f"Updated domain {domain_id} color via molecule method")
-                        else:
-                            print(f"Failed to update domain {domain_id} color")
+                        molecule.update_domain_color(domain_id, color)
                         return
 
     # Fallback to direct object color application if molecule method not available
     if domain_item.object_name:
         obj = bpy.data.objects.get(domain_item.object_name)
         if obj:
-            print(f"Fallback: Applying color directly to object {obj.name}")
             apply_color_to_object(obj, color)
 
 
@@ -486,13 +481,11 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
             break
 
     if not style_node:
-        print(f"Warning: No Style node found in {obj.name}")
         return False
 
     # Check if the Style node has a Material input
     material_input = style_node.inputs.get("Material")
     if not material_input:
-        print(f"Warning: Style node in {obj.name} has no Material input")
         return False
 
     # Check if we already have a material assigned
@@ -513,15 +506,10 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
         # If it is, we need to duplicate it to allow independent alpha control
         if mat.users > 1:
             # Material is shared - create a unique copy for this object
-            print(f"Material '{mat.name}' is shared ({mat.users} users). Creating unique copy for {obj.name}")
-
-            # Duplicate the material
             mat = mat.copy()
             mat.name = f"MN_Transparent_{obj.name}"
-
             # Assign the duplicated material
             material_input.default_value = mat
-            print(f"Created unique material '{mat.name}' for independent alpha control")
 
     # Now update the alpha value in the material's Principled BSDF node
     if mat and mat.use_nodes and mat.node_tree:
@@ -545,10 +533,7 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
 def get_object_style(obj):
     """Get the current style from an object's geometry nodes"""
     if not obj:
-        print("get_object_style: No object provided")
         return None
-    
-    print(f"get_object_style: Getting style from {obj.name}")
     
     # Find the geometry nodes modifier
     mod = None
@@ -564,16 +549,14 @@ def get_object_style(obj):
                 mod = modifier
                 break
         if not mod or not mod.node_group:
-            print(f"get_object_style: No geometry nodes modifier found on {obj.name}")
             return None
-    
+
     node_tree = mod.node_group
-    
+
     # Find the style node and determine its type
     for node in node_tree.nodes:
         if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
             node_tree_name = node.node_tree.name
-            print(f"Found style node with tree: {node_tree_name}")
             
             # Map MolecularNodes style node names to our style names
             style_map = {
@@ -598,18 +581,15 @@ def get_object_color(obj):
     default_color = (0.8, 0.1, 0.8, 1.0)  # Purple/salmon default
     
     if not obj:
-        print("get_object_color: No object provided")
         return default_color
-    
-    print(f"get_object_color: Getting color from {obj.name}")
-    
+
     # Find the geometry nodes modifier
     mod = None
     for modifier in obj.modifiers:
         if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
             mod = modifier
             break
-    
+
     if not mod or not mod.node_group:
         # Try any nodes modifier
         for modifier in obj.modifiers:
@@ -617,7 +597,6 @@ def get_object_color(obj):
                 mod = modifier
                 break
         if not mod or not mod.node_group:
-            print(f"get_object_color: No geometry nodes modifier found on {obj.name}")
             return default_color
     
     node_tree = mod.node_group
@@ -690,15 +669,7 @@ def apply_color_to_object(obj, color):
             return
     
     node_tree = mod.node_group
-    
-    # Debug: print node names to understand structure
-    print(f"Applying color to {obj.name}")
-    print("Nodes in tree:")
-    for node in node_tree.nodes:
-        print(f"  - {node.name} (type: {node.type})")
-        if node.type == 'GROUP':
-            print(f"    Node tree: {node.node_tree.name if node.node_tree else 'None'}")
-    
+
     # Look for existing color nodes
     color_node = None
     set_color_node = None
@@ -712,7 +683,6 @@ def apply_color_to_object(obj, color):
             color_node = node
     
     if not set_color_node:
-        print("Warning: Set Color node not found")
         return
     
     # Find what's currently connected to Set Color's Atoms input
@@ -774,7 +744,6 @@ def apply_color_to_object(obj, color):
         
         # Create new connection
         node_tree.links.new(combine_color_node.outputs["Color"], color_input)
-        print(f"Connected Custom Combine Color to {set_color_node.name}")
     
     # Ensure atoms/geometry is still connected
     if atoms_input and current_atoms_connection:
@@ -787,7 +756,6 @@ def apply_color_to_object(obj, color):
         
         if not connection_exists:
             node_tree.links.new(current_atoms_connection, atoms_input)
-            print("Reconnected atoms input")
     
     # Force update by tagging the object
     obj.data.update()
@@ -814,20 +782,15 @@ def sync_color_to_selection(context):
         try:
             scene_manager = ProteinBlenderScene.get_instance()
             if not scene_manager or not hasattr(scene_manager, 'molecules'):
-                print("sync_color_to_selection: scene_manager not ready yet")
                 return
-        except Exception as e:
-            print(f"sync_color_to_selection: Failed to get scene_manager: {e}")
+        except Exception:
             return
 
         # Find first selected item
         selected_items = [item for item in scene.outliner_items if item.is_selected]
         if not selected_items:
             # No selection - don't change the color picker
-            print("sync_color_to_selection: No items selected")
             return
-    
-        print(f"sync_color_to_selection: {len(selected_items)} items selected, first: {selected_items[0].name}")
     
         first_item = selected_items[0]
         obj = None
@@ -896,7 +859,6 @@ def sync_color_to_selection(context):
         if obj:
             # Get and set color
             color = get_object_color(obj)
-            print(f"Syncing color to picker: R={color[0]:.2f}, G={color[1]:.2f}, B={color[2]:.2f}, A={color[3]:.2f}")
         
             # Set a flag to prevent feedback loop
             _is_syncing_color = True
@@ -916,7 +878,6 @@ def sync_color_to_selection(context):
                 style = get_object_style(obj)
                 if style:
                     scene.visual_setup_style = style
-                    print(f"Syncing style to panel: {style}")
                 _is_syncing_style = False
             
                 # Force UI update
@@ -930,14 +891,9 @@ def sync_color_to_selection(context):
                 
             finally:
                 _is_syncing_color = False
-        else:
-            print(f"sync_color_to_selection: Could not find object for {first_item.item_type}: {first_item.name}")
 
-    except Exception as e:
+    except Exception:
         # Catch all exceptions to prevent crashes during addon reload
-        print(f"Error in sync_color_to_selection: {e}")
-        import traceback
-        traceback.print_exc()
         # Reset flags
         _is_syncing_color = False
         _is_syncing_style = False
@@ -1101,24 +1057,20 @@ def apply_style_to_object(obj, style):
             return
     
     node_tree = mod.node_group
-    
-    print(f"Applying style '{style}' to {obj.name}")
-    
+
     # Find the style node
     style_node = None
     for node in node_tree.nodes:
         if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
             style_node = node
-            print(f"Found style node: {node.name} with tree: {node.node_tree.name}")
             break
-    
+
     if not style_node:
-        print("Warning: Style node not found")
         return
-    
+
     # Swap to the desired style node
     from ..utils.molecularnodes.blender import nodes
-    
+
     # Map our style names to MolecularNodes style node names
     style_map = {
         'spheres': 'Style Spheres',
@@ -1128,15 +1080,14 @@ def apply_style_to_object(obj, style):
         'sticks': 'Style Sticks',
         'ball_and_stick': 'Style Ball and Stick'
     }
-    
+
     target_style_name = style_map.get(style)
     if target_style_name:
         try:
             # Use the swap function from MolecularNodes
             nodes.swap(style_node, target_style_name)
-            print(f"Swapped to {target_style_name}")
-        except Exception as e:
-            print(f"Error swapping style: {e}")
+        except Exception:
+            pass
     
     # Force update
     obj.data.update()

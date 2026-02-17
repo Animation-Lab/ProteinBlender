@@ -286,7 +286,6 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
             for modifier in target_object.modifiers:
                 if modifier.type == 'NODES' and modifier.node_group:
                     self.target_node_tree = modifier.node_group
-                    print(f"  Found geometry nodes modifier: {modifier.name}")
                     
                     # Simply find ANY Select Res ID Range node in this tree
                     # Since this is the isolated object, it should be the right one
@@ -294,38 +293,26 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
                         if node.type == 'GROUP' and node.node_tree:
                             # Check if this is a Select Res ID Range node
                             if "Select Res ID Range" in node.node_tree.name:
-                                print(f"    Found Select Res ID Range node: {node.name}")
                                 self.target_res_node = node
                                 self.preview_active = True
-                                
+
                                 # Store node reference in scene properties for persistence
                                 context.scene["pb_preview_object"] = target_object.name
                                 context.scene["pb_preview_modifier"] = modifier.name
                                 context.scene["pb_preview_node"] = node.name
-                                print(f"    Stored references: object='{target_object.name}', modifier='{modifier.name}', node='{node.name}'")
-                                
-                                # Debug: List all inputs
-                                print(f"      Node inputs: {[inp.name for inp in node.inputs if inp.type in ('VALUE', 'INT')]}")
-                                
+
                                 # Set initial values
                                 if "Min" in node.inputs:
-                                    print(f"      Setting Min from {node.inputs['Min'].default_value} to {self.split_start}")
                                     node.inputs["Min"].default_value = self.split_start
-                                
+
                                 if "Max" in node.inputs:
-                                    print(f"      Setting Max from {node.inputs['Max'].default_value} to {self.split_end}")
                                     node.inputs["Max"].default_value = self.split_end
-                                
+
                                 # Force update
                                 if context.view_layer:
                                     context.view_layer.update()
-                                
-                                print(f"    Preview mode activated!")
+
                                 return  # We found it, done!
-                    
-                    # If we get here, we didn't find the node
-                    if not self.target_res_node:
-                        print("  Warning: No Select Res ID Range node found in this object's node tree")
                     break  # Only check the first geometry nodes modifier
     
     def cleanup_preview_mode(self, context):
