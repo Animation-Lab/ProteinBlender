@@ -1,10 +1,18 @@
+"""Trajectory class for MolecularNodes.
+
+This module requires MDAnalysis which depends on scipy. It should only be
+imported when MDAnalysis is confirmed to be available.
+"""
+
 from typing import Dict, Callable
 
 import bpy
-import MDAnalysis as mda
 import numpy as np
 import numpy.typing as npt
 
+# MDAnalysis import - this module should only be imported when MDAnalysis is available
+# The trajectory/__init__.py checks for this before importing this module
+import MDAnalysis as mda
 
 from ... import data
 from ..entity import MolecularEntity, EntityType

@@ -1,3 +1,11 @@
+"""Selection class for trajectory atom group selections.
+
+This module requires MDAnalysis which depends on scipy. It should only be
+imported when MDAnalysis is confirmed to be available.
+"""
+
+# MDAnalysis import - this module should only be imported when MDAnalysis is available
+# The trajectory/__init__.py checks for this before importing this module
 import MDAnalysis as mda
 import numpy.typing as npt
 import numpy as np

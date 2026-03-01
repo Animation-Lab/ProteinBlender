@@ -322,6 +322,13 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
             self.report({'ERROR'}, "Puppet not found")
             return {'CANCELLED'}
         
+        # Remove any linkers belonging to this puppet
+        try:
+            from ..linkers.linker_handlers import on_puppet_deleted
+            on_puppet_deleted(self.puppet_id)
+        except Exception:
+            pass
+
         # Delete the Empty controller object if it exists
         if puppet_item.controller_object_name:
             empty_obj = bpy.data.objects.get(puppet_item.controller_object_name)

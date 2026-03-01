@@ -1,10 +1,25 @@
 import bpy
+import logging
 
-from ..entities.trajectory import dna
+logger = logging.getLogger(__name__)
 
 from ..blender import nodes
 from ..session import get_session
 from ..entities import density, ensemble, molecule, trajectory
+
+# Import dna module with fallback for scipy/MDAnalysis issues
+# Only attempt if trajectory module loaded successfully (MDAnalysis available)
+DNA_AVAILABLE = False
+dna = None
+
+if trajectory is not None and hasattr(trajectory, 'TRAJECTORY_AVAILABLE') and trajectory.TRAJECTORY_AVAILABLE:
+    try:
+        from ..entities.trajectory import dna
+        DNA_AVAILABLE = dna is not None and hasattr(dna, 'panel')
+    except ImportError as e:
+        logger.warning(f"DNA module not available: {e}")
+        dna = None
+        DNA_AVAILABLE = False
 
 bpy.types.Scene.MN_panel = bpy.props.EnumProperty(
     name="Panel Selection",
@@ -35,15 +50,32 @@ bpy.types.Scene.MN_panel_import = bpy.props.EnumProperty(
 )
 
 
+def _panel_unavailable(layout, scene):
+    """Placeholder panel for unavailable features."""
+    layout.label(text="Feature Unavailable", icon="ERROR")
+    layout.label(text="MDAnalysis/scipy dependency failed to load.")
+    layout.label(text="This feature requires scipy which may not")
+    layout.label(text="be compatible with this Blender version.")
+
+
+# Check if trajectory.ui is available (trajectory module may exist but ui may be None)
+_trajectory_ui_available = (
+    trajectory is not None and
+    hasattr(trajectory, 'ui') and
+    trajectory.ui is not None and
+    hasattr(trajectory.ui, 'panel')
+)
+
+# Build chosen_panel dict with fallbacks for unavailable modules
 chosen_panel = {
     "pdb": molecule.ui.panel_wwpdb,
     "local": molecule.ui.panel_local,
     "alphafold": molecule.ui.panel_alphafold,
     "star": ensemble.ui.panel_starfile,
-    "md": trajectory.ui.panel,
+    "md": trajectory.ui.panel if _trajectory_ui_available else _panel_unavailable,
     "density": density.ui.panel,
     "cellpack": ensemble.ui.panel_cellpack,
-    "dna": dna.panel,
+    "dna": dna.panel if DNA_AVAILABLE else _panel_unavailable,
 }
 
 
@@ -106,11 +138,19 @@ def ui_from_node(
 
 
 def panel_md_properties(layout, context):
+    # Check if trajectory features are available
+    # Use getattr to safely access Trajectory which may not exist
+    TrajectoryClass = getattr(trajectory, 'Trajectory', None) if trajectory is not None else None
+    if TrajectoryClass is None:
+        layout.label(text="Trajectory features unavailable", icon="ERROR")
+        layout.label(text="MDAnalysis/scipy dependency failed to load.")
+        return None
+
     obj = context.active_object
     session = get_session()
-    traj: trajectory.Trajectory = session.match(obj)
+    traj = session.match(obj)
     traj_is_linked = bool(traj)
-    if traj is not None and not isinstance(traj, trajectory.Trajectory):
+    if traj is not None and not isinstance(traj, TrajectoryClass):
         raise TypeError(f"Expected a trajectory, got {type(traj)}")
 
     col = layout.column()

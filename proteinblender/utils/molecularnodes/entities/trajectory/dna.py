@@ -1,95 +1,137 @@
+"""oxDNA trajectory support for MolecularNodes.
+
+This module provides import functionality for oxDNA molecular dynamics files.
+Requires MDAnalysis which depends on scipy - may not be available on all
+Blender versions due to DLL compatibility issues.
+"""
+
+import logging
+logger = logging.getLogger(__name__)
+
+# Track availability - check MDAnalysis FIRST before any other imports
+# that might transitively depend on it
+OXDNA_AVAILABLE = False
+Universe = None
+Trajectory = None
+OXDNAParser = None
+OXDNAReader = None
+
 try:
     from MDAnalysis import Universe
+    OXDNA_AVAILABLE = True
 except ImportError as e:
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.error(f"Failed to import MDAnalysis: {e}")
+    logger.warning(f"oxDNA features disabled - MDAnalysis not available: {e}")
     Universe = None
-    
+
+# Only import dependent modules if MDAnalysis is available
+if OXDNA_AVAILABLE:
+    try:
+        from .trajectory import Trajectory
+        from .oxdna.OXDNAParser import OXDNAParser
+        from .oxdna.OXDNAReader import OXDNAReader
+    except ImportError as e:
+        logger.warning(f"oxDNA features disabled - dependency error: {e}")
+        OXDNA_AVAILABLE = False
+        Trajectory = None
+        OXDNAParser = None
+        OXDNAReader = None
+
+# These imports don't depend on MDAnalysis so they're safe
 from .ops import TrajectoryImportOperator
 from ... import color
 from ...blender import coll, nodes
 import databpy
 from databpy import AttributeTypes
 
-
 from ..entity import EntityType
-
-from .oxdna.OXDNAParser import OXDNAParser
-from .oxdna.OXDNAReader import OXDNAReader
-from .trajectory import Trajectory
 
 DNA_SCALE = 10
 
 
-class OXDNA(Trajectory):
-    def __init__(self, universe: Universe, world_scale: float = 0.01):
-        super().__init__(universe=universe, world_scale=world_scale * DNA_SCALE)
-        self._entity_type = EntityType.MD_OXDNA
-        self._att_names = (
-            "base_vector",
-            "base_normal",
-            "velocity",
-            "angular_velocity",
-        )
+# Only define OXDNA class if Trajectory is available
+if OXDNA_AVAILABLE and Trajectory is not None:
+    class OXDNA(Trajectory):
+        def __init__(self, universe: Universe, world_scale: float = 0.01):
+            super().__init__(universe=universe, world_scale=world_scale * DNA_SCALE)
+            self._entity_type = EntityType.MD_OXDNA
+            self._att_names = (
+                "base_vector",
+                "base_normal",
+                "velocity",
+                "angular_velocity",
+            )
 
-    def _create_object(self, style: str = "oxdna", name: str = "NewUniverseObject"):
-        self.object = databpy.create_object(
-            name=name,
-            collection=coll.mn(),
-            vertices=self.univ_positions,
-            edges=self.bonds,
-        )
-        self._update_timestep_values()
+        def _create_object(self, style: str = "oxdna", name: str = "NewUniverseObject"):
+            self.object = databpy.create_object(
+                name=name,
+                collection=coll.mn(),
+                vertices=self.univ_positions,
+                edges=self.bonds,
+            )
+            self._update_timestep_values()
 
-        for name in ("chain_id", "res_id", "res_name"):
-            if name == "res_name":
-                att_name = "res_num"
-            else:
-                att_name = name
-            self.store_named_attribute(getattr(self, att_name), name)
+            for name in ("chain_id", "res_id", "res_name"):
+                if name == "res_name":
+                    att_name = "res_num"
+                else:
+                    att_name = name
+                self.store_named_attribute(getattr(self, att_name), name)
 
-        self.store_named_attribute(
-            data=color.color_chains_equidistant(self.chain_id),
-            name="Color",
-            atype=AttributeTypes.FLOAT_COLOR,
-        )
+            self.store_named_attribute(
+                data=color.color_chains_equidistant(self.chain_id),
+                name="Color",
+                atype=AttributeTypes.FLOAT_COLOR,
+            )
 
-        if style:
-            nodes.create_starting_node_tree(self.object, style="oxdna", color=None)
+            if style:
+                nodes.create_starting_node_tree(self.object, style="oxdna", color=None)
 
-        return self.object
+            return self.object
 
-    def _update_positions(self, frame: int) -> None:
-        super()._update_positions(frame)
-        self._update_timestep_values()
+        def _update_positions(self, frame: int) -> None:
+            super()._update_positions(frame)
+            self._update_timestep_values()
 
-    def _update_timestep_values(self):
-        for name in self._att_names:
-            try:
-                self.store_named_attribute(
-                    self.universe.trajectory.ts.data[name] * self.world_scale, name=name
-                )
-            except KeyError as e:
-                print(e)
-
-
-def load(top, traj, name="oxDNA", style="oxdna", world_scale=0.01):
-    univ = Universe(top, traj, topology_format=OXDNAParser, format=OXDNAReader)
-    traj = OXDNA(univ, world_scale=world_scale)
-    traj.create_object(name=name, style=style)
-    return traj
+        def _update_timestep_values(self):
+            for name in self._att_names:
+                try:
+                    self.store_named_attribute(
+                        self.universe.trajectory.ts.data[name] * self.world_scale, name=name
+                    )
+                except KeyError as e:
+                    print(e)
 
 
-class MN_OT_Import_OxDNA_Trajectory(TrajectoryImportOperator):
-    bl_idname = "mn.import_oxdna"
+    def load(top, traj, name="oxDNA", style="oxdna", world_scale=0.01):
+        univ = Universe(top, traj, topology_format=OXDNAParser, format=OXDNAReader)
+        traj = OXDNA(univ, world_scale=world_scale)
+        traj.create_object(name=name, style=style)
+        return traj
 
-    def execute(self, context):
-        load(top=self.topology, traj=self.trajectory, name=self.name)
-        return {"FINISHED"}
+
+    class MN_OT_Import_OxDNA_Trajectory(TrajectoryImportOperator):
+        bl_idname = "mn.import_oxdna"
+
+        def execute(self, context):
+            load(top=self.topology, traj=self.trajectory, name=self.name)
+            return {"FINISHED"}
+
+else:
+    # Placeholder class when MDAnalysis is not available
+    OXDNA = None
+    load = None
+    MN_OT_Import_OxDNA_Trajectory = None
 
 
 def panel(layout, scene):
+    """Panel for oxDNA import - shows error if dependencies unavailable."""
+    if not OXDNA_AVAILABLE:
+        layout.label(text="oxDNA Unavailable", icon="ERROR")
+        layout.label(text="MDAnalysis/scipy dependency failed to load.")
+        layout.label(text="This feature is not available in this")
+        layout.label(text="Blender version.")
+        return
+
     layout.label(text="Load oxDNA File", icon="FILE_TICK")
     layout.separator()
     row = layout.row()

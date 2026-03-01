@@ -123,13 +123,21 @@ class MOLECULE_PB_OT_delete(Operator):
             scene_manager._capture_molecule_state(self.molecule_id)
         except Exception:
             pass
+
+        # Clean up any linkers referencing this molecule
+        try:
+            from ..linkers.linker_handlers import on_molecule_deleted
+            on_molecule_deleted(self.molecule_id)
+        except Exception:
+            pass
+
         # Perform deletion
         scene_manager.delete_molecule(self.molecule_id)
-        
+
         # Rebuild the outliner hierarchy to reflect the deletion
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
-        
+
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_update_identifier(Operator):

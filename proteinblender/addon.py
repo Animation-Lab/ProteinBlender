@@ -17,6 +17,7 @@ from .properties.protein_props import register as register_protein_props, unregi
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .properties.pose_props import register as register_pose_props, unregister as unregister_pose_props
 from .properties.brownian_props import register as register_brownian_props, unregister as unregister_brownian_props
+from .linkers import register as register_linkers, unregister as unregister_linkers
 from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -138,6 +139,9 @@ def register() -> None:
     from .handlers import frame_change_handler
     frame_change_handler.register()
 
+    # Register flexible linkers module
+    register_linkers()
+
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
     
@@ -178,6 +182,12 @@ def unregister() -> None:
         frame_change_handler.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister frame change handler: {e}")
+
+    # Unregister flexible linkers module
+    try:
+        unregister_linkers()
+    except Exception as e:
+        logger.debug(f"Failed to unregister linkers: {e}")
 
     # Unregister properties
     try:

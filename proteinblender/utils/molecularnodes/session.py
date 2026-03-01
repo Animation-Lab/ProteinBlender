@@ -1,6 +1,7 @@
 import os
 import pickle as pk
 from typing import Dict, Union
+import logging
 
 import bpy
 from bpy.app.handlers import persistent
@@ -10,7 +11,18 @@ from databpy.object import get_from_uuid
 
 from .entities.ensemble.base import Ensemble
 from .entities.molecule.molecule import Molecule
-from .entities.trajectory.trajectory import Trajectory
+
+# Import Trajectory with fallback for scipy/MDAnalysis issues
+logger = logging.getLogger(__name__)
+try:
+    # Import from trajectory module which handles MDAnalysis availability check
+    from .entities.trajectory import Trajectory, TRAJECTORY_AVAILABLE
+    if Trajectory is None:
+        TRAJECTORY_AVAILABLE = False
+except ImportError as e:
+    logger.warning(f"Trajectory class not available: {e}")
+    Trajectory = None
+    TRAJECTORY_AVAILABLE = False
 
 
 def trim(dictionary: dict):
@@ -21,7 +33,8 @@ def trim(dictionary: dict):
     return dic
 
 
-def make_paths_relative(trajectories: Dict[str, Trajectory]) -> None:
+def make_paths_relative(trajectories: dict) -> None:
+    """Make trajectory paths relative. Only called when Trajectory is available."""
     for key, traj in trajectories.items():
         traj.universe.load_new(make_path_relative(traj.universe.trajectory.filename))
         traj.save_filepaths_on_object()
@@ -55,15 +68,17 @@ def make_path_relative(filepath):
 
 class MNSession:
     def __init__(self) -> None:
-        self.entities: Dict[str, Union[Molecule, Trajectory, Ensemble]] = {}
+        self.entities: Dict[str, Union[Molecule, Ensemble]] = {}  # Trajectory may not be available
 
     @property
     def molecules(self) -> Dict[str, Molecule]:
         return {k: v for k, v in self.entities.items() if isinstance(v, Molecule)}
 
     @property
-    def trajectories(self) -> Dict[str, Trajectory]:
-        # return a filtered dictionary of only the trajectories using isinstance(item, Trajectory)
+    def trajectories(self) -> dict:
+        # Return filtered dictionary of trajectories - handle case when Trajectory class unavailable
+        if Trajectory is None:
+            return {}
         return {k: v for k, v in self.entities.items() if isinstance(v, Trajectory)}
 
     @property
@@ -71,10 +86,10 @@ class MNSession:
         # return a filtered dictionary of only the ensembles using isinstance(item, Ensemble)
         return {k: v for k, v in self.entities.items() if isinstance(v, Ensemble)}
 
-    def register_entity(self, item: Union[Molecule, Trajectory, Ensemble]) -> None:
+    def register_entity(self, item) -> None:
         self.entities[item.uuid] = item
 
-    def match(self, obj: bpy.types.Object) -> Union[Molecule, Trajectory, Ensemble]:
+    def match(self, obj: bpy.types.Object):
         return self.get(obj.uuid)
 
     def get_object(self, uuid: str) -> bpy.types.Object | None:
@@ -85,7 +100,7 @@ class MNSession:
         """
         return get_from_uuid(uuid)
 
-    def get(self, uuid: str) -> Union[Molecule, Trajectory, Ensemble] | None:
+    def get(self, uuid: str):
         return self.entities.get(uuid)
 
     @property

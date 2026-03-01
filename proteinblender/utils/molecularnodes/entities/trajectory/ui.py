@@ -1,11 +1,18 @@
 """
 Importing molecular dynamics trajectories and associated files.
+
+This module requires MDAnalysis which depends on scipy. It should only be
+imported when MDAnalysis is confirmed to be available. The trajectory/__init__.py
+checks for this before importing this module.
 """
 
 __name__ = "MolecularNodes.trajectory"
 __author__ = "Brady Johnston"
 
 import bpy
+
+# MDAnalysis import - this module should only be imported when MDAnalysis is available
+# The trajectory/__init__.py checks for this before importing this module
 import MDAnalysis as mda
 
 from ... import blender as bl
