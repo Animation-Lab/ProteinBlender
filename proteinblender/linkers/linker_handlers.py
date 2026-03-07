@@ -19,6 +19,7 @@ from .linker_geometry import (
     get_residue_position_from_item,
     get_object_for_item,
     get_backbone_direction,
+    _get_numeric_chain_id_from_item,
     BU_PER_RESIDUE,
 )
 
@@ -108,21 +109,20 @@ def linker_constraint_and_update_handler(scene, depsgraph):
     _constraint_active = True
     try:
         for linker in scene.pb2_linkers:
-            if not linker.is_valid or (not linker.puppet_id_a and not linker.puppet_id_b):
+            if not linker.is_valid or not linker.puppet_id:
                 continue
 
             # Check if any endpoint's object was moved
             obj_a_name = _get_object_name_for_endpoint(linker, 'A', scene)
             obj_b_name = _get_object_name_for_endpoint(linker, 'B', scene)
 
-            # Check if either puppet's controller was moved (moves all children)
+            # Check if the puppet's controller was moved (moves all children)
             controller_moved = False
             if hasattr(scene, 'outliner_items'):
-                puppet_ids = {linker.puppet_id_a, linker.puppet_id_b} - {''}
                 for item in scene.outliner_items:
-                    if (item.item_id in puppet_ids and
-                        item.item_type == 'PUPPET' and
-                        item.controller_object_name in transformed_objects):
+                    if (item.item_type == 'PUPPET' and
+                            item.item_id == linker.puppet_id and
+                            item.controller_object_name in transformed_objects):
                         controller_moved = True
                         break
 
@@ -131,6 +131,13 @@ def linker_constraint_and_update_handler(scene, depsgraph):
             either_moved = moved_a or moved_b or controller_moved
 
             if not either_moved:
+                continue
+
+            # If the controller moved, all children move together so the
+            # distance between endpoints within the same puppet doesn't
+            # change — just update the curve geometry.
+            if controller_moved and not moved_a and not moved_b:
+                update_linker_curve(linker)
                 continue
 
             # Get current endpoint positions
@@ -151,12 +158,11 @@ def linker_constraint_and_update_handler(scene, depsgraph):
             distance = (pos_b - pos_a).length
             max_reach = linker.length_residues * BU_PER_RESIDUE
 
-            # Enforce distance constraint
-            if distance > max_reach and not controller_moved:
+            # Enforce distance constraint (individual domain moved within puppet)
+            if distance > max_reach:
                 overshoot = distance - max_reach
                 direction_world = (pos_b - pos_a).normalized()
 
-                # Determine which object to snap back
                 if moved_a and not moved_b:
                     obj_a = bpy.data.objects.get(obj_a_name)
                     if obj_a:
@@ -172,7 +178,6 @@ def linker_constraint_and_update_handler(scene, depsgraph):
                         )
                         obj_b.location += correction
                 elif moved_a and moved_b:
-                    # Both moved: split the correction equally
                     obj_a = bpy.data.objects.get(obj_a_name)
                     obj_b = bpy.data.objects.get(obj_b_name)
                     half_overshoot = overshoot / 2
@@ -240,11 +245,15 @@ def _reconnect_linker_geometry(linker) -> bool:
         # Get backbone directions
         obj_a = get_object_for_item(linker.endpoint_a_item_id)
         obj_b = get_object_for_item(linker.endpoint_b_item_id)
+        num_chain_a = _get_numeric_chain_id_from_item(linker.endpoint_a_item_id)
+        num_chain_b = _get_numeric_chain_id_from_item(linker.endpoint_b_item_id)
         start_dir = get_backbone_direction(
-            obj_a, linker.endpoint_a_chain, linker.endpoint_a_residue
+            obj_a, linker.endpoint_a_chain, linker.endpoint_a_residue,
+            numeric_chain_id=num_chain_a
         ) if obj_a else None
         end_dir = get_backbone_direction(
-            obj_b, linker.endpoint_b_chain, linker.endpoint_b_residue
+            obj_b, linker.endpoint_b_chain, linker.endpoint_b_residue,
+            numeric_chain_id=num_chain_b
         ) if obj_b else None
 
         create_linker_curve(linker, start_pos, end_pos, start_dir, end_dir)
@@ -295,15 +304,28 @@ def linker_load_post_handler(dummy):
 
 
 # ---------------------------------------------------------------------------
+# Frame change handler — ensures linkers update during animation playback
+# ---------------------------------------------------------------------------
+
+@persistent
+def linker_frame_change_handler(scene):
+    """Update all valid linker curves on frame change."""
+    if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        return
+
+    for linker in scene.pb2_linkers:
+        if linker.is_valid:
+            update_linker_curve(linker)
+
+
+# ---------------------------------------------------------------------------
 # Puppet deletion cleanup
 # ---------------------------------------------------------------------------
 
 def on_puppet_deleted(puppet_id: str):
-    """Remove all linkers that involve a deleted puppet.
+    """Remove all linkers belonging to a deleted puppet.
 
     Called from group_maker_panel.py when a puppet is deleted.
-    For cross-puppet linkers, the linker is removed if either
-    endpoint's puppet is the deleted one.
 
     Args:
         puppet_id: ID of the deleted puppet
@@ -314,7 +336,7 @@ def on_puppet_deleted(puppet_id: str):
 
     linkers_to_remove = []
     for i, linker in enumerate(scene.pb2_linkers):
-        if linker.puppet_id_a == puppet_id or linker.puppet_id_b == puppet_id:
+        if linker.puppet_id == puppet_id:
             linkers_to_remove.append(i)
 
     for i in reversed(linkers_to_remove):
@@ -350,6 +372,9 @@ def register():
     if linker_constraint_and_update_handler not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(linker_constraint_and_update_handler)
 
+    if linker_frame_change_handler not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(linker_frame_change_handler)
+
     _handlers_registered = True
     logger.info("Linker handlers registered")
 
@@ -369,6 +394,9 @@ def unregister():
 
     if linker_constraint_and_update_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(linker_constraint_and_update_handler)
+
+    if linker_frame_change_handler in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(linker_frame_change_handler)
 
     _handlers_registered = False
     logger.info("Linker handlers unregistered")

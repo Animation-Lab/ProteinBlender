@@ -1,4 +1,4 @@
-"""UI Panel for managing flexible linkers within or across puppets."""
+"""UI Panel for managing flexible linkers within a single puppet."""
 
 import bpy
 from bpy.types import Panel, UIList
@@ -31,7 +31,7 @@ class PB2_UL_linkers(UIList):
                 row.label(text=f"{linker.name} (Invalid)", icon='ERROR')
 
             # Style icon
-            style_icons = {'CARTOON': 'CURVE_BEZCIRCLE', 'RIBBON': 'SURFACE_DATA', 'BEADS': 'MESH_UVSPHERE'}
+            style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
             row.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
 
             # Rendering mode indicator
@@ -83,7 +83,7 @@ class PB2_PT_linkers(Panel):
         if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
             info_box = main_box.box()
             info_box.label(text="No linkers defined", icon='INFO')
-            info_box.label(text="Click 'Create Linker' to connect chains within or across puppets")
+            info_box.label(text="Click 'Create Linker' to connect chains within a puppet")
             return
 
         main_box.separator()
@@ -122,16 +122,8 @@ class PB2_PT_linkers(Panel):
 
         # Puppet info
         box = main_box.box()
-        if linker.is_cross_puppet():
-            name_a = self._get_puppet_name(linker.puppet_id_a)
-            name_b = self._get_puppet_name(linker.puppet_id_b)
-            box.label(text="Cross-Puppet Linker", icon='LINK_BLEND')
-            row = box.row()
-            row.label(text=f"A: {name_a}")
-            row.label(text=f"B: {name_b}")
-        else:
-            puppet_name = self._get_puppet_name(linker.puppet_id_a)
-            box.label(text=f"Puppet: {puppet_name}", icon='ARMATURE_DATA')
+        puppet_name = self._get_puppet_name(linker.puppet_id)
+        box.label(text=f"Puppet: {puppet_name}", icon='ARMATURE_DATA')
 
         # Endpoints
         box = main_box.box()
@@ -152,6 +144,10 @@ class PB2_PT_linkers(Panel):
         max_reach_angstrom = linker.length_residues * 3.5
         box.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} \u00C5)")
 
+        # Physics behavior
+        box.separator()
+        box.prop(linker, "behavior")
+
         # Appearance
         box = main_box.box()
         box.label(text="Appearance", icon='MATERIAL')
@@ -161,13 +157,8 @@ class PB2_PT_linkers(Panel):
         col.prop(linker, "rendering_mode")
         col.prop(linker, "color")
 
-        # Style-specific size parameter
-        if linker.style == 'CARTOON':
-            col.prop(linker, "cartoon_radius")
-        elif linker.style == 'RIBBON':
-            col.prop(linker, "ribbon_width")
-        elif linker.style == 'BEADS':
-            col.prop(linker, "bead_size")
+        if linker.style == 'TUBE':
+            col.prop(linker, "tube_radius")
 
         col.prop(linker, "binding_zone_residues")
 

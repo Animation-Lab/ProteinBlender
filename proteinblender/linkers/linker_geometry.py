@@ -1,7 +1,7 @@
 """Linker geometry creation using Blender curves with catenary physics.
 
 This module handles creation of flexible linker curves between protein
-domains within a puppet. The linker behaves like a string/ribbon:
+domains within a puppet. The linker behaves like a string/tube:
 - Fixed length determined by residue count
 - Catenary shape when there's slack (floppy string under gravity)
 - Rigid binding zones at endpoints aligned with backbone direction
@@ -16,63 +16,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Cache for ribbon profile curves
-_ribbon_profile_cache = {}
-
 # Constants
 ANGSTROM_PER_RESIDUE = 3.5
 MN_SCALE = 0.01  # MolecularNodes scale: 1 BU = 100 Angstroms
 BU_PER_RESIDUE = ANGSTROM_PER_RESIDUE * MN_SCALE  # 0.035 BU per residue
-
-
-def _get_or_create_ribbon_profile(width: float) -> Optional[bpy.types.Object]:
-    """Get or create a flat ribbon profile curve for beveling.
-
-    Args:
-        width: Width of the ribbon in Blender units
-
-    Returns:
-        Curve object for use as bevel_object, or None on failure
-    """
-    global _ribbon_profile_cache
-
-    width_key = round(width, 3)
-
-    if width_key in _ribbon_profile_cache:
-        profile_obj = _ribbon_profile_cache[width_key]
-        if profile_obj and profile_obj.name in bpy.data.objects:
-            return profile_obj
-
-    try:
-        profile_name = f"LinkerRibbonProfile_{width_key}"
-
-        existing = bpy.data.objects.get(profile_name)
-        if existing:
-            _ribbon_profile_cache[width_key] = existing
-            return existing
-
-        curve_data = bpy.data.curves.new(name=profile_name, type='CURVE')
-        curve_data.dimensions = '2D'
-
-        spline = curve_data.splines.new('POLY')
-        spline.points.add(1)
-
-        half_width = width / 2
-        spline.points[0].co = (-half_width, 0, 0, 1)
-        spline.points[1].co = (half_width, 0, 0, 1)
-
-        profile_obj = bpy.data.objects.new(name=profile_name, object_data=curve_data)
-        bpy.context.scene.collection.objects.link(profile_obj)
-        profile_obj.hide_viewport = True
-        profile_obj.hide_render = True
-        profile_obj.hide_select = True
-
-        _ribbon_profile_cache[width_key] = profile_obj
-        return profile_obj
-
-    except Exception as e:
-        logger.error(f"Failed to create ribbon profile: {e}")
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +46,59 @@ def get_residue_position_from_item(item_id: str, chain_id: str,
         logger.warning(f"No object found for item {item_id}")
         return None
 
-    return _get_residue_position_from_object(obj, chain_id, residue_num)
+    # Get the numeric chain_id from the outliner item itself.
+    # This is more reliable than chain_mapping_str on the mesh (which may not exist).
+    numeric_chain_id = _get_numeric_chain_id_from_item(item_id)
+
+    logger.info(f"Resolving position: item={item_id} -> obj='{obj.name}' "
+                f"chain={chain_id} numeric_chain={numeric_chain_id} res={residue_num}")
+
+    pos = _get_residue_position_from_object(obj, chain_id, residue_num,
+                                             numeric_chain_id=numeric_chain_id)
+
+    # If position not found on the item's own object (e.g., single-chain domain
+    # object that doesn't contain the requested chain), try the parent molecule
+    # object which may contain all chains.
+    if pos is None and obj.parent:
+        logger.info(f"  Not found on '{obj.name}', trying parent '{obj.parent.name}'")
+        pos = _get_residue_position_from_object(obj.parent, chain_id, residue_num,
+                                                 numeric_chain_id=numeric_chain_id)
+
+    return pos
+
+
+def _get_numeric_chain_id_from_item(item_id: str) -> Optional[int]:
+    """Get the numeric chain_id stored on an outliner item.
+
+    Outliner chain items store the numeric chain index (e.g., "0", "9") in
+    their chain_id property. This directly corresponds to the chain_id mesh
+    attribute values, making it the most reliable way to filter vertices by chain.
+
+    Args:
+        item_id: Outliner item_id
+
+    Returns:
+        Numeric chain_id as int, or None if not found
+    """
+    scene = bpy.context.scene
+    if not hasattr(scene, 'outliner_items'):
+        return None
+
+    for item in scene.outliner_items:
+        if item.item_id == item_id:
+            chain_str = getattr(item, 'chain_id', '')
+            if chain_str and chain_str.isdigit():
+                return int(chain_str)
+            # Also check parent chain item if this is a domain item
+            if item.item_type == 'DOMAIN' and item.parent_id:
+                for parent_item in scene.outliner_items:
+                    if parent_item.item_id == item.parent_id:
+                        parent_chain = getattr(parent_item, 'chain_id', '')
+                        if parent_chain and parent_chain.isdigit():
+                            return int(parent_chain)
+                        break
+            return None
+    return None
 
 
 def get_object_for_item(item_id: str) -> Optional[bpy.types.Object]:
@@ -110,21 +109,31 @@ def get_object_for_item(item_id: str) -> Optional[bpy.types.Object]:
 
     for item in scene.outliner_items:
         if item.item_id == item_id:
-            return bpy.data.objects.get(item.object_name)
+            obj = bpy.data.objects.get(item.object_name)
+            if obj:
+                logger.info(f"  item_id '{item_id}' -> object '{item.object_name}' "
+                            f"(chain_id='{getattr(item, 'chain_id', '')}', "
+                            f"item_type='{item.item_type}')")
+            else:
+                logger.warning(f"  item_id '{item_id}' -> object_name '{item.object_name}' NOT FOUND in bpy.data.objects")
+            return obj
     return None
 
 
 def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
-                                       residue_num: int) -> Optional[Vector]:
+                                       residue_num: int,
+                                       numeric_chain_id: Optional[int] = None) -> Optional[Vector]:
     """Get residue position from a specific Blender mesh object.
 
     Searches mesh attributes for the target residue, preferring alpha
-    carbon (CA) atoms.
+    carbon (CA) atoms. Uses the numeric chain ID from the outliner item
+    for reliable chain filtering on multi-chain mesh objects.
 
     Args:
         obj: Blender mesh object to search
         chain_id: Chain letter (e.g., 'A')
         residue_num: Residue number
+        numeric_chain_id: Numeric chain_id from the outliner item (most reliable)
 
     Returns:
         World position Vector or None if not found
@@ -143,14 +152,37 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
     has_chain_id_attr = "chain_id" in mesh.attributes
     has_is_alpha = "is_alpha_carbon" in mesh.attributes
 
-    # Get chain mapping to convert letter -> numeric
-    chain_mapping = get_chain_mapping_from_object(obj)
-    chain_numeric = None
-    if chain_mapping:
-        for num_id, letter in chain_mapping.items():
-            if letter == chain_id:
-                chain_numeric = num_id
-                break
+    # Determine the numeric chain_id to filter by.
+    # Priority: 1) numeric_chain_id from outliner item (most reliable)
+    #           2) chain_mapping_str on mesh (may not exist)
+    #           3) single-chain object detection
+    chain_numeric = numeric_chain_id
+
+    if chain_numeric is None:
+        # Fallback: try chain mapping from mesh custom property
+        chain_mapping = get_chain_mapping_from_object(obj)
+        if chain_mapping:
+            for num_id, letter in chain_mapping.items():
+                if letter == chain_id:
+                    chain_numeric = num_id
+                    break
+
+    # If still no match, try additional strategies
+    if chain_numeric is None and has_chain_id_attr:
+        chain_attr = mesh.attributes["chain_id"].data
+        unique_chains = set()
+        for c in chain_attr:
+            unique_chains.add(c.value)
+
+        if len(unique_chains) == 1:
+            chain_numeric = unique_chains.pop()
+            logger.info(f"  Single-chain object '{obj.name}' has chain_id={chain_numeric}")
+        else:
+            logger.info(f"  Multi-chain object '{obj.name}' has chain_ids={unique_chains}, "
+                        f"no numeric_chain_id provided, looking for '{chain_id}'")
+
+    logger.info(f"  Searching obj='{obj.name}' for chain_numeric={chain_numeric} "
+                f"res={residue_num} (has_chain_attr={has_chain_id_attr})")
 
     best_pos = None
     for i, res in enumerate(res_ids):
@@ -178,7 +210,8 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
 
 
 def get_backbone_direction(obj: bpy.types.Object, chain_id: str,
-                            residue_num: int) -> Optional[Vector]:
+                            residue_num: int,
+                            numeric_chain_id: Optional[int] = None) -> Optional[Vector]:
     """Get backbone direction at a residue by finding CA positions of neighbors.
 
     Computes the vector from CA(residue-1) to CA(residue+1) to get the
@@ -189,13 +222,17 @@ def get_backbone_direction(obj: bpy.types.Object, chain_id: str,
         obj: Blender mesh object containing the chain
         chain_id: Chain letter
         residue_num: Residue number at the binding point
+        numeric_chain_id: Numeric chain_id from the outliner item
 
     Returns:
         Normalized direction vector in world space, or None
     """
-    pos_prev = _get_residue_position_from_object(obj, chain_id, residue_num - 1)
-    pos_next = _get_residue_position_from_object(obj, chain_id, residue_num + 1)
-    pos_curr = _get_residue_position_from_object(obj, chain_id, residue_num)
+    pos_prev = _get_residue_position_from_object(obj, chain_id, residue_num - 1,
+                                                  numeric_chain_id=numeric_chain_id)
+    pos_next = _get_residue_position_from_object(obj, chain_id, residue_num + 1,
+                                                  numeric_chain_id=numeric_chain_id)
+    pos_curr = _get_residue_position_from_object(obj, chain_id, residue_num,
+                                                  numeric_chain_id=numeric_chain_id)
 
     if pos_prev and pos_next:
         direction = (pos_next - pos_prev).normalized()
@@ -388,6 +425,197 @@ def compute_catenary_points(start: Vector, end: Vector,
     return points
 
 
+def compute_zero_g_points(start: Vector, end: Vector,
+                           total_length: float,
+                           num_samples: int = 9) -> List[Vector]:
+    """Compute points along a smooth arc with no gravity bias.
+
+    When the linker has slack, the excess length is distributed as a
+    symmetric parabolic bulge perpendicular to the start-end axis.
+    The bulge direction is chosen automatically: perpendicular to the
+    line connecting the endpoints, biased away from the midpoint of
+    the two parent objects when possible, otherwise an arbitrary
+    perpendicular direction.
+
+    When taut, returns a straight line.
+
+    Args:
+        start: Start position (world space)
+        end: End position (world space)
+        total_length: Total linker length in BU
+        num_samples: Number of sample points (including endpoints)
+
+    Returns:
+        List of Vector positions sampled along the arc
+    """
+    D = (end - start).length
+    L = total_length
+
+    # Taut or nearly taut: straight line
+    if D >= L * 0.99 or D < 1e-6:
+        return [start.lerp(end, t / max(num_samples - 1, 1))
+                for t in range(num_samples)]
+
+    direction = end - start
+
+    # Find a perpendicular direction for the bulge
+    # Try cross with world-up first, fall back to world-right
+    perp = direction.cross(Vector((0, 0, 1)))
+    if perp.length < 0.1:
+        perp = direction.cross(Vector((0, 1, 0)))
+    if perp.length < 0.1:
+        perp = direction.cross(Vector((1, 0, 0)))
+    perp = perp.normalized()
+
+    # Amount of bulge from excess length
+    # For a parabolic arc: L ≈ D + (8*sag²)/(3*D)
+    # Solving for sag: sag = sqrt(3*D*(L-D)/8)
+    sag_amount = math.sqrt(max(0, 3.0 * D * (L - D) / 8.0))
+
+    points = []
+    for i in range(num_samples):
+        t = i / max(num_samples - 1, 1)
+        base = start.lerp(end, t)
+        # Parabolic bulge: maximum at t=0.5, zero at t=0 and t=1
+        bulge = 4.0 * t * (1.0 - t) * sag_amount
+        points.append(base + perp * bulge)
+
+    return points
+
+
+def _arc_length(points: List[Vector]) -> float:
+    """Compute the total arc length of a polyline."""
+    length = 0.0
+    for i in range(1, len(points)):
+        length += (points[i] - points[i - 1]).length
+    return length
+
+
+def _generate_random_coil_shape(start: Vector, end: Vector,
+                                 amplitude: float,
+                                 num_samples: int,
+                                 perp1: Vector, perp2: Vector,
+                                 freqs: List[float], amps: List[float],
+                                 phase_offsets: List[float]) -> List[Vector]:
+    """Generate wiggly coil points at a given amplitude scale.
+
+    Helper for compute_random_coil_points — separated so we can iterate
+    on the amplitude to match a target arc length.
+    """
+    amp_sum = sum(amps)
+    points = []
+    for i in range(num_samples):
+        t = i / max(num_samples - 1, 1)
+        base = start.lerp(end, t)
+
+        # Envelope: zero at endpoints, max in middle
+        envelope = 4.0 * t * (1.0 - t)
+
+        # Sum sinusoidal components in both perpendicular directions
+        offset1 = 0.0
+        offset2 = 0.0
+        for k in range(len(freqs)):
+            angle1 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k]
+            angle2 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k + 3]
+            offset1 += amps[k] * math.sin(angle1)
+            offset2 += amps[k] * math.cos(angle2)
+
+        offset1 = (offset1 / amp_sum) * amplitude * envelope
+        offset2 = (offset2 / amp_sum) * amplitude * envelope
+
+        points.append(base + perp1 * offset1 + perp2 * offset2)
+
+    return points
+
+
+def compute_random_coil_points(start: Vector, end: Vector,
+                                total_length: float,
+                                num_residues: int = 10,
+                                seed: int = 0) -> List[Vector]:
+    """Compute points along a wiggly random-coil path whose arc length
+    matches total_length.
+
+    Simulates an intrinsically disordered region by layering sinusoidal
+    perturbations at multiple frequencies in two perpendicular directions.
+    The wiggle amplitude is iteratively adjusted so the polyline arc length
+    equals total_length (the linker's physical length in BU).
+
+    The seed (derived from the linker UID) makes the shape deterministic —
+    same linker always produces the same wiggle pattern, but different
+    linkers look distinct. When taut, returns a straight line.
+
+    Args:
+        start: Start position (world space)
+        end: End position (world space)
+        total_length: Target arc length of the path in BU
+        num_residues: Number of residues (controls sample density)
+        seed: Integer seed for deterministic noise pattern
+
+    Returns:
+        List of Vector positions sampled along the wiggly path
+    """
+    D = (end - start).length
+    L = total_length
+
+    # More samples for smoother wiggles (~3 per residue)
+    num_samples = max(9, num_residues * 3)
+
+    # Taut or nearly taut: straight line
+    if D >= L * 0.99 or D < 1e-6:
+        return [start.lerp(end, t / max(num_samples - 1, 1))
+                for t in range(num_samples)]
+
+    direction = (end - start).normalized()
+
+    # Build two perpendicular axes
+    perp1 = direction.cross(Vector((0, 0, 1)))
+    if perp1.length < 0.1:
+        perp1 = direction.cross(Vector((0, 1, 0)))
+    perp1 = perp1.normalized()
+    perp2 = direction.cross(perp1).normalized()
+
+    # Phase offsets from seed so each linker looks different
+    # Use golden ratio multiples for well-distributed phases
+    phi = 1.6180339887
+    phase_offsets = [seed * phi * (k + 1) for k in range(6)]
+
+    # Frequency multipliers (prime-ish ratios avoid repetitive patterns)
+    freqs = [2.0, 3.0, 5.0]
+    # Amplitude falloff for higher frequencies (1/f character)
+    amps = [1.0, 0.5, 0.25]
+
+    # Binary search for the amplitude that makes arc length == total_length.
+    # The straight-line distance D is the minimum arc length (amplitude=0).
+    # We search between 0 and a generous upper bound.
+    amp_lo = 0.0
+    amp_hi = L  # generous upper bound
+    best_amplitude = 0.0
+    best_points = None
+
+    for _ in range(30):
+        amp_mid = (amp_lo + amp_hi) / 2.0
+        pts = _generate_random_coil_shape(
+            start, end, amp_mid, num_samples,
+            perp1, perp2, freqs, amps, phase_offsets
+        )
+        arc = _arc_length(pts)
+
+        if abs(arc - L) < L * 0.001:  # within 0.1% tolerance
+            best_amplitude = amp_mid
+            best_points = pts
+            break
+
+        if arc < L:
+            amp_lo = amp_mid
+        else:
+            amp_hi = amp_mid
+
+        best_amplitude = amp_mid
+        best_points = pts
+
+    return best_points
+
+
 def _solve_catenary_parameter(h_dist: float, L_target: float,
                                 max_iterations: int = 50) -> Optional[float]:
     """Solve for catenary parameter 'a' using Newton-Raphson.
@@ -544,8 +772,22 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
         total_length = linker_def.length_residues * BU_PER_RESIDUE
         zone_length = linker_def.binding_zone_residues * BU_PER_RESIDUE
 
-        # Compute catenary sample points
-        catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
+        # Clamp end position so the curve never stretches beyond max reach
+        dist = (end_pos - start_pos).length
+        if dist > total_length and dist > 1e-6:
+            end_pos = start_pos + (end_pos - start_pos).normalized() * total_length
+
+        # Compute curve sample points based on behavior
+        behavior = linker_def.behavior
+        if behavior == 'ZERO_G':
+            catenary_points = compute_zero_g_points(start_pos, end_pos, total_length)
+        elif behavior == 'RANDOM_COIL':
+            catenary_points = compute_random_coil_points(
+                start_pos, end_pos, total_length, linker_def.length_residues,
+                seed=hash(linker_def.uid) & 0xFFFF
+            )
+        else:
+            catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
 
         # Apply rigid binding zones
         catenary_points = apply_rigid_binding_zones(
@@ -648,6 +890,11 @@ def update_linker_curve(linker_def) -> bool:
     total_length = linker_def.length_residues * BU_PER_RESIDUE
     zone_length = linker_def.binding_zone_residues * BU_PER_RESIDUE
 
+    # Clamp end position so the curve never stretches beyond max reach
+    dist = (end_pos - start_pos).length
+    if dist > total_length and dist > 1e-6:
+        end_pos = start_pos + (end_pos - start_pos).normalized() * total_length
+
     # Get backbone directions
     obj_a = get_object_for_item(linker_def.endpoint_a_item_id)
     obj_b = get_object_for_item(linker_def.endpoint_b_item_id)
@@ -663,8 +910,17 @@ def update_linker_curve(linker_def) -> bool:
             obj_b, linker_def.endpoint_b_chain, linker_def.endpoint_b_residue
         )
 
-    # Compute new catenary points
-    catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
+    # Compute new curve points based on behavior
+    behavior = linker_def.behavior
+    if behavior == 'ZERO_G':
+        catenary_points = compute_zero_g_points(start_pos, end_pos, total_length)
+    elif behavior == 'RANDOM_COIL':
+        catenary_points = compute_random_coil_points(
+            start_pos, end_pos, total_length, linker_def.length_residues,
+            seed=hash(linker_def.uid) & 0xFFFF
+        )
+    else:
+        catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
     catenary_points = apply_rigid_binding_zones(
         catenary_points, start_dir, end_dir, zone_length
     )
@@ -680,20 +936,31 @@ def update_linker_curve(linker_def) -> bool:
         spline = obj.data.splines.new('BEZIER')
         spline.bezier_points.add(num_new - 1)
 
+    # Transform world-space catenary points to curve object's local space.
+    # The curve is parented to the puppet controller, so bp.co must be in
+    # local space — not world space — otherwise the linker won't follow
+    # when the parent moves.
+    inv_matrix = obj.matrix_world.inverted()
+
     for i, pos in enumerate(catenary_points):
         bp = spline.bezier_points[i]
-        bp.co = pos
+        bp.co = inv_matrix @ pos
         bp.handle_left_type = 'AUTO'
         bp.handle_right_type = 'AUTO'
+
+    # Tag curve data so Blender knows it changed and GN modifiers re-evaluate
+    obj.data.update_tag()
+    obj.update_tag()
 
     # Reapply style (handles bevel changes if style or params changed)
     _apply_curve_style(obj.data, linker_def)
 
-    # Handle beads geometry nodes
-    has_beads_mod = obj.modifiers.get("LinkerBeads") is not None
+    # Handle beads geometry nodes — only rebuild if missing, not every frame
+    beads_mod = obj.modifiers.get("LinkerBeads")
     if linker_def.style == 'BEADS':
-        setup_beads_geometry_nodes(obj, linker_def)
-    elif has_beads_mod:
+        if not beads_mod or not beads_mod.node_group:
+            setup_beads_geometry_nodes(obj, linker_def)
+    elif beads_mod:
         _remove_beads_geometry_nodes(obj, linker_def.uid)
 
     # Update material
@@ -741,20 +1008,10 @@ def _apply_curve_style(curve_data, linker_def) -> None:
     """
     style = linker_def.style
 
-    if style == 'CARTOON':
-        # Smooth round tube - spaghetti noodle look
-        curve_data.bevel_depth = linker_def.cartoon_radius
+    if style == 'TUBE':
+        # Smooth round tube
+        curve_data.bevel_depth = linker_def.tube_radius
         curve_data.bevel_resolution = 6  # Smooth circle cross-section
-    elif style == 'RIBBON':
-        # Flat ribbon using bevel profile object
-        profile_curve = _get_or_create_ribbon_profile(linker_def.ribbon_width)
-        if profile_curve:
-            curve_data.bevel_mode = 'OBJECT'
-            curve_data.bevel_object = profile_curve
-        else:
-            # Fallback to flat-ish profile
-            curve_data.bevel_depth = linker_def.ribbon_width / 2
-            curve_data.bevel_resolution = 0
     elif style == 'BEADS':
         # No bevel on curve itself - beads are added via geometry nodes
         curve_data.bevel_depth = 0
@@ -763,10 +1020,19 @@ def _apply_curve_style(curve_data, linker_def) -> None:
 
 def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
                                 linker_def) -> None:
-    """Set up geometry nodes to instance bead shapes along the curve.
+    """Set up geometry nodes for a 'meaty pearl necklace' bead style.
 
-    Creates one bead per residue with slight random scale variation
-    to give an organic, irregular amino acid bead appearance.
+    Creates overlapping, misshapen beads — like a surface rendering of an
+    intrinsically disordered region.
+
+    Bead radius is auto-calculated from residue spacing so beads overlap
+    slightly, giving a continuous chain look with no gaps.
+
+    GN tree structure:
+      Input Curve
+        └─ ResampleCurve (COUNT = length_residues)
+            └─ InstanceOnPoints (noise-displaced ico spheres with per-axis random scale)
+                └─ RealizeInstances → MergeByDistance → SetShadeSmooth → Output
 
     Args:
         curve_obj: The linker curve object
@@ -781,10 +1047,13 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
     ng = bpy.data.node_groups.get(ng_name)
 
     if ng:
-        # Remove and recreate to pick up new parameters
         bpy.data.node_groups.remove(ng)
 
     ng = bpy.data.node_groups.new(ng_name, 'GeometryNodeTree')
+
+    # Auto-calculate sizes from residue spacing
+    # bead_radius = spacing * 0.85 → heavy overlap so beads merge into one surface
+    bead_radius = BU_PER_RESIDUE * 0.85  # ~0.030 BU — deep overlap
 
     # Create interface sockets
     ng.interface.new_socket(
@@ -799,32 +1068,24 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
     count_socket.default_value = linker_def.length_residues
     count_socket.min_value = 1
 
-    size_socket = ng.interface.new_socket(
-        name="Bead Size", in_out='INPUT', socket_type='NodeSocketFloat'
+    bead_r_socket = ng.interface.new_socket(
+        name="Bead Radius", in_out='INPUT', socket_type='NodeSocketFloat'
     )
-    size_socket.default_value = linker_def.bead_size
-    size_socket.min_value = 0.001
-
-    randomness_socket = ng.interface.new_socket(
-        name="Randomness", in_out='INPUT', socket_type='NodeSocketFloat'
-    )
-    randomness_socket.default_value = 0.3
-    randomness_socket.min_value = 0.0
-    randomness_socket.max_value = 1.0
+    bead_r_socket.default_value = bead_radius
+    bead_r_socket.min_value = 0.001
 
     nodes = ng.nodes
     links = ng.links
 
-    # Group Input / Output
+    # ── Group Input / Output ──
     input_node = nodes.new('NodeGroupInput')
-    input_node.location = (-800, 0)
+    input_node.location = (-900, 0)
     output_node = nodes.new('NodeGroupOutput')
-    output_node.location = (800, 0)
+    output_node.location = (1100, 0)
 
-    # Resample Curve - resample to exactly `Count` points
+    # ── Resample Curve (COUNT = length_residues) ──
     resample = nodes.new('GeometryNodeResampleCurve')
-    resample.location = (-400, 0)
-    # Set mode to COUNT - handle both old property API and new menu socket API
+    resample.location = (-500, 100)
     if hasattr(resample, 'mode'):
         resample.mode = 'COUNT'
     elif "Mode" in resample.inputs:
@@ -832,71 +1093,171 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
     links.new(input_node.outputs["Geometry"], resample.inputs["Curve"])
     links.new(input_node.outputs["Count"], resample.inputs["Count"])
 
-    # Ico Sphere mesh for bead shape (subdivision=2 for irregular feel)
+    # ══════════════════════════════════════════════════════════════════
+    # BEAD BRANCH — misshapen overlapping ico spheres
+    # ══════════════════════════════════════════════════════════════════
+
+    # Ico Sphere (subdivision 3 — enough geometry for noise displacement)
     ico_sphere = nodes.new('GeometryNodeMeshIcoSphere')
-    ico_sphere.location = (-200, -250)
+    ico_sphere.location = (-600, -200)
     ico_sphere.inputs["Radius"].default_value = 1.0
     ico_sphere.inputs["Subdivisions"].default_value = 2
 
-    # Random Value node for per-instance scale variation
-    random_val = nodes.new('FunctionNodeRandomValue')
-    random_val.location = (-200, -450)
-    if hasattr(random_val, 'data_type'):
-        random_val.data_type = 'FLOAT'
-    # Min scale factor = 1.0 - randomness, max = 1.0 + randomness
-    # We'll use a Math node to compute the range from the Randomness input
+    # ── Noise displacement on sphere surface (raisin/deflated ball look) ──
+    # Displace each vertex along its normal by a noise value, creating
+    # lumpy dents and bumps on the surface of each bead.
 
-    # Math: 1.0 - Randomness (min scale)
-    math_sub = nodes.new('ShaderNodeMath')
-    math_sub.operation = 'SUBTRACT'
-    math_sub.location = (-450, -400)
-    math_sub.inputs[0].default_value = 1.0
-    links.new(input_node.outputs["Randomness"], math_sub.inputs[1])
+    # Position → feed into noise texture for spatial variation
+    pos_node = nodes.new('GeometryNodeInputPosition')
+    pos_node.location = (-600, -350)
 
-    # Math: 1.0 + Randomness (max scale)
-    math_add = nodes.new('ShaderNodeMath')
-    math_add.operation = 'ADD'
-    math_add.location = (-450, -550)
-    math_add.inputs[0].default_value = 1.0
-    links.new(input_node.outputs["Randomness"], math_add.inputs[1])
+    # Noise Texture — creates the lumpy pattern
+    noise_tex = nodes.new('ShaderNodeTexNoise')
+    noise_tex.location = (-400, -350)
+    noise_tex.inputs["Scale"].default_value = 3.0      # bump frequency
+    noise_tex.inputs["Detail"].default_value = 4.0      # fine detail
+    noise_tex.inputs["Roughness"].default_value = 0.7   # irregular
+    links.new(pos_node.outputs["Position"], noise_tex.inputs["Vector"])
 
-    # Connect min/max to random value
-    links.new(math_sub.outputs[0], random_val.inputs["Min"])
-    links.new(math_add.outputs[0], random_val.inputs["Max"])
+    # Map noise from [0,1] to [-0.3, 0.3] — centered so bumps and dents
+    map_range = nodes.new('ShaderNodeMapRange')
+    map_range.location = (-200, -350)
+    map_range.inputs["From Min"].default_value = 0.0
+    map_range.inputs["From Max"].default_value = 1.0
+    map_range.inputs["To Min"].default_value = -0.3
+    map_range.inputs["To Max"].default_value = 0.3
+    links.new(noise_tex.outputs["Fac"], map_range.inputs["Value"])
 
-    # Multiply random scale factor by bead size
-    math_scale = nodes.new('ShaderNodeMath')
-    math_scale.operation = 'MULTIPLY'
-    math_scale.location = (0, -350)
-    links.new(random_val.outputs["Value"], math_scale.inputs[0])
-    links.new(input_node.outputs["Bead Size"], math_scale.inputs[1])
+    # Normal — displacement direction
+    normal_node = nodes.new('GeometryNodeInputNormal')
+    normal_node.location = (-200, -500)
 
-    # Combine XYZ to make a scale vector from the single float
+    # Scale normal by noise amount
+    vec_math = nodes.new('ShaderNodeVectorMath')
+    vec_math.operation = 'SCALE'
+    vec_math.location = (0, -400)
+    links.new(normal_node.outputs["Normal"], vec_math.inputs[0])
+    links.new(map_range.outputs["Result"], vec_math.inputs["Scale"])
+
+    # Set Position — apply displacement to sphere
+    set_pos = nodes.new('GeometryNodeSetPosition')
+    set_pos.location = (200, -250)
+    links.new(ico_sphere.outputs["Mesh"], set_pos.inputs["Geometry"])
+    links.new(vec_math.outputs["Vector"], set_pos.inputs["Offset"])
+
+    # Per-axis random scale for globby misshapen beads:
+    #   Each axis gets an independent random value in [0.5, 1.5] * bead_radius
+    #   Combined with noise displacement, gives raisin-like irregular shapes.
+
+    # Random Value for X scale
+    rand_x = nodes.new('FunctionNodeRandomValue')
+    rand_x.location = (-300, -400)
+    if hasattr(rand_x, 'data_type'):
+        rand_x.data_type = 'FLOAT'
+    rand_x.inputs["Min"].default_value = 0.5
+    rand_x.inputs["Max"].default_value = 1.5
+    rand_x.inputs["Seed"].default_value = 1
+
+    # Random Value for Y scale
+    rand_y = nodes.new('FunctionNodeRandomValue')
+    rand_y.location = (-300, -550)
+    if hasattr(rand_y, 'data_type'):
+        rand_y.data_type = 'FLOAT'
+    rand_y.inputs["Min"].default_value = 0.5
+    rand_y.inputs["Max"].default_value = 1.5
+    rand_y.inputs["Seed"].default_value = 2
+
+    # Random Value for Z scale
+    rand_z = nodes.new('FunctionNodeRandomValue')
+    rand_z.location = (-300, -700)
+    if hasattr(rand_z, 'data_type'):
+        rand_z.data_type = 'FLOAT'
+    rand_z.inputs["Min"].default_value = 0.5
+    rand_z.inputs["Max"].default_value = 1.5
+    rand_z.inputs["Seed"].default_value = 3
+
+    # Multiply each random factor by bead_radius
+    mul_x = nodes.new('ShaderNodeMath')
+    mul_x.operation = 'MULTIPLY'
+    mul_x.location = (-50, -400)
+    links.new(rand_x.outputs["Value"], mul_x.inputs[0])
+    links.new(input_node.outputs["Bead Radius"], mul_x.inputs[1])
+
+    mul_y = nodes.new('ShaderNodeMath')
+    mul_y.operation = 'MULTIPLY'
+    mul_y.location = (-50, -550)
+    links.new(rand_y.outputs["Value"], mul_y.inputs[0])
+    links.new(input_node.outputs["Bead Radius"], mul_y.inputs[1])
+
+    mul_z = nodes.new('ShaderNodeMath')
+    mul_z.operation = 'MULTIPLY'
+    mul_z.location = (-50, -700)
+    links.new(rand_z.outputs["Value"], mul_z.inputs[0])
+    links.new(input_node.outputs["Bead Radius"], mul_z.inputs[1])
+
+    # Combine into per-instance scale vector
     combine_scale = nodes.new('ShaderNodeCombineXYZ')
-    combine_scale.location = (200, -350)
-    links.new(math_scale.outputs[0], combine_scale.inputs['X'])
-    links.new(math_scale.outputs[0], combine_scale.inputs['Y'])
-    links.new(math_scale.outputs[0], combine_scale.inputs['Z'])
+    combine_scale.location = (150, -550)
+    links.new(mul_x.outputs[0], combine_scale.inputs['X'])
+    links.new(mul_y.outputs[0], combine_scale.inputs['Y'])
+    links.new(mul_z.outputs[0], combine_scale.inputs['Z'])
 
-    # Instance on Points - place beads at each resampled point
-    instance_on_pts = nodes.new('GeometryNodeInstanceOnPoints')
-    instance_on_pts.location = (400, 0)
-    links.new(resample.outputs["Curve"], instance_on_pts.inputs["Points"])
-    links.new(ico_sphere.outputs["Mesh"], instance_on_pts.inputs["Instance"])
-    links.new(combine_scale.outputs["Vector"], instance_on_pts.inputs["Scale"])
+    # Random rotation for extra irregularity
+    rand_rot = nodes.new('FunctionNodeRandomValue')
+    rand_rot.location = (-300, -850)
+    if hasattr(rand_rot, 'data_type'):
+        rand_rot.data_type = 'FLOAT_VECTOR'
+    rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
+    rand_rot.inputs["Max"].default_value = (6.283, 6.283, 6.283)
+    rand_rot.inputs["Seed"].default_value = 7
 
-    # Realize Instances - convert to real geometry
+    # Instance on Points — place beads along resampled curve
+    instance_beads = nodes.new('GeometryNodeInstanceOnPoints')
+    instance_beads.location = (350, 100)
+    links.new(resample.outputs["Curve"], instance_beads.inputs["Points"])
+    links.new(set_pos.outputs["Geometry"], instance_beads.inputs["Instance"])
+    links.new(combine_scale.outputs["Vector"], instance_beads.inputs["Scale"])
+    links.new(rand_rot.outputs["Value"], instance_beads.inputs["Rotation"])
+
+    # Realize Instances
     realize = nodes.new('GeometryNodeRealizeInstances')
-    realize.location = (600, 0)
-    links.new(instance_on_pts.outputs["Instances"], realize.inputs["Geometry"])
+    realize.location = (550, 100)
+    links.new(instance_beads.outputs["Instances"], realize.inputs["Geometry"])
+
+    # ══════════════════════════════════════════════════════════════════
+    # SMOOTH — merge + subdivide + shade smooth for continuous surface
+    # Merge welds overlapping verts, subdivision smooths seam artifacts,
+    # and topology stays stable across frames for fluid animation.
+    # ══════════════════════════════════════════════════════════════════
+
+    # Merge by Distance — weld overlapping vertices where beads intersect
+    merge = nodes.new('GeometryNodeMergeByDistance')
+    merge.location = (750, 0)
+    merge.inputs["Distance"].default_value = bead_radius * 0.2
+    links.new(realize.outputs["Geometry"], merge.inputs["Geometry"])
+
+    # Subdivision Surface — smooth out seam artifacts at bead intersections
+    subdiv = nodes.new('GeometryNodeSubdivisionSurface')
+    subdiv.location = (950, 0)
+    subdiv.inputs["Level"].default_value = 1
+    links.new(merge.outputs["Geometry"], subdiv.inputs["Mesh"])
+
+    # Set Shade Smooth — blend normals for final smooth appearance
+    shade_smooth = nodes.new('GeometryNodeSetShadeSmooth')
+    shade_smooth.location = (1150, 0)
+    shade_smooth.inputs["Shade Smooth"].default_value = True
+    links.new(subdiv.outputs["Mesh"], shade_smooth.inputs["Geometry"])
+
+    # Move output node further right
+    output_node.location = (1350, 0)
 
     # Connect to output
-    links.new(realize.outputs["Geometry"], output_node.inputs["Geometry"])
+    links.new(shade_smooth.outputs["Geometry"], output_node.inputs["Geometry"])
 
     # Assign node group to modifier
     mod.node_group = ng
 
-    # Set modifier input values via socket identifiers
+    # Set modifier input values
     for item in ng.interface.items_tree:
         if item.in_out != 'INPUT':
             continue
@@ -905,10 +1266,8 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
             continue
         if item.name == "Count":
             mod[ident] = linker_def.length_residues
-        elif item.name == "Bead Size":
-            mod[ident] = linker_def.bead_size
-        elif item.name == "Randomness":
-            mod[ident] = 0.3
+        elif item.name == "Bead Radius":
+            mod[ident] = bead_radius
 
 
 def _remove_beads_geometry_nodes(curve_obj: bpy.types.Object,
@@ -987,16 +1346,6 @@ def delete_linker_geometry(linker_def) -> None:
         # Clean up beads geometry nodes before removing object
         _remove_beads_geometry_nodes(obj, linker_def.uid)
 
-        # Clean up ribbon profile reference
-        if obj.data and hasattr(obj.data, 'bevel_object') and obj.data.bevel_object:
-            profile = obj.data.bevel_object
-            obj.data.bevel_object = None
-            if profile and profile.users <= 1:
-                profile_data = profile.data
-                bpy.data.objects.remove(profile, do_unlink=True)
-                if profile_data and profile_data.users == 0:
-                    bpy.data.curves.remove(profile_data)
-
         curve_data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
         if curve_data and curve_data.users == 0:
@@ -1020,24 +1369,6 @@ def toggle_linker_visibility(linker_def, visible: bool) -> None:
     linker_def.is_visible = visible
 
 
-def cleanup_ribbon_profiles():
-    """Clean up cached ribbon profile curves."""
-    global _ribbon_profile_cache
-
-    for width_key, profile_obj in list(_ribbon_profile_cache.items()):
-        try:
-            if profile_obj and profile_obj.name in bpy.data.objects:
-                if profile_obj.data and profile_obj.data.users <= 1:
-                    curve_data = profile_obj.data
-                    bpy.data.objects.remove(profile_obj, do_unlink=True)
-                    if curve_data and curve_data.users == 0:
-                        bpy.data.curves.remove(curve_data)
-        except (ReferenceError, KeyError):
-            pass
-        finally:
-            _ribbon_profile_cache.pop(width_key, None)
-
-
 def register():
     """Register geometry-related items."""
     pass
@@ -1045,4 +1376,4 @@ def register():
 
 def unregister():
     """Unregister geometry-related items."""
-    cleanup_ribbon_profiles()
+    pass

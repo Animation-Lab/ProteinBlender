@@ -1,8 +1,8 @@
 """Linker properties for ProteinBlender.
 
-Linkers connect chains/domains within or across puppets. At least one
-puppet must exist before creating a linker. The linker length is
-determined by residue count, which sets a hard constraint on max distance.
+Linkers connect chains/domains within a single puppet. A puppet must
+exist before creating a linker. The linker length is determined by
+residue count, which sets a hard constraint on max distance.
 
 All references use string-based IDs to ensure undo/redo stability.
 """
@@ -27,10 +27,10 @@ def generate_linker_uid():
 
 
 class PB2_LinkerDefinition(PropertyGroup):
-    """Definition of a flexible linker connecting chains within or across puppets.
+    """Definition of a flexible linker connecting chains within a single puppet.
 
-    Stored at scene level. Each endpoint references a puppet and a chain/domain
-    within that puppet. All object references use string names for undo/redo stability.
+    Stored at scene level. Both endpoints must belong to the same puppet.
+    All object references use string names for undo/redo stability.
     """
 
     # Unique identifier (never changes)
@@ -47,15 +47,10 @@ class PB2_LinkerDefinition(PropertyGroup):
         default="Linker"
     )
 
-    # Puppet references - one per endpoint (allows cross-puppet linkers)
-    puppet_id_a: StringProperty(
-        name="Puppet A",
-        description="ID of the puppet that endpoint A belongs to",
-        default=""
-    )
-    puppet_id_b: StringProperty(
-        name="Puppet B",
-        description="ID of the puppet that endpoint B belongs to",
+    # Puppet reference - both endpoints must belong to this puppet
+    puppet_id: StringProperty(
+        name="Puppet",
+        description="ID of the puppet this linker belongs to",
         default=""
     )
 
@@ -110,11 +105,10 @@ class PB2_LinkerDefinition(PropertyGroup):
         name="Style",
         description="Visual appearance of the linker",
         items=[
-            ('CARTOON', "Cartoon", "Smooth spaghetti-noodle tube (adjustable radius)"),
-            ('RIBBON', "Ribbon", "Flat protein-style ribbon (adjustable width)"),
+            ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
         ],
-        default='CARTOON'
+        default='TUBE'
     )
 
     color: FloatVectorProperty(
@@ -126,27 +120,11 @@ class PB2_LinkerDefinition(PropertyGroup):
     )
 
     # Style-specific size parameters
-    cartoon_radius: FloatProperty(
+    tube_radius: FloatProperty(
         name="Radius",
-        description="Radius of the cartoon tube",
-        default=0.04,
+        description="Radius of the tube",
+        default=0.01,
         min=0.005, max=0.5,
-        unit='LENGTH'
-    )
-
-    ribbon_width: FloatProperty(
-        name="Width",
-        description="Width of the ribbon",
-        default=0.15,
-        min=0.01, max=1.0,
-        unit='LENGTH'
-    )
-
-    bead_size: FloatProperty(
-        name="Bead Size",
-        description="Size of each amino acid bead",
-        default=0.025,
-        min=0.005, max=0.2,
         unit='LENGTH'
     )
 
@@ -155,10 +133,22 @@ class PB2_LinkerDefinition(PropertyGroup):
         name="Rendering",
         description="How the linker is rendered",
         items=[
-            ('QUICK', "Quick", "Styled Bezier curve (ribbon/tube) with catenary physics"),
+            ('QUICK', "Quick", "Styled Bezier curve (tube) with catenary physics"),
             ('DETAILED', "Detailed", "MolecularNodes peptide geometry along curve"),
         ],
         default='QUICK'
+    )
+
+    # Physics behavior
+    behavior: EnumProperty(
+        name="Behavior",
+        description="How the linker responds to slack (excess length beyond the endpoint distance)",
+        items=[
+            ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
+            ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
+            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
+        ],
+        default='GRAVITY'
     )
 
     # Rigid binding zone length at each end
@@ -200,14 +190,9 @@ class PB2_LinkerDefinition(PropertyGroup):
         """Max reach in Blender units: length_residues * 3.5A * 0.01 scale."""
         return self.length_residues * 0.035
 
-    def is_cross_puppet(self):
-        """True if this linker connects chains from different puppets."""
-        return (self.puppet_id_a != self.puppet_id_b
-                and self.puppet_id_a and self.puppet_id_b)
-
-    def involves_puppet(self, puppet_id):
-        """True if either endpoint belongs to the given puppet."""
-        return self.puppet_id_a == puppet_id or self.puppet_id_b == puppet_id
+    def belongs_to_puppet(self, puppet_id):
+        """True if this linker belongs to the given puppet."""
+        return self.puppet_id == puppet_id
 
     def get_endpoint_a_display(self):
         """Get display string for endpoint A."""
