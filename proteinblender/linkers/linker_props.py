@@ -107,7 +107,6 @@ class PB2_LinkerDefinition(PropertyGroup):
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
-            ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges — like a snake that swallowed bubble gum"),
         ],
         default='TUBE'
     )
@@ -124,8 +123,8 @@ class PB2_LinkerDefinition(PropertyGroup):
     tube_radius: FloatProperty(
         name="Radius",
         description="Radius of the tube",
-        default=0.01,
-        min=0.005, max=0.5,
+        default=0.005,
+        min=0.001, max=0.5,
         unit='LENGTH'
     )
 

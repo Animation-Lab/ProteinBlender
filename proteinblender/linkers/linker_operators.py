@@ -256,7 +256,6 @@ class PB2_OT_add_linker(Operator):
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
-            ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
         ],
         default='TUBE'
     )
@@ -281,8 +280,8 @@ class PB2_OT_add_linker(Operator):
     tube_radius: FloatProperty(
         name="Radius",
         description="Radius of the tube",
-        default=0.01,
-        min=0.005, max=0.5
+        default=0.005,
+        min=0.001, max=0.5
     )
 
     behavior: EnumProperty(
@@ -402,7 +401,7 @@ class PB2_OT_add_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style in ('TUBE', 'LUMPY_TUBE'):
+        if self.style == 'TUBE':
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")
@@ -637,7 +636,6 @@ class PB2_OT_edit_linker(Operator):
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
-            ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
         ]
     )
     rendering_mode: EnumProperty(
@@ -656,7 +654,7 @@ class PB2_OT_edit_linker(Operator):
         ]
     )
     color: FloatVectorProperty(name="Color", subtype='COLOR', size=4, min=0.0, max=1.0)
-    tube_radius: FloatProperty(name="Radius", min=0.005, max=0.5)
+    tube_radius: FloatProperty(name="Radius", default=0.005, min=0.001, max=0.5)
     binding_zone_residues: IntProperty(name="Binding Zone", min=1, max=10)
 
     def invoke(self, context, event):
@@ -691,7 +689,7 @@ class PB2_OT_edit_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style in ('TUBE', 'LUMPY_TUBE'):
+        if self.style == 'TUBE':
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")

@@ -839,9 +839,6 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
         # Set up style-specific geometry nodes
         if linker_def.style == 'BEADS':
             setup_beads_geometry_nodes(curve_obj, linker_def)
-        elif linker_def.style == 'LUMPY_TUBE':
-            setup_lumpy_tube_geometry_nodes(curve_obj, linker_def)
-
         # Set up detailed rendering mode if requested
         if linker_def.rendering_mode == 'DETAILED':
             setup_detailed_mode(linker_def, curve_obj)
@@ -959,34 +956,14 @@ def update_linker_curve(linker_def) -> bool:
 
     # Handle style-specific GN modifiers — only rebuild if missing
     beads_mod = obj.modifiers.get("LinkerBeads")
-    lumpy_mod = obj.modifiers.get("LinkerLumpyTube")
 
     if linker_def.style == 'BEADS':
         if not beads_mod or not beads_mod.node_group:
             setup_beads_geometry_nodes(obj, linker_def)
-        if lumpy_mod:
-            _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
-    elif linker_def.style == 'LUMPY_TUBE':
-        if not lumpy_mod or not lumpy_mod.node_group:
-            setup_lumpy_tube_geometry_nodes(obj, linker_def)
-            lumpy_mod = obj.modifiers.get("LinkerLumpyTube")
-        # Always sync Base Radius modifier input with current tube_radius
-        if lumpy_mod and lumpy_mod.node_group:
-            new_radius = linker_def.tube_radius if linker_def.tube_radius > 0 else 0.01
-            for item in lumpy_mod.node_group.interface.items_tree:
-                if item.in_out == 'INPUT' and item.name == "Base Radius":
-                    ident = item.identifier
-                    if ident in lumpy_mod:
-                        lumpy_mod[ident] = new_radius
-                    break
-        if beads_mod:
-            _remove_beads_geometry_nodes(obj, linker_def.uid)
     else:
         # TUBE style — remove any GN modifiers
         if beads_mod:
             _remove_beads_geometry_nodes(obj, linker_def.uid)
-        if lumpy_mod:
-            _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
 
     # Update material
     setup_linker_material(obj, linker_def)
@@ -1037,7 +1014,7 @@ def _apply_curve_style(curve_data, linker_def) -> None:
         # Smooth round tube
         curve_data.bevel_depth = linker_def.tube_radius
         curve_data.bevel_resolution = 6  # Smooth circle cross-section
-    elif style in ('BEADS', 'LUMPY_TUBE'):
+    elif style == 'BEADS':
         # No bevel on curve itself - geometry is added via geometry nodes
         curve_data.bevel_depth = 0
         curve_data.bevel_resolution = 0
@@ -1311,278 +1288,6 @@ def _remove_beads_geometry_nodes(curve_obj: bpy.types.Object,
 
 
 # ---------------------------------------------------------------------------
-# Lumpy Tube geometry nodes
-# ---------------------------------------------------------------------------
-
-def setup_lumpy_tube_geometry_nodes(curve_obj: bpy.types.Object,
-                                     linker_def) -> None:
-    """Set up geometry nodes for a 'lumpy tube' style.
-
-    Instances IcoSpheres along the curve to create bead shapes, then
-    applies noise displacement to deform them into lumpy, organic blobs
-    (like raisins, chewed gum, or molecular surface residues).
-
-    GN tree structure:
-      Input Curve
-        └─ ResampleCurve (bead count)
-            └─ InstanceOnPoints (IcoSphere, radius = base_radius × 4)
-                └─ RealizeInstances
-                    └─ Noise(Position) → SetPosition (lumpy deformation)
-                        └─ Shade Smooth → Output
-    """
-    mod_name = "LinkerLumpyTube"
-    mod = curve_obj.modifiers.get(mod_name)
-    if not mod:
-        mod = curve_obj.modifiers.new(mod_name, 'NODES')
-
-    ng_name = f"LinkerLumpyTube_{linker_def.uid}"
-    ng = bpy.data.node_groups.get(ng_name)
-    if ng:
-        bpy.data.node_groups.remove(ng)
-
-    ng = bpy.data.node_groups.new(ng_name, 'GeometryNodeTree')
-
-    base_radius = linker_def.tube_radius if linker_def.tube_radius > 0 else 0.01
-    bead_count = max(linker_def.length_residues * 3 // 4, 6)
-
-    # Interface sockets
-    ng.interface.new_socket(
-        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry'
-    )
-    ng.interface.new_socket(
-        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry'
-    )
-
-    count_socket = ng.interface.new_socket(
-        name="Bead Count", in_out='INPUT', socket_type='NodeSocketInt'
-    )
-    count_socket.default_value = bead_count
-    count_socket.min_value = 2
-
-    radius_socket = ng.interface.new_socket(
-        name="Base Radius", in_out='INPUT', socket_type='NodeSocketFloat'
-    )
-    radius_socket.default_value = base_radius
-    radius_socket.min_value = 0.001
-
-    nodes = ng.nodes
-    links = ng.links
-
-    # ── Group Input / Output ──
-    input_node = nodes.new('NodeGroupInput')
-    input_node.location = (-1400, 0)
-    output_node = nodes.new('NodeGroupOutput')
-    output_node.location = (1800, 0)
-
-    # ── Resample curve to bead positions ──
-    resample = nodes.new('GeometryNodeResampleCurve')
-    resample.location = (-1100, 0)
-    if hasattr(resample, 'mode'):
-        resample.mode = 'COUNT'
-    links.new(input_node.outputs["Geometry"], resample.inputs["Curve"])
-    links.new(input_node.outputs["Bead Count"], resample.inputs["Count"])
-
-    # ── Sphere radius = Base Radius × 5 (big enough to close gaps) ──
-    sphere_rad = nodes.new('ShaderNodeMath')
-    sphere_rad.operation = 'MULTIPLY'
-    sphere_rad.location = (-800, -350)
-    sphere_rad.inputs[1].default_value = 5.0
-    links.new(input_node.outputs["Base Radius"], sphere_rad.inputs[0])
-
-    # ── IcoSphere bead (subdivisions=3 → 642 verts, smooth enough) ──
-    ico = nodes.new('GeometryNodeMeshIcoSphere')
-    ico.location = (-800, -200)
-    ico.inputs["Subdivisions"].default_value = 3
-    links.new(sphere_rad.outputs[0], ico.inputs["Radius"])
-
-    # ══════════════════════════════════════════════════════════════════
-    # PER-AXIS RANDOM SCALE — dramatic size AND shape variation
-    # Each bead gets independent X/Y/Z scale factors so they look
-    # squished, elongated, or lopsided — like potatoes or chewing gum.
-    # Range [0.3, 2.2] gives dramatic differences between beads.
-    # ══════════════════════════════════════════════════════════════════
-
-    # Random Value for X scale
-    rand_x = nodes.new('FunctionNodeRandomValue')
-    rand_x.location = (-600, -500)
-    if hasattr(rand_x, 'data_type'):
-        rand_x.data_type = 'FLOAT'
-    rand_x.inputs["Min"].default_value = 0.5
-    rand_x.inputs["Max"].default_value = 2.0
-    rand_x.inputs["Seed"].default_value = 1
-
-    # Random Value for Y scale
-    rand_y = nodes.new('FunctionNodeRandomValue')
-    rand_y.location = (-600, -650)
-    if hasattr(rand_y, 'data_type'):
-        rand_y.data_type = 'FLOAT'
-    rand_y.inputs["Min"].default_value = 0.5
-    rand_y.inputs["Max"].default_value = 2.0
-    rand_y.inputs["Seed"].default_value = 2
-
-    # Random Value for Z scale
-    rand_z = nodes.new('FunctionNodeRandomValue')
-    rand_z.location = (-600, -800)
-    if hasattr(rand_z, 'data_type'):
-        rand_z.data_type = 'FLOAT'
-    rand_z.inputs["Min"].default_value = 0.5
-    rand_z.inputs["Max"].default_value = 2.0
-    rand_z.inputs["Seed"].default_value = 3
-
-    # Multiply each random factor by bead_radius equivalent
-    mul_x = nodes.new('ShaderNodeMath')
-    mul_x.operation = 'MULTIPLY'
-    mul_x.location = (-400, -500)
-    links.new(rand_x.outputs["Value"], mul_x.inputs[0])
-    mul_x.inputs[1].default_value = 1.0  # already scaled by sphere_rad
-
-    mul_y = nodes.new('ShaderNodeMath')
-    mul_y.operation = 'MULTIPLY'
-    mul_y.location = (-400, -650)
-    links.new(rand_y.outputs["Value"], mul_y.inputs[0])
-    mul_y.inputs[1].default_value = 1.0
-
-    mul_z = nodes.new('ShaderNodeMath')
-    mul_z.operation = 'MULTIPLY'
-    mul_z.location = (-400, -800)
-    links.new(rand_z.outputs["Value"], mul_z.inputs[0])
-    mul_z.inputs[1].default_value = 1.0
-
-    # Combine into per-instance scale vector
-    scale_vec = nodes.new('ShaderNodeCombineXYZ')
-    scale_vec.location = (-200, -650)
-    links.new(mul_x.outputs[0], scale_vec.inputs['X'])
-    links.new(mul_y.outputs[0], scale_vec.inputs['Y'])
-    links.new(mul_z.outputs[0], scale_vec.inputs['Z'])
-
-    # ── Random rotation per bead for extra variety ──
-    rand_rot = nodes.new('FunctionNodeRandomValue')
-    rand_rot.location = (-600, -950)
-    if hasattr(rand_rot, 'data_type'):
-        rand_rot.data_type = 'FLOAT_VECTOR'
-    rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
-    rand_rot.inputs["Max"].default_value = (6.283, 6.283, 6.283)
-    rand_rot.inputs["Seed"].default_value = 7
-
-    # ══════════════════════════════════════════════════════════════════
-    # NOISE DISPLACEMENT — applied to icosphere BEFORE instancing
-    # Using the icosphere's own local Position ensures the noise pattern
-    # is completely stable — it never shifts when the linker curve moves,
-    # eliminating the "stop-motion" shimmer in shadows and clipping.
-    # Per-bead variety comes from the random scale + rotation already
-    # applied during instancing.
-    # ══════════════════════════════════════════════════════════════════
-
-    pos_node = nodes.new('GeometryNodeInputPosition')
-    pos_node.location = (-700, -300)
-
-    noise = nodes.new('ShaderNodeTexNoise')
-    noise.location = (-500, -300)
-    noise.inputs["Scale"].default_value = 25.0     # enough bumps to stay lumpy
-    noise.inputs["Detail"].default_value = 5.0      # good surface detail
-    noise.inputs["Roughness"].default_value = 0.65  # moderate irregularity
-    links.new(pos_node.outputs["Position"], noise.inputs["Vector"])
-
-    # Map [0,1] → [-0.4, 0.6] — more pronounced bumps and dents
-    map_range = nodes.new('ShaderNodeMapRange')
-    map_range.location = (-300, -300)
-    map_range.inputs["From Min"].default_value = 0.0
-    map_range.inputs["From Max"].default_value = 1.0
-    map_range.inputs["To Min"].default_value = -0.4
-    map_range.inputs["To Max"].default_value = 0.6
-    links.new(noise.outputs["Fac"], map_range.inputs["Value"])
-
-    # Scale displacement by sphere radius
-    mul_disp = nodes.new('ShaderNodeMath')
-    mul_disp.operation = 'MULTIPLY'
-    mul_disp.location = (-100, -300)
-    links.new(map_range.outputs["Result"], mul_disp.inputs[0])
-    links.new(sphere_rad.outputs[0], mul_disp.inputs[1])
-
-    # Displace along surface normal
-    normal_node = nodes.new('GeometryNodeInputNormal')
-    normal_node.location = (-300, -500)
-
-    vec_scale = nodes.new('ShaderNodeVectorMath')
-    vec_scale.operation = 'SCALE'
-    vec_scale.location = (-100, -400)
-    links.new(normal_node.outputs["Normal"], vec_scale.inputs[0])
-    links.new(mul_disp.outputs[0], vec_scale.inputs["Scale"])
-
-    # Apply noise displacement to icosphere BEFORE instancing
-    set_pos = nodes.new('GeometryNodeSetPosition')
-    set_pos.location = (-700, -100)
-    links.new(ico.outputs["Mesh"], set_pos.inputs["Geometry"])
-    links.new(vec_scale.outputs["Vector"], set_pos.inputs["Offset"])
-
-    # ── Instance displaced spheres on resampled curve points ──
-    instance = nodes.new('GeometryNodeInstanceOnPoints')
-    instance.location = (-500, 0)
-    links.new(resample.outputs["Curve"], instance.inputs["Points"])
-    links.new(set_pos.outputs["Geometry"], instance.inputs["Instance"])
-    links.new(scale_vec.outputs["Vector"], instance.inputs["Scale"])
-    links.new(rand_rot.outputs["Value"], instance.inputs["Rotation"])
-
-    # ── Realize instances into editable mesh ──
-    realize = nodes.new('GeometryNodeRealizeInstances')
-    realize.location = (-300, 0)
-    links.new(instance.outputs["Instances"], realize.inputs["Geometry"])
-
-    # ══════════════════════════════════════════════════════════════════
-    # SMOOTH — merge + subdivide + shade smooth for continuous surface
-    # Merge welds overlapping verts where beads intersect, subdivision
-    # smooths out any remaining faceting, shade smooth blends normals.
-    # This eliminates all jagged edges.
-    # ══════════════════════════════════════════════════════════════════
-
-    # Merge by Distance — weld overlapping vertices where beads intersect
-    merge = nodes.new('GeometryNodeMergeByDistance')
-    merge.location = (1000, 0)
-    merge.inputs["Distance"].default_value = base_radius * 1.0
-    links.new(realize.outputs["Geometry"], merge.inputs["Geometry"])
-
-    # Shade Smooth — blend normals for smooth appearance
-    # (IcoSphere subdiv 3 already has 642 verts per bead = smooth enough,
-    #  no need for Subdivision Surface which would 4x the mesh)
-    shade_smooth = nodes.new('GeometryNodeSetShadeSmooth')
-    shade_smooth.location = (1200, 0)
-    shade_smooth.inputs["Shade Smooth"].default_value = True
-    links.new(merge.outputs["Geometry"], shade_smooth.inputs["Geometry"])
-
-    links.new(shade_smooth.outputs["Geometry"], output_node.inputs["Geometry"])
-
-    # Assign to modifier
-    mod.node_group = ng
-
-    # Set modifier input values
-    for item in ng.interface.items_tree:
-        if item.in_out != 'INPUT':
-            continue
-        ident = item.identifier
-        if ident not in mod:
-            continue
-        if item.name == "Bead Count":
-            mod[ident] = bead_count
-        elif item.name == "Base Radius":
-            mod[ident] = base_radius
-
-
-def _remove_lumpy_tube_geometry_nodes(curve_obj: bpy.types.Object,
-                                       linker_uid: str) -> None:
-    """Remove lumpy tube geometry nodes from a linker curve."""
-    if not curve_obj:
-        return
-    mod = curve_obj.modifiers.get("LinkerLumpyTube")
-    if mod:
-        curve_obj.modifiers.remove(mod)
-
-    ng_name = f"LinkerLumpyTube_{linker_uid}"
-    ng = bpy.data.node_groups.get(ng_name)
-    if ng and ng.users == 0:
-        bpy.data.node_groups.remove(ng)
-
-
-# ---------------------------------------------------------------------------
 # Detailed rendering mode (MN Peptide to Curve)
 # ---------------------------------------------------------------------------
 
@@ -1642,7 +1347,6 @@ def delete_linker_geometry(linker_def) -> None:
     if obj:
         # Clean up all style-specific geometry nodes before removing object
         _remove_beads_geometry_nodes(obj, linker_def.uid)
-        _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
 
         curve_data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)

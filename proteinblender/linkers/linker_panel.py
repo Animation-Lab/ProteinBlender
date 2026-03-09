@@ -31,7 +31,7 @@ class PB2_UL_linkers(UIList):
                 row.label(text=f"{linker.name} (Invalid)", icon='ERROR')
 
             # Style icon
-            style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE', 'LUMPY_TUBE': 'FORCE_TURBULENCE'}
+            style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
             row.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
 
             # Rendering mode indicator
@@ -157,7 +157,7 @@ class PB2_PT_linkers(Panel):
         col.prop(linker, "rendering_mode")
         col.prop(linker, "color")
 
-        if linker.style in ('TUBE', 'LUMPY_TUBE'):
+        if linker.style == 'TUBE':
             col.prop(linker, "tube_radius")
 
         col.prop(linker, "binding_zone_residues")
