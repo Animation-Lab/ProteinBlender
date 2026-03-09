@@ -841,6 +841,8 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
             setup_beads_geometry_nodes(curve_obj, linker_def)
         elif linker_def.style == 'LUMPY_TUBE':
             setup_lumpy_tube_geometry_nodes(curve_obj, linker_def)
+        elif linker_def.style == 'RESIDUES':
+            setup_residues_geometry_nodes(curve_obj, linker_def)
 
         # Set up detailed rendering mode if requested
         if linker_def.rendering_mode == 'DETAILED':
@@ -960,12 +962,15 @@ def update_linker_curve(linker_def) -> bool:
     # Handle style-specific GN modifiers — only rebuild if missing
     beads_mod = obj.modifiers.get("LinkerBeads")
     lumpy_mod = obj.modifiers.get("LinkerLumpyTube")
+    residues_mod = obj.modifiers.get("LinkerResidues")
 
     if linker_def.style == 'BEADS':
         if not beads_mod or not beads_mod.node_group:
             setup_beads_geometry_nodes(obj, linker_def)
         if lumpy_mod:
             _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
+        if residues_mod:
+            _remove_residues_geometry_nodes(obj, linker_def.uid)
     elif linker_def.style == 'LUMPY_TUBE':
         if not lumpy_mod or not lumpy_mod.node_group:
             setup_lumpy_tube_geometry_nodes(obj, linker_def)
@@ -981,12 +986,37 @@ def update_linker_curve(linker_def) -> bool:
                     break
         if beads_mod:
             _remove_beads_geometry_nodes(obj, linker_def.uid)
+        if residues_mod:
+            _remove_residues_geometry_nodes(obj, linker_def.uid)
+    elif linker_def.style == 'RESIDUES':
+        if not residues_mod or not residues_mod.node_group:
+            setup_residues_geometry_nodes(obj, linker_def)
+            residues_mod = obj.modifiers.get("LinkerResidues")
+        # Sync Tube Radius and Count modifier inputs
+        if residues_mod and residues_mod.node_group:
+            new_radius = linker_def.tube_radius if linker_def.tube_radius > 0 else 0.01
+            resample_count = linker_def.length_residues * 4
+            for item in residues_mod.node_group.interface.items_tree:
+                if item.in_out == 'INPUT':
+                    ident = item.identifier
+                    if ident not in residues_mod:
+                        continue
+                    if item.name == "Tube Radius":
+                        residues_mod[ident] = new_radius
+                    elif item.name == "Count":
+                        residues_mod[ident] = resample_count
+        if beads_mod:
+            _remove_beads_geometry_nodes(obj, linker_def.uid)
+        if lumpy_mod:
+            _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
     else:
         # TUBE style — remove any GN modifiers
         if beads_mod:
             _remove_beads_geometry_nodes(obj, linker_def.uid)
         if lumpy_mod:
             _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
+        if residues_mod:
+            _remove_residues_geometry_nodes(obj, linker_def.uid)
 
     # Update material
     setup_linker_material(obj, linker_def)
@@ -1037,7 +1067,7 @@ def _apply_curve_style(curve_data, linker_def) -> None:
         # Smooth round tube
         curve_data.bevel_depth = linker_def.tube_radius
         curve_data.bevel_resolution = 6  # Smooth circle cross-section
-    elif style in ('BEADS', 'LUMPY_TUBE'):
+    elif style in ('BEADS', 'LUMPY_TUBE', 'RESIDUES'):
         # No bevel on curve itself - geometry is added via geometry nodes
         curve_data.bevel_depth = 0
         curve_data.bevel_resolution = 0
@@ -1838,8 +1868,10 @@ def delete_linker_geometry(linker_def) -> None:
     """Remove linker geometry from scene."""
     obj = bpy.data.objects.get(linker_def.curve_object_name)
     if obj:
-        # Clean up beads geometry nodes before removing object
+        # Clean up all style-specific geometry nodes before removing object
         _remove_beads_geometry_nodes(obj, linker_def.uid)
+        _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
+        _remove_residues_geometry_nodes(obj, linker_def.uid)
 
         curve_data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)

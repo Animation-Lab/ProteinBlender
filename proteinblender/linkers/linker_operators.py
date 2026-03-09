@@ -256,6 +256,8 @@ class PB2_OT_add_linker(Operator):
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
+            ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
+            ('RESIDUES', "Residues", "Cartoon backbone coil with per-residue bulges — standard structural biology representation"),
         ],
         default='TUBE'
     )
@@ -304,6 +306,10 @@ class PB2_OT_add_linker(Operator):
     )
 
     def invoke(self, context, event):
+        # Default endpoint B to a different chain than A when possible
+        items = _build_chain_items_for_puppet(context, self.puppet_selector)
+        if len(items) >= 2:
+            self.endpoint_b_item = f"B_{items[1][0]}"
         return context.window_manager.invoke_props_dialog(self, width=450)
 
     def draw(self, context):
@@ -397,7 +403,7 @@ class PB2_OT_add_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style == 'TUBE':
+        if self.style in ('TUBE', 'LUMPY_TUBE', 'RESIDUES'):
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")
@@ -429,7 +435,12 @@ class PB2_OT_add_linker(Operator):
 
         logger.info(f"Linker create: chain_a='{chain_a}' chain_b='{chain_b}'")
 
-        # Validate not linking same residue on same chain
+        # Validate not linking same chain to itself
+        if item_a == item_b:
+            self.report({'ERROR'}, "Start and end must be different chains")
+            return {'CANCELLED'}
+
+        # Validate not linking same residue on same chain (safety net)
         if (item_a == item_b and
             self.endpoint_a_residue == self.endpoint_b_residue):
             self.report({'ERROR'}, "Cannot link a residue to itself")
@@ -627,6 +638,8 @@ class PB2_OT_edit_linker(Operator):
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
+            ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
+            ('RESIDUES', "Residues", "Cartoon backbone coil with per-residue bulges — standard structural biology representation"),
         ]
     )
     rendering_mode: EnumProperty(
@@ -680,7 +693,7 @@ class PB2_OT_edit_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style == 'TUBE':
+        if self.style in ('TUBE', 'LUMPY_TUBE', 'RESIDUES'):
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")
