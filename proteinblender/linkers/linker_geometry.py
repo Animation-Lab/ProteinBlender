@@ -841,8 +841,6 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
             setup_beads_geometry_nodes(curve_obj, linker_def)
         elif linker_def.style == 'LUMPY_TUBE':
             setup_lumpy_tube_geometry_nodes(curve_obj, linker_def)
-        elif linker_def.style == 'RESIDUES':
-            setup_residues_geometry_nodes(curve_obj, linker_def)
 
         # Set up detailed rendering mode if requested
         if linker_def.rendering_mode == 'DETAILED':
@@ -962,15 +960,12 @@ def update_linker_curve(linker_def) -> bool:
     # Handle style-specific GN modifiers — only rebuild if missing
     beads_mod = obj.modifiers.get("LinkerBeads")
     lumpy_mod = obj.modifiers.get("LinkerLumpyTube")
-    residues_mod = obj.modifiers.get("LinkerResidues")
 
     if linker_def.style == 'BEADS':
         if not beads_mod or not beads_mod.node_group:
             setup_beads_geometry_nodes(obj, linker_def)
         if lumpy_mod:
             _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
-        if residues_mod:
-            _remove_residues_geometry_nodes(obj, linker_def.uid)
     elif linker_def.style == 'LUMPY_TUBE':
         if not lumpy_mod or not lumpy_mod.node_group:
             setup_lumpy_tube_geometry_nodes(obj, linker_def)
@@ -986,37 +981,12 @@ def update_linker_curve(linker_def) -> bool:
                     break
         if beads_mod:
             _remove_beads_geometry_nodes(obj, linker_def.uid)
-        if residues_mod:
-            _remove_residues_geometry_nodes(obj, linker_def.uid)
-    elif linker_def.style == 'RESIDUES':
-        if not residues_mod or not residues_mod.node_group:
-            setup_residues_geometry_nodes(obj, linker_def)
-            residues_mod = obj.modifiers.get("LinkerResidues")
-        # Sync Tube Radius and Count modifier inputs
-        if residues_mod and residues_mod.node_group:
-            new_radius = linker_def.tube_radius if linker_def.tube_radius > 0 else 0.01
-            resample_count = linker_def.length_residues * 4
-            for item in residues_mod.node_group.interface.items_tree:
-                if item.in_out == 'INPUT':
-                    ident = item.identifier
-                    if ident not in residues_mod:
-                        continue
-                    if item.name == "Tube Radius":
-                        residues_mod[ident] = new_radius
-                    elif item.name == "Count":
-                        residues_mod[ident] = resample_count
-        if beads_mod:
-            _remove_beads_geometry_nodes(obj, linker_def.uid)
-        if lumpy_mod:
-            _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
     else:
         # TUBE style — remove any GN modifiers
         if beads_mod:
             _remove_beads_geometry_nodes(obj, linker_def.uid)
         if lumpy_mod:
             _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
-        if residues_mod:
-            _remove_residues_geometry_nodes(obj, linker_def.uid)
 
     # Update material
     setup_linker_material(obj, linker_def)
@@ -1067,7 +1037,7 @@ def _apply_curve_style(curve_data, linker_def) -> None:
         # Smooth round tube
         curve_data.bevel_depth = linker_def.tube_radius
         curve_data.bevel_resolution = 6  # Smooth circle cross-section
-    elif style in ('BEADS', 'LUMPY_TUBE', 'RESIDUES'):
+    elif style in ('BEADS', 'LUMPY_TUBE'):
         # No bevel on curve itself - geometry is added via geometry nodes
         curve_data.bevel_depth = 0
         curve_data.bevel_resolution = 0
@@ -1613,204 +1583,6 @@ def _remove_lumpy_tube_geometry_nodes(curve_obj: bpy.types.Object,
 
 
 # ---------------------------------------------------------------------------
-# Residues geometry nodes (cartoon backbone coil with per-residue bulges)
-# ---------------------------------------------------------------------------
-
-def setup_residues_geometry_nodes(curve_obj: bpy.types.Object,
-                                   linker_def) -> None:
-    """Set up geometry nodes for a 'residues' style — cartoon backbone coil.
-
-    Creates a worm/putty representation where the tube radius oscillates
-    sinusoidally along the curve, producing one visible bulge per residue.
-    This mimics the cartoon coil look from PyMOL/ChimeraX.
-
-    GN tree structure:
-      Input Curve
-        └─ ResampleCurve (COUNT = length_residues * 4)
-            └─ SplineParameter × num_residues × 2π → Sin
-                → MapRange [-1,1] → [tube_radius*0.7, tube_radius*1.3]
-                    └─ SetCurveRadius
-                        └─ CurveToMesh (circle profile, 8 verts, fill caps)
-                            └─ SetShadeSmooth → Output
-
-    Args:
-        curve_obj: The linker curve object
-        linker_def: PB2_LinkerDefinition PropertyGroup
-    """
-    mod_name = "LinkerResidues"
-    mod = curve_obj.modifiers.get(mod_name)
-    if not mod:
-        mod = curve_obj.modifiers.new(mod_name, 'NODES')
-
-    ng_name = f"LinkerResidues_{linker_def.uid}"
-    ng = bpy.data.node_groups.get(ng_name)
-    if ng:
-        bpy.data.node_groups.remove(ng)
-
-    ng = bpy.data.node_groups.new(ng_name, 'GeometryNodeTree')
-
-    tube_radius = linker_def.tube_radius if linker_def.tube_radius > 0 else 0.01
-    num_residues = linker_def.length_residues
-    resample_count = num_residues * 4  # 4x for smooth sine wave
-
-    # ── Interface sockets ──
-    ng.interface.new_socket(
-        name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry'
-    )
-    ng.interface.new_socket(
-        name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry'
-    )
-
-    count_socket = ng.interface.new_socket(
-        name="Count", in_out='INPUT', socket_type='NodeSocketInt'
-    )
-    count_socket.default_value = resample_count
-    count_socket.min_value = 4
-
-    radius_socket = ng.interface.new_socket(
-        name="Tube Radius", in_out='INPUT', socket_type='NodeSocketFloat'
-    )
-    radius_socket.default_value = tube_radius
-    radius_socket.min_value = 0.001
-
-    nodes = ng.nodes
-    links = ng.links
-
-    # ── Group Input / Output ──
-    input_node = nodes.new('NodeGroupInput')
-    input_node.location = (-1200, 0)
-    output_node = nodes.new('NodeGroupOutput')
-    output_node.location = (1200, 0)
-
-    # ── Resample Curve (COUNT = length_residues * 4) ──
-    resample = nodes.new('GeometryNodeResampleCurve')
-    resample.location = (-900, 0)
-    if hasattr(resample, 'mode'):
-        resample.mode = 'COUNT'
-    links.new(input_node.outputs["Geometry"], resample.inputs["Curve"])
-    links.new(input_node.outputs["Count"], resample.inputs["Count"])
-
-    # ══════════════════════════════════════════════════════════════════
-    # SINUSOIDAL RADIUS — one bulge per residue
-    #
-    # SplineParameter (0..1) × num_residues × 2π → Sin → MapRange
-    #   Maps [-1, 1] to [tube_radius * 0.7, tube_radius * 1.3]
-    # ══════════════════════════════════════════════════════════════════
-
-    # SplineParameter — gives 0..1 along the curve
-    spline_param = nodes.new('GeometryNodeSplineParameter')
-    spline_param.location = (-700, -200)
-
-    # Multiply by num_residues: SplineParameter × num_residues
-    mul_residues = nodes.new('ShaderNodeMath')
-    mul_residues.operation = 'MULTIPLY'
-    mul_residues.location = (-500, -200)
-    mul_residues.inputs[1].default_value = float(num_residues)
-    links.new(spline_param.outputs["Factor"], mul_residues.inputs[0])
-
-    # Multiply by 2π: (SplineParameter × num_residues) × 2π
-    mul_2pi = nodes.new('ShaderNodeMath')
-    mul_2pi.operation = 'MULTIPLY'
-    mul_2pi.location = (-300, -200)
-    mul_2pi.inputs[1].default_value = 2.0 * math.pi
-    links.new(mul_residues.outputs[0], mul_2pi.inputs[0])
-
-    # Sin
-    sin_node = nodes.new('ShaderNodeMath')
-    sin_node.operation = 'SINE'
-    sin_node.location = (-100, -200)
-    links.new(mul_2pi.outputs[0], sin_node.inputs[0])
-
-    # ── Compute min/max radius from Tube Radius input socket ──
-    # min_radius = Tube Radius × 0.7
-    mul_min = nodes.new('ShaderNodeMath')
-    mul_min.operation = 'MULTIPLY'
-    mul_min.location = (-300, -400)
-    mul_min.inputs[1].default_value = 0.7
-    links.new(input_node.outputs["Tube Radius"], mul_min.inputs[0])
-
-    # max_radius = Tube Radius × 1.3
-    mul_max = nodes.new('ShaderNodeMath')
-    mul_max.operation = 'MULTIPLY'
-    mul_max.location = (-300, -550)
-    mul_max.inputs[1].default_value = 1.3
-    links.new(input_node.outputs["Tube Radius"], mul_max.inputs[0])
-
-    # MapRange: Sin output [-1, 1] → [min_radius, max_radius]
-    map_range = nodes.new('ShaderNodeMapRange')
-    map_range.location = (100, -300)
-    map_range.inputs["From Min"].default_value = -1.0
-    map_range.inputs["From Max"].default_value = 1.0
-    links.new(sin_node.outputs[0], map_range.inputs["Value"])
-    links.new(mul_min.outputs[0], map_range.inputs["To Min"])
-    links.new(mul_max.outputs[0], map_range.inputs["To Max"])
-
-    # ── Set Curve Radius ──
-    set_radius = nodes.new('GeometryNodeSetCurveRadius')
-    set_radius.location = (300, 0)
-    links.new(resample.outputs["Curve"], set_radius.inputs["Curve"])
-    links.new(map_range.outputs["Result"], set_radius.inputs["Radius"])
-
-    # ══════════════════════════════════════════════════════════════════
-    # CURVE TO MESH — circle profile, 8 verts, fill caps
-    # ══════════════════════════════════════════════════════════════════
-
-    # Circle profile curve: mode='POINTS', Resolution=8, Radius=1.0
-    # (radius is 1.0 because it will be scaled by the curve radius)
-    circle_profile = nodes.new('GeometryNodeCurvePrimitiveCircle')
-    circle_profile.location = (300, -300)
-    circle_profile.mode = 'POINTS'
-    circle_profile.inputs["Resolution"].default_value = 8
-    circle_profile.inputs["Radius"].default_value = 1.0
-
-    # Curve to Mesh — extrude curve along circle profile
-    curve_to_mesh = nodes.new('GeometryNodeCurveToMesh')
-    curve_to_mesh.location = (550, 0)
-    curve_to_mesh.inputs["Fill Caps"].default_value = True
-    links.new(set_radius.outputs["Curve"], curve_to_mesh.inputs["Curve"])
-    links.new(circle_profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
-
-    # ── Set Shade Smooth ──
-    shade_smooth = nodes.new('GeometryNodeSetShadeSmooth')
-    shade_smooth.location = (800, 0)
-    shade_smooth.inputs["Shade Smooth"].default_value = True
-    links.new(curve_to_mesh.outputs["Mesh"], shade_smooth.inputs["Geometry"])
-
-    # ── Connect to output ──
-    links.new(shade_smooth.outputs["Geometry"], output_node.inputs["Geometry"])
-
-    # Assign node group to modifier
-    mod.node_group = ng
-
-    # Set modifier input values
-    for item in ng.interface.items_tree:
-        if item.in_out != 'INPUT':
-            continue
-        ident = item.identifier
-        if ident not in mod:
-            continue
-        if item.name == "Count":
-            mod[ident] = resample_count
-        elif item.name == "Tube Radius":
-            mod[ident] = tube_radius
-
-
-def _remove_residues_geometry_nodes(curve_obj: bpy.types.Object,
-                                     linker_uid: str) -> None:
-    """Remove residues geometry nodes from a linker curve."""
-    if not curve_obj:
-        return
-    mod = curve_obj.modifiers.get("LinkerResidues")
-    if mod:
-        curve_obj.modifiers.remove(mod)
-
-    ng_name = f"LinkerResidues_{linker_uid}"
-    ng = bpy.data.node_groups.get(ng_name)
-    if ng and ng.users == 0:
-        bpy.data.node_groups.remove(ng)
-
-
-# ---------------------------------------------------------------------------
 # Detailed rendering mode (MN Peptide to Curve)
 # ---------------------------------------------------------------------------
 
@@ -1871,7 +1643,6 @@ def delete_linker_geometry(linker_def) -> None:
         # Clean up all style-specific geometry nodes before removing object
         _remove_beads_geometry_nodes(obj, linker_def.uid)
         _remove_lumpy_tube_geometry_nodes(obj, linker_def.uid)
-        _remove_residues_geometry_nodes(obj, linker_def.uid)
 
         curve_data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)

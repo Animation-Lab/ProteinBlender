@@ -108,7 +108,6 @@ class PB2_LinkerDefinition(PropertyGroup):
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
             ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges — like a snake that swallowed bubble gum"),
-            ('RESIDUES', "Residues", "Cartoon backbone coil with per-residue bulges — standard structural biology representation"),
         ],
         default='TUBE'
     )

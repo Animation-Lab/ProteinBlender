@@ -257,7 +257,6 @@ class PB2_OT_add_linker(Operator):
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
             ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
-            ('RESIDUES', "Residues", "Cartoon backbone coil with per-residue bulges — standard structural biology representation"),
         ],
         default='TUBE'
     )
@@ -403,7 +402,7 @@ class PB2_OT_add_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style in ('TUBE', 'LUMPY_TUBE', 'RESIDUES'):
+        if self.style in ('TUBE', 'LUMPY_TUBE'):
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")
@@ -639,7 +638,6 @@ class PB2_OT_edit_linker(Operator):
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
             ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
             ('LUMPY_TUBE', "Lumpy Tube", "Tube with irregular bulges"),
-            ('RESIDUES', "Residues", "Cartoon backbone coil with per-residue bulges — standard structural biology representation"),
         ]
     )
     rendering_mode: EnumProperty(
@@ -693,7 +691,7 @@ class PB2_OT_edit_linker(Operator):
         box.prop(self, "behavior")
         box.prop(self, "color")
 
-        if self.style in ('TUBE', 'LUMPY_TUBE', 'RESIDUES'):
+        if self.style in ('TUBE', 'LUMPY_TUBE'):
             box.prop(self, "tube_radius")
 
         box.prop(self, "binding_zone_residues")
