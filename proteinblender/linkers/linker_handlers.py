@@ -159,6 +159,7 @@ def linker_constraint_and_update_handler(scene, depsgraph):
             max_reach = linker.length_residues * BU_PER_RESIDUE
 
             # Enforce distance constraint (individual domain moved within puppet)
+            corrected = False
             if distance > max_reach:
                 overshoot = distance - max_reach
                 direction_world = (pos_b - pos_a).normalized()
@@ -170,6 +171,7 @@ def linker_constraint_and_update_handler(scene, depsgraph):
                             obj_a, direction_world * overshoot
                         )
                         obj_a.location += correction
+                        corrected = True
                 elif moved_b and not moved_a:
                     obj_b = bpy.data.objects.get(obj_b_name)
                     if obj_b:
@@ -177,6 +179,7 @@ def linker_constraint_and_update_handler(scene, depsgraph):
                             obj_b, -direction_world * overshoot
                         )
                         obj_b.location += correction
+                        corrected = True
                 elif moved_a and moved_b:
                     obj_a = bpy.data.objects.get(obj_a_name)
                     obj_b = bpy.data.objects.get(obj_b_name)
@@ -191,6 +194,13 @@ def linker_constraint_and_update_handler(scene, depsgraph):
                             obj_b, -direction_world * half_overshoot
                         )
                         obj_b.location += correction
+                    corrected = True
+
+            # Force matrix_world recalculation after location corrections
+            # so update_linker_curve reads the corrected positions.
+            # _constraint_active guard prevents re-entrancy.
+            if corrected:
+                bpy.context.view_layer.update()
 
             # Update linker curve geometry
             update_linker_curve(linker)
