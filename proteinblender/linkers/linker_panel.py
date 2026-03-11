@@ -159,6 +159,11 @@ class PB2_PT_linkers(Panel):
 
         if linker.style == 'TUBE':
             col.prop(linker, "tube_radius")
+        elif linker.style == 'BEADS':
+            col.prop(linker, "bead_radius")
+            col.prop(linker, "bead_radius_variance")
+            col.prop(linker, "bead_overlap")
+            col.prop(linker, "bead_jitter")
 
         col.prop(linker, "binding_zone_residues")
 

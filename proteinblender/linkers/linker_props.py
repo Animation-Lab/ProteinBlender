@@ -26,6 +26,30 @@ def generate_linker_uid():
     return str(uuid.uuid4())[:8]
 
 
+def _on_linker_bead_param_update(self, context):
+    """Called when bead radius or overlap is changed in the UI."""
+    obj = bpy.data.objects.get(self.curve_object_name)
+    if not obj:
+        return
+    try:
+        from .linker_geometry import setup_beads_geometry_nodes
+        setup_beads_geometry_nodes(obj, self)
+    except Exception:
+        pass
+
+
+def _on_linker_color_update(self, context):
+    """Called when linker color is changed in the UI."""
+    obj = bpy.data.objects.get(self.curve_object_name)
+    if not obj:
+        return
+    try:
+        from .linker_geometry import setup_linker_material
+        setup_linker_material(obj, self)
+    except Exception:
+        pass
+
+
 class PB2_LinkerDefinition(PropertyGroup):
     """Definition of a flexible linker connecting chains within a single puppet.
 
@@ -106,7 +130,7 @@ class PB2_LinkerDefinition(PropertyGroup):
         description="Visual appearance of the linker",
         items=[
             ('TUBE', "Tube", "Smooth tube (adjustable radius)"),
-            ('BEADS', "Beads", "Irregular beads representing each amino acid residue"),
+            ('BEADS', "Beads", "Spherical beads with random sizing"),
         ],
         default='TUBE'
     )
@@ -116,7 +140,8 @@ class PB2_LinkerDefinition(PropertyGroup):
         subtype='COLOR',
         size=4,
         min=0.0, max=1.0,
-        default=(0.7, 0.7, 0.7, 1.0)
+        default=(0.7, 0.7, 0.7, 1.0),
+        update=_on_linker_color_update
     )
 
     # Style-specific size parameters
@@ -126,6 +151,42 @@ class PB2_LinkerDefinition(PropertyGroup):
         default=0.005,
         min=0.001, max=0.5,
         unit='LENGTH'
+    )
+
+    bead_radius: FloatProperty(
+        name="Bead Radius",
+        description="Base radius of each bead",
+        default=0.020,
+        min=0.001, max=0.1,
+        unit='LENGTH',
+        update=_on_linker_bead_param_update
+    )
+
+    bead_overlap: FloatProperty(
+        name="Bead Overlap",
+        description="Fraction of overlap between adjacent beads (0 = touching, no overlap)",
+        default=0.3,
+        min=0.0, max=0.95,
+        subtype='FACTOR',
+        update=_on_linker_bead_param_update
+    )
+
+    bead_jitter: FloatProperty(
+        name="Bead Jitter",
+        description="Random positional offset perpendicular to the curve",
+        default=0.3,
+        min=0.0, max=1.0,
+        subtype='FACTOR',
+        update=_on_linker_bead_param_update
+    )
+
+    bead_radius_variance: FloatProperty(
+        name="Radius Variance",
+        description="How much bead sizes vary (0 = all same size, 1 = max variation)",
+        default=0.5,
+        min=0.0, max=1.0,
+        subtype='FACTOR',
+        update=_on_linker_bead_param_update
     )
 
     # Rendering mode

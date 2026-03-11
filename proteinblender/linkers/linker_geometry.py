@@ -975,6 +975,19 @@ def update_linker_curve(linker_def) -> bool:
 # Material
 # ---------------------------------------------------------------------------
 
+def _get_bsdf_color_input(bsdf):
+    """Get the color input socket from a Principled BSDF node.
+
+    Handles Blender version differences: 'Base Color' (pre-4.0)
+    vs 'Color' (4.0+).
+    """
+    if "Base Color" in bsdf.inputs:
+        return bsdf.inputs["Base Color"]
+    if "Color" in bsdf.inputs:
+        return bsdf.inputs["Color"]
+    return None
+
+
 def setup_linker_material(obj: bpy.types.Object, linker_def) -> None:
     """Create and assign material for linker."""
     mat_name = f"Linker_{linker_def.uid}_material"
@@ -989,7 +1002,9 @@ def setup_linker_material(obj: bpy.types.Object, linker_def) -> None:
 
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf:
-        bsdf.inputs["Base Color"].default_value = linker_def.color
+        color_input = _get_bsdf_color_input(bsdf)
+        if color_input:
+            color_input.default_value = linker_def.color
 
     if obj.data.materials:
         obj.data.materials[0] = mat
@@ -1022,19 +1037,18 @@ def _apply_curve_style(curve_data, linker_def) -> None:
 
 def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
                                 linker_def) -> None:
-    """Set up geometry nodes for a 'meaty pearl necklace' bead style.
+    """Set up geometry nodes for overlapping spherical beads.
 
-    Creates overlapping, misshapen beads — like a surface rendering of an
-    intrinsically disordered region.
-
-    Bead radius is auto-calculated from residue spacing so beads overlap
-    slightly, giving a continuous chain look with no gaps.
+    Simple and fast: UV spheres with random sizes placed along the curve
+    with a small positional jitter perpendicular to the curve direction.
+    No surface merging — just overlapping spheres with shade smooth.
 
     GN tree structure:
       Input Curve
-        └─ ResampleCurve (COUNT = length_residues)
-            └─ InstanceOnPoints (noise-displaced ico spheres with per-axis random scale)
-                └─ RealizeInstances → MergeByDistance → SetShadeSmooth → Output
+        -> ResampleCurve (COUNT)
+           -> SetPosition (random XYZ jitter offset)
+           -> InstanceOnPoints (UV sphere, uniform random scale)
+              -> SetMaterial -> SetShadeSmooth -> Output
 
     Args:
         curve_obj: The linker curve object
@@ -1053,28 +1067,36 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
 
     ng = bpy.data.node_groups.new(ng_name, 'GeometryNodeTree')
 
-    # Auto-calculate sizes from residue spacing
-    # bead_radius = spacing * 0.85 → heavy overlap so beads merge into one surface
-    bead_radius = BU_PER_RESIDUE * 0.85  # ~0.030 BU — deep overlap
+    bead_radius = linker_def.bead_radius
+    bead_overlap = linker_def.bead_overlap
 
-    # Create interface sockets
+    # Variance controls scale range: 0 = all same size, 1 = [1.0, 1.5]
+    # Beads only grow larger — spacing is based on base size so beads
+    # always touch at overlap=0, and any variance adds more contact.
+    variance = linker_def.bead_radius_variance
+    max_scale = 1.0 + (variance * 0.5)  # 1.0 at var=0, 1.5 at var=1
+
+    # Overlap=0 means just touching (spacing = full diameter).
+    # Overlap=1 would mean fully overlapping (spacing → 0).
+    full_diameter = 2.0 * bead_radius  # diameter at scale 1.0
+    spacing = full_diameter * (1.0 - bead_overlap)
+    spacing = max(spacing, 0.001)
+
+    # Convert spacing to bead count — COUNT mode distributes evenly
+    # along the actual curve arc length, so no safety multiplier needed.
+    curve_length = linker_def.length_residues * BU_PER_RESIDUE
+    bead_count = max(3, round(curve_length / spacing))
+
+    # Jitter amount — random positional offset, scaled by bead_radius
+    jitter = bead_radius * linker_def.bead_jitter
+
+    # Create interface sockets — only Geometry in/out
     ng.interface.new_socket(
         name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry'
     )
     ng.interface.new_socket(
         name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry'
     )
-    count_socket = ng.interface.new_socket(
-        name="Count", in_out='INPUT', socket_type='NodeSocketInt'
-    )
-    count_socket.default_value = linker_def.length_residues
-    count_socket.min_value = 1
-
-    bead_r_socket = ng.interface.new_socket(
-        name="Bead Radius", in_out='INPUT', socket_type='NodeSocketFloat'
-    )
-    bead_r_socket.default_value = bead_radius
-    bead_r_socket.min_value = 0.001
 
     nodes = ng.nodes
     links = ng.links
@@ -1083,193 +1105,87 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
     input_node = nodes.new('NodeGroupInput')
     input_node.location = (-900, 0)
     output_node = nodes.new('NodeGroupOutput')
-    output_node.location = (1100, 0)
+    output_node.location = (1200, 0)
 
-    # ── Resample Curve (COUNT = length_residues) ──
+    # ── Resample Curve (COUNT mode) ──
     resample = nodes.new('GeometryNodeResampleCurve')
     resample.location = (-500, 100)
     if hasattr(resample, 'mode'):
         resample.mode = 'COUNT'
-    elif "Mode" in resample.inputs:
-        resample.inputs["Mode"].default_value = 'Count'
     links.new(input_node.outputs["Geometry"], resample.inputs["Curve"])
-    links.new(input_node.outputs["Count"], resample.inputs["Count"])
+    resample.inputs["Count"].default_value = bead_count
 
-    # ══════════════════════════════════════════════════════════════════
-    # BEAD BRANCH — misshapen overlapping ico spheres
-    # ══════════════════════════════════════════════════════════════════
+    # ── Positional jitter — random XYZ offset on resampled points ──
+    rand_jitter = nodes.new('FunctionNodeRandomValue')
+    rand_jitter.location = (-300, -100)
+    if hasattr(rand_jitter, 'data_type'):
+        rand_jitter.data_type = 'FLOAT_VECTOR'
+    rand_jitter.inputs["Min"].default_value = (-jitter, -jitter, -jitter)
+    rand_jitter.inputs["Max"].default_value = (jitter, jitter, jitter)
+    rand_jitter.inputs["Seed"].default_value = 5
 
-    # Ico Sphere (subdivision 3 — enough geometry for noise displacement)
-    ico_sphere = nodes.new('GeometryNodeMeshIcoSphere')
-    ico_sphere.location = (-600, -200)
-    ico_sphere.inputs["Radius"].default_value = 1.0
-    ico_sphere.inputs["Subdivisions"].default_value = 2
-
-    # ── Noise displacement on sphere surface (raisin/deflated ball look) ──
-    # Displace each vertex along its normal by a noise value, creating
-    # lumpy dents and bumps on the surface of each bead.
-
-    # Position → feed into noise texture for spatial variation
-    pos_node = nodes.new('GeometryNodeInputPosition')
-    pos_node.location = (-600, -350)
-
-    # Noise Texture — creates the lumpy pattern
-    noise_tex = nodes.new('ShaderNodeTexNoise')
-    noise_tex.location = (-400, -350)
-    noise_tex.inputs["Scale"].default_value = 3.0      # bump frequency
-    noise_tex.inputs["Detail"].default_value = 4.0      # fine detail
-    noise_tex.inputs["Roughness"].default_value = 0.7   # irregular
-    links.new(pos_node.outputs["Position"], noise_tex.inputs["Vector"])
-
-    # Map noise from [0,1] to [-0.3, 0.3] — centered so bumps and dents
-    map_range = nodes.new('ShaderNodeMapRange')
-    map_range.location = (-200, -350)
-    map_range.inputs["From Min"].default_value = 0.0
-    map_range.inputs["From Max"].default_value = 1.0
-    map_range.inputs["To Min"].default_value = -0.3
-    map_range.inputs["To Max"].default_value = 0.3
-    links.new(noise_tex.outputs["Fac"], map_range.inputs["Value"])
-
-    # Normal — displacement direction
-    normal_node = nodes.new('GeometryNodeInputNormal')
-    normal_node.location = (-200, -500)
-
-    # Scale normal by noise amount
-    vec_math = nodes.new('ShaderNodeVectorMath')
-    vec_math.operation = 'SCALE'
-    vec_math.location = (0, -400)
-    links.new(normal_node.outputs["Normal"], vec_math.inputs[0])
-    links.new(map_range.outputs["Result"], vec_math.inputs["Scale"])
-
-    # Set Position — apply displacement to sphere
     set_pos = nodes.new('GeometryNodeSetPosition')
-    set_pos.location = (200, -250)
-    links.new(ico_sphere.outputs["Mesh"], set_pos.inputs["Geometry"])
-    links.new(vec_math.outputs["Vector"], set_pos.inputs["Offset"])
+    set_pos.location = (-100, 100)
+    links.new(resample.outputs["Curve"], set_pos.inputs["Geometry"])
+    links.new(rand_jitter.outputs["Value"], set_pos.inputs["Offset"])
 
-    # Per-axis random scale for globby misshapen beads:
-    #   Each axis gets an independent random value in [0.5, 1.5] * bead_radius
-    #   Combined with noise displacement, gives raisin-like irregular shapes.
+    # ── UV Sphere (unit sphere) ──
+    uv_sphere = nodes.new('GeometryNodeMeshUVSphere')
+    uv_sphere.location = (-500, -300)
+    uv_sphere.inputs["Radius"].default_value = 1.0
+    uv_sphere.inputs["Segments"].default_value = 16
+    uv_sphere.inputs["Rings"].default_value = 8
 
-    # Random Value for X scale
-    rand_x = nodes.new('FunctionNodeRandomValue')
-    rand_x.location = (-300, -400)
-    if hasattr(rand_x, 'data_type'):
-        rand_x.data_type = 'FLOAT'
-    rand_x.inputs["Min"].default_value = 0.5
-    rand_x.inputs["Max"].default_value = 1.5
-    rand_x.inputs["Seed"].default_value = 1
+    # ── Random scale (0.5 to 1.0) for size variation ──
+    rand_scale = nodes.new('FunctionNodeRandomValue')
+    rand_scale.location = (-300, -400)
+    if hasattr(rand_scale, 'data_type'):
+        rand_scale.data_type = 'FLOAT'
+    rand_scale.inputs["Min"].default_value = 1.0
+    rand_scale.inputs["Max"].default_value = max_scale
+    rand_scale.inputs["Seed"].default_value = 1
 
-    # Random Value for Y scale
-    rand_y = nodes.new('FunctionNodeRandomValue')
-    rand_y.location = (-300, -550)
-    if hasattr(rand_y, 'data_type'):
-        rand_y.data_type = 'FLOAT'
-    rand_y.inputs["Min"].default_value = 0.5
-    rand_y.inputs["Max"].default_value = 1.5
-    rand_y.inputs["Seed"].default_value = 2
+    # Multiply random factor by bead_radius
+    mul_radius = nodes.new('ShaderNodeMath')
+    mul_radius.operation = 'MULTIPLY'
+    mul_radius.location = (-100, -400)
+    links.new(rand_scale.outputs["Value"], mul_radius.inputs[0])
+    mul_radius.inputs[1].default_value = bead_radius
 
-    # Random Value for Z scale
-    rand_z = nodes.new('FunctionNodeRandomValue')
-    rand_z.location = (-300, -700)
-    if hasattr(rand_z, 'data_type'):
-        rand_z.data_type = 'FLOAT'
-    rand_z.inputs["Min"].default_value = 0.5
-    rand_z.inputs["Max"].default_value = 1.5
-    rand_z.inputs["Seed"].default_value = 3
-
-    # Multiply each random factor by bead_radius
-    mul_x = nodes.new('ShaderNodeMath')
-    mul_x.operation = 'MULTIPLY'
-    mul_x.location = (-50, -400)
-    links.new(rand_x.outputs["Value"], mul_x.inputs[0])
-    links.new(input_node.outputs["Bead Radius"], mul_x.inputs[1])
-
-    mul_y = nodes.new('ShaderNodeMath')
-    mul_y.operation = 'MULTIPLY'
-    mul_y.location = (-50, -550)
-    links.new(rand_y.outputs["Value"], mul_y.inputs[0])
-    links.new(input_node.outputs["Bead Radius"], mul_y.inputs[1])
-
-    mul_z = nodes.new('ShaderNodeMath')
-    mul_z.operation = 'MULTIPLY'
-    mul_z.location = (-50, -700)
-    links.new(rand_z.outputs["Value"], mul_z.inputs[0])
-    links.new(input_node.outputs["Bead Radius"], mul_z.inputs[1])
-
-    # Combine into per-instance scale vector
+    # Combine into uniform scale vector (same value on all axes = sphere)
     combine_scale = nodes.new('ShaderNodeCombineXYZ')
-    combine_scale.location = (150, -550)
-    links.new(mul_x.outputs[0], combine_scale.inputs['X'])
-    links.new(mul_y.outputs[0], combine_scale.inputs['Y'])
-    links.new(mul_z.outputs[0], combine_scale.inputs['Z'])
+    combine_scale.location = (100, -400)
+    links.new(mul_radius.outputs[0], combine_scale.inputs['X'])
+    links.new(mul_radius.outputs[0], combine_scale.inputs['Y'])
+    links.new(mul_radius.outputs[0], combine_scale.inputs['Z'])
 
-    # Random rotation for extra irregularity
-    rand_rot = nodes.new('FunctionNodeRandomValue')
-    rand_rot.location = (-300, -850)
-    if hasattr(rand_rot, 'data_type'):
-        rand_rot.data_type = 'FLOAT_VECTOR'
-    rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
-    rand_rot.inputs["Max"].default_value = (6.283, 6.283, 6.283)
-    rand_rot.inputs["Seed"].default_value = 7
-
-    # Instance on Points — place beads along resampled curve
+    # ── Instance on Points — place beads along jittered curve points ──
     instance_beads = nodes.new('GeometryNodeInstanceOnPoints')
     instance_beads.location = (350, 100)
-    links.new(resample.outputs["Curve"], instance_beads.inputs["Points"])
-    links.new(set_pos.outputs["Geometry"], instance_beads.inputs["Instance"])
+    links.new(set_pos.outputs["Geometry"], instance_beads.inputs["Points"])
+    links.new(uv_sphere.outputs["Mesh"], instance_beads.inputs["Instance"])
     links.new(combine_scale.outputs["Vector"], instance_beads.inputs["Scale"])
-    links.new(rand_rot.outputs["Value"], instance_beads.inputs["Rotation"])
 
-    # Realize Instances
-    realize = nodes.new('GeometryNodeRealizeInstances')
-    realize.location = (550, 100)
-    links.new(instance_beads.outputs["Instances"], realize.inputs["Geometry"])
+    # ── Set Material ──
+    set_mat = nodes.new('GeometryNodeSetMaterial')
+    set_mat.location = (600, 0)
+    mat_name = f"Linker_{linker_def.uid}_material"
+    mat = bpy.data.materials.get(mat_name)
+    if mat:
+        set_mat.inputs["Material"].default_value = mat
+    links.new(instance_beads.outputs["Instances"], set_mat.inputs["Geometry"])
 
-    # ══════════════════════════════════════════════════════════════════
-    # SMOOTH — merge + subdivide + shade smooth for continuous surface
-    # Merge welds overlapping verts, subdivision smooths seam artifacts,
-    # and topology stays stable across frames for fluid animation.
-    # ══════════════════════════════════════════════════════════════════
-
-    # Merge by Distance — weld overlapping vertices where beads intersect
-    merge = nodes.new('GeometryNodeMergeByDistance')
-    merge.location = (750, 0)
-    merge.inputs["Distance"].default_value = bead_radius * 0.2
-    links.new(realize.outputs["Geometry"], merge.inputs["Geometry"])
-
-    # Subdivision Surface — smooth out seam artifacts at bead intersections
-    subdiv = nodes.new('GeometryNodeSubdivisionSurface')
-    subdiv.location = (950, 0)
-    subdiv.inputs["Level"].default_value = 1
-    links.new(merge.outputs["Geometry"], subdiv.inputs["Mesh"])
-
-    # Set Shade Smooth — blend normals for final smooth appearance
+    # ── Set Shade Smooth ──
     shade_smooth = nodes.new('GeometryNodeSetShadeSmooth')
-    shade_smooth.location = (1150, 0)
+    shade_smooth.location = (850, 0)
     shade_smooth.inputs["Shade Smooth"].default_value = True
-    links.new(subdiv.outputs["Mesh"], shade_smooth.inputs["Geometry"])
-
-    # Move output node further right
-    output_node.location = (1350, 0)
+    links.new(set_mat.outputs["Geometry"], shade_smooth.inputs["Geometry"])
 
     # Connect to output
     links.new(shade_smooth.outputs["Geometry"], output_node.inputs["Geometry"])
 
     # Assign node group to modifier
     mod.node_group = ng
-
-    # Set modifier input values
-    for item in ng.interface.items_tree:
-        if item.in_out != 'INPUT':
-            continue
-        ident = item.identifier
-        if ident not in mod:
-            continue
-        if item.name == "Count":
-            mod[ident] = linker_def.length_residues
-        elif item.name == "Bead Radius":
-            mod[ident] = bead_radius
 
 
 def _remove_beads_geometry_nodes(curve_obj: bpy.types.Object,
