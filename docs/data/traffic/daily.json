@@ -1,5 +1,104 @@
 {
+  "daily": [
+    {
+      "date": "2026-03-17",
+      "views": 4,
+      "visitors": 4,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-18",
+      "views": 10,
+      "visitors": 5,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-19",
+      "views": 2,
+      "visitors": 2,
+      "clones": 1,
+      "cloners": 1
+    },
+    {
+      "date": "2026-03-20",
+      "views": 1,
+      "visitors": 1,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-21",
+      "views": 0,
+      "visitors": 0,
+      "clones": 1,
+      "cloners": 1
+    },
+    {
+      "date": "2026-03-22",
+      "views": 0,
+      "visitors": 0,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-23",
+      "views": 11,
+      "visitors": 4,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-24",
+      "views": 53,
+      "visitors": 10,
+      "clones": 1,
+      "cloners": 1
+    },
+    {
+      "date": "2026-03-25",
+      "views": 1,
+      "visitors": 1,
+      "clones": 1,
+      "cloners": 1
+    },
+    {
+      "date": "2026-03-26",
+      "views": 12,
+      "visitors": 3,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-27",
+      "views": 3,
+      "visitors": 1,
+      "clones": 1,
+      "cloners": 1
+    },
+    {
+      "date": "2026-03-28",
+      "views": 2,
+      "visitors": 1,
+      "clones": 2,
+      "cloners": 2
+    },
+    {
+      "date": "2026-03-29",
+      "views": 1,
+      "visitors": 1,
+      "clones": 0,
+      "cloners": 0
+    },
+    {
+      "date": "2026-03-30",
+      "views": 6,
+      "visitors": 3,
+      "clones": 1,
+      "cloners": 1
+    }
+  ],
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": null,
-  "daily": []
+  "generated_at": "2026-03-31T23:32:29+00:00"
 }
