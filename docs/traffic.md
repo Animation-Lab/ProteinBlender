@@ -66,6 +66,10 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
     color: #57606a;
   }
 
+  .traffic-hidden {
+    display: none;
+  }
+
   .traffic-list {
     margin: 0;
     padding-left: 1.2rem;
@@ -77,6 +81,10 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
 </style>
 
 <div class="traffic-meta" id="traffic-meta">Loading latest traffic snapshot...</div>
+
+<div class="traffic-empty traffic-hidden" id="traffic-no-data">
+  No traffic snapshot has been captured yet. Run the <code>Track Repository Traffic</code> workflow once, then refresh this page after GitHub Pages republishes.
+</div>
 
 <div class="traffic-grid" id="summary-cards"></div>
 
@@ -185,6 +193,17 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
 
     document.getElementById("traffic-meta").textContent =
       `Repository: ${latest.repo || "unknown"} | Updated: ${generatedAt}`;
+
+    if (!latest.generated_at) {
+      document.getElementById("traffic-no-data").classList.remove("traffic-hidden");
+      document.getElementById("summary-cards").classList.add("traffic-hidden");
+      document.getElementById("delta-cards").classList.add("traffic-hidden");
+      document.getElementById("views-chart").parentElement.classList.add("traffic-hidden");
+      document.getElementById("clones-chart").parentElement.classList.add("traffic-hidden");
+      renderList("referrers-panel", [], () => "");
+      renderList("paths-panel", [], () => "");
+      return;
+    }
 
     renderCards("summary-cards", [
       { label: "Views (14-day total)", value: latest.summary?.views },
