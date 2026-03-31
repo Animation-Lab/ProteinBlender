@@ -148,8 +148,9 @@ class PB2_LinkerDefinition(PropertyGroup):
     tube_radius: FloatProperty(
         name="Radius",
         description="Radius of the tube",
-        default=0.005,
-        min=0.001, max=0.5,
+        default=0.015,
+        min=0.001, soft_max=0.03, max=0.1,
+        step=0.1,
         unit='LENGTH'
     )
 

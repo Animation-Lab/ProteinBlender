@@ -162,19 +162,23 @@ def remove_whls():
 def download_whls(
     platforms: Union[Platform, List[Platform]],
     required_packages: List[str] = required_packages,
-    python_version="3.11",
+    python_versions: Union[str, List[str]] = ["3.11", "3.13"],
     clean: bool = True,
 ):
     if isinstance(platforms, Platform):
         platforms = [platforms]
 
+    if isinstance(python_versions, str):
+        python_versions = [python_versions]
+
     if clean:
         remove_whls()
 
-    for platform in platforms:
-        run_python(
-            f"-m pip download {' '.join(required_packages)} --dest ./proteinblender/wheels --only-binary=:all: --python-version={python_version} --platform={platform.pypi_suffix}"
-        )
+    for python_version in python_versions:
+        for platform in platforms:
+            run_python(
+                f"-m pip download {' '.join(required_packages)} --dest ./proteinblender/wheels --only-binary=:all: --python-version={python_version} --platform={platform.pypi_suffix}"
+            )
 
 
 def update_toml_whls(platforms):

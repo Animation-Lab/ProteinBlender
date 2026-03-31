@@ -31,6 +31,7 @@ env/
 .idea/
 .cursor/
 .ruff_cache/
+.mcp.json
 *.code-workspace
 *.swp
 *.swo
@@ -58,9 +59,14 @@ htmlcov/
 .pytest_cache/
 .tox/
 example_pdbs/
+tmp_tests/
 
 # Documentation
 docs/_build/
+docs/plans/
+
+# Claude Code
+.claude/skills/
 
 # Temporary files
 *.log

@@ -1070,11 +1070,11 @@ def setup_beads_geometry_nodes(curve_obj: bpy.types.Object,
     bead_radius = linker_def.bead_radius
     bead_overlap = linker_def.bead_overlap
 
-    # Variance controls scale range: 0 = all same size, 1 = [1.0, 1.5]
+    # Variance controls scale range: 0 = all same size, 1 = [1.0, 4.0]
     # Beads only grow larger — spacing is based on base size so beads
     # always touch at overlap=0, and any variance adds more contact.
     variance = linker_def.bead_radius_variance
-    max_scale = 1.0 + (variance * 0.5)  # 1.0 at var=0, 1.5 at var=1
+    max_scale = 1.0 + (variance * 3.0)  # 1.0 at var=0, 4.0 at var=1
 
     # Overlap=0 means just touching (spacing = full diameter).
     # Overlap=1 would mean fully overlapping (spacing → 0).

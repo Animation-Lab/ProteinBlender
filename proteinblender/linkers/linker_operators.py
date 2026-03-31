@@ -280,8 +280,9 @@ class PB2_OT_add_linker(Operator):
     tube_radius: FloatProperty(
         name="Radius",
         description="Radius of the tube",
-        default=0.005,
-        min=0.001, max=0.5
+        default=0.015,
+        min=0.001, soft_max=0.03, max=0.1,
+        step=0.1
     )
 
     behavior: EnumProperty(
@@ -654,7 +655,7 @@ class PB2_OT_edit_linker(Operator):
         ]
     )
     color: FloatVectorProperty(name="Color", subtype='COLOR', size=4, min=0.0, max=1.0)
-    tube_radius: FloatProperty(name="Radius", default=0.005, min=0.001, max=0.5)
+    tube_radius: FloatProperty(name="Radius", default=0.015, min=0.001, soft_max=0.03, max=0.1, step=0.1)
     binding_zone_residues: IntProperty(name="Binding Zone", min=1, max=10)
 
     def invoke(self, context, event):

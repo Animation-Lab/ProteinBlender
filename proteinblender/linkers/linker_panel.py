@@ -1,9 +1,42 @@
 """UI Panel for managing flexible linkers within a single puppet."""
 
 import bpy
-from bpy.types import Panel, UIList
+from bpy.types import Operator, Panel, UIList
+from bpy.props import StringProperty
 
 from .linker_geometry import BU_PER_RESIDUE
+
+
+class PB2_OT_show_help_popup(Operator):
+    """Show a help popup with an explanation"""
+    bl_idname = "pb2.show_help_popup"
+    bl_label = "Help"
+    bl_options = {'INTERNAL'}
+
+    title: StringProperty(name="Title", default="Help")
+    message: StringProperty(name="Message", default="")
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_popup(self, width=300)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=self.title, icon='INFO')
+        layout.separator()
+        # Word-wrap the message into multiple lines
+        words = self.message.split()
+        line = ""
+        for word in words:
+            if len(line) + len(word) + 1 > 45:
+                layout.label(text=line)
+                line = word
+            else:
+                line = f"{line} {word}".strip()
+        if line:
+            layout.label(text=line)
 
 
 class PB2_UL_linkers(UIList):
@@ -165,7 +198,16 @@ class PB2_PT_linkers(Panel):
             col.prop(linker, "bead_overlap")
             col.prop(linker, "bead_jitter")
 
-        col.prop(linker, "binding_zone_residues")
+        row = col.row(align=True)
+        row.prop(linker, "binding_zone_residues")
+        help_op = row.operator("pb2.show_help_popup", text="", icon='QUESTION')
+        help_op.title = "Binding Zone"
+        help_op.message = (
+            "The binding zone is the number of residues at each end of the linker "
+            "that stay rigid and align with the backbone direction of the connected chain. "
+            "This prevents the linker from bending unnaturally right at the attachment point, "
+            "mimicking how real peptide linkers emerge from a protein surface."
+        )
 
         # Actions
         main_box.separator()
@@ -193,6 +235,7 @@ class PB2_PT_linkers(Panel):
 
 # Registration
 CLASSES = [
+    PB2_OT_show_help_popup,
     PB2_UL_linkers,
     PB2_PT_linkers,
 ]

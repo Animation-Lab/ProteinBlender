@@ -59,7 +59,7 @@ class PROTEINBLENDER_PT_animation(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 6  # After pose library
+    bl_order = 7  # After linker panel
     
     def draw(self, context):
         layout = self.layout
