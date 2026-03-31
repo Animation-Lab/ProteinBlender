@@ -25,7 +25,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#157878">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=0d4a0ff58eb46152db31eb7e2ac30293126bf39a">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=09a0f47cbc81d019d406e195f5bef0c409db4ce4">
     <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
 
 <!-- Setup Google Analytics -->
@@ -114,6 +114,10 @@
     color: #57606a;
   }
 
+  .traffic-hidden {
+    display: none;
+  }
+
   .traffic-list {
     margin: 0;
     padding-left: 1.2rem;
@@ -125,6 +129,10 @@
 </style>
 
 <div class="traffic-meta" id="traffic-meta">Loading latest traffic snapshot...</div>
+
+<div class="traffic-empty traffic-hidden" id="traffic-no-data">
+  No traffic snapshot has been captured yet. Run the <code>Track Repository Traffic</code> workflow once, then refresh this page after GitHub Pages republishes.
+</div>
 
 <div class="traffic-grid" id="summary-cards"></div>
 
@@ -234,6 +242,17 @@
 
     document.getElementById("traffic-meta").textContent =
       `Repository: ${latest.repo || "unknown"} | Updated: ${generatedAt}`;
+
+    if (!latest.generated_at) {
+      document.getElementById("traffic-no-data").classList.remove("traffic-hidden");
+      document.getElementById("summary-cards").classList.add("traffic-hidden");
+      document.getElementById("delta-cards").classList.add("traffic-hidden");
+      document.getElementById("views-chart").parentElement.classList.add("traffic-hidden");
+      document.getElementById("clones-chart").parentElement.classList.add("traffic-hidden");
+      renderList("referrers-panel", [], () => "");
+      renderList("paths-panel", [], () => "");
+      return;
+    }
 
     renderCards("summary-cards", [
       { label: "Views (14-day total)", value: latest.summary?.views },
