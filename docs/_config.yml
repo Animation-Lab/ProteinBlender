@@ -32,3 +32,5 @@ navigation:
     url: /poses
   - title: Keyframes
     url: /keyframes
+  - title: Repository Traffic
+    url: /traffic
