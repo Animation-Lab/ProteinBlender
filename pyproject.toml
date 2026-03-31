@@ -1,6 +1,6 @@
 [project]
 name = "proteinblender"
-version = "1.0.2"
+version = "1.0.3"
 description = "Visualize and animate proteins in Blender"
 readme = "README.md"
 dependencies = [
