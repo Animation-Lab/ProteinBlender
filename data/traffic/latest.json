@@ -1,42 +1,42 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-04-01T03:43:05+00:00",
+  "generated_at": "2026-04-02T03:24:35+00:00",
   "summary": {
-    "views": 106,
-    "visitors": 31,
-    "clones": 8,
-    "cloners": 8
+    "views": 127,
+    "visitors": 32,
+    "clones": 87,
+    "cloners": 35
   },
   "current_day": {
+    "date": "2026-03-31",
+    "views": 25,
+    "visitors": 3,
+    "clones": 79,
+    "cloners": 28
+  },
+  "previous_day": {
     "date": "2026-03-30",
     "views": 6,
     "visitors": 3,
     "clones": 1,
     "cloners": 1
   },
-  "previous_day": {
-    "date": "2026-03-29",
-    "views": 1,
-    "visitors": 1,
-    "clones": 0,
-    "cloners": 0
-  },
   "delta_since_previous_day": {
-    "views": 5,
-    "visitors": 2,
-    "clones": 1,
-    "cloners": 1
+    "views": 19,
+    "visitors": 0,
+    "clones": 78,
+    "cloners": 27
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 36,
+      "count": 37,
       "uniques": 20
     },
     {
       "referrer": "github.com",
-      "count": 22,
-      "uniques": 6
+      "count": 28,
+      "uniques": 7
     },
     {
       "referrer": "Bing",
@@ -58,38 +58,44 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "GitHub - Animation-Lab/ProteinBlender \u00b7 GitHub",
-      "count": 40,
+      "count": 41,
       "uniques": 27
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "Releases \u00b7 Animation-Lab/ProteinBlender",
-      "count": 7,
-      "uniques": 6
+      "count": 8,
+      "uniques": 7
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
       "title": "GitHub \u00b7 Where software is built",
-      "count": 6,
-      "uniques": 3
+      "count": 7,
+      "uniques": 4
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions",
       "title": "Animation-Lab/ProteinBlender \u00b7 Discussions \u00b7 GitHub",
+      "count": 5,
+      "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/discussions/15",
+      "title": "ProteinBlender not working with Blender 5.1.0? \u00b7 Animation-Lab/ProteinBlender...",
       "count": 4,
-      "uniques": 1
+      "uniques": 3
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/branches/stale",
+      "title": "Branches \u00b7 Animation-Lab/ProteinBlender \u00b7 GitHub",
+      "count": 4,
+      "uniques": 2
     },
     {
       "path": "/Animation-Lab/proteinblender/issues",
       "title": "GitHub \u00b7 Where software is built",
       "count": 3,
       "uniques": 3
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/discussions/15",
-      "title": "ProteinBlender not working with Blender 5.1.0? \u00b7 Animation-Lab/ProteinBlender...",
-      "count": 3,
-      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues/14",
@@ -104,16 +110,10 @@
       "uniques": 2
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/commit/e6ed3423ec9968208e5d971d6637f2a7b3378696",
-      "title": "Added the core Brownian motion components. Still have some work but t\u2026 \u00b7 Anim...",
-      "count": 2,
-      "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/pulse",
-      "title": "Pulse \u00b7 Animation-Lab/ProteinBlender \u00b7 GitHub",
-      "count": 2,
-      "uniques": 2
+      "path": "/Animation-Lab/ProteinBlender/actions",
+      "title": "Workflow runs \u00b7 Animation-Lab/ProteinBlender",
+      "count": 3,
+      "uniques": 1
     }
   ]
 }
