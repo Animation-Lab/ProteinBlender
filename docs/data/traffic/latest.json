@@ -1,62 +1,68 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-04-11T03:18:14+00:00",
+  "generated_at": "2026-04-12T03:44:52+00:00",
   "summary": {
-    "views": 174,
-    "visitors": 103,
-    "clones": 221,
-    "cloners": 119
+    "views": 200,
+    "visitors": 104,
+    "clones": 241,
+    "cloners": 127
   },
   "current_day": {
+    "date": "2026-04-10",
+    "views": 29,
+    "visitors": 5,
+    "clones": 21,
+    "cloners": 11
+  },
+  "previous_day": {
     "date": "2026-04-09",
     "views": 14,
     "visitors": 4,
     "clones": 9,
     "cloners": 6
   },
-  "previous_day": {
-    "date": "2026-04-08",
-    "views": 81,
-    "visitors": 80,
-    "clones": 11,
-    "cloners": 7
-  },
   "delta_since_previous_day": {
-    "views": -67,
-    "visitors": -76,
-    "clones": -2,
-    "cloners": -1
+    "views": 15,
+    "visitors": 1,
+    "clones": 12,
+    "cloners": 5
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 34,
+      "count": 40,
       "uniques": 14
     },
     {
       "referrer": "github.com",
-      "count": 21,
-      "uniques": 8
+      "count": 25,
+      "uniques": 9
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 36,
-      "uniques": 24
+      "count": 44,
+      "uniques": 25
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
       "title": "/issues",
-      "count": 9,
+      "count": 18,
       "uniques": 4
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/issues/14",
+      "title": "/issues/14",
+      "count": 12,
+      "uniques": 3
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 5,
-      "uniques": 5
+      "count": 6,
+      "uniques": 6
     },
     {
       "path": "/Animation-Lab/ProteinBlender/commits/main",
@@ -83,20 +89,14 @@
       "uniques": 2
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/issues/14",
-      "title": "/issues/14",
-      "count": 3,
-      "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.0.0",
-      "title": "/releases/tag/1.0.0",
-      "count": 3,
-      "uniques": 2
-    },
-    {
       "path": "/Animation-Lab/ProteinBlender/actions/workflows/track-repo-traffic.yml",
       "title": "/actions/workflows/track-repo-traffic.yml",
+      "count": 3,
+      "uniques": 1
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/tree/main",
+      "title": "/tree/main",
       "count": 3,
       "uniques": 1
     }
