@@ -1,42 +1,42 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-04-22T03:39:53+00:00",
+  "generated_at": "2026-04-23T03:44:43+00:00",
   "summary": {
-    "views": 171,
-    "visitors": 101,
-    "clones": 355,
-    "cloners": 181
+    "views": 185,
+    "visitors": 102,
+    "clones": 416,
+    "cloners": 211
   },
   "current_day": {
+    "date": "2026-04-21",
+    "views": 14,
+    "visitors": 3,
+    "clones": 73,
+    "cloners": 40
+  },
+  "previous_day": {
     "date": "2026-04-20",
     "views": 1,
     "visitors": 1,
     "clones": 36,
     "cloners": 28
   },
-  "previous_day": {
-    "date": "2026-04-19",
-    "views": 0,
-    "visitors": 0,
-    "clones": 33,
-    "cloners": 17
-  },
   "delta_since_previous_day": {
-    "views": 1,
-    "visitors": 1,
-    "clones": 3,
-    "cloners": 11
+    "views": 13,
+    "visitors": 2,
+    "clones": 37,
+    "cloners": 12
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 35,
-      "uniques": 14
+      "count": 41,
+      "uniques": 15
     },
     {
       "referrer": "github.com",
-      "count": 21,
-      "uniques": 7
+      "count": 26,
+      "uniques": 8
     },
     {
       "referrer": "Bing",
@@ -48,8 +48,8 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 34,
-      "uniques": 19
+      "count": 37,
+      "uniques": 20
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
@@ -76,10 +76,22 @@
       "uniques": 2
     },
     {
+      "path": "/Animation-Lab/ProteinBlender/blob/main/README.md",
+      "title": "/blob/main/README.md",
+      "count": 4,
+      "uniques": 1
+    },
+    {
       "path": "/Animation-Lab/ProteinBlender/commits/main",
       "title": "/commits/main",
       "count": 3,
       "uniques": 3
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/actions",
+      "title": "/actions",
+      "count": 3,
+      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/7",
@@ -92,18 +104,6 @@
       "title": "/discussions/15",
       "count": 2,
       "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/pulse",
-      "title": "/pulse",
-      "count": 2,
-      "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/commit/759e19ab3fff5b74fca234bc38e94a073b43d7fe",
-      "title": "/commit/759e19ab3fff5b74fca234bc38e94a073b43d7fe",
-      "count": 2,
-      "uniques": 1
     }
   ]
 }
