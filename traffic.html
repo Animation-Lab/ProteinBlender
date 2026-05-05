@@ -25,7 +25,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#157878">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=c3202c835dd9ec25bcdb5a196746ecc12e42bf3e">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=b4ab600ec59050b0810c419a1708a5550bb2cdd4">
     <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
 
 <!-- Setup Google Analytics -->
@@ -133,6 +133,8 @@
 <div class="traffic-empty traffic-hidden" id="traffic-no-data">
   No traffic snapshot has been captured yet. Run the <code>Track Repository Traffic</code> workflow once, then refresh this page after GitHub Pages republishes.
 </div>
+
+<div class="traffic-grid" id="alltime-cards"></div>
 
 <div class="traffic-grid" id="summary-cards"></div>
 
@@ -245,6 +247,7 @@
 
     if (!latest.generated_at) {
       document.getElementById("traffic-no-data").classList.remove("traffic-hidden");
+      document.getElementById("alltime-cards").classList.add("traffic-hidden");
       document.getElementById("summary-cards").classList.add("traffic-hidden");
       document.getElementById("delta-cards").classList.add("traffic-hidden");
       document.getElementById("views-chart").parentElement.classList.add("traffic-hidden");
@@ -254,11 +257,23 @@
       return;
     }
 
+    if (latest.all_time) {
+      const daysNote = latest.all_time.days_tracked
+        ? ` (${latest.all_time.days_tracked} days tracked)`
+        : "";
+      renderCards("alltime-cards", [
+        { label: "All-Time Views" + daysNote, value: latest.all_time.views },
+        { label: "All-Time Visitors" + daysNote, value: latest.all_time.visitors },
+        { label: "All-Time Clones" + daysNote, value: latest.all_time.clones },
+        { label: "All-Time Cloners" + daysNote, value: latest.all_time.cloners }
+      ]);
+    }
+
     renderCards("summary-cards", [
       { label: "Views (14-day total)", value: latest.summary?.views },
-      { label: "Unique Visitors", value: latest.summary?.visitors },
+      { label: "Unique Visitors (14-day)", value: latest.summary?.visitors },
       { label: "Clones (14-day total)", value: latest.summary?.clones },
-      { label: "Unique Cloners", value: latest.summary?.cloners }
+      { label: "Unique Cloners (14-day)", value: latest.summary?.cloners }
     ]);
 
     renderCards("delta-cards", [
