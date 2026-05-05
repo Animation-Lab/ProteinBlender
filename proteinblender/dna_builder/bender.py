@@ -44,6 +44,7 @@ PIVOT_SHIFTED_PROP = "pb_bend_pivot_shifted"
 _CURVE_MOD = "DNA Bend"
 _HOOK_PREFIX = "Hook_BP"
 
+
 # Default visible bevel on the curve
 _CURVE_BEVEL = 0.005
 
@@ -217,19 +218,16 @@ def _create_bend_curve(name, dna_obj, height, n_points=RES_DEFAULT):
             if dna_obj.users_collection else bpy.context.collection)
     coll.objects.link(curve_obj)
 
-    # Parent the curve to the DNA so moving the DNA moves the whole rig.
-    # Nodes are parented to the curve (set up in _create_bend_nodes), giving
-    # the hierarchy: DNA → Curve → Nodes.
-    # Flush the depsgraph first — shift_origin_to_bottom may have changed
-    # dna_obj.location without matrix_world being recalculated yet.
-    bpy.context.view_layer.update()
-    curve_obj.parent = dna_obj
-    curve_obj.matrix_parent_inverse = dna_obj.matrix_world.inverted()
+    # The curve is NOT parented to the DNA — that would create a depsgraph
+    # circular dependency (DNA modifier → Object Info → curve → parent DNA).
+    # Instead, the "Move Strand" button selects DNA + curve together so
+    # they translate by the same delta.
 
     return curve_obj
 
 
 def _add_curve_modifier(dna_obj, curve_obj):
+    """Add a standard Curve modifier to deform the DNA along the bend curve."""
     existing = dna_obj.modifiers.get(_CURVE_MOD)
     if existing is not None:
         dna_obj.modifiers.remove(existing)
@@ -394,9 +392,8 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
     curve_world = curve_obj.matrix_world.copy()
 
     # First pass: create + link all empties at their target world positions.
-    # Each empty is parented to the curve so that when Move Strand
-    # translates the curve, the nodes follow automatically. This avoids
-    # double-translation issues and keeps hook deformation consistent.
+    # Empties are NOT parented (no parent-child relationships in the rig).
+    # Move Strand selects DNA + nodes together for translation.
     created = []  # list of (i, empty, bp)
     names = []
     for i in range(n_points):
@@ -411,11 +408,6 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
         empty.location = bp_world
         empty.show_in_front = True
         coll.objects.link(empty)
-
-        # Parent the empty to the curve so it follows the curve when the
-        # whole rig is translated (Move Strand selects DNA + curve).
-        empty.parent = curve_obj
-        empty.matrix_parent_inverse = curve_world.inverted()
 
         created.append((i, empty, bp))
         names.append(empty.name)
@@ -532,18 +524,14 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     """Re-establish the bend after `update_dna` rebuilds the DNA mesh.
 
     The curve and any bend nodes are separate scene objects that survive
-    the rebuild; we just shift the new mesh's pivot back to its bottom,
-    re-add the Curve modifier, and re-parent the curve to the new DNA.
+    the rebuild; we just shift the new mesh's pivot back to its bottom
+    and re-add the Curve modifier.
     """
     if curve_obj is None:
         return
     shift_origin_to_bottom(new_dna_obj)
     _add_curve_modifier(new_dna_obj, curve_obj)
     new_dna_obj[BEND_CURVE_PROP] = curve_obj.name
-
-    # Re-parent the curve to the new DNA object.
-    curve_obj.parent = new_dna_obj
-    curve_obj.matrix_parent_inverse = new_dna_obj.matrix_world.inverted()
 
 
 def cleanup_bend_curve(dna_obj):
@@ -555,6 +543,7 @@ def cleanup_bend_curve(dna_obj):
         mod = dna_obj.modifiers.get(_CURVE_MOD)
         if mod is not None:
             dna_obj.modifiers.remove(mod)
+
         curve_obj = bpy.data.objects.get(name)
         if curve_obj is not None:
             curve_data = curve_obj.data
@@ -846,13 +835,15 @@ class PROTEINBLENDER_OT_dna_remove_bend(Operator):
 
 
 class PROTEINBLENDER_OT_dna_select_rig(Operator):
-    """Select the DNA molecule and immediately start a translate drag, so the
-    user can move the whole strand in a single click + drag.
+    """Select DNA + all bend nodes and immediately start a translate drag,
+    so the user can move the whole strand in a single click + drag.
 
-    The full hierarchy is DNA → Curve → Nodes, so moving just the DNA
-    carries everything along. Relative offsets between all objects stay
-    constant, keeping both the Curve modifier and hook deformations
-    unchanged."""
+    The bend curve is intentionally NOT selected — moving the curve along
+    with the empties causes hook double-deformation. With DNA + nodes
+    moved by the same delta and the curve held fixed, the hooks shift the
+    bezier path by the same delta in curve-local space, the curve
+    modifier maps the mesh onto the shifted path, and everything stays
+    coherent."""
 
     bl_idname = "proteinblender.dna_select_rig"
     bl_label = "Move Strand"
@@ -868,11 +859,7 @@ class PROTEINBLENDER_OT_dna_select_rig(Operator):
         return get_dna_for_curve(obj) is not None or get_dna_for_node(obj) is not None
 
     def _select(self, context):
-        """Select just the DNA. Returns the DNA or None.
-
-        The hierarchy DNA → Curve → Nodes means moving the DNA carries
-        everything along — no need to select children explicitly.
-        """
+        """Select DNA + all bend nodes. Returns the DNA or None."""
         dna = context.active_object
         if dna is not None and not dna.get("pb_is_nucleic_acid", False):
             dna = get_dna_for_curve(dna) or get_dna_for_node(dna)
@@ -886,7 +873,14 @@ class PROTEINBLENDER_OT_dna_select_rig(Operator):
         except Exception:
             pass
 
+        nodes = get_bend_nodes(dna)
+
         dna.select_set(True)
+        for n in nodes:
+            n.hide_set(False)
+            n.hide_select = False
+            n.select_set(True)
+
         context.view_layer.objects.active = dna
         return dna
 
