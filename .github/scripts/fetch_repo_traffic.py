@@ -158,6 +158,14 @@ def main() -> int:
     current_day = daily["daily"][-1] if daily["daily"] else None
     previous_day = daily["daily"][-2] if len(daily["daily"]) > 1 else None
 
+    all_time = {
+        "views": sum(d.get("views", 0) for d in daily["daily"]),
+        "visitors": sum(d.get("visitors", 0) for d in daily["daily"]),
+        "clones": sum(d.get("clones", 0) for d in daily["daily"]),
+        "cloners": sum(d.get("cloners", 0) for d in daily["daily"]),
+        "days_tracked": len(daily["daily"]),
+    }
+
     latest = {
         "repo": repository,
         "generated_at": now,
@@ -167,6 +175,7 @@ def main() -> int:
             "clones": clones_payload.get("count", 0),
             "cloners": clones_payload.get("uniques", 0),
         },
+        "all_time": all_time,
         "current_day": current_day,
         "previous_day": previous_day,
         "delta_since_previous_day": delta(current_day, previous_day),

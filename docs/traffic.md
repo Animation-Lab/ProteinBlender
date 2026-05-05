@@ -86,6 +86,8 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
   No traffic snapshot has been captured yet. Run the <code>Track Repository Traffic</code> workflow once, then refresh this page after GitHub Pages republishes.
 </div>
 
+<div class="traffic-grid" id="alltime-cards"></div>
+
 <div class="traffic-grid" id="summary-cards"></div>
 
 <div class="traffic-grid" id="delta-cards"></div>
@@ -196,6 +198,7 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
 
     if (!latest.generated_at) {
       document.getElementById("traffic-no-data").classList.remove("traffic-hidden");
+      document.getElementById("alltime-cards").classList.add("traffic-hidden");
       document.getElementById("summary-cards").classList.add("traffic-hidden");
       document.getElementById("delta-cards").classList.add("traffic-hidden");
       document.getElementById("views-chart").parentElement.classList.add("traffic-hidden");
@@ -205,11 +208,23 @@ This page shows GitHub traffic metrics captured by the daily workflow. It includ
       return;
     }
 
+    if (latest.all_time) {
+      const daysNote = latest.all_time.days_tracked
+        ? ` (${latest.all_time.days_tracked} days tracked)`
+        : "";
+      renderCards("alltime-cards", [
+        { label: "All-Time Views" + daysNote, value: latest.all_time.views },
+        { label: "All-Time Visitors" + daysNote, value: latest.all_time.visitors },
+        { label: "All-Time Clones" + daysNote, value: latest.all_time.clones },
+        { label: "All-Time Cloners" + daysNote, value: latest.all_time.cloners }
+      ]);
+    }
+
     renderCards("summary-cards", [
       { label: "Views (14-day total)", value: latest.summary?.views },
-      { label: "Unique Visitors", value: latest.summary?.visitors },
+      { label: "Unique Visitors (14-day)", value: latest.summary?.visitors },
       { label: "Clones (14-day total)", value: latest.summary?.clones },
-      { label: "Unique Cloners", value: latest.summary?.cloners }
+      { label: "Unique Cloners (14-day)", value: latest.summary?.cloners }
     ]);
 
     renderCards("delta-cards", [
