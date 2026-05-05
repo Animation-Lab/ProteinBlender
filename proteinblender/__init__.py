@@ -391,9 +391,12 @@ def _show_error_popup(message: str) -> None:
         if "System Console" not in message:
             self.layout.label(text="See System Console (Window > Toggle System Console).", icon='INFO')
     
-    if bpy.context.window_manager:
-        bpy.context.window_manager.popup_menu(draw_error, title="ProteinBlender Dependency Error", icon='ERROR')
-    else:
+    try:
+        if bpy.context.window_manager and bpy.context.window:
+            bpy.context.window_manager.popup_menu(draw_error, title="ProteinBlender Dependency Error", icon='ERROR')
+        else:
+            logger.error(f"Could not show popup (no window context): {message}")
+    except RuntimeError:
         logger.error(f"Could not show popup: {message}")
 
 
@@ -438,11 +441,11 @@ bl_info = {
 # --- Constants ---
 REQUIRED_PACKAGES = {
     # Core scientific packages - must be installed first with compatible versions
-    "numpy": ">=1.24.0,<2.0",  # databpy requires <2.0, biotite needs >=1.25
-    "scipy": ">=1.13,<1.15",  # Required by biotite and MDAnalysis; <1.15 for NumPy 1.x compatibility
+    "numpy": ">=1.24.0",  # Blender 5.1 ships numpy 2.x; don't cap
+    "scipy": ">=1.13",  # Required by biotite and MDAnalysis
 
     # Main dependencies with relaxed version constraints
-    "biotite": ">=1.2.0,<1.3.0",  # Use >= instead of == to allow minor updates; <1.3.0 for NumPy 1.x compatibility
+    "biotite": ">=1.2.0",  # Use >= instead of == to allow minor updates
     "databpy": ">=0.0.15",  # Use >= instead of == to allow patches
     "MDAnalysis": ">=2.7.0",
 
