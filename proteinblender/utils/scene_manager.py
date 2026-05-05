@@ -223,6 +223,27 @@ class ProteinBlenderScene:
         # Force UI refresh
         self._refresh_ui()
 
+    def _finalize_dna_molecule(self, molecule):
+        """Finalize a DNA/RNA molecule: add to UI list, build outliner. No domain creation."""
+        molecule.set_protein_pivot_to_center_of_mass(bpy.context)
+
+        scene = bpy.context.scene
+        item = scene.molecule_list_items.add()
+        item.identifier = molecule.identifier
+        item.object_ptr = molecule.object
+        if molecule.object:
+            item.object_name = molecule.object.name
+        item.sync_from_wrapper(molecule)
+        scene.molecule_list_index = len(scene.molecule_list_items) - 1
+        self.active_molecule = molecule.identifier
+
+        build_outliner_hierarchy(bpy.context)
+
+        for oitem in scene.outliner_items:
+            oitem.is_selected = False
+        bpy.ops.object.select_all(action='DESELECT')
+        self._refresh_ui()
+
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB', remote_format: str = 'pdb') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
         try:
@@ -962,19 +983,27 @@ def build_outliner_hierarchy(context=None):
     
     # Add molecules
     for molecule_id, molecule in scene_manager.molecules.items():
-        # Add protein item
-        protein_item = scene.outliner_items.add()
-        protein_item.item_type = 'PROTEIN'
-        protein_item.item_id = molecule_id
-        protein_item.parent_id = ""
-        protein_item.name = getattr(molecule, 'name', molecule.identifier)
         # Get the object - it might be molecule.object or molecule.molecule.object
         mol_object = None
         if hasattr(molecule, 'object') and molecule.object:
             mol_object = molecule.object
         elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
             mol_object = molecule.molecule.object
-        
+
+        # Detect DNA/RNA molecules via custom property
+        is_nucleic = False
+        try:
+            is_nucleic = bool(mol_object and mol_object.get("pb_is_nucleic_acid", False))
+        except (ReferenceError, AttributeError):
+            pass
+
+        # Add top-level item
+        protein_item = scene.outliner_items.add()
+        protein_item.item_type = 'DNA_RNA' if is_nucleic else 'PROTEIN'
+        protein_item.item_id = molecule_id
+        protein_item.parent_id = ""
+        protein_item.name = getattr(molecule, 'name', molecule.identifier)
+
         # Safely get object name and visibility
         try:
             protein_item.object_name = mol_object.name if mol_object else ""
@@ -982,23 +1011,29 @@ def build_outliner_hierarchy(context=None):
             protein_item.object_name = ""
 
         protein_item.indent_level = 0
-        protein_item.icon = 'MESH_DATA'
+        protein_item.icon = 'OUTLINER_OB_CURVE' if is_nucleic else 'MESH_DATA'
 
         try:
             protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True
         except (ReferenceError, AttributeError):
             protein_item.is_visible = True
-        
+
         # Restore selection and expansion states
         if molecule_id in item_selection_states:
             protein_item.is_selected = item_selection_states[molecule_id]
         if molecule_id in item_expansion_states:
             protein_item.is_expanded = item_expansion_states[molecule_id]
 
-        # Generate and store tooltip for protein
-        tooltip_parts = [f"Protein: {protein_item.name}"]
-        if hasattr(molecule, 'identifier'):
-            tooltip_parts.append(f"ID: {molecule.identifier}")
+        # Generate and store tooltip
+        if is_nucleic:
+            nt = mol_object.get("pb_nucleic_type", "DNA") if mol_object else "DNA"
+            seq = mol_object.get("pb_sequence", "") if mol_object else ""
+            seq_display = seq[:30] + "..." if len(seq) > 30 else seq
+            tooltip_parts = [f"{nt}: {protein_item.name}", f"Sequence: {seq_display}", f"Length: {len(seq)} nt"]
+        else:
+            tooltip_parts = [f"Protein: {protein_item.name}"]
+            if hasattr(molecule, 'identifier'):
+                tooltip_parts.append(f"ID: {molecule.identifier}")
         protein_item.tooltip = "\n".join(tooltip_parts)
 
         # Get chains from the molecule
@@ -1034,8 +1069,13 @@ def build_outliner_hierarchy(context=None):
                 # Final fallback to sequential alphabet
                 if not chain_name:
                     chain_name = chr(65 + chain_id) if chain_id < 26 else f"Chain{chain_id}"
-                
-                chain_item.name = f"Chain {chain_name}"
+
+                # DNA/RNA: use strand names instead of chain names
+                if is_nucleic:
+                    strand_labels = {0: "Sense strand (5'\u21923')", 1: "Antisense strand (3'\u21925')"}
+                    chain_item.name = strand_labels.get(chain_id, f"Strand {chain_name}")
+                else:
+                    chain_item.name = f"Chain {chain_name}"
                 chain_item.chain_id = str(chain_id)
                 chain_item.indent_level = 1
                 chain_item.icon = 'LINKED'

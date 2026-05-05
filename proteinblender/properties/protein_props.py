@@ -14,7 +14,8 @@ class ProteinOutlinerItem(PropertyGroup):
             ('PROTEIN', 'Protein', 'Protein molecule'),
             ('CHAIN', 'Chain', 'Protein chain'),
             ('DOMAIN', 'Domain', 'Protein domain'),
-            ('PUPPET', 'Puppet', 'Protein Puppet')
+            ('PUPPET', 'Puppet', 'Protein Puppet'),
+            ('DNA_RNA', 'DNA/RNA', 'DNA or RNA molecule'),
         ],
         default='PROTEIN'
     )

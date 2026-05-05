@@ -56,15 +56,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
     def _generate_tooltip(self, context, item):
         """Generate tooltip text for an outliner item"""
         try:
-            if item.item_type == 'PROTEIN':
-                # For proteins, show the molecule name
+            if item.item_type in ('PROTEIN', 'DNA_RNA'):
+                # For proteins / DNA / RNA, show the molecule name
                 scene_manager = ProteinBlenderScene.get_instance()
                 if not scene_manager or not hasattr(scene_manager, 'molecules'):
                     return None
                 molecule = scene_manager.molecules.get(item.item_id)
                 if molecule:
+                    if item.item_type == 'DNA_RNA':
+                        return item.tooltip  # tooltip built during hierarchy build
                     tooltip_parts = [f"Protein: {item.name}"]
-                    # Add PDB ID if available
                     if hasattr(molecule, 'identifier'):
                         tooltip_parts.append(f"ID: {molecule.identifier}")
                     return "\n".join(tooltip_parts)
@@ -188,7 +189,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
 
-        if item.item_type in ['PROTEIN', 'PUPPET'] and not is_reference:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA'] and not is_reference:
             show_expand = True
         elif item.item_type == 'CHAIN':
             # Show expand arrow for chains with domains (both original and reference items)
@@ -326,17 +327,18 @@ class PROTEINBLENDER_UL_outliner(UIList):
                             delete_op.molecule_id = molecule_id
                         break
         
-        # First: Buttons for proteins
-        elif item.item_type == 'PROTEIN':
+        # First: Buttons for proteins and DNA/RNA
+        elif item.item_type in ('PROTEIN', 'DNA_RNA'):
             # Center button (move to origin at center of mass)
             center_op = row.operator("molecule.center_protein", text="", icon='OBJECT_ORIGIN', emboss=False)
             if center_op:
                 center_op.molecule_id = item.item_id
 
-            # Duplicate button (create exact copy)
-            duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
-            if duplicate_op:
-                duplicate_op.molecule_id = item.item_id
+            if item.item_type == 'PROTEIN':
+                # Duplicate button (create exact copy) - proteins only for now
+                duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
+                if duplicate_op:
+                    duplicate_op.molecule_id = item.item_id
 
             # Delete button (trash can) - use the existing molecule.delete operator
             delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
@@ -487,8 +489,8 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
                     ref_item.is_selected = new_selection_state
         
         # Handle hierarchical selection
-        if clicked_item.item_type == 'PROTEIN':
-            # Select/deselect all children (chains and domains)
+        if clicked_item.item_type in ('PROTEIN', 'DNA_RNA'):
+            # Select/deselect all children (chains and domains / strands)
             self.select_children(scene, clicked_item.item_id, new_selection_state)
         elif clicked_item.item_type == 'CHAIN':
             # Check if this chain has domains
@@ -672,9 +674,9 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         self._set_visibility_for_item(context, item, new_visibility)
         
         # If this is a protein or puppet, update children too
-        if item.item_type in ['PROTEIN', 'PUPPET']:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA']:
             self._update_children_visibility(context, item.item_id, new_visibility)
-            
+
             # If this is a protein, also update puppets containing its chains
             if item.item_type == 'PROTEIN':
                 self._update_puppet_visibility_for_protein(context, item.item_id, new_visibility)
@@ -700,7 +702,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         view_layer = context.view_layer
         scene_manager = ProteinBlenderScene.get_instance()
         
-        if item.item_type == 'PROTEIN':
+        if item.item_type in ('PROTEIN', 'DNA_RNA'):
             molecule = scene_manager.molecules.get(item.item_id)
             if molecule and molecule.object:
                 self._set_object_visibility(molecule.object, visible, view_layer)
@@ -708,7 +710,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                 for domain in molecule.domains.values():
                     if domain.object:
                         self._set_object_visibility(domain.object, visible, view_layer)
-                        
+
         elif item.item_type == 'CHAIN':
             molecule = scene_manager.molecules.get(item.parent_id)
             if molecule:

@@ -71,9 +71,54 @@ class MoleculeManager:
             print(f"Failed to import file {filepath}: {str(e)}")
             raise
     
+    def create_from_array(self, array, identifier: str, style: str = "ball_and_stick") -> MoleculeWrapper:
+        """Create a molecule from a pre-built biotite AtomArray.
+
+        Used by the DNA/RNA builder to bypass the PDB fetch step.
+        """
+        from ..utils.molecularnodes.entities.molecule.molecule import Molecule, _create_object
+        from ..utils.molecularnodes.entities.entity import EntityType
+        from ..utils.molecularnodes import blender as bl
+
+        # Create Blender object from the AtomArray (same function PDB import uses)
+        obj, frames = _create_object(array=array, name=identifier, style=style)
+
+        # Build the geometry-nodes tree (skip MN color nodes — we set our own)
+        if style:
+            bl.nodes.create_starting_node_tree(
+                object=obj, coll_frames=frames, style=style, color=None
+            )
+
+        # Construct a Molecule shell without invoking full __init__ (which needs a file).
+        # Must initialise BlenderObject parent so the `object` property works.
+        from databpy import BlenderObject as _BO
+        mol = Molecule.__new__(Molecule)
+        _BO.__init__(mol, obj=None)          # sets mol._object
+        mol.array = array
+        mol.object = obj                     # uses property setter from BlenderObject
+        mol.file_path = None
+        mol.file = None
+        mol._frames_collection = None
+        mol._entity_type = EntityType.MOLECULE
+
+        # Register with MNSession so undo/redo can find it
+        try:
+            mol._register_with_session()
+        except Exception:
+            pass
+
+        try:
+            obj["entity_ids"] = None
+        except Exception:
+            pass
+
+        wrapper = MoleculeWrapper(mol, identifier)
+        self.molecules[identifier] = wrapper
+        return wrapper
+
     def get_molecule(self, identifier: str) -> Optional[MoleculeWrapper]:
         """Get a molecule by its identifier (PDB ID or name)"""
-        return self.molecules.get(identifier) 
+        return self.molecules.get(identifier)
 
     def delete_molecule(self, identifier: str):
         """Deletes a molecule and all its associated Blender objects and data."""
