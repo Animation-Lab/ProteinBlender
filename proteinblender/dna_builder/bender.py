@@ -216,6 +216,16 @@ def _create_bend_curve(name, dna_obj, height, n_points=RES_DEFAULT):
     coll = (dna_obj.users_collection[0]
             if dna_obj.users_collection else bpy.context.collection)
     coll.objects.link(curve_obj)
+
+    # Parent the curve to the DNA so moving the DNA moves the whole rig.
+    # Nodes are parented to the curve (set up in _create_bend_nodes), giving
+    # the hierarchy: DNA → Curve → Nodes.
+    # Flush the depsgraph first — shift_origin_to_bottom may have changed
+    # dna_obj.location without matrix_world being recalculated yet.
+    bpy.context.view_layer.update()
+    curve_obj.parent = dna_obj
+    curve_obj.matrix_parent_inverse = dna_obj.matrix_world.inverted()
+
     return curve_obj
 
 
@@ -522,15 +532,18 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     """Re-establish the bend after `update_dna` rebuilds the DNA mesh.
 
     The curve and any bend nodes are separate scene objects that survive
-    the rebuild; we just shift the new mesh's pivot back to its bottom and
-    re-add the Curve modifier. The control nodes & hooks on the curve
-    don't need to be touched.
+    the rebuild; we just shift the new mesh's pivot back to its bottom,
+    re-add the Curve modifier, and re-parent the curve to the new DNA.
     """
     if curve_obj is None:
         return
     shift_origin_to_bottom(new_dna_obj)
     _add_curve_modifier(new_dna_obj, curve_obj)
     new_dna_obj[BEND_CURVE_PROP] = curve_obj.name
+
+    # Re-parent the curve to the new DNA object.
+    curve_obj.parent = new_dna_obj
+    curve_obj.matrix_parent_inverse = new_dna_obj.matrix_world.inverted()
 
 
 def cleanup_bend_curve(dna_obj):
@@ -781,10 +794,6 @@ class PROTEINBLENDER_OT_dna_finish_bend_edit(Operator):
         except Exception:
             pass
 
-        # Re-hide the curve from selection (Move Strand may have enabled it).
-        curve = get_bend_curve(dna)
-        if curve is not None:
-            curve.hide_select = True
 
         dna.select_set(True)
         context.view_layer.objects.active = dna
@@ -837,14 +846,13 @@ class PROTEINBLENDER_OT_dna_remove_bend(Operator):
 
 
 class PROTEINBLENDER_OT_dna_select_rig(Operator):
-    """Select DNA + bend curve and immediately start a translate drag, so the
+    """Select the DNA molecule and immediately start a translate drag, so the
     user can move the whole strand in a single click + drag.
 
-    Bend nodes are parented to the curve, so they follow the curve
-    automatically. Moving DNA + curve together preserves their relative
-    offset, keeping the Curve modifier deformation unchanged. The hooks
-    also see no change because the nodes' positions relative to the curve
-    (their parent) stay constant."""
+    The full hierarchy is DNA → Curve → Nodes, so moving just the DNA
+    carries everything along. Relative offsets between all objects stay
+    constant, keeping both the Curve modifier and hook deformations
+    unchanged."""
 
     bl_idname = "proteinblender.dna_select_rig"
     bl_label = "Move Strand"
@@ -860,14 +868,10 @@ class PROTEINBLENDER_OT_dna_select_rig(Operator):
         return get_dna_for_curve(obj) is not None or get_dna_for_node(obj) is not None
 
     def _select(self, context):
-        """Set up the rig selection (DNA + curve). Returns the DNA or None.
+        """Select just the DNA. Returns the DNA or None.
 
-        Bend nodes are parented to the curve, so they follow automatically
-        when the curve is translated — no need to select them explicitly.
-        Selecting DNA + curve preserves the relative offset between them,
-        which keeps the Curve modifier deformation unchanged. The hooks
-        also see no change because the nodes' positions relative to the
-        curve stay constant.
+        The hierarchy DNA → Curve → Nodes means moving the DNA carries
+        everything along — no need to select children explicitly.
         """
         dna = context.active_object
         if dna is not None and not dna.get("pb_is_nucleic_acid", False):
@@ -881,14 +885,6 @@ class PROTEINBLENDER_OT_dna_select_rig(Operator):
             bpy.ops.object.select_all(action="DESELECT")
         except Exception:
             pass
-
-        curve = get_bend_curve(dna)
-
-        # Select the curve (temporarily allow selection — it's normally
-        # hidden from selection to prevent accidental solo-grabs).
-        if curve is not None:
-            curve.hide_select = False
-            curve.select_set(True)
 
         dna.select_set(True)
         context.view_layer.objects.active = dna
