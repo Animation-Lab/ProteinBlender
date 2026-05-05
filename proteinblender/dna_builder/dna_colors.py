@@ -20,7 +20,9 @@ _RNA_U = 43   # U
 
 
 def apply_base_colors(obj, colors: dict) -> None:
-    """Overwrite the ``Color`` attribute on *obj* with per-base colours.
+    """Overwrite the ``Color`` attribute on *obj* with per-base colours and
+    push the backbone colour into the Style Cartoon/Ribbon node's
+    ``Backbone Color`` socket.
 
     Parameters
     ----------
@@ -40,28 +42,42 @@ def apply_base_colors(obj, colors: dict) -> None:
     res_names = np.zeros(n, dtype=np.int32)
     rn_attr.data.foreach_get("value", res_names)
 
-    # Start with backbone colour everywhere
+    # is_backbone is written by the MN pipeline (bool per atom). Used to
+    # exclude sugar/phosphate atoms from the per-base recolouring so the
+    # backbone keeps its own colour in styles that read the Color attribute
+    # directly (ball-and-stick, sticks, spheres, surface).
+    bb_attr = mesh.attributes.get("is_backbone")
+    is_backbone = np.zeros(n, dtype=bool)
+    if bb_attr is not None:
+        try:
+            bb_attr.data.foreach_get("value", is_backbone)
+        except Exception:
+            pass
+
+    base_mask = ~is_backbone
+
+    # Backbone colour everywhere, then overwrite only base-ring atoms
     bb = np.array(colors.get("backbone", [0.75, 0.75, 0.75, 1.0]), dtype=np.float32)
     color_data = np.tile(bb, (n, 1))
 
     # Adenine
-    mask_a = np.isin(res_names, [_DNA_A, _RNA_A])
+    mask_a = base_mask & np.isin(res_names, [_DNA_A, _RNA_A])
     color_data[mask_a] = colors["A"]
 
     # Thymine
-    mask_t = res_names == _DNA_T
+    mask_t = base_mask & (res_names == _DNA_T)
     color_data[mask_t] = colors["T"]
 
     # Guanine
-    mask_g = np.isin(res_names, [_DNA_G, _RNA_G])
+    mask_g = base_mask & np.isin(res_names, [_DNA_G, _RNA_G])
     color_data[mask_g] = colors["G"]
 
     # Cytosine
-    mask_c = np.isin(res_names, [_DNA_C, _RNA_C])
+    mask_c = base_mask & np.isin(res_names, [_DNA_C, _RNA_C])
     color_data[mask_c] = colors["C"]
 
     # Uracil
-    mask_u = res_names == _RNA_U
+    mask_u = base_mask & (res_names == _RNA_U)
     color_data[mask_u] = colors["U"]
 
     # Write back
@@ -71,6 +87,28 @@ def apply_base_colors(obj, colors: dict) -> None:
     color_attr.data.foreach_set("color", color_data.flatten())
 
     mesh.update()
+
+    # The cartoon/ribbon style's backbone tube does NOT read the per-atom
+    # Color attribute — it has its own Backbone Color socket. Push the user
+    # colour into any matching socket on the object's modifier node tree.
+    _apply_backbone_color_to_style(obj, bb)
+
+
+def _apply_backbone_color_to_style(obj, backbone_rgba) -> None:
+    """Set Backbone Color on Style Cartoon / Ribbon nodes in obj's modifiers."""
+    rgba = tuple(float(v) for v in backbone_rgba)
+    for mod in obj.modifiers:
+        if mod.type != "NODES" or mod.node_group is None:
+            continue
+        for node in mod.node_group.nodes:
+            # Style Cartoon, Style Ribbon, etc. are GROUP nodes whose
+            # subgroup name starts with "Style ".
+            ng = getattr(node, "node_tree", None)
+            if ng is None or not ng.name.startswith("Style "):
+                continue
+            socket = node.inputs.get("Backbone Color")
+            if socket is not None:
+                socket.default_value = rgba
 
 
 def colors_from_props(props) -> dict:

@@ -1,6 +1,7 @@
 """PropertyGroup for the DNA/RNA Builder panel."""
 
 import bpy
+from bpy.app.handlers import persistent
 from bpy.props import (
     BoolProperty,
     EnumProperty,
@@ -128,15 +129,131 @@ class DNABuilderProperties(PropertyGroup):
 CLASSES = (DNABuilderProperties,)
 
 
+# ---------------------------------------------------------------------------
+# Auto-sync: when a DNA/RNA molecule becomes the active object, copy its
+# stored pb_* custom properties into the scene's dna_builder_props so the
+# panel acts as an editor for the selected molecule.
+# ---------------------------------------------------------------------------
+
+_msgbus_owner = object()
+
+
+def sync_props_from_object(props, obj) -> bool:
+    """Copy pb_* custom props from *obj* into *props*.
+
+    Returns True if any value was actually changed (used to suppress no-op
+    redraws).
+    """
+    if not obj or not obj.get("pb_is_nucleic_acid", False):
+        return False
+
+    changed = False
+
+    def _set(attr, value):
+        nonlocal changed
+        try:
+            cur = getattr(props, attr)
+            if isinstance(cur, (list, tuple)) or hasattr(cur, "__iter__") and not isinstance(cur, str):
+                cur_list = list(cur)
+                new_list = list(value)
+                if cur_list != new_list:
+                    setattr(props, attr, new_list)
+                    changed = True
+            else:
+                if cur != value:
+                    setattr(props, attr, value)
+                    changed = True
+        except Exception:
+            pass
+
+    seq = obj.get("pb_sequence")
+    if isinstance(seq, str):
+        _set("sequence", seq)
+
+    nt = obj.get("pb_nucleic_type")
+    if nt in ("DNA", "RNA"):
+        _set("nucleic_type", nt)
+
+    ds = obj.get("pb_double_stranded")
+    if ds is not None:
+        _set("double_stranded", bool(ds))
+
+    style = obj.get("pb_style")
+    if isinstance(style, str) and style:
+        _set("style", style)
+
+    for key, prop_name in (
+        ("a", "color_a"), ("t", "color_t"), ("g", "color_g"),
+        ("c", "color_c"), ("u", "color_u"), ("backbone", "color_backbone"),
+    ):
+        v = obj.get(f"pb_color_{key}")
+        if v is not None:
+            try:
+                _set(prop_name, list(v))
+            except Exception:
+                pass
+
+    return changed
+
+
+def _on_active_object_changed(*_args):
+    try:
+        ctx = bpy.context
+        scene = getattr(ctx, "scene", None)
+        if scene is None or not hasattr(scene, "dna_builder_props"):
+            return
+        obj = getattr(ctx, "active_object", None)
+        if obj is None:
+            return
+        sync_props_from_object(scene.dna_builder_props, obj)
+    except Exception:
+        # msgbus callbacks must never raise
+        pass
+
+
+def register_msgbus():
+    try:
+        bpy.msgbus.clear_by_owner(_msgbus_owner)
+    except Exception:
+        pass
+    try:
+        bpy.msgbus.subscribe_rna(
+            key=(bpy.types.LayerObjects, "active"),
+            owner=_msgbus_owner,
+            args=(),
+            notify=_on_active_object_changed,
+        )
+    except Exception:
+        pass
+
+
+def unregister_msgbus():
+    try:
+        bpy.msgbus.clear_by_owner(_msgbus_owner)
+    except Exception:
+        pass
+
+
+@persistent
+def _load_post_handler(_dummy):
+    register_msgbus()
+
+
 def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.dna_builder_props = bpy.props.PointerProperty(
         type=DNABuilderProperties
     )
+    register_msgbus()
+    if _load_post_handler not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_load_post_handler)
 
 
 def unregister():
+    unregister_msgbus()
+    if _load_post_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_load_post_handler)
     if hasattr(bpy.types.Scene, "dna_builder_props"):
         del bpy.types.Scene.dna_builder_props
     for cls in reversed(CLASSES):

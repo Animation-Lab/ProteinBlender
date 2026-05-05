@@ -35,13 +35,27 @@ class PROTEINBLENDER_PT_builders(Panel):
         layout = self.layout
         props = context.scene.dna_builder_props
 
+        # ---- Edit mode detection -----------------------------------------
+        active_obj = context.active_object
+        editing = bool(
+            active_obj is not None
+            and active_obj.get("pb_is_nucleic_acid", False)
+        )
+
         # ---- DNA / RNA builder section -----------------------------------
         main_box = layout.box()
         main_box.label(text="Builders", icon="CURVE_DATA")
         main_box.separator()
 
-        # Sub-header
-        main_box.label(text="DNA / RNA builder")
+        # Sub-header — switches based on edit/build mode
+        if editing:
+            row = main_box.row()
+            row.label(
+                text=f"Editing: {active_obj.name}",
+                icon="GREASEPENCIL",
+            )
+        else:
+            main_box.label(text="DNA / RNA builder")
 
         # Type toggle
         row = main_box.row(align=True)
@@ -127,15 +141,30 @@ class PROTEINBLENDER_PT_builders(Panel):
             row.label(text="Turns")
             row.label(text=f"{info['turns']:.2f}")
 
-        # ---- Build button ------------------------------------------------
+        # ---- Action button(s) -------------------------------------------
         main_box.separator(factor=0.5)
-        build_row = main_box.row()
-        build_row.scale_y = 1.4
-        build_row.operator(
-            "proteinblender.build_dna",
-            text=f"\u25b6 Build {nt}",
-            icon="MESH_CYLINDER",
-        )
+        if editing:
+            update_row = main_box.row()
+            update_row.scale_y = 1.4
+            update_row.operator(
+                "proteinblender.update_dna",
+                text=f"\u21bb Update {nt}",
+                icon="FILE_REFRESH",
+            )
+            new_row = main_box.row()
+            new_row.operator(
+                "proteinblender.build_dna",
+                text="Build New Instead",
+                icon="ADD",
+            )
+        else:
+            build_row = main_box.row()
+            build_row.scale_y = 1.4
+            build_row.operator(
+                "proteinblender.build_dna",
+                text=f"\u25b6 Build {nt}",
+                icon="MESH_CYLINDER",
+            )
 
 
 CLASSES = (PROTEINBLENDER_PT_builders,)
