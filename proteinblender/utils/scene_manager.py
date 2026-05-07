@@ -208,6 +208,12 @@ class ProteinBlenderScene:
             item.object_name = molecule.object.name
         item.sync_from_wrapper(molecule)
         scene.molecule_list_index = len(scene.molecule_list_items) - 1
+        # Auto-domain creation ran BEFORE the list item existed, so each
+        # _create_domain_with_params call mirrored into a None list item
+        # (no-op). Now that the item exists, mirror once explicitly so the
+        # auto-created chain domains land in the persistent PG (Bug B).
+        if hasattr(molecule, '_mirror_domains_to_property_group'):
+            molecule._mirror_domains_to_property_group()
         # Set as active molecule
         self.active_molecule = molecule.identifier
         # Build outliner hierarchy
@@ -306,6 +312,15 @@ class ProteinBlenderScene:
                 # scene.show_domain_preview = False # This relates to a different feature
                 scene.show_molecule_edit_panel = False
                 scene.edit_molecule_identifier = ""
+
+            # Rebuild the outliner so chain/domain rows for the deleted
+            # molecule are dropped immediately. Without this the outliner
+            # carries orphan rows until the next sync (e.g. a reload), which
+            # showed up in scenario 07 of the save/load stress test.
+            try:
+                build_outliner_hierarchy(bpy.context)
+            except Exception as e:
+                print(f"delete_molecule: outliner rebuild failed: {e}")
 
             # Refresh UI
             self._refresh_ui()
@@ -407,102 +422,213 @@ def _has_invalid_domains(molecule):
         return True
 
 
+def _snapshot_list_item(item):
+    """Capture every persistent field of a MoleculeListItem so the list can
+    be cleared and rebuilt without losing state.
+
+    Historically this function only preserved keyframes and poses, which
+    meant every panel-draw-after-load silently wiped object_name, style,
+    chain mappings, residue ranges, and the persisted domains collection.
+    See save-load-stress-test.md (Bug A) for the regression history.
+    """
+    snap = {
+        # Top-level scalar persistence — without these, loading a saved file
+        # leaves the molecule list visibly broken (no chain ranges, default
+        # style, no object reference healing).
+        'object_name': item.object_name,
+        'style': item.style,
+        'chain_mapping_json': item.chain_mapping_json,
+        'chain_residue_ranges_json': item.chain_residue_ranges_json,
+        # Persisted domain definitions (the runtime wrapper has more state,
+        # but this collection is what survives a .blend round-trip).
+        'domains': [
+            {
+                'is_expanded': getattr(d, 'is_expanded', False),
+                'domain_id': getattr(d, 'domain_id', ''),
+                'chain_id': d.chain_id,
+                'start': d.start,
+                'end': d.end,
+                'name': d.name,
+                # Object PointerProperty is restored by name lookup below.
+                'object_name': (
+                    d.object.name if d.object
+                    else getattr(d, 'object_name', '')
+                ),
+            }
+            for d in item.domains
+        ],
+        'keyframes': [
+            {'name': kf.name, 'frame': kf.frame} for kf in item.keyframes
+        ],
+        'active_keyframe_index': item.active_keyframe_index,
+        'active_pose_index': item.active_pose_index,
+        'poses': [
+            {
+                'name': p.name,
+                'has_protein_transform': p.has_protein_transform,
+                'protein_location': list(p.protein_location),
+                'protein_rotation': list(p.protein_rotation),
+                'protein_scale': list(p.protein_scale),
+                'domain_transforms': [
+                    {
+                        'domain_id': dt.domain_id,
+                        'location': list(dt.location),
+                        'rotation': list(dt.rotation),
+                        'scale': list(dt.scale),
+                    }
+                    for dt in p.domain_transforms
+                ],
+                'group_transforms': [
+                    {
+                        'group_id': gt.group_id,
+                        'relative_location': list(gt.relative_location),
+                        'relative_rotation': list(gt.relative_rotation),
+                        'relative_scale': list(gt.relative_scale),
+                    }
+                    for gt in getattr(p, 'group_transforms', [])
+                ],
+            }
+            for p in item.poses
+        ],
+    }
+    return snap
+
+
+def _restore_list_item(item, snap):
+    """Inverse of _snapshot_list_item — write captured state back onto a
+    freshly-added MoleculeListItem."""
+    if not snap:
+        return
+
+    # Top-level scalars
+    item.object_name = snap.get('object_name', '')
+    style = snap.get('style')
+    if style:
+        try:
+            item.style = style
+        except (TypeError, ValueError):
+            # Style enum may have changed across versions — fall back to default.
+            pass
+    item.chain_mapping_json = snap.get('chain_mapping_json', '{}')
+    item.chain_residue_ranges_json = snap.get('chain_residue_ranges_json', '{}')
+
+    # Domains collection (Domain PropertyGroup)
+    for d_data in snap.get('domains', []):
+        new_d = item.domains.add()
+        if hasattr(new_d, 'domain_id'):
+            new_d.domain_id = d_data.get('domain_id', '')
+        new_d.chain_id = d_data.get('chain_id', '')
+        new_d.start = d_data.get('start', 1)
+        new_d.end = d_data.get('end', 1)
+        new_d.name = d_data.get('name', '')
+        if hasattr(new_d, 'is_expanded'):
+            new_d.is_expanded = d_data.get('is_expanded', False)
+        obj_name = d_data.get('object_name')
+        if hasattr(new_d, 'object_name'):
+            new_d.object_name = obj_name or ''
+        if obj_name and obj_name in bpy.data.objects:
+            new_d.object = bpy.data.objects[obj_name]
+
+    # Keyframes
+    for kf_data in snap.get('keyframes', []):
+        new_kf = item.keyframes.add()
+        new_kf.name = kf_data.get('name', '')
+        new_kf.frame = kf_data.get('frame', 0)
+    item.active_keyframe_index = snap.get('active_keyframe_index', 0)
+
+    # Poses
+    for pose_data in snap.get('poses', []):
+        new_pose = item.poses.add()
+        new_pose.name = pose_data.get('name', '')
+        new_pose.has_protein_transform = pose_data.get('has_protein_transform', False)
+        new_pose.protein_location = pose_data.get('protein_location', (0, 0, 0))
+        new_pose.protein_rotation = pose_data.get('protein_rotation', (0, 0, 0))
+        new_pose.protein_scale = pose_data.get('protein_scale', (1, 1, 1))
+        for dt_data in pose_data.get('domain_transforms', []):
+            new_dt = new_pose.domain_transforms.add()
+            new_dt.domain_id = dt_data.get('domain_id', '')
+            new_dt.location = dt_data.get('location', (0, 0, 0))
+            new_dt.rotation = dt_data.get('rotation', (0, 0, 0))
+            new_dt.scale = dt_data.get('scale', (1, 1, 1))
+        for gt_data in pose_data.get('group_transforms', []):
+            new_gt = new_pose.group_transforms.add()
+            new_gt.group_id = gt_data.get('group_id', '')
+            new_gt.relative_location = gt_data.get('relative_location', (0, 0, 0))
+            new_gt.relative_rotation = gt_data.get('relative_rotation', (0, 0, 0))
+            new_gt.relative_scale = gt_data.get('relative_scale', (1, 1, 1))
+    item.active_pose_index = snap.get('active_pose_index', 0)
+
+
 def _refresh_molecule_ui(scene_manager, scene):
-    """Refresh the UI to match current state"""
-    # Preserve existing keyframes and poses before clearing the list
-    existing_keyframes = {}
-    existing_poses = {}
-    
-    for item in scene.molecule_list_items:
-        if item.identifier:
-            # Preserve keyframes
-            if len(item.keyframes) > 0:
-                existing_keyframes[item.identifier] = []
-                for kf in item.keyframes:
-                    kf_data = {
-                        'name': kf.name,
-                        'frame': kf.frame,
-                    }
-                    existing_keyframes[item.identifier].append(kf_data)
-            
-            # Preserve poses
-            if len(item.poses) > 0:
-                existing_poses[item.identifier] = []
-                for pose in item.poses:
-                    # Store pose data
-                    pose_data = {
-                        'name': pose.name,
-                        'has_protein_transform': pose.has_protein_transform,
-                        'protein_location': list(pose.protein_location),
-                        'protein_rotation': list(pose.protein_rotation),
-                        'protein_scale': list(pose.protein_scale),
-                        'domain_transforms': []
-                    }
-                    # Store domain transforms
-                    for domain_transform in pose.domain_transforms:
-                        domain_data = {
-                            'domain_id': domain_transform.domain_id,
-                            'location': list(domain_transform.location),
-                            'rotation': list(domain_transform.rotation),
-                            'scale': list(domain_transform.scale)
-                        }
-                        pose_data['domain_transforms'].append(domain_data)
-                    existing_poses[item.identifier].append(pose_data)
-    
-    # Clear and rebuild molecule list
+    """Refresh the UI list to match the runtime wrapper dict.
+
+    All persistent MoleculeListItem fields are snapshotted up-front, the
+    list is then cleared and rebuilt one item per wrapper, and finally each
+    snapshot is restored. New molecules (no prior snapshot) get just the
+    bare identifier + object_ptr — `sync_from_wrapper` then fills in the
+    rest from the wrapper itself.
+    """
+    # 1. Snapshot every existing list item by identifier.
+    snapshots = {
+        item.identifier: _snapshot_list_item(item)
+        for item in scene.molecule_list_items
+        if item.identifier
+    }
+
+    # 2. Clear and rebuild the list from the wrapper dict.
     scene.molecule_list_items.clear()
 
     for identifier, molecule in scene_manager.molecules.items():
+        # Heal the wrapper's object pointer if it became stale.
         if not is_object_valid(molecule.object):
             name = getattr(molecule, 'object_name', '')
             if name and name in bpy.data.objects:
                 molecule.object = bpy.data.objects[name]
                 if hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
                     molecule.molecule.object = molecule.object
-        if is_object_valid(molecule.object):
-            # Restore domain pointers if needed
-            for domain in molecule.domains.values():
-                if not is_object_valid(domain.object):
-                    name = getattr(domain, 'object_name', '')
-                    if name and name in bpy.data.objects:
-                        domain.object = bpy.data.objects[name]
-                if not domain.node_group:
-                    ng_name = getattr(domain, 'node_group_name', '')
-                    if ng_name and ng_name in bpy.data.node_groups:
-                        domain.node_group = bpy.data.node_groups[ng_name]
-            item = scene.molecule_list_items.add()
-            item.identifier = identifier
-            item.object_ptr = molecule.object
-            
-            # Restore keyframes for this molecule if they existed
-            if identifier in existing_keyframes:
-                for kf_data in existing_keyframes[identifier]:
-                    new_kf = item.keyframes.add()
-                    new_kf.name = kf_data['name']
-                    new_kf.frame = kf_data['frame']
-            
-            # Restore poses for this molecule if they existed
-            if identifier in existing_poses:
-                for pose_data in existing_poses[identifier]:
-                    new_pose = item.poses.add()
-                    new_pose.name = pose_data['name']
-                    new_pose.has_protein_transform = pose_data['has_protein_transform']
-                    new_pose.protein_location = pose_data['protein_location']
-                    new_pose.protein_rotation = pose_data['protein_rotation']
-                    new_pose.protein_scale = pose_data['protein_scale']
-                    
-                    # Restore domain transforms
-                    for domain_data in pose_data['domain_transforms']:
-                        new_domain_transform = new_pose.domain_transforms.add()
-                        new_domain_transform.domain_id = domain_data['domain_id']
-                        new_domain_transform.location = domain_data['location']
-                        new_domain_transform.rotation = domain_data['rotation']
-                        new_domain_transform.scale = domain_data['scale']
-    
+
+        if not is_object_valid(molecule.object):
+            # Wrapper has no recoverable object — skip rather than create a
+            # broken list entry.
+            continue
+
+        # Heal each domain's references too.
+        for domain in molecule.domains.values():
+            if not is_object_valid(domain.object):
+                name = getattr(domain, 'object_name', '')
+                if name and name in bpy.data.objects:
+                    domain.object = bpy.data.objects[name]
+            if not domain.node_group:
+                ng_name = getattr(domain, 'node_group_name', '')
+                if ng_name and ng_name in bpy.data.node_groups:
+                    domain.node_group = bpy.data.node_groups[ng_name]
+
+        item = scene.molecule_list_items.add()
+        item.identifier = identifier
+        item.object_ptr = molecule.object
+
+        snap = snapshots.get(identifier)
+        if snap is not None:
+            # 3a. Restore every persistent field from the snapshot.
+            _restore_list_item(item, snap)
+        else:
+            # 3b. New molecule (e.g. orphan adoption) — pull what we can
+            # from the runtime wrapper. sync_from_wrapper writes object_name,
+            # chain_mapping_json, chain_residue_ranges_json.
+            try:
+                item.object_name = molecule.object.name
+            except (ReferenceError, AttributeError):
+                pass
+            if hasattr(item, 'sync_from_wrapper'):
+                try:
+                    item.sync_from_wrapper(molecule)
+                except Exception as e:
+                    print(f"sync_from_wrapper failed for {identifier}: {e}")
+
     # Update active molecule
     if scene_manager.active_molecule not in scene_manager.molecules:
         scene_manager.active_molecule = next(iter(scene_manager.molecules), None)
-    
+
     # Force UI refresh
     scene_manager._refresh_ui()
 
@@ -732,6 +858,63 @@ def _remove_invalid_wrappers(scene_manager, scene) -> List[str]:
     return removed_ids
 
 
+def _restore_domains_into_wrapper(wrapper, item):
+    """Rebuild a MoleculeWrapper's runtime domain dict from the persisted
+    MoleculeListItem.domains collection.
+
+    Pairs with `MoleculeWrapper._mirror_domains_to_property_group` — the
+    write path mirrors runtime domains to PG, this reads them back. Without
+    this, auto-domains (and any user-created domains) vanish on file load
+    even though their Blender objects still exist (Bug B).
+    """
+    try:
+        from ..core.domain import DomainDefinition
+    except Exception:
+        return
+    if not hasattr(item, "domains") or len(item.domains) == 0:
+        return
+    for d_pg in item.domains:
+        try:
+            domain = DomainDefinition(
+                d_pg.chain_id,
+                int(d_pg.start),
+                int(d_pg.end),
+                d_pg.name or None,
+            )
+            domain.parent_molecule_id = wrapper.identifier
+            domain_id = d_pg.domain_id or domain.domain_id
+            domain.domain_id = domain_id
+            # Heal the object reference: PointerProperty first, then by
+            # stored name as a fallback (handles undo/redo or rename
+            # scenarios).
+            obj = None
+            try:
+                obj = d_pg.object
+            except (AttributeError, ReferenceError):
+                obj = None
+            if obj is None and d_pg.object_name:
+                obj = bpy.data.objects.get(d_pg.object_name)
+            if obj is not None:
+                domain.object = obj
+            # Restore visual properties from the Blender object's custom
+            # properties (these survive .blend save automatically).
+            if obj is not None:
+                if hasattr(obj, "domain_color"):
+                    try:
+                        domain.color = tuple(obj.domain_color)
+                    except Exception:
+                        pass
+                if hasattr(obj, "domain_style"):
+                    try:
+                        domain.style = obj.domain_style
+                    except Exception:
+                        pass
+            wrapper.domains[domain_id] = domain
+        except Exception as e:
+            print(f"_restore_domains_into_wrapper: failed for "
+                  f"{wrapper.identifier} / {getattr(d_pg, 'domain_id', '?')}: {e}")
+
+
 def _reconstruct_wrappers_from_properties(scene_manager, scene) -> List[str]:
     """Reconstruct wrappers from PropertyGroups for restored objects.
 
@@ -782,6 +965,11 @@ def _reconstruct_wrappers_from_properties(scene_manager, scene) -> List[str]:
             )
 
             if wrapper:
+                # Bug B fix: rebuild the wrapper's runtime domain dict from
+                # the persisted MoleculeListItem.domains collection so
+                # auto-domains and any user customizations survive
+                # save → load.
+                _restore_domains_into_wrapper(wrapper, item)
                 scene_manager.molecules[item.identifier] = wrapper
                 scene_manager.molecule_manager.molecules[item.identifier] = wrapper
                 restored_ids.append(item.identifier)

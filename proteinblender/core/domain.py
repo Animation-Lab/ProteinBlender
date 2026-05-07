@@ -380,12 +380,24 @@ class DomainDefinition:
 
 # The old Domain class is kept for backward compatibility
 class Domain(PropertyGroup):
-    """Blender Property Group for UI integration - kept for compatibility"""
+    """Blender Property Group for UI integration - kept for compatibility.
+
+    Stored on `MoleculeListItem.domains` so domain definitions survive a
+    .blend save → load cycle. The runtime DomainDefinition dict on
+    MoleculeWrapper is reconstructed from this collection on load (see
+    save-load-stress-test.md, Bug B).
+    """
     is_expanded: BoolProperty(default=False)
+    # `domain_id` is the stable identifier used as the dict key on
+    # MoleculeWrapper.domains; without it we cannot rebuild the runtime
+    # dict from the persisted collection on load.
+    domain_id: StringProperty()
     chain_id: StringProperty()
     start: IntProperty()
     end: IntProperty()
     name: StringProperty()
+    # Stored object name for healing PointerProperty references after load.
+    object_name: StringProperty()
     object: PointerProperty(type=bpy.types.Object)  # Reference to the domain object
 
 def ensure_domain_properties_registered():
