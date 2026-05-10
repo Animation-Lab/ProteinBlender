@@ -36,11 +36,31 @@ class PROTEINBLENDER_PT_builders(Panel):
         props = context.scene.dna_builder_props
 
         # ---- Edit mode detection -----------------------------------------
-        active_obj = context.active_object
-        editing = bool(
-            active_obj is not None
-            and active_obj.get("pb_is_nucleic_acid", False)
+        # The user is "editing a DNA" if either:
+        #   (a) the active object is a DNA molecule
+        #   (b) the active object is its bend curve, or
+        #   (c) the active object is one of its bend control nodes (the
+        #       Empties placed by "Edit Bend").
+        from .bender import (
+            BEND_CURVE_PROP,
+            get_dna_for_curve,
+            get_dna_for_node,
         )
+        active_obj = context.active_object
+        dna_obj = None
+
+        if active_obj is not None and active_obj.get("pb_is_nucleic_acid", False):
+            dna_obj = active_obj
+        elif active_obj is not None and active_obj.type == "CURVE":
+            dna_obj = get_dna_for_curve(active_obj)
+        elif active_obj is not None and active_obj.type == "EMPTY":
+            dna_obj = get_dna_for_node(active_obj)
+
+        editing = dna_obj is not None
+        editing_node = (editing
+                        and active_obj is not None
+                        and active_obj is not dna_obj
+                        and active_obj.type == "EMPTY")
 
         # ---- DNA / RNA builder section -----------------------------------
         main_box = layout.box()
@@ -51,9 +71,20 @@ class PROTEINBLENDER_PT_builders(Panel):
         if editing:
             row = main_box.row()
             row.label(
-                text=f"Editing: {active_obj.name}",
+                text=f"Editing: {dna_obj.name}",
                 icon="GREASEPENCIL",
             )
+            if editing_node:
+                # User is dragging a control node — offer a fast way to
+                # bounce back to the DNA when they're done.
+                done_row = main_box.row()
+                done_row.scale_y = 1.1
+                done_row.operator(
+                    "proteinblender.dna_finish_bend_edit",
+                    text="\u2713 Done Editing Bend",
+                    icon="LOOP_BACK",
+                )
+                main_box.separator(factor=0.5)
         else:
             main_box.label(text="DNA / RNA builder")
 
@@ -121,8 +152,7 @@ class PROTEINBLENDER_PT_builders(Panel):
             col.prop(props, "color_backbone")
 
             # Update existing button (only if a DNA object is selected)
-            obj = context.active_object
-            if obj and obj.get("pb_is_nucleic_acid", False):
+            if dna_obj is not None:
                 col.separator(factor=0.3)
                 col.operator(
                     "proteinblender.update_dna_colors",
@@ -140,6 +170,10 @@ class PROTEINBLENDER_PT_builders(Panel):
             row = info_box.row()
             row.label(text="Turns")
             row.label(text=f"{info['turns']:.2f}")
+
+        # ---- Shape (bending) section — only when editing a DNA ----------
+        if editing:
+            self._draw_shape_section(main_box, dna_obj)
 
         # ---- Action button(s) -------------------------------------------
         main_box.separator(factor=0.5)
@@ -166,6 +200,81 @@ class PROTEINBLENDER_PT_builders(Panel):
                 icon="MESH_CYLINDER",
             )
 
+    def _draw_shape_section(self, parent_layout, dna_obj):
+        """Bending controls — visible only when a DNA molecule is active."""
+        from .bender import (
+            BEND_CURVE_PROP,
+            BEND_NODES_PROP,
+            RES_DEFAULT, RES_MIN, RES_MAX,
+            get_bend_nodes,
+        )
+
+        shape_box = parent_layout.box()
+        shape_box.label(text="Shape", icon="CURVE_BEZCURVE")
+
+        has_bend = bool(dna_obj.get(BEND_CURVE_PROP))
+
+        if not has_bend:
+            row = shape_box.row()
+            row.scale_y = 1.2
+            row.operator(
+                "proteinblender.dna_add_bend",
+                text="\u2795 Add Bend Control",
+                icon="OUTLINER_OB_CURVE",
+            )
+            shape_box.label(
+                text="Adds a Bezier curve along the helix axis.",
+                icon="INFO",
+            )
+            return
+
+        # ---- Bend exists ---------------------------------------------------
+        nodes = get_bend_nodes(dna_obj)
+        n_nodes = len(nodes)
+        has_nodes = n_nodes > 0
+
+        # PRIMARY: Move-the-whole-strand affordance. Goes first because
+        # moving the DNA object alone doesn't work once a bend is attached
+        # (the Curve modifier anchors the mesh to the curve's world path).
+        # Users must select all rig parts together to translate the strand.
+        # Edit / Remove row
+        row = shape_box.row(align=True)
+        row.scale_y = 1.2
+        edit_op = row.operator(
+            "proteinblender.dna_edit_bend",
+            text="Edit Bend" if has_nodes else "Place Control Nodes",
+            icon="EMPTY_AXIS",
+        )
+        # When creating fresh, default the count to RES_DEFAULT; otherwise
+        # the existing count (this property only matters on first place).
+        edit_op.n_points = n_nodes if n_nodes >= RES_MIN else RES_DEFAULT
+        row.operator(
+            "proteinblender.dna_remove_bend",
+            text="",
+            icon="X",
+        )
+
+        # Node-count control (only after first Edit Bend)
+        if has_nodes:
+            shape_box.separator(factor=0.3)
+            res_row = shape_box.row(align=True)
+            res_row.label(text="Nodes:")
+            minus = res_row.operator(
+                "proteinblender.dna_set_bend_resolution",
+                text="", icon="REMOVE",
+            )
+            minus.n_points = max(RES_MIN, n_nodes - 1)
+            res_row.label(text=str(n_nodes))
+            plus = res_row.operator(
+                "proteinblender.dna_set_bend_resolution",
+                text="", icon="ADD",
+            )
+            plus.n_points = min(RES_MAX, n_nodes + 1)
+
+            shape_box.label(
+                text="Click a node to grab it. Shift-click to multi-select.",
+                icon="INFO",
+            )
 
 CLASSES = (PROTEINBLENDER_PT_builders,)
 
