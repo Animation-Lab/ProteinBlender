@@ -208,6 +208,17 @@ class PROTEINBLENDER_OT_update_dna(Operator):
         bend_curve_name = old_obj.get(_bender.BEND_CURVE_PROP)
         bend_curve_obj = bpy.data.objects.get(bend_curve_name) if bend_curve_name else None
 
+        # Materialise any user-driven bend into the curve's bezier data
+        # before we destroy the hook empties. Hook modifiers only deform at
+        # evaluation time, so without this bake the user's nudges live
+        # solely in the empties' positions and would be lost when the
+        # empties get purged with the old molecule's collection.
+        if bend_curve_obj is not None:
+            try:
+                _bender.bake_evaluated_curve_shape(bend_curve_obj)
+            except Exception as e:
+                self.report({"WARNING"}, f"Could not bake bend shape: {e}")
+
         # Delete the old molecule (object, collection, registry, list item).
         # The bend curve is a separate object and survives this deletion.
         scene_mgr.delete_molecule(identifier)

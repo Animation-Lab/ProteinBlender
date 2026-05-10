@@ -489,6 +489,37 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
     dna_obj[BEND_NODES_PROP] = json.dumps(names)
 
 
+def bake_evaluated_curve_shape(curve_obj):
+    """Copy the curve's evaluated bezier-point positions (i.e. with any
+    hook-modifier deformation applied) back into the underlying curve data.
+
+    Hook modifiers deform the curve at *evaluation* time only — they don't
+    write to ``bp.co``. As a result, any user-driven bend (dragging a node
+    Empty) is invisible to operations that read the static curve, including
+    arc-length resampling and rebuild-then-recreate flows. Calling this
+    before destroying the hook empties materialises the user's bend so it
+    survives the rebuild.
+    """
+    if curve_obj is None or curve_obj.data is None:
+        return
+    deps = bpy.context.evaluated_depsgraph_get()
+    eval_curve = curve_obj.evaluated_get(deps)
+    eval_data = eval_curve.data
+    eval_spline = eval_data.splines[0] if eval_data.splines else None
+    if eval_spline is None:
+        return
+    orig_spline = curve_obj.data.splines[0]
+    # Hook modifiers don't change topology, so the bezier-point counts
+    # should match. If they ever diverge, skip — copying point-by-point is
+    # the only safe operation here.
+    if len(eval_spline.bezier_points) != len(orig_spline.bezier_points):
+        return
+    for ebp, obp in zip(eval_spline.bezier_points, orig_spline.bezier_points):
+        obp.co = ebp.co.copy()
+        obp.handle_left = ebp.handle_left.copy()
+        obp.handle_right = ebp.handle_right.copy()
+
+
 def _rebuild_bend_nodes(dna_obj, n_points):
     """Tear down & recreate the bend node system at a new resolution while
     preserving the curve's current shape via arc-length resampling."""
@@ -496,24 +527,9 @@ def _rebuild_bend_nodes(dna_obj, n_points):
     if curve_obj is None:
         return
 
-    # Save the empties' positions first via the *evaluated* curve (positions
-    # already include any hook deformation the user has applied).
-    deps = bpy.context.evaluated_depsgraph_get()
-    eval_curve = curve_obj.evaluated_get(deps)
-    eval_data = eval_curve.data
-    # Bake the deformed positions into the original curve so resampling
-    # accounts for the user's bend.
-    eval_spline = eval_data.splines[0] if eval_data.splines else None
-    if eval_spline is not None:
-        orig_spline = curve_obj.data.splines[0]
-        # Number of bezier points may match the original (hooks don't
-        # change topology) so we copy point-by-point.
-        if len(eval_spline.bezier_points) == len(orig_spline.bezier_points):
-            for ebp, obp in zip(eval_spline.bezier_points,
-                                orig_spline.bezier_points):
-                obp.co = ebp.co.copy()
-                obp.handle_left = ebp.handle_left.copy()
-                obp.handle_right = ebp.handle_right.copy()
+    # Bake the user's hook-deformed shape into the underlying curve so the
+    # subsequent resample sees their bend, not the straight starting line.
+    bake_evaluated_curve_shape(curve_obj)
 
     # Remove old nodes & hooks
     _remove_bend_nodes(dna_obj)
@@ -531,9 +547,12 @@ def _rebuild_bend_nodes(dna_obj, n_points):
 def reattach_after_rebuild(new_dna_obj, curve_obj):
     """Re-establish the bend after `update_dna` rebuilds the DNA mesh.
 
-    The curve and any bend nodes are separate scene objects that survive
-    the rebuild; we just shift the new mesh's pivot back to its bottom,
-    re-add the Curve modifier, and re-parent the curve to the new DNA.
+    The curve survives the rebuild because we held a separate reference
+    to it before deleting the old molecule. The control-node Empties do
+    NOT — they were linked to the old DNA's collection, which was purged
+    with the molecule, and their hook modifiers on the curve are now
+    pointing at deleted data. We rebuild them from the curve's bezier
+    points (the canonical source of the bend shape).
     """
     if curve_obj is None:
         return
@@ -541,9 +560,65 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     _add_curve_modifier(new_dna_obj, curve_obj)
     new_dna_obj[BEND_CURVE_PROP] = curve_obj.name
 
-    # Re-parent the curve to the new DNA object.
+    # Re-parent the curve to the new DNA object AND snap its local transform
+    # to identity. This makes the curve sit exactly at the DNA's pivot —
+    # which, after shift_origin_to_bottom, is the bottom of the strand.
+    # Without this, the curve retains its OLD world position and floats
+    # below the new (longer) strand once the bbox-centre correction shifts
+    # the new DNA into place.
+    import mathutils
     curve_obj.parent = new_dna_obj
-    curve_obj.matrix_parent_inverse = new_dna_obj.matrix_world.inverted()
+    curve_obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
+    curve_obj.location = (0.0, 0.0, 0.0)
+    curve_obj.rotation_euler = (0.0, 0.0, 0.0)
+    curve_obj.scale = (1.0, 1.0, 1.0)
+
+    splines = curve_obj.data.splines if curve_obj.data else None
+    if not splines or len(splines) == 0:
+        return
+    spline = splines[0]
+    n_points = len(spline.bezier_points)
+    if n_points < RES_MIN:
+        return
+
+    # Resize the curve along Z to span the new DNA's height. The curve's
+    # bezier points were sized to the OLD DNA's height; without this
+    # rescale, a longer/shorter sequence leaves the curve floating off
+    # the strand. X/Y deformation (the user's bend) is preserved.
+    #
+    # We rescale only the *control point* Z values, then regenerate the
+    # bezier handles from scratch via _set_aligned_handles_along_path —
+    # blindly rescaling the existing handles can leave them overshooting
+    # adjacent control points, which makes the Curve modifier compress or
+    # loop the strand even though the control points are correctly placed.
+    extent = _mesh_z_extent(new_dna_obj)
+    if extent is not None:
+        new_height = extent[1] - extent[0]
+        old_z_max = max(bp.co.z for bp in spline.bezier_points)
+        if old_z_max > 1e-6 and new_height > 1e-6 and abs(new_height - old_z_max) > 1e-4:
+            scale_z = new_height / old_z_max
+            for bp in spline.bezier_points:
+                bp.co.z *= scale_z
+            _set_aligned_handles_along_path(spline)
+            curve_obj.data.update_tag()
+
+    # Sweep up any stale node Empties still parented to the curve. These
+    # may exist as orphans (their old collection was deleted) or have been
+    # re-homed to another collection — either way they're broken handles.
+    for ob in list(bpy.data.objects):
+        if (ob.type == "EMPTY"
+                and ob.parent is curve_obj
+                and "_BendNode" in ob.name):
+            try:
+                bpy.data.objects.remove(ob, do_unlink=True)
+            except Exception:
+                pass
+
+    # Drop the curve's now-stale hook modifiers; _create_bend_nodes will
+    # rebuild a fresh set keyed to the new Empties.
+    _remove_hook_modifiers(curve_obj)
+
+    _create_bend_nodes(new_dna_obj, curve_obj, n_points)
 
 
 def cleanup_bend_curve(dna_obj):
