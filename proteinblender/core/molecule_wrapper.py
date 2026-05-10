@@ -67,9 +67,23 @@ class MoleculeWrapper:
         
         # Keep legacy chain_mapping for backward compatibility (use auth_chain_id_map as source)
         self.chain_mapping = self.auth_chain_id_map
-        
+
         # Initialize chain residue ranges
         self.chain_residue_ranges = self._get_chain_residue_ranges()
+
+        # Bug C fallback: on Blender 5.1 + biotite 1.2.x, `chain_mapping_str()`
+        # returns an empty dict for many structures, leaving auth_chain_id_map
+        # empty. Without a chain_mapping, the create-domain operator can't
+        # translate UI numeric chain indices back to author chain IDs and
+        # ends up reporting bogus overlap errors. Fall back to deriving the
+        # map from chain_residue_ranges keys (label_asym_ids) so downstream
+        # code always has a non-empty {idx -> author-id} dict to work with.
+        if not self.chain_mapping and self.chain_residue_ranges:
+            for idx, auth_id in enumerate(sorted(self.chain_residue_ranges.keys())):
+                self.chain_mapping[idx] = auth_id
+            # Keep auth_chain_id_map in lock-step so any direct reads of it
+            # see the same fallback values.
+            self.auth_chain_id_map = self.chain_mapping
         
         # Add after existing initialization
         self.preview_nodes = None
@@ -604,6 +618,9 @@ class MoleculeWrapper:
         # Add the domain to our domain collection
         self.domains[domain_id] = domain
         created_domain_ids_list.append(domain_id) # Add primary domain to list
+        # Mirror the new domain into the persistent PropertyGroup collection
+        # so it survives .blend save → load (Bug B).
+        self._mirror_domains_to_property_group()
         
         # Check if we need to create additional domains to span the rest of the chain/context
         if auto_fill_chain:
@@ -1532,11 +1549,13 @@ class MoleculeWrapper:
                 # Normalization called by the caller of update_domain, or if ID does not change, see below.
                 # For now, let's assume caller handles normalization for the *returned* ID.
                 # However, if the ID changes, the *new* domain should be normalized.
-                self._normalize_domain_name(new_domain_id) 
+                self._normalize_domain_name(new_domain_id)
+                self._mirror_domains_to_property_group()
                 return new_domain_id
-            
+
             # If domain ID didn't change, still normalize its name as its range or context might have.
             self._normalize_domain_name(domain_id)
+            self._mirror_domains_to_property_group()
             return domain_id
             
         except Exception:
@@ -2548,12 +2567,63 @@ class MoleculeWrapper:
         """Internal method to delete a domain without adjusting adjacent domains"""
         # Delete domain mask nodes in parent molecule
         self._delete_domain_mask_nodes(domain_id)
-        
+
         # Clean up domain object and node group
         self.domains[domain_id].cleanup()
-        
+
         # Remove from domains dictionary
         del self.domains[domain_id]
+
+        # Keep PG mirror in sync so the next save doesn't keep a ghost entry.
+        self._mirror_domains_to_property_group()
+
+    def _get_list_item(self):
+        """Find the MoleculeListItem PropertyGroup for this molecule.
+
+        Returns None when called from a context without a scene (e.g. during
+        construction before the item has been added).
+        """
+        try:
+            scene = bpy.context.scene
+        except Exception:
+            return None
+        if not scene or not hasattr(scene, "molecule_list_items"):
+            return None
+        for item in scene.molecule_list_items:
+            if item.identifier == self.identifier:
+                return item
+        return None
+
+    def _mirror_domains_to_property_group(self):
+        """Mirror self.domains (runtime dict) into MoleculeListItem.domains
+        (persistent CollectionProperty).
+
+        Without this, every domain create/split/copy/delete is invisible to
+        a .blend save — see save-load-stress-test.md (Bug B). Called at the
+        end of each domain CRUD operation.
+        """
+        item = self._get_list_item()
+        if item is None:
+            return
+        try:
+            item.domains.clear()
+            for domain_id, domain in self.domains.items():
+                pg = item.domains.add()
+                pg.domain_id = domain_id
+                pg.chain_id = domain.chain_id
+                pg.start = domain.start
+                pg.end = domain.end
+                pg.name = domain.name
+                # Keep the object PointerProperty AND a stored name so
+                # reconstruction can heal a stale pointer.
+                if domain.object:
+                    pg.object = domain.object
+                    pg.object_name = domain.object.name
+                else:
+                    pg.object_name = getattr(domain, 'object_name', '')
+        except Exception as e:
+            # Mirror failure must never break the surrounding op.
+            print(f"_mirror_domains_to_property_group: failed for {self.identifier}: {e}")
 
     def get_blender_chain_id(self, chain_id: str) -> Optional[str]:
         """
