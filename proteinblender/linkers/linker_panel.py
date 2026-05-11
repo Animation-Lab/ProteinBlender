@@ -150,57 +150,54 @@ class PB2_PT_linkers(Panel):
                 self._draw_linker_details(main_box, linker)
 
     def _draw_linker_details(self, main_box, linker):
-        """Draw detailed settings for the selected linker."""
-        main_box.separator()
+        """Draw detailed settings for the selected linker.
 
-        # Puppet info
-        box = main_box.box()
+        Everything for the selected linker lives inside ONE outer box so
+        the panel reads as a single cohesive editor for that linker \u2014 not
+        as a stack of disconnected sections that happen to follow the list.
+        """
+        main_box.separator(factor=0.5)
+
+        # One box that owns the whole "editor for this linker" surface.
+        editor = main_box.box()
+        header = editor.row(align=True)
+        header.label(text=f"Editing: {linker.name}", icon='LINK_BLEND')
+        # Show the linker's style + rendering mode in the header so the
+        # user can see what they're editing at a glance.
+        style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
+        header.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
+        if linker.rendering_mode == 'DETAILED':
+            header.label(text="", icon='MESH_DATA')
+
+        # ---- Connection (puppet + endpoints) ---------------------------
+        section = editor.column(align=True)
+        section.separator(factor=0.5)
+
         puppet_name = self._get_puppet_name(linker.puppet_id)
-        box.label(text=f"Puppet: {puppet_name}", icon='ARMATURE_DATA')
+        row = section.row(align=True)
+        row.label(text="Puppet:", icon='ARMATURE_DATA')
+        row.label(text=puppet_name)
 
-        # Endpoints
-        box = main_box.box()
-        box.label(text="Endpoints", icon='LINKED')
-
-        row = box.row()
-        row.label(text="Start:")
+        row = section.row(align=True)
+        row.label(text="Start:", icon='TRACKING_BACKWARDS')
         row.label(text=linker.get_endpoint_a_display())
 
-        row = box.row()
-        row.label(text="End:")
+        row = section.row(align=True)
+        row.label(text="End:", icon='TRACKING_FORWARDS')
         row.label(text=linker.get_endpoint_b_display())
 
-        # Length and reach
-        box.separator()
-        box.prop(linker, "length_residues")
+        # ---- Physics --------------------------------------------------
+        editor.separator(factor=0.6)
+        section = editor.column(align=True)
+        section.label(text="Physics", icon='PHYSICS')
+        section.prop(linker, "length_residues")
         max_reach = linker.get_max_reach_bu()
         max_reach_angstrom = linker.length_residues * 3.5
-        box.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} \u00C5)")
-
-        # Physics behavior
-        box.separator()
-        box.prop(linker, "behavior")
-
-        # Appearance
-        box = main_box.box()
-        box.label(text="Appearance", icon='MATERIAL')
-
-        col = box.column()
-        col.prop(linker, "style")
-        col.prop(linker, "rendering_mode")
-        col.prop(linker, "color")
-
-        if linker.style == 'TUBE':
-            col.prop(linker, "tube_radius")
-        elif linker.style == 'BEADS':
-            col.prop(linker, "bead_radius")
-            col.prop(linker, "bead_radius_variance")
-            col.prop(linker, "bead_overlap")
-            col.prop(linker, "bead_jitter")
-
-        row = col.row(align=True)
-        row.prop(linker, "binding_zone_residues")
-        help_op = row.operator("pb2.show_help_popup", text="", icon='QUESTION')
+        section.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} \u00C5)")
+        section.prop(linker, "behavior")
+        bz_row = section.row(align=True)
+        bz_row.prop(linker, "binding_zone_residues")
+        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
         help_op.title = "Binding Zone"
         help_op.message = (
             "The binding zone is the number of residues at each end of the linker "
@@ -209,17 +206,36 @@ class PB2_PT_linkers(Panel):
             "mimicking how real peptide linkers emerge from a protein surface."
         )
 
-        # Actions
-        main_box.separator()
-        row = main_box.row(align=True)
+        # ---- Appearance -----------------------------------------------
+        editor.separator(factor=0.6)
+        section = editor.column(align=True)
+        section.label(text="Appearance", icon='MATERIAL')
+        section.prop(linker, "style")
+        section.prop(linker, "rendering_mode")
+        section.prop(linker, "color")
+        if linker.style == 'TUBE':
+            section.prop(linker, "tube_radius")
+        elif linker.style == 'BEADS':
+            section.prop(linker, "bead_radius")
+            section.prop(linker, "bead_radius_variance")
+            section.prop(linker, "bead_overlap")
+            section.prop(linker, "bead_jitter")
 
-        op = row.operator("pb2.edit_linker", text="Edit", icon='GREASEPENCIL')
+        # ---- Actions: Edit / Select / Apply ---------------------------
+        # Apply rebuilds the geometry from the current property values \u2014
+        # used to be labelled "Refresh" but "Apply" is clearer about
+        # what the button does.
+        editor.separator(factor=0.6)
+        action_row = editor.row(align=True)
+        action_row.scale_y = 1.15
+
+        op = action_row.operator("pb2.edit_linker", text="Edit", icon='GREASEPENCIL')
         op.linker_uid = linker.uid
 
-        op = row.operator("pb2.select_linker_object", text="Select", icon='RESTRICT_SELECT_OFF')
+        op = action_row.operator("pb2.select_linker_object", text="Select", icon='RESTRICT_SELECT_OFF')
         op.linker_uid = linker.uid
 
-        op = row.operator("pb2.update_linker", text="Refresh", icon='FILE_REFRESH')
+        op = action_row.operator("pb2.update_linker", text="Apply", icon='CHECKMARK')
         op.linker_uid = linker.uid
 
     @staticmethod
