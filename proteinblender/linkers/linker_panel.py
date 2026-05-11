@@ -152,27 +152,28 @@ class PB2_PT_linkers(Panel):
     def _draw_linker_details(self, main_box, linker):
         """Draw detailed settings for the selected linker.
 
-        Everything for the selected linker lives inside ONE outer box so
-        the panel reads as a single cohesive editor for that linker \u2014 not
-        as a stack of disconnected sections that happen to follow the list.
+        Renders directly into main_box (the same outer box that holds the
+        Create button and the linker list) so the editor reads as part of
+        the panel rather than as a separate floating section below it.
+        No inner box wrapper \u2014 just labelled section columns with thin
+        separators between them.
         """
-        main_box.separator(factor=0.5)
+        # Slim separator to mark the boundary between the list and the
+        # editor without inserting a visible nested box.
+        main_box.separator(factor=0.4)
 
-        # One box that owns the whole "editor for this linker" surface.
-        editor = main_box.box()
-        header = editor.row(align=True)
+        # Editor header \u2014 a plain row, no box. The icons mirror the style
+        # + rendering-mode icons shown on the linker's list row so the
+        # editor visually echoes the row it belongs to.
+        header = main_box.row(align=True)
         header.label(text=f"Editing: {linker.name}", icon='LINK_BLEND')
-        # Show the linker's style + rendering mode in the header so the
-        # user can see what they're editing at a glance.
         style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
         header.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
         if linker.rendering_mode == 'DETAILED':
             header.label(text="", icon='MESH_DATA')
 
         # ---- Connection (puppet + endpoints) ---------------------------
-        section = editor.column(align=True)
-        section.separator(factor=0.5)
-
+        section = main_box.column(align=True)
         puppet_name = self._get_puppet_name(linker.puppet_id)
         row = section.row(align=True)
         row.label(text="Puppet:", icon='ARMATURE_DATA')
@@ -187,8 +188,8 @@ class PB2_PT_linkers(Panel):
         row.label(text=linker.get_endpoint_b_display())
 
         # ---- Physics --------------------------------------------------
-        editor.separator(factor=0.6)
-        section = editor.column(align=True)
+        main_box.separator(factor=0.6)
+        section = main_box.column(align=True)
         section.label(text="Physics", icon='PHYSICS')
         section.prop(linker, "length_residues")
         max_reach = linker.get_max_reach_bu()
@@ -207,8 +208,8 @@ class PB2_PT_linkers(Panel):
         )
 
         # ---- Appearance -----------------------------------------------
-        editor.separator(factor=0.6)
-        section = editor.column(align=True)
+        main_box.separator(factor=0.6)
+        section = main_box.column(align=True)
         section.label(text="Appearance", icon='MATERIAL')
         section.prop(linker, "style")
         section.prop(linker, "rendering_mode")
@@ -225,8 +226,8 @@ class PB2_PT_linkers(Panel):
         # Apply rebuilds the geometry from the current property values \u2014
         # used to be labelled "Refresh" but "Apply" is clearer about
         # what the button does.
-        editor.separator(factor=0.6)
-        action_row = editor.row(align=True)
+        main_box.separator(factor=0.6)
+        action_row = main_box.row(align=True)
         action_row.scale_y = 1.15
 
         op = action_row.operator("pb2.edit_linker", text="Edit", icon='GREASEPENCIL')
