@@ -406,16 +406,21 @@ def _is_molecule_valid(molecule):
 
     Uses the centralized is_object_valid from blender_utils.
     Also attempts to heal the reference if possible.
+
+    Catches LinkedObjectError / ReferenceError / etc. — after `ed.undo`
+    of an import the wrapper's stored UUID may no longer resolve, and
+    those exceptions need to be treated as "invalid" rather than fatal.
     """
     if not molecule:
         return False
-
-    # Use wrapper's is_valid method if available (new approach)
-    if hasattr(molecule, 'is_valid'):
-        return molecule.is_valid()
-
-    # Fallback for compatibility
-    return is_object_valid(molecule.object)
+    try:
+        # Use wrapper's is_valid method if available (new approach)
+        if hasattr(molecule, 'is_valid'):
+            return molecule.is_valid()
+        # Fallback for compatibility
+        return is_object_valid(molecule.object)
+    except Exception:
+        return False
 
 
 def _has_invalid_domains(molecule):
@@ -861,7 +866,14 @@ def _remove_invalid_wrappers(scene_manager, scene) -> List[str]:
     removed_ids = []
 
     for molecule_id, molecule in list(scene_manager.molecules.items()):
-        if not _is_molecule_valid(molecule):
+        # Wrap the validity check itself so a failure on one wrapper
+        # (e.g. databpy raising LinkedObjectError) doesn't kill the rest
+        # of the cleanup loop and leave other stale wrappers behind.
+        try:
+            is_valid = _is_molecule_valid(molecule)
+        except Exception:
+            is_valid = False
+        if not is_valid:
             removed_ids.append(molecule_id)
 
             # Remove from scene_manager
@@ -1096,6 +1108,23 @@ def build_outliner_hierarchy(context=None):
     selection_sync._update_in_progress = True  # Prevent any updates during rebuild
     
     # Get all valid molecule and domain IDs currently in the scene
+    # Drop any wrappers whose underlying object is gone — typically a
+    # consequence of `ed.undo` reverting an import, which leaves the
+    # runtime singleton with stale entries that would otherwise crash
+    # build_outliner_hierarchy when resolving via databpy.
+    for stale_id in [
+        mid for mid, mol in list(scene_manager.molecules.items())
+        if not _is_molecule_valid(mol)
+    ]:
+        try:
+            del scene_manager.molecules[stale_id]
+        except KeyError:
+            pass
+        try:
+            del scene_manager.molecule_manager.molecules[stale_id]
+        except (KeyError, AttributeError):
+            pass
+
     valid_item_ids = set()
     for molecule_id in scene_manager.molecules.keys():
         valid_item_ids.add(molecule_id)
@@ -1106,10 +1135,13 @@ def build_outliner_hierarchy(context=None):
         # Also add chain IDs which are used in outliner items
         # Chain IDs have format: "{molecule_id}_chain_{chain_id}"
         mol_object = None
-        if hasattr(molecule, 'object') and molecule.object:
-            mol_object = molecule.object
-        elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
-            mol_object = molecule.molecule.object
+        try:
+            if hasattr(molecule, 'object') and molecule.object:
+                mol_object = molecule.object
+            elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
+                mol_object = molecule.molecule.object
+        except Exception:
+            mol_object = None
 
         if mol_object and "chain_id" in mol_object.data.attributes:
             chain_attr = mol_object.data.attributes["chain_id"]

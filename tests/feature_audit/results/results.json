@@ -1,0 +1,845 @@
+[
+  {
+    "test_id": "D1",
+    "name": "Auto-chain-domain creation (4 chains -> 4 auto-domains)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.import_protein",
+      "props": {
+        "pdb_id": "4hhb"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\D1_initial_4hhb_4chains.png"
+  },
+  {
+    "test_id": "D2",
+    "name": "Set domain color via obj.domain_color property",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "set obj.domain_color = (1, 0.2, 0.2, 1)",
+      "domain_id": "4hhb_001_A_1_198_Chain_A"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\D2_domain_color.png"
+  },
+  {
+    "test_id": "D3",
+    "name": "Set domain style via obj.domain_style",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "set obj.domain_style = 'spheres'",
+      "domain_id": "4hhb_001_B_1_205_Chain_B"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "D4",
+    "name": "Split chain A: extract residues 1-99 as a new sub-domain",
+    "status": "PASS",
+    "error": null,
+    "notes": "After split, domain keys: ['4hhb_001_A_100_198_Residues_100-198', '4hhb_001_A_1_99_Residues_1-99', '4hhb_001_B_1_205_Chain_B', '4hhb_001_C_1_201_Chain_C', '4hhb_001_D_1_197_Chain_D']",
+    "repro": {
+      "op": "proteinblender.split_domain",
+      "props": {
+        "chain_id": "A",
+        "molecule_id": "4hhb_001",
+        "split_start": 1,
+        "split_end": 99
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\D4_split_domain.png"
+  },
+  {
+    "test_id": "D5",
+    "name": "Rename domain (via outliner selection + EXEC_DEFAULT)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.rename_domain",
+      "props": {
+        "domain_id": "4hhb_001_D_1_197_Chain_D",
+        "new_name": "Renamed_X"
+      },
+      "precondition": "outliner item is_selected=True for target domain",
+      "original_name": "Chain D"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "D6",
+    "name": "Merge two domains (outliner-selected)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.merge_domains (no kwargs \u2014 reads outliner selection)",
+      "selected": [
+        "4hhb_001_A_100_198_Residues_100-198",
+        "4hhb_001_A_1_99_Residues_1-99"
+      ]
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\D6_merged.png"
+  },
+  {
+    "test_id": "D7",
+    "name": "Delete domain",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.delete_domain",
+      "props": {
+        "molecule_id": "4hhb_001",
+        "domain_id": "4hhb_001_D_1_197_Chain_D"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA1",
+    "name": "Build double-stranded DNA (12 nt cartoon)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.build_dna",
+      "props": {
+        "sequence": "ATCGATCGATCG",
+        "nucleic_type": "DNA",
+        "double_stranded": true,
+        "style": "cartoon",
+        "name_prefix": "DNA_DS"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\DNA1_build_ds.png"
+  },
+  {
+    "test_id": "DNA2",
+    "name": "Build single-stranded RNA",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.build_dna",
+      "props": {
+        "sequence": "AUGCAUGC",
+        "nucleic_type": "RNA",
+        "double_stranded": false,
+        "style": "sticks"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA3",
+    "name": "Add bend creates curve + 3 default nodes",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.dna_add_bend",
+      "precondition": "DNA object is active"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\DNA3_add_bend.png"
+  },
+  {
+    "test_id": "DNA4",
+    "name": "Set bend resolution to 5 nodes",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.dna_set_bend_resolution",
+      "props": {
+        "n_points": 5
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA5",
+    "name": "Edit bend selects all 5 control nodes",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.dna_edit_bend",
+      "props": {
+        "n_points": 5
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA6",
+    "name": "Finish bend edit returns active to DNA",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.dna_finish_bend_edit",
+      "precondition": "active object is a bend node"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA7",
+    "name": "Update DNA sequence preserves bend curve + nodes (regression fix)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.update_dna",
+      "preconditions": [
+        "DNA active",
+        "bend with 5 nodes",
+        "sequence prop set to new value"
+      ]
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\DNA7_update_with_bend.png"
+  },
+  {
+    "test_id": "DNA8",
+    "name": "Remove bend (cleans BEND_CURVE_PROP, modifier, nodes)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.dna_remove_bend"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "DNA9",
+    "name": "Update DNA colors via proteinblender.update_dna_colors",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.update_dna_colors",
+      "preconditions": [
+        "dna_builder_props.color_a = (0.9, 0.1, 0.1, 1)",
+        "DNA active"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF1",
+    "name": "Create keyframe 'KF_Start' at frame 1",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.keyframe_protein",
+      "props": {
+        "keyframe_name": "KF_Start",
+        "frame_number": 1
+      },
+      "precondition": "selected_molecule_id=1aki_001, frame_current=1"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF2",
+    "name": "Create second keyframe at frame 30 with translated protein",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.keyframe_protein",
+      "props": {
+        "keyframe_name": "KF_Mid",
+        "frame_number": 30
+      },
+      "precondition": "frame_current=30, 1aki.location=(5,0,0)"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF3",
+    "name": "Jump to keyframe via active_keyframe_index -> scene.frame_current == 30",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.jump_to_keyframe",
+      "preconditions": [
+        "frame_current=5",
+        "item.active_keyframe_index = 1"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF4",
+    "name": "Edit keyframe: rename + change frame",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.edit_keyframe",
+      "props": {
+        "keyframe_index": 0,
+        "keyframe_name": "KF_Start_Renamed",
+        "frame_number": 2
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF5",
+    "name": "Delete keyframe (index 0)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.delete_keyframe",
+      "props": {
+        "keyframe_index": 0
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "KF6",
+    "name": "F-curves exist after keyframe ops (>=3 channels)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "note": "Inspect 1aki object's animation_data.action F-curves"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "L1",
+    "name": "Create QUICK-mode tube linker between chain A:5 and chain B:5",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "pb2.add_linker",
+      "props": {
+        "puppet_selector": "puppet_0f62940b",
+        "endpoint_a_item": "A_4hhb_001_chain_0",
+        "endpoint_a_residue": 5,
+        "endpoint_b_item": "B_4hhb_001_chain_1",
+        "endpoint_b_residue": 5,
+        "rendering_mode": "QUICK",
+        "style": "TUBE"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\L1_quick_linker.png"
+  },
+  {
+    "test_id": "L2",
+    "name": "Linker has a backing curve object in the scene",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "check": "scene.pb2_linkers[0].curve_object_name resolves to a bpy.data.objects entry"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "L3",
+    "name": "Reject linker connecting same chain to itself",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "pb2.add_linker",
+      "preconditions": "endpoint_a_item == endpoint_b_item"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "L4",
+    "name": "Toggle linker visibility",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "pb2.toggle_linker_visibility",
+      "props": {
+        "linker_uid": "62e9b5bb"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "L5",
+    "name": "Remove linker \u2014 linker entry + curve object both removed",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "pb2.remove_linker",
+      "props": {
+        "linker_uid": "<uid>"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "L6",
+    "name": "Puppet deletion cascades linker cleanup (via operator)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "on_puppet_deleted(puppet_id) or proteinblender.delete_puppet",
+      "preconditions": "puppet has at least one linker"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "P1",
+    "name": "Import single-chain protein (1aki)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.import_protein",
+      "props": {
+        "pdb_id": "1aki",
+        "import_method": "PDB"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\P1_import_1aki.png"
+  },
+  {
+    "test_id": "P2",
+    "name": "Import multi-chain protein (4hhb) \u2014 auto-domain count == 4",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.import_protein",
+      "props": {
+        "pdb_id": "4hhb"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\P2_import_4hhb.png"
+  },
+  {
+    "test_id": "P3",
+    "name": "Change protein style ribbon\u2192spheres",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "scene.molecule_style = 'spheres'",
+      "preconditions": "selected_molecule_id=1aki_001"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\P3_style_spheres.png"
+  },
+  {
+    "test_id": "P4",
+    "name": "Duplicate protein (1aki_001)",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.duplicate_protein",
+      "props": {
+        "molecule_id": "1aki_001"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\P4_duplicate.png"
+  },
+  {
+    "test_id": "P5",
+    "name": "Toggle protein visibility",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.toggle_visibility",
+      "props": {
+        "molecule_id": "4hhb_001"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "P6",
+    "name": "Center protein at origin",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.center_protein",
+      "props": {
+        "molecule_id": "4hhb_001"
+      },
+      "precondition": "obj.location set to (5,3,1)"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "P7",
+    "name": "Delete protein (1aki_001) \u2014 wrapper+obj+list_item all gone",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.delete",
+      "props": {
+        "molecule_id": "1aki_001"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\P7_after_delete_1aki.png"
+  },
+  {
+    "test_id": "PO1",
+    "name": "Create pose 'Pose_Default' capturing 4 domain transforms",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.create_pose",
+      "props": {
+        "pose_name": "Pose_Default"
+      },
+      "precondition": "selected_molecule_id=4hhb_001"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PO1_create_pose_default.png"
+  },
+  {
+    "test_id": "PO2",
+    "name": "Create pose 'Pose_Moved' captures translated domain positions",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.create_pose",
+      "props": {
+        "pose_name": "Pose_Moved"
+      },
+      "preconditions": [
+        "chain A moved to (3, 2, 1)",
+        "chain B moved to (6, 2, 1)"
+      ]
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PO2_create_pose_moved.png"
+  },
+  {
+    "test_id": "PO3",
+    "name": "Apply pose toggles domain positions between 2 stored states",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "ops": [
+        "molecule.apply_pose(pose_index='0')",
+        "molecule.apply_pose(pose_index='1')"
+      ]
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PO3_after_apply_moved.png"
+  },
+  {
+    "test_id": "PO4",
+    "name": "Update pose overwrites stored transforms",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.update_pose",
+      "props": {
+        "pose_index": "0"
+      },
+      "precondition": "first chain moved to (9, 9, 9)"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PO5",
+    "name": "Rename pose",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.rename_pose",
+      "props": {
+        "new_name": "Renamed_Pose"
+      },
+      "precondition": "item.active_pose_index = 0"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PO6",
+    "name": "Delete pose",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "molecule.delete_pose",
+      "precondition": "item.active_pose_index = 0"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PU1",
+    "name": "Create puppet 'Puppet_AB' from chain A + chain B",
+    "status": "PASS",
+    "error": null,
+    "notes": "controller_obj=Puppet_AB_Controller",
+    "repro": {
+      "op": "proteinblender.create_puppet",
+      "props": {
+        "puppet_name": "Puppet_AB"
+      },
+      "precondition": "two chain items have is_selected=True in outliner"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PU1_create_puppet.png"
+  },
+  {
+    "test_id": "PU2",
+    "name": "Puppet controller has >=2 chain children (parented)",
+    "status": "PASS",
+    "error": null,
+    "notes": "children: ['Chain A_A_1_198', 'Chain B_B_1_205']",
+    "repro": {
+      "check": "list bpy.data.objects with parent == puppet controller"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PU3",
+    "name": "Move puppet controller \u2014 children follow by matching delta",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "set controller.location = (5, 3, 1)",
+      "check": "children matrix_world.translation delta == (setpoint - old_controller_loc)"
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PU3_move_puppet.png"
+  },
+  {
+    "test_id": "PU4",
+    "name": "Create-puppet on already-puppeted chain is rejected",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.create_puppet",
+      "precondition": "selected chain is already in another puppet"
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PU5",
+    "name": "Rename puppet via edit_puppet(action='RENAME')",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.edit_puppet",
+      "props": {
+        "action": "RENAME",
+        "puppet_id": "puppet_0028056f",
+        "new_name": "Renamed_Puppet"
+      }
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "PU6",
+    "name": "Delete puppet removes outliner item + controller",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "op": "proteinblender.delete_puppet",
+      "props": {
+        "puppet_id": "puppet_0028056f"
+      }
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PU6_after_delete.png"
+  },
+  {
+    "test_id": "SL1",
+    "name": "Save+load a single protein roundtrips manager state",
+    "status": "PASS",
+    "error": null,
+    "notes": "verify snap: {'blend': 'c:\\\\Users\\\\dlee1\\\\BlenderProjects\\\\ProteinBlender\\\\tests\\\\feature_audit\\\\results\\\\blends\\\\sl1_single_protein.blend', 'manager_ids': ['1aki_001'], 'list_items': [{'id': '1aki_001', 'object_name': '1aki', 'style': 'cartoon', 'n_domains': 1, 'n_poses': 0, 'n_keyframes': 0}], 'outliner_count': 2, 'outliner_types': {'PROTEIN': 1, 'CHAIN': 1}, 'linker_count': 0, 'linker_uids': [], 'nucleic_objs': [], 'puppet_count': 0}",
+    "repro": {
+      "steps": [
+        "reset",
+        "import_pdb 1aki",
+        "save_as_mainfile",
+        "fresh blender --background <blend> verify_dump"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "SL2",
+    "name": "Save+load 4hhb preserves 4 auto-chain-domains (Bug B regression guard)",
+    "status": "PASS",
+    "error": null,
+    "notes": "{'blend': 'c:\\\\Users\\\\dlee1\\\\BlenderProjects\\\\ProteinBlender\\\\tests\\\\feature_audit\\\\results\\\\blends\\\\sl2_multi_chain.blend', 'manager_ids': ['4hhb_001'], 'list_items': [{'id': '4hhb_001', 'object_name': '4hhb', 'style': 'cartoon', 'n_domains': 4, 'n_poses': 0, 'n_keyframes': 0}], 'outliner_count': 5",
+    "repro": {
+      "steps": [
+        "reset",
+        "import_pdb 4hhb",
+        "save_as_mainfile",
+        "fresh blender verify"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "SL3",
+    "name": "Save+load mixed protein + DNA + bend",
+    "status": "PASS",
+    "error": null,
+    "notes": "{'blend': 'c:\\\\Users\\\\dlee1\\\\BlenderProjects\\\\ProteinBlender\\\\tests\\\\feature_audit\\\\results\\\\blends\\\\sl3_mixed.blend', 'manager_ids': ['1aki_001', 'MixDNA_001'], 'list_items': [{'id': '1aki_001', 'object_name': '1aki', 'style': 'cartoon', 'n_domains': 1, 'n_poses': 0, 'n_keyframes': 0}, {'id': 'MixDNA_001', 'object_name': 'MixDNA_001', 'style': 'cartoon', 'n_domains': 0, 'n_poses': 0, 'n_keyframes",
+    "repro": {
+      "steps": [
+        "import 1aki",
+        "build DNA MixDNA",
+        "add bend",
+        "save"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "SL4",
+    "name": "Save+load preserves pose data",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "steps": [
+        "import 4hhb",
+        "move chain A",
+        "create_pose SL_Pose",
+        "save"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "SL5",
+    "name": "Save+load preserves keyframe metadata",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "steps": [
+        "import 1aki",
+        "keyframe_protein",
+        "save"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "SL6",
+    "name": "Save+load preserves puppet + linker",
+    "status": "PASS",
+    "error": null,
+    "notes": "linker uids in snap: ['97fc9008']",
+    "repro": {
+      "steps": [
+        "import 4hhb",
+        "create_puppet",
+        "add_linker",
+        "save"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "UR1",
+    "name": "Undo a protein import removes the molecule",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "steps": [
+        "ed.undo_push baseline",
+        "molecule.import_protein 1aki",
+        "ed.undo",
+        "sync_molecule_list_after_undo"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "UR2",
+    "name": "Redo after undo restores the molecule",
+    "status": "FAIL",
+    "error": "molecules=[]",
+    "notes": "",
+    "repro": {
+      "steps": [
+        "follows UR1 then ed.redo + sync"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "UR3",
+    "name": "Undo a molecule.delete restores the protein + wrapper",
+    "status": "FAIL",
+    "error": "gone_after_delete=True restored=False obj_back=False",
+    "notes": "",
+    "repro": {
+      "steps": [
+        "import 1aki",
+        "undo_push",
+        "molecule.delete",
+        "ed.undo",
+        "sync_molecule_list_after_undo"
+      ]
+    },
+    "screenshot": null
+  },
+  {
+    "test_id": "UR4",
+    "name": "Undo a DNA build removes object + wrapper",
+    "status": "PASS",
+    "error": null,
+    "notes": "",
+    "repro": {
+      "steps": [
+        "undo_push",
+        "proteinblender.build_dna",
+        "ed.undo",
+        "sync"
+      ]
+    },
+    "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\UR4_after_undo_dna_build.png"
+  },
+  {
+    "test_id": "UR5",
+    "name": "Undo a domain split restores original count",
+    "status": "FAIL",
+    "error": "before=4 after_split=5 after_undo=-1",
+    "notes": "",
+    "repro": {
+      "steps": [
+        "import 4hhb",
+        "undo_push",
+        "split_domain chain A 1-50",
+        "ed.undo",
+        "sync"
+      ]
+    },
+    "screenshot": null
+  }
+]

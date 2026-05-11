@@ -898,18 +898,32 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     affected_groups[group_item.item_id] = domains_in_group
                     self.report({'INFO'}, f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
         
+        # Resolve the outliner's numeric chain id ("0", "1", ...) to the
+        # molecule's chain letter ("A", "B", ...). MoleculeWrapper domains
+        # store the letter on `domain.chain_id`, so without this mapping the
+        # removal loop's match condition silently never fires and the merge
+        # just stacks a new domain on top of the originals.
+        chain_letter = None
+        chain_id_int = int(parent_chain.chain_id) if parent_chain.chain_id.isdigit() else None
+        if (chain_id_int is not None
+                and hasattr(molecule, 'idx_to_label_asym_id_map')
+                and chain_id_int in molecule.idx_to_label_asym_id_map):
+            chain_letter = molecule.idx_to_label_asym_id_map[chain_id_int]
+        if chain_letter is None:
+            chain_letter = parent_chain.chain_id  # fallback for non-numeric ids
+
         # Remove the old domains (use actual domain items)
         for domain_item in actual_domain_items:
             # Find the actual domain in molecule
             domain_to_remove = None
             for domain_id, domain in molecule.domains.items():
                 if (hasattr(domain, 'start') and hasattr(domain, 'end') and
-                    domain.start == domain_item.domain_start and 
+                    domain.start == domain_item.domain_start and
                     domain.end == domain_item.domain_end and
-                    str(domain.chain_id) == parent_chain.chain_id):
+                    str(domain.chain_id) == str(chain_letter)):
                     domain_to_remove = domain_id
                     break
-            
+
             if domain_to_remove:
                 domain = molecule.domains[domain_to_remove]
                 # Remove the domain's Blender object if it exists
@@ -1030,17 +1044,37 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
     
     def execute(self, context):
         scene = context.scene
-        
+
         # Update domain name in outliner
         for item in scene.outliner_items:
             if item.item_id == self.domain_id:
                 item.name = self.new_name
                 break
-        
-        # TODO: Update actual domain object name
-        
-        # Redraw UI
-        context.area.tag_redraw()
+
+        # Update the wrapper's domain.name so the rename survives a
+        # save/load cycle (and matches what UI re-reads from the wrapper).
+        scene_manager = ProteinBlenderScene.get_instance()
+        for molecule in scene_manager.molecules.values():
+            domain = getattr(molecule, 'domains', {}).get(self.domain_id)
+            if domain is not None:
+                domain.name = self.new_name
+                # Mirror into the persisted PG so a subsequent save sees it.
+                if hasattr(molecule, '_mirror_domains_to_property_group'):
+                    try:
+                        molecule._mirror_domains_to_property_group()
+                    except Exception:
+                        pass
+                break
+
+        # Redraw UI. context.area is None when called from a script/MCP/
+        # headless context — fall back to tagging every 3D view.
+        if context.area is not None:
+            context.area.tag_redraw()
+        else:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type in ("VIEW_3D", "PROPERTIES"):
+                        area.tag_redraw()
         return {'FINISHED'}
 
 

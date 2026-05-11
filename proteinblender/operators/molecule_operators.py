@@ -370,14 +370,25 @@ class MOLECULE_PB_OT_toggle_visibility(Operator):
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             return {'CANCELLED'}
-        # Determine new visibility state (False = visible, True = hidden)
-        new_state = not molecule.object.hide_viewport
-        # Toggle main molecule
-        molecule.object.hide_viewport = new_state
-        # Also toggle all domains for this molecule
+        # Determine new visibility state (False = visible, True = hidden).
+        # Toggle all three Blender hide attributes so the outliner eye icon,
+        # the camera icon, and the rendered output stay in sync.
+        new_hidden = not molecule.object.hide_viewport
+
+        def _apply(obj):
+            obj.hide_viewport = new_hidden
+            obj.hide_render = new_hidden
+            try:
+                obj.hide_set(new_hidden)
+            except RuntimeError:
+                # hide_set requires a valid view_layer context — skip if
+                # invoked from a context that doesn't have one.
+                pass
+
+        _apply(molecule.object)
         for domain in getattr(molecule, 'domains', {}).values():
             if domain.object:
-                domain.object.hide_viewport = new_state
+                _apply(domain.object)
         return {'FINISHED'}
 
 

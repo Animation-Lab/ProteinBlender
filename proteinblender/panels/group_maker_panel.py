@@ -308,7 +308,14 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
     
     def execute(self, context):
         scene = context.scene
-        
+
+        # The "Puppets" separator row in the outliner has item_type='PUPPET'
+        # and item_id='puppets_separator'. It's a header, not a real puppet,
+        # so reject any attempt to delete it.
+        if self.puppet_id == 'puppets_separator':
+            self.report({'ERROR'}, "Cannot delete the puppets header row")
+            return {'CANCELLED'}
+
         # Find and remove the puppet
         puppet_item = None
         puppet_index = -1
@@ -317,7 +324,7 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
                 puppet_item = item
                 puppet_index = i
                 break
-        
+
         if not puppet_item:
             self.report({'ERROR'}, "Puppet not found")
             return {'CANCELLED'}
@@ -362,8 +369,15 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
         build_outliner_hierarchy(context)
         self.report({'INFO'}, f"Deleted puppet: {puppet_item.name}")
         
-        # Update UI
-        context.area.tag_redraw()
+        # Update UI. context.area is None when called from a script/MCP
+        # context — fall back to tagging every 3D view.
+        if context.area is not None:
+            context.area.tag_redraw()
+        else:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type in ("VIEW_3D", "PROPERTIES"):
+                        area.tag_redraw()
         return {'FINISHED'}
 
 
@@ -583,19 +597,37 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             self.report({'INFO'}, f"Deleted puppet: {puppet_item.name}")
             
         elif self.action == 'RENAME':
-            # Find selected puppet
-            selected_puppet = None
-            for item in scene.outliner_items:
-                if item.is_selected and item.item_type == 'PUPPET':
-                    selected_puppet = item
-                    break
-            
-            if selected_puppet:
-                selected_puppet.name = self.new_name
+            # Prefer an explicit puppet_id when caller supplies it; fall
+            # back to the outliner selection. This makes the operator
+            # scriptable in addition to the click-driven panel usage.
+            target_puppet = None
+            if self.puppet_id:
+                for item in scene.outliner_items:
+                    if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
+                        target_puppet = item
+                        break
+            if target_puppet is None:
+                for item in scene.outliner_items:
+                    if item.is_selected and item.item_type == 'PUPPET':
+                        target_puppet = item
+                        break
+
+            if target_puppet:
+                target_puppet.name = self.new_name
                 self.report({'INFO'}, f"Renamed puppet to: {self.new_name}")
+            else:
+                self.report({'WARNING'}, "No puppet to rename (none selected and no puppet_id given)")
+                return {'CANCELLED'}
         
-        # Update UI
-        context.area.tag_redraw()
+        # Update UI. context.area is None when called from a script/MCP
+        # context — fall back to tagging every 3D view.
+        if context.area is not None:
+            context.area.tag_redraw()
+        else:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type in ("VIEW_3D", "PROPERTIES"):
+                        area.tag_redraw()
         return {'FINISHED'}
 
 

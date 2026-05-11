@@ -184,7 +184,15 @@ class MoleculeWrapper:
     @property
     def object(self) -> Optional[bpy.types.Object]:
         """Get the Blender object, healing reference if needed."""
-        obj = self.molecule.object if self.molecule else None
+        # Resolving via databpy can raise LinkedObjectError when the
+        # underlying object has been removed (e.g. after ed.undo of an
+        # import). Catch that explicitly so callers see None instead of
+        # a crash, which would otherwise kill the undo-sync loop and
+        # leave stale wrappers in mgr.molecules.
+        try:
+            obj = self.molecule.object if self.molecule else None
+        except Exception:
+            obj = None
 
         # Check if reference is still valid
         if not is_object_valid(obj):
@@ -192,7 +200,10 @@ class MoleculeWrapper:
             if self.object_name and self.object_name in bpy.data.objects:
                 healed_obj = bpy.data.objects[self.object_name]
                 if self.molecule:
-                    self.molecule.object = healed_obj
+                    try:
+                        self.molecule.object = healed_obj
+                    except Exception:
+                        pass
                 return healed_obj
             return None
 
@@ -237,7 +248,13 @@ class MoleculeWrapper:
         Returns:
             True if the main object reference is valid
         """
-        return is_object_valid(self.object)
+        try:
+            return is_object_valid(self.object)
+        except Exception:
+            # Any exception while resolving the object reference
+            # (LinkedObjectError, ReferenceError, etc.) means the wrapper
+            # is no longer pointing at a live Blender object.
+            return False
 
     @classmethod
     def from_existing_object(

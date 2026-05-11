@@ -1279,11 +1279,19 @@ def delete_linker_geometry(linker_def) -> None:
 
 
 def toggle_linker_visibility(linker_def, visible: bool) -> None:
-    """Toggle linker visibility."""
+    """Toggle linker visibility. Flips all three Blender hide flags so the
+    outliner eye icon, camera icon, and rendered output stay consistent."""
     obj = bpy.data.objects.get(linker_def.curve_object_name)
     if obj:
-        obj.hide_viewport = not visible
-        obj.hide_render = not visible
+        new_hidden = not visible
+        obj.hide_viewport = new_hidden
+        obj.hide_render = new_hidden
+        try:
+            obj.hide_set(new_hidden)
+        except RuntimeError:
+            # hide_set requires a valid view_layer context — skip if
+            # invoked from a context that doesn't have one.
+            pass
     linker_def.is_visible = visible
 
 

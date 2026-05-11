@@ -659,3 +659,13 @@ def update_molecule_style(self, context):
                     domain.object.domain_style = style
                 except Exception:
                     pass
+        # Mirror the new style into the persistent MoleculeListItem so it
+        # survives save/load. Without this, item.style drifts from the
+        # actual rendered style and the saved .blend records a stale value.
+        for item in context.scene.molecule_list_items:
+            if item.identifier == molecule.identifier:
+                try:
+                    item.style = style
+                except Exception:
+                    pass
+                break

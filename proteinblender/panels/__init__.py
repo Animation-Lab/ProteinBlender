@@ -25,6 +25,7 @@ from .domain_maker_panel import (
 from .group_maker_panel import (
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,
+    PROTEINBLENDER_OT_delete_puppet,
     PROTEINBLENDER_PT_puppet_maker
 )
 from .pose_library_panel import (
@@ -36,7 +37,12 @@ from .pose_library_panel import (
     PROTEINBLENDER_OT_delete_pose,
     PROTEINBLENDER_OT_placeholder
 )
-from .animation_panel import PROTEINBLENDER_PT_animation
+from .animation_panel import (
+    PROTEINBLENDER_PT_animation,
+    PROTEINBLENDER_UL_keyframe_list,
+    PROTEINBLENDER_OT_delete_keyframe as PROTEINBLENDER_OT_anim_delete_keyframe,
+    PROTEINBLENDER_OT_jump_to_keyframe,
+)
 # Direct panels - no container needed
 
 # Legacy panels (to be phased out)
@@ -58,6 +64,7 @@ __all__ = [
     'PROTEINBLENDER_PT_domain_maker',
     'PROTEINBLENDER_OT_create_puppet',
     'PROTEINBLENDER_OT_edit_puppet',
+    'PROTEINBLENDER_OT_delete_puppet',
     'PROTEINBLENDER_PT_puppet_maker',
     'PROTEINBLENDER_PT_pose_library',
     'PROTEINBLENDER_OT_toggle_puppet_selection',
@@ -84,13 +91,17 @@ CLASSES = [
     PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,
+    PROTEINBLENDER_OT_delete_puppet,
     PROTEINBLENDER_OT_toggle_puppet_selection,
     PROTEINBLENDER_OT_create_pose,
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,
     PROTEINBLENDER_OT_delete_pose,
     PROTEINBLENDER_OT_placeholder,
-    
+    PROTEINBLENDER_UL_keyframe_list,
+    PROTEINBLENDER_OT_anim_delete_keyframe,
+    PROTEINBLENDER_OT_jump_to_keyframe,
+
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
