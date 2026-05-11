@@ -327,7 +327,7 @@
     "repro": {
       "op": "pb2.add_linker",
       "props": {
-        "puppet_selector": "puppet_0f62940b",
+        "puppet_selector": "puppet_77b94ec2",
         "endpoint_a_item": "A_4hhb_001_chain_0",
         "endpoint_a_residue": 5,
         "endpoint_b_item": "B_4hhb_001_chain_1",
@@ -370,7 +370,7 @@
     "repro": {
       "op": "pb2.toggle_linker_visibility",
       "props": {
-        "linker_uid": "62e9b5bb"
+        "linker_uid": "43911811"
       }
     },
     "screenshot": null
@@ -648,7 +648,7 @@
       "op": "proteinblender.edit_puppet",
       "props": {
         "action": "RENAME",
-        "puppet_id": "puppet_0028056f",
+        "puppet_id": "puppet_07e50232",
         "new_name": "Renamed_Puppet"
       }
     },
@@ -663,7 +663,7 @@
     "repro": {
       "op": "proteinblender.delete_puppet",
       "props": {
-        "puppet_id": "puppet_0028056f"
+        "puppet_id": "puppet_07e50232"
       }
     },
     "screenshot": "c:\\Users\\dlee1\\BlenderProjects\\ProteinBlender\\tests\\feature_audit\\screenshots\\PU6_after_delete.png"

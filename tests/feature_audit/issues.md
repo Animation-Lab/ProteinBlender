@@ -16,16 +16,25 @@ All 8 originally-identified issues have been addressed. Three undo/redo failures
 - `build_outliner_hierarchy()` now purges wrappers whose underlying object is gone *before* iterating them, so the outliner rebuild can no longer crash on stale UUIDs.
 - `_remove_invalid_wrappers` itself wraps each per-wrapper validity check in `try/except` so one bad wrapper can't poison the loop.
 
-**What still fails and why:**
-- `bpy.data.objects.remove(obj, do_unlink=True)` calls in [proteinblender/core/manager.py:32](../../proteinblender/core/manager.py#L32), [proteinblender/core/molecule_manager.py:142](../../proteinblender/core/molecule_manager.py#L142), and [proteinblender/core/domain.py:281,291](../../proteinblender/core/domain.py#L281) bypass Blender's undo stack. Blender's undo system only knows about state changes made via `bpy.ops` operators. So when `molecule.delete` calls these low-level removes, `ed.undo` later has nothing to roll back — the objects are simply gone.
-- The same applies to domain splits which call low-level mesh API to create the new sub-meshes.
+**What was attempted and reverted (2026-05-11):**
+A second fix attempt routed object deletions in `MoleculeManager.delete_molecule` through a new `undoable_remove_objects(objs)` helper that calls `bpy.ops.object.delete(use_global=False)` (a Blender op that pushes its own undo step and unlinks objects from scenes while keeping the data blocks alive in `bpy.data`).
 
-**Proposed fix path (multi-day):** route every object deletion through `bpy.ops.object.delete()`. That requires:
-1. Selecting the object(s) to delete.
-2. Calling `bpy.ops.object.delete(use_global=False)` instead of `bpy.data.objects.remove`.
-3. Ensuring the surrounding manager state (wrapper dict, list items) is mirrored to PropertyGroups so Blender's undo of the operator includes that state too.
+Probing showed:
+- With all undo / depsgraph handlers temporarily disabled: `ed.undo` after `bpy.ops.object.delete(use_global=False)` correctly re-linked the deleted objects to the view layer.
+- With the addon's handlers active (as they are in normal use): the objects were already gone from `bpy.data` by the time the first `undo_post` handler started, so `_reconstruct_wrappers_from_properties` had nothing to rebuild from.
 
-This is the right fix but a substantial refactor of the manager + molecule_manager + domain cleanup paths. Flagged for separate planning.
+In other words: Blender's undo does the right thing in isolation, but some interaction between the addon's depsgraph handlers and `ed.undo`'s internal cycle is purging the orphan data blocks before our reconstruction code can see them. Identifying which handler — and whether the cause is in this addon, MolecularNodes, or Blender 5.1 itself — needs deeper investigation.
+
+The attempted change also caused regressions in P7 (delete protein) and DNA7-9 because leaving data blocks alive as orphans changed the downstream test's "object is gone" check semantics, and forced auxiliary helpers (e.g., the audit's screenshot framing) to deal with objects that are no longer in the view layer. The change was reverted; the audit pass rate is back to **55/58 = 95%**.
+
+**Next steps for a future fix attempt:**
+1. Add tracing to identify exactly which handler (or Blender internal step) purges the orphan data between `ed.undo` and the first `undo_post` callback.
+2. If it's a 3rd-party handler (MolecularNodes / Blender), prefer the "soft delete" approach: move objects to a hidden helper collection rather than unlinking them, so the data blocks stay scene-linked (just invisible). `ed.undo` can then undo the collection-move directly.
+3. Audit downstream code paths that assume `bpy.data.objects.get(name) is None` as the "deleted" signal — they'd need updating to match the new semantics.
+
+**Why it still doesn't work without a refactor:**
+- `bpy.data.objects.remove(obj, do_unlink=True)` calls in [proteinblender/core/manager.py:32](../../proteinblender/core/manager.py#L32), [proteinblender/core/molecule_manager.py:142](../../proteinblender/core/molecule_manager.py#L142), and [proteinblender/core/domain.py:281,291](../../proteinblender/core/domain.py#L281) bypass Blender's undo stack entirely.
+- Domain splits call low-level mesh API to create sub-meshes and also bypass undo.
 
 ---
 
