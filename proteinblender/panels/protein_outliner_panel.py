@@ -681,8 +681,16 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
             if item.item_type == 'PROTEIN':
                 self._update_puppet_visibility_for_protein(context, item.item_id, new_visibility)
         
-        # Force UI redraw
-        context.area.tag_redraw()
+        # Force UI redraw. context.area is None when invoked from a
+        # script / MCP / headless context — fall back to tagging every
+        # 3D and properties area.
+        if context.area is not None:
+            context.area.tag_redraw()
+        else:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type in ("VIEW_3D", "PROPERTIES"):
+                        area.tag_redraw()
         return {'FINISHED'}
     
     def _get_object_visibility(self, item, view_layer):
@@ -714,15 +722,29 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         elif item.item_type == 'CHAIN':
             molecule = scene_manager.molecules.get(item.parent_id)
             if molecule:
-                chain_id = item.item_id.split('_chain_')[-1]
+                # Outliner CHAIN items use the *numeric* chain index in
+                # their item_id (e.g. "3b75_001_chain_0"), but the
+                # MoleculeWrapper's domain.chain_id stores the chain
+                # *letter* (e.g. "A"). Translate via the wrapper's
+                # idx_to_label_asym_id_map before comparing, otherwise
+                # the loop matches nothing and the visibility toggle is
+                # a silent no-op.
+                raw = item.item_id.split('_chain_')[-1]
+                chain_letter = None
                 try:
-                    chain_id_int = int(chain_id)
+                    raw_int = int(raw)
                 except ValueError:
-                    chain_id_int = chain_id
-                
+                    raw_int = None
+                if (raw_int is not None
+                        and hasattr(molecule, 'idx_to_label_asym_id_map')
+                        and raw_int in molecule.idx_to_label_asym_id_map):
+                    chain_letter = molecule.idx_to_label_asym_id_map[raw_int]
+                if chain_letter is None:
+                    chain_letter = raw  # already a letter, or no mapping available
+
                 for domain in molecule.domains.values():
                     domain_chain = getattr(domain, 'chain_id', None)
-                    if domain_chain is not None and str(domain_chain) == str(chain_id_int):
+                    if domain_chain is not None and str(domain_chain) == str(chain_letter):
                         if domain.object:
                             self._set_object_visibility(domain.object, visible, view_layer)
                             
