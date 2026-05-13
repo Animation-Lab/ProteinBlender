@@ -35,8 +35,12 @@ def apply_base_colors(obj, colors: dict) -> None:
     mesh = obj.data
     n = len(mesh.vertices)
 
-    # Read res_name integers from mesh attribute
-    rn_attr = mesh.attributes.get("res_name")
+    # Read residue type per atom. Prefer pb_real_res_name (a snapshot of
+    # the original per-atom residue type) if present — uniform-rungs
+    # mode overrides the mesh's res_name attribute to all DT so MN's
+    # Cartoon style draws every base with the same pyrimidine block,
+    # but we still need the *real* base identity to colour correctly.
+    rn_attr = mesh.attributes.get("pb_real_res_name") or mesh.attributes.get("res_name")
     if rn_attr is None:
         return
     res_names = np.zeros(n, dtype=np.int32)

@@ -163,6 +163,8 @@ def build_nucleic_acid(
     nucleic_type: str = "DNA",
     double_stranded: bool = True,
     form: str = "B",
+    wound_mask=None,
+    schematic: bool = False,
 ) -> struc.AtomArray:
     """Build a nucleic-acid AtomArray from a sequence string.
 
@@ -176,6 +178,10 @@ def build_nucleic_acid(
         Build complementary antisense strand.
     form : str
         ``'B'`` (B-DNA) or ``'A'`` (A-form, used automatically for RNA).
+    wound_mask : sequence of bool, optional
+        Per-base-pair wound state (length must match ``sequence``).
+        ``True`` = wound (helical twist), ``False`` = unwound (ladder rung).
+        If ``None`` (default), all bases are wound.  Used by LADDER mode.
 
     Returns
     -------
@@ -183,9 +189,74 @@ def build_nucleic_acid(
         Complete structure with bonds, ready for MolecularNodes pipeline.
     """
     sequence = sequence.upper()
+    n = len(sequence)
     tmpl = _get_templates()
     params = A_FORM_PARAMS if (nucleic_type == "RNA" or form == "A") else B_DNA_PARAMS
     res_map = RES_NAMES[nucleic_type]
+
+    cum_angle = _cumulative_twist(n, params["twist"], wound_mask)
+
+    # LADDER mode: every bp held at constant angle. Override the strand
+    # geometry to give a clean symmetric ladder — strands at exactly
+    # 180° apart at a common radius, and each base template pre-rotated
+    # so its base centre points the same way regardless of which residue
+    # in 1BNA it was extracted from.
+    ladder_mode = (
+        wound_mask is not None and len(wound_mask) > 0 and not any(wound_mask)
+    )
+    if ladder_mode:
+        sense_phi = math.pi
+        anti_phi = 0.0
+        ladder_radius = 0.5 * (tmpl.sense_radius + tmpl.anti_radius)
+        sense_radius = ladder_radius
+        anti_radius = ladder_radius
+        sense_tmpls = {k: _ladder_align_template(v) for k, v in tmpl.sense.items()}
+        if schematic:
+            # Uniform-rungs mode: share both backbone *and* the 6-membered
+            # ring atoms across all templates of a strand, then collapse
+            # the purine extension atoms (N7/C8/N9) onto the 6-ring
+            # centroid so MN's cartoon node renders every base with the
+            # same pyrimidine-style outline. The atoms stay in the array
+            # (only their coordinates move) so MN's per-atom
+            # classification still sees DA/DG as purines and our per-base
+            # Color attribute remains correctly applied.
+            sense_tmpls = _share_atoms(sense_tmpls, _SCHEMATIC_KEEP_ATOMS,
+                                       reference_key="DA")
+            sense_tmpls = {k: _collapse_purine_extension(v)
+                           for k, v in sense_tmpls.items()}
+        else:
+            # Realistic-atom ladder: only share the backbone so consecutive
+            # residues stack into a straight column (the bases keep their
+            # natural per-type sizes/decorations).
+            sense_tmpls = _share_backbone(sense_tmpls, reference_key="DA")
+        # Anti uses sense's chain-A templates flipped 180° around the X
+        # axis (y → -y, z → -z). Combined with the antipodal-angle
+        # placement (sense at π, anti at 0), each anti residue ends up
+        # as the Watson-Crick dyad partner of its paired sense residue:
+        # a 180° rotation around the helix-radial axis at that pair's Z.
+        # Why this matters for cartoon: MN's Style Cartoon orients each
+        # base block from atom positions, including a per-base in-plane
+        # frame. With a simple sense↔anti mirror (point reflection
+        # through the helix axis), that in-plane frame lands at +Y on
+        # one strand and -Y on the other, so the two rectangles meet at
+        # the helix axis 180°-rotated against each other — top-down view
+        # shows a twisted "X" instead of a flat rung. The X-axis flip
+        # rotates anti's in-plane direction so both halves' short axes
+        # point the same way, giving a clean continuous rung.
+        # Side benefit: the Z flip restores antiparallel backbone
+        # direction (anti's P above its C1', O3' below), so when the
+        # antisense strand is also placed in spatial reverse (j = N-1-i,
+        # below), each O3'(i) lands right next to P(i+1) and the
+        # backbone connects smoothly even though we skip the explicit
+        # inter-residue bonds in ladder mode.
+        anti_tmpls = {k: _flip_template_about_x(v) for k, v in sense_tmpls.items()}
+    else:
+        sense_phi = tmpl.phi_sense
+        anti_phi = tmpl.phi_anti
+        sense_radius = tmpl.sense_radius
+        anti_radius = tmpl.anti_radius
+        sense_tmpls = tmpl.sense
+        anti_tmpls = tmpl.anti
 
     arrays: list[struc.AtomArray] = []
     atom_counter = 1
@@ -193,9 +264,9 @@ def build_nucleic_acid(
     # ---- sense strand (5'->3') -------------------------------------------
     for i, base in enumerate(sequence):
         nuc, atom_counter = _place_nucleotide(
-            tmpl.sense[_BASE_TO_TEMPLATE[base]],
-            angle_rad=math.radians(params["twist"] * i) + tmpl.phi_sense,
-            radius=tmpl.sense_radius,
+            sense_tmpls[_BASE_TO_TEMPLATE[base]],
+            angle_rad=cum_angle[i] + sense_phi,
+            radius=sense_radius,
             z=params["rise"] * i + tmpl.z_offset,
             chain="A",
             res_id=i + 1,
@@ -206,20 +277,27 @@ def build_nucleic_acid(
         arrays.append(nuc)
 
     # ---- antisense strand ------------------------------------------------
-    # The antisense runs antiparallel to the sense: its 5' end is at the
-    # TOP of the helix (high z), its 3' end at the BOTTOM. We index the
-    # strand 5'->3' (i = 0 .. N-1) but place residue i at spatial index
-    # j = N-1-i so chain-B's natural backbone geometry (P on +Z side,
-    # O3' on -Z side) lines up with neighbours going downward.
+    # The antisense runs antiparallel: its 5' end is at the TOP of the
+    # helix (high z), its 3' end at the BOTTOM. We index the strand
+    # 5'->3' (i = 0 .. N-1) but place residue i at spatial index
+    # j = N-1-i so the backbone direction lines up with neighbours
+    # going downward.
+    #
+    # This applies in both wound (helix) and ladder modes. In ladder
+    # mode the anti template has been pre-flipped about its X axis (see
+    # the LADDER setup above), which gives each anti residue an inverted
+    # P/O3' arrangement; combined with the spatial reverse here, that
+    # puts O3'(i) right next to P(i+1) for a clean antiparallel
+    # backbone path even though we skip the explicit inter-residue
+    # bonds in ladder mode.
     if double_stranded:
         comp = "".join(COMPLEMENTS[nucleic_type][b] for b in reversed(sequence))
-        n = len(comp)
         for i, base in enumerate(comp):
             j = n - 1 - i  # spatial z-index along the helix
             nuc, atom_counter = _place_nucleotide(
-                tmpl.anti[_BASE_TO_TEMPLATE[base]],
-                angle_rad=math.radians(params["twist"] * j) + tmpl.phi_anti,
-                radius=tmpl.anti_radius,
+                anti_tmpls[_BASE_TO_TEMPLATE[base]],
+                angle_rad=cum_angle[j] + anti_phi,
+                radius=anti_radius,
                 z=params["rise"] * j + tmpl.z_offset,
                 chain="B",
                 res_id=i + 1,
@@ -237,8 +315,11 @@ def build_nucleic_acid(
     # ensure standard annotations exist (some may be absent on constructed arrays)
     _ensure_annotations(full)
 
-    # bonds
-    full.bonds = _build_bonds(full)
+    # bonds — skip the inter-residue O3'->P bonds in LADDER mode because
+    # the templates were extracted from a wound helix where consecutive
+    # residues are rotated 36° apart; without that rotation those bonds
+    # stretch to ~6 Å and look like long crossing sticks.
+    full.bonds = _build_bonds(full, skip_inter_residue=ladder_mode)
 
     # Set DNA_BUILDER_DEBUG=1 in the environment to print a structure overview
     # (chain layout, cross-chain bonds, abnormally long bonds) to the console.
@@ -320,6 +401,202 @@ def _debug_dump(array: struc.AtomArray):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _cumulative_twist(n: int, twist_deg: float, wound_mask) -> list[float]:
+    """Per-position cumulative angle (radians) along the helix axis.
+
+    The transition between two consecutive base pairs contributes ``twist``
+    only when both endpoints are wound; if either is unwound, the angle
+    holds steady (giving a flat ladder there).
+    """
+    if wound_mask is None:
+        wound = [True] * n
+    else:
+        wound = [bool(w) for w in wound_mask]
+        if len(wound) != n:
+            raise ValueError(
+                f"wound_mask length {len(wound)} does not match sequence length {n}"
+            )
+
+    twist_rad = math.radians(twist_deg)
+    cum = [0.0] * n
+    for k in range(1, n):
+        if wound[k - 1] and wound[k]:
+            cum[k] = cum[k - 1] + twist_rad
+        else:
+            cum[k] = cum[k - 1]
+    return cum
+
+
+def make_wound_mask(length: int, mode: str) -> list[bool] | None:
+    """Build a wound mask from a high-level UI mode.
+
+    Returns ``None`` for HELIX (all wound, default), or an all-False
+    list for LADDER (all unwound, every bp held at constant angle).
+    """
+    if mode == "HELIX":
+        return None
+    if mode == "LADDER":
+        return [False] * length
+    raise ValueError(f"unknown winding mode: {mode!r}")
+
+
+# Common 6-membered ring atoms (pyrimidine ring, also part of every purine).
+# Used as a base-type-agnostic centre for ladder alignment.
+_BASE_RING_ATOMS = ("N1", "C2", "N3", "C4", "C5", "C6")
+
+
+_BACKBONE_ATOMS = ("P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'",
+                   "C3'", "O3'", "C2'", "C1'")
+
+# Atoms whose positions are shared across every template in "uniform
+# rungs" mode: backbone + 6-membered ring (which is present in both
+# purines and pyrimidines). Purine extras (N7/C8/N9) are not in this
+# list because the templates have them at offset positions; they are
+# collapsed onto the 6-ring centroid in a follow-up step instead.
+_SCHEMATIC_KEEP_ATOMS = tuple(set(_BACKBONE_ATOMS) | set(_BASE_RING_ATOMS))
+
+# Purine-only atoms forming the fused 5-membered extension. Collapsed
+# onto the 6-ring centroid in schematic mode so the cartoon node draws
+# every rung with an identical pyrimidine-style outline.
+_PURINE_EXTENSION_ATOMS = ("N7", "C8", "N9")
+
+
+def _flip_template_about_x(template):
+    """Rotate template 180° around X axis through C1' (y → -y, z → -z).
+
+    Applied to anti templates in LADDER mode so paired sense/anti
+    residues form a Watson-Crick dyad: a 180° rotation around the helix-
+    radial axis. This aligns the in-plane base frame of the two bases so
+    MN's Cartoon node renders each pair as a flat rung instead of a
+    twisted X, and as a side effect restores biological antiparallel
+    backbone direction inside each anti residue (P above C1', O3' below
+    — opposite of sense).
+    """
+    out = template.copy()
+    coord = out.coord.copy()
+    coord[:, 1] = -coord[:, 1]
+    coord[:, 2] = -coord[:, 2]
+    out.coord = coord
+    return out
+
+
+def _ladder_align_template(template, flip_in_plane: bool = False):
+    """Pre-rotate a template so every base type has identical orientation.
+
+    Each template was extracted from a different residue position in 1BNA
+    and only had its C1' rotated onto the +X axis. We pin all three axes
+    in one rotation so every base — regardless of type — ends up with:
+
+    - C1' at the origin (invariant: it's on every rotation axis we use)
+    - Base ring centroid at ``(-d, 0, 0)`` (centroid direction → -X)
+    - Base ring plane horizontal (plane normal → +Z)
+    - In-plane orientation pinned so the base can't spin around the
+      centroid axis from one template to the next.
+
+    Set ``flip_in_plane=True`` for the antisense strand to invert the
+    in-plane "right" direction. After placement at angle 0 (antisense)
+    vs angle π (sense), this makes both strands' bases face the same way
+    in world space rather than mirror-flipped about the centerline.
+    """
+    base_mask = np.array(
+        [name in _BASE_RING_ATOMS for name in template.atom_name]
+    )
+    if not base_mask.any():
+        return template
+
+    out = template.copy()
+    base_coords = out.coord[base_mask]
+    centroid = base_coords.mean(axis=0)
+    d = float(np.linalg.norm(centroid))
+    if d < 1e-6:
+        return out
+
+    # Source frame in template space.
+    v1 = centroid / d
+    centred = base_coords - centroid
+    cov = np.cov(centred.T)
+    _, evecs = np.linalg.eigh(cov)
+    v2 = evecs[:, 0]  # smallest eigenvalue = plane normal
+    if v2[2] < 0:
+        v2 = -v2
+    # Force v2 perpendicular to v1 to keep src orthonormal.
+    v2 -= np.dot(v2, v1) * v1
+    v2 /= np.linalg.norm(v2)
+    v3 = np.cross(v1, v2)
+
+    src = np.column_stack([v1, v2, v3])
+    target_v3 = np.array([0.0, -1.0, 0.0]) if flip_in_plane else np.array([0.0, 1.0, 0.0])
+    # When v3 target is flipped we also flip v2 target to keep the frame
+    # right-handed (so the rotation matrix is a pure rotation, not a
+    # reflection): (-X) × (-Z) = -Y, (-X) × (+Z) = +Y.
+    target_v2 = np.array([0.0, 0.0, -1.0]) if flip_in_plane else np.array([0.0, 0.0, 1.0])
+    tgt = np.column_stack([
+        np.array([-1.0, 0.0, 0.0]),  # centroid direction
+        target_v2,
+        target_v3,
+    ])
+    rot = Rotation.from_matrix(tgt @ src.T)
+    out.coord = rot.apply(out.coord)
+    return out
+
+
+def _share_atoms(templates: dict, atom_names, reference_key: str = "DA") -> dict:
+    """Force every aligned template in ``templates`` to use the same
+    positions for the atoms listed in ``atom_names``, taken from
+    ``reference_key``'s aligned template.
+
+    The default call shares only backbone atoms — that removes the
+    sugar/phosphate jitter between residues (each base type was
+    extracted from a different spot in 1BNA, so its backbone drifts
+    slightly under our alignment). In "uniform rungs" mode we extend
+    this to the 6-membered ring as well so every rung is identical.
+
+    Atoms not present in ``atom_names`` are left untouched.
+    """
+    if reference_key not in templates:
+        return templates
+    keep = set(atom_names)
+    ref = templates[reference_key]
+    ref_positions = {}
+    for nm, co in zip(ref.atom_name, ref.coord):
+        if nm in keep:
+            ref_positions[nm] = co.copy()
+
+    out = {}
+    for key, tmpl in templates.items():
+        new = tmpl.copy()
+        for i, nm in enumerate(new.atom_name):
+            if nm in ref_positions:
+                new.coord[i] = ref_positions[nm]
+        out[key] = new
+    return out
+
+
+def _share_backbone(templates: dict, reference_key: str = "DA") -> dict:
+    """Backwards-compatible shim: share only backbone atoms."""
+    return _share_atoms(templates, _BACKBONE_ATOMS, reference_key)
+
+
+def _collapse_purine_extension(template):
+    """Move purine N7/C8/N9 onto the 6-ring centroid for this template.
+
+    Pyrimidine templates lack those atoms and are returned unchanged.
+    For purines, the three extension atoms are repositioned to a single
+    point inside the 6-ring so MN's cartoon shape logic — which derives
+    the rung outline from the actual atom positions — produces the
+    same outline as a pyrimidine rung. The atoms themselves remain in
+    the array so MN's atom_name-based classification is unaffected.
+    """
+    out = template.copy()
+    ring_mask = np.isin(out.atom_name, _BASE_RING_ATOMS)
+    ext_mask = np.isin(out.atom_name, _PURINE_EXTENSION_ATOMS)
+    if not ext_mask.any() or not ring_mask.any():
+        return out
+    centroid = out.coord[ring_mask].mean(axis=0)
+    out.coord[ext_mask] = centroid
+    return out
 
 
 def _place_nucleotide(template, angle_rad, radius, z, chain, res_id, res_name,
@@ -412,7 +689,7 @@ _BASE_BONDS: dict[str, list] = {
 }
 
 
-def _build_bonds(array: struc.AtomArray) -> struc.BondList:
+def _build_bonds(array: struc.AtomArray, skip_inter_residue: bool = False) -> struc.BondList:
     bonds = struc.BondList(len(array))
 
     for chain in np.unique(array.chain_id):
@@ -433,13 +710,15 @@ def _build_bonds(array: struc.AtomArray) -> struc.BondList:
                     bonds.add_bond(name_to_idx[a1], name_to_idx[a2],
                                    struc.BondType.SINGLE)
 
-            # Glycosidic bond
-            if rn in _PURINES:
-                if "C1'" in name_to_idx and "N9" in name_to_idx:
+            # Glycosidic bond. Real purines bond C1'->N9; real
+            # pyrimidines C1'->N1. In schematic ladder mode purines have
+            # been stripped of N7/C8/N9, so we fall back to C1'->N1
+            # (the same atom that anchors pyrimidines).
+            if "C1'" in name_to_idx:
+                if rn in _PURINES and "N9" in name_to_idx:
                     bonds.add_bond(name_to_idx["C1'"], name_to_idx["N9"],
                                    struc.BondType.SINGLE)
-            else:
-                if "C1'" in name_to_idx and "N1" in name_to_idx:
+                elif "N1" in name_to_idx:
                     bonds.add_bond(name_to_idx["C1'"], name_to_idx["N1"],
                                    struc.BondType.SINGLE)
 
@@ -450,13 +729,14 @@ def _build_bonds(array: struc.AtomArray) -> struc.BondList:
                                    struc.BondType.SINGLE)
 
         # Inter-residue backbone: O3'(i) -> P(i+1)
-        for j in range(len(chain_res_ids) - 1):
-            o3 = np.where(cm & (array.res_id == chain_res_ids[j])
-                          & (array.atom_name == "O3'"))[0]
-            p = np.where(cm & (array.res_id == chain_res_ids[j + 1])
-                         & (array.atom_name == "P"))[0]
-            if len(o3) and len(p):
-                bonds.add_bond(int(o3[0]), int(p[0]), struc.BondType.SINGLE)
+        if not skip_inter_residue:
+            for j in range(len(chain_res_ids) - 1):
+                o3 = np.where(cm & (array.res_id == chain_res_ids[j])
+                              & (array.atom_name == "O3'"))[0]
+                p = np.where(cm & (array.res_id == chain_res_ids[j + 1])
+                             & (array.atom_name == "P"))[0]
+                if len(o3) and len(p):
+                    bonds.add_bond(int(o3[0]), int(p[0]), struc.BondType.SINGLE)
 
     return bonds
 
@@ -476,11 +756,23 @@ def validate_sequence(sequence: str, nucleic_type: str = "DNA") -> str:
     return "".join(c for c in sequence.upper() if c in valid)
 
 
-def calculate_helix_info(length: int, nucleic_type: str = "DNA") -> dict:
-    """Return dict with helix_length_angstrom, turns, base_pairs."""
+def calculate_helix_info(length: int, nucleic_type: str = "DNA",
+                         wound_mask=None) -> dict:
+    """Return dict with helix_length_angstrom, turns, base_pairs.
+
+    If ``wound_mask`` is given, the turn count reflects only the wound
+    transitions (z-extent is unchanged by unwinding).
+    """
     p = A_FORM_PARAMS if nucleic_type == "RNA" else B_DNA_PARAMS
+    if wound_mask is None:
+        wound_transitions = max(0, length - 1)
+    else:
+        wound = [bool(w) for w in wound_mask]
+        wound_transitions = sum(
+            1 for k in range(1, length) if wound[k - 1] and wound[k]
+        )
     return {
         "helix_length_angstrom": length * p["rise"],
-        "turns": length * p["twist"] / 360.0,
+        "turns": wound_transitions * p["twist"] / 360.0,
         "base_pairs": length,
     }

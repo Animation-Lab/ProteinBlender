@@ -10,13 +10,20 @@ def _validate_seq(seq, nt):
     return "".join(c for c in seq.upper() if c in valid)
 
 
-def _helix_info(length, nt):
-    """Lightweight helix info without importing heavy deps."""
+def _helix_info(length, nt, winding_mode="HELIX"):
+    """Lightweight helix info without importing heavy deps.
+
+    LADDER zeroes out the twist accumulation. Length along the helix
+    axis is unchanged (rise per bp is constant).
+    """
     rise = 2.6 if nt == "RNA" else 3.38
     twist = 32.7 if nt == "RNA" else 36.0
+
+    wound_transitions = 0 if winding_mode == "LADDER" else max(0, length - 1)
+
     return {
         "helix_length_angstrom": length * rise,
-        "turns": length * twist / 360.0,
+        "turns": wound_transitions * twist / 360.0,
     }
 
 
@@ -128,6 +135,37 @@ class PROTEINBLENDER_PT_builders(Panel):
         # Name
         main_box.prop(props, "name_prefix", text="Name")
 
+        # ---- Collapsible winding section ---------------------------------
+        wind_box = main_box.box()
+        wind_header = wind_box.row()
+        wind_header.prop(
+            props,
+            "show_winding",
+            text="Winding",
+            icon="TRIA_DOWN" if props.show_winding else "TRIA_RIGHT",
+            emboss=False,
+        )
+
+        if props.show_winding:
+            wind_box.prop(props, "winding_mode", expand=True)
+
+            if props.winding_mode == "LADDER":
+                wind_box.label(
+                    text="Stylised flat ladder. Backbone is not atomically valid here.",
+                    icon="INFO",
+                )
+                wind_box.prop(props, "ladder_uniform")
+                if props.ladder_uniform:
+                    wind_box.label(
+                        text="All rungs share the same outline.",
+                        icon="INFO",
+                    )
+                    if props.style != "ball_and_stick":
+                        wind_box.label(
+                            text="Tip: use Ball & Stick for fully identical rungs.",
+                            icon="INFO",
+                        )
+
         # ---- Collapsible colour section ----------------------------------
         color_box = main_box.box()
         color_header = color_box.row()
@@ -162,7 +200,7 @@ class PROTEINBLENDER_PT_builders(Panel):
 
         # ---- Info readout ------------------------------------------------
         if len(seq) >= 2:
-            info = _helix_info(len(seq), nt)
+            info = _helix_info(len(seq), nt, winding_mode=props.winding_mode)
             info_box = main_box.box()
             row = info_box.row()
             row.label(text="Helix length")

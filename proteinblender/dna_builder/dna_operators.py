@@ -10,6 +10,62 @@ from bpy.types import Operator
 from bpy.props import StringProperty
 
 
+# MN's encoded value for residue name "DT" (thymine). Used by uniform-
+# rungs mode to overwrite every nucleotide's res_name so MN's Cartoon
+# style draws the same pyrimidine block for every base.
+_DT_CODE = 33
+
+
+def _snapshot_real_res_name(obj):
+    """Copy the mesh's ``res_name`` attribute into ``pb_real_res_name``.
+
+    ``apply_base_colors`` (and ``update_dna_colors``) read this attribute
+    in preference to ``res_name`` when assigning per-base colours, which
+    lets uniform-rungs mode overwrite ``res_name`` for cartoon's shape
+    selection without losing the original base identity needed for
+    colour assignment.
+    """
+    import numpy as np
+
+    mesh = getattr(obj, "data", None)
+    if mesh is None:
+        return
+    rn_attr = mesh.attributes.get("res_name")
+    if rn_attr is None:
+        return
+    n = len(mesh.vertices)
+    values = np.zeros(n, dtype=np.int32)
+    rn_attr.data.foreach_get("value", values)
+    existing = mesh.attributes.get("pb_real_res_name")
+    if existing is not None:
+        try:
+            mesh.attributes.remove(existing)
+        except Exception:
+            pass
+    new_attr = mesh.attributes.new("pb_real_res_name", "INT", "POINT")
+    new_attr.data.foreach_set("value", values)
+
+
+def _override_res_name_uniform(obj, value):
+    """Set the mesh's ``res_name`` attribute to ``value`` for every atom.
+
+    Used by uniform-rungs mode so MN's Cartoon style sees one residue
+    type everywhere and draws a single block shape, while the real
+    residue identities are preserved in ``pb_real_res_name``.
+    """
+    import numpy as np
+
+    mesh = getattr(obj, "data", None)
+    if mesh is None:
+        return
+    rn_attr = mesh.attributes.get("res_name")
+    if rn_attr is None:
+        return
+    n = len(mesh.vertices)
+    rn_attr.data.foreach_set("value", np.full(n, int(value), dtype=np.int32))
+    mesh.update()
+
+
 def _build_dna_from_props(operator, context, identifier):
     """Shared build path: read scene props, build the AtomArray, create the
     Blender object via MN pipeline, apply colours and finalize.
@@ -22,6 +78,7 @@ def _build_dna_from_props(operator, context, identifier):
         build_nucleic_acid,
         validate_sequence,
         calculate_helix_info,
+        make_wound_mask,
     )
     from .dna_colors import apply_base_colors, colors_from_props, store_colors_on_object
 
@@ -38,11 +95,17 @@ def _build_dna_from_props(operator, context, identifier):
 
     scene_mgr = ProteinBlenderScene.get_instance()
 
+    n = len(seq)
+    primary_mask = make_wound_mask(n, props.winding_mode)
+    schematic = props.winding_mode == "LADDER" and bool(props.ladder_uniform)
+
     try:
         array = build_nucleic_acid(
             sequence=seq,
             nucleic_type=nucleic_type,
             double_stranded=props.double_stranded,
+            wound_mask=primary_mask,
+            schematic=schematic,
         )
     except Exception as e:
         operator.report({"ERROR"}, f"Build failed: {e}")
@@ -62,15 +125,26 @@ def _build_dna_from_props(operator, context, identifier):
     obj["pb_sequence"] = seq
     obj["pb_double_stranded"] = props.double_stranded
     obj["pb_style"] = props.style
+    obj["pb_winding_mode"] = props.winding_mode
+    obj["pb_ladder_uniform"] = bool(props.ladder_uniform)
 
     context.evaluated_depsgraph_get()
+    _snapshot_real_res_name(obj)
+    if schematic:
+        # MN's Cartoon style switches base shape based on the res_name
+        # attribute. Force every atom to look like DT so the cartoon
+        # draws the same pyrimidine block for every rung. The original
+        # residue type lives on in pb_real_res_name, which
+        # apply_base_colors prefers for the colour lookup so per-base
+        # colours stay correct.
+        _override_res_name_uniform(obj, _DT_CODE)
     colors = colors_from_props(props)
     store_colors_on_object(obj, colors)
     apply_base_colors(obj, colors)
 
     scene_mgr._finalize_dna_molecule(wrapper)
 
-    return wrapper, calculate_helix_info(len(seq), nucleic_type)
+    return wrapper, calculate_helix_info(len(seq), nucleic_type, primary_mask)
 
 
 class PROTEINBLENDER_OT_build_dna(Operator):

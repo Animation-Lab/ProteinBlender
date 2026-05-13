@@ -36,14 +36,14 @@ class DNABuilderProperties(PropertyGroup):
     sequence: StringProperty(
         name="Sequence (5'\u21923')",
         description="Nucleotide sequence. DNA: A T G C. RNA: A U G C",
-        default="ATCGATCGATCG",
+        default="ATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGAT",
         maxlen=1000,
     )
 
     sequence_length: IntProperty(
         name="Length",
         description="Number of nucleotides for random sequence generation",
-        default=12,
+        default=50,
         min=2,
         max=500,
     )
@@ -52,6 +52,34 @@ class DNABuilderProperties(PropertyGroup):
         name="Double Stranded",
         description="Build a double-stranded helix with the complementary strand",
         default=True,
+    )
+
+    # ------------------------------------------------------------------
+    # Winding (helix vs ladder)
+    # ------------------------------------------------------------------
+    winding_mode: EnumProperty(
+        name="Winding",
+        description="How the strands relate to each other",
+        items=[
+            ("HELIX", "Helix", "Standard double helix (fully wound, paired)"),
+            ("LADDER", "Ladder",
+             "Fully unwound textbook ladder — bases stacked in a flat ladder. "
+             "Stylised: backbone geometry is not atomically valid in this mode."),
+        ],
+        default="HELIX",
+    )
+
+    ladder_uniform: BoolProperty(
+        name="Uniform Rungs",
+        description=(
+            "Share one set of backbone + base-ring atom positions across "
+            "every residue and collapse the purine N7/C8/N9 extension "
+            "onto the 6-ring so every rung renders with the same outline. "
+            "Per-base colours still apply. Best paired with the Ball & "
+            "Stick style — Cartoon style still draws purine vs pyrimidine "
+            "blocks at MN's hardcoded sizes. Only applies in Ladder mode."
+        ),
+        default=False,
     )
 
     style: EnumProperty(
@@ -124,6 +152,7 @@ class DNABuilderProperties(PropertyGroup):
 
     # Collapsible sections
     show_colors: BoolProperty(name="Show Colors", default=False)
+    show_winding: BoolProperty(name="Show Winding", default=False)
 
 
 CLASSES = (DNABuilderProperties,)
@@ -181,6 +210,18 @@ def sync_props_from_object(props, obj) -> bool:
     style = obj.get("pb_style")
     if isinstance(style, str) and style:
         _set("style", style)
+
+    wm = obj.get("pb_winding_mode")
+    if wm in ("HELIX", "LADDER"):
+        _set("winding_mode", wm)
+    elif wm in ("BUBBLE", "REGION"):
+        # Old strands built before BUBBLE/REGION were removed: fall back
+        # to HELIX rather than leaving the panel in an unknown state.
+        _set("winding_mode", "HELIX")
+
+    lu = obj.get("pb_ladder_uniform")
+    if lu is not None:
+        _set("ladder_uniform", bool(lu))
 
     for key, prop_name in (
         ("a", "color_a"), ("t", "color_t"), ("g", "color_g"),
