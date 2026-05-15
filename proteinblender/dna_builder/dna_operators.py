@@ -374,6 +374,28 @@ class PROTEINBLENDER_OT_randomize_sequence(Operator):
         return {"FINISHED"}
 
 
+class PROTEINBLENDER_OT_swap_to_complement(Operator):
+    """Replace the sequence with its reverse complement (the antisense strand
+    read 5'->3'). Click twice to return to the original — useful for hopping
+    between the two single strands when building them separately."""
+
+    bl_idname = "proteinblender.swap_to_complement"
+    bl_label = "Swap to Complement"
+
+    def execute(self, context):
+        from .sequence_builder import COMPLEMENTS, validate_sequence
+
+        props = context.scene.dna_builder_props
+        nt = props.nucleic_type
+        seq = validate_sequence(props.sequence, nt)
+        if len(seq) < 1:
+            self.report({"WARNING"}, "Nothing to swap — sequence is empty.")
+            return {"CANCELLED"}
+        comp_map = COMPLEMENTS[nt]
+        props.sequence = "".join(comp_map[b] for b in reversed(seq))
+        return {"FINISHED"}
+
+
 class PROTEINBLENDER_OT_update_dna_colors(Operator):
     """Update per-base colours on the selected DNA/RNA molecule"""
 
@@ -433,6 +455,7 @@ CLASSES = (
     PROTEINBLENDER_OT_build_dna,
     PROTEINBLENDER_OT_update_dna,
     PROTEINBLENDER_OT_randomize_sequence,
+    PROTEINBLENDER_OT_swap_to_complement,
     PROTEINBLENDER_OT_update_dna_colors,
     PROTEINBLENDER_OT_update_dna_style,
 )

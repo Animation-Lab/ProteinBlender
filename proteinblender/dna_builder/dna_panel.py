@@ -129,6 +129,17 @@ class PROTEINBLENDER_PT_builders(Panel):
         # Double / single stranded
         main_box.prop(props, "double_stranded")
 
+        # Single-strand mode: offer a quick way to flip to the antisense
+        # strand (reverse complement) so the user can build both strands
+        # back-to-back without retyping the sequence.
+        if not props.double_stranded:
+            row = main_box.row()
+            row.operator(
+                "proteinblender.swap_to_complement",
+                text="⇄ Swap to Complement",
+                icon="ARROW_LEFTRIGHT",
+            )
+
         # Style
         main_box.prop(props, "style")
 
