@@ -98,6 +98,7 @@ def _build_dna_from_props(operator, context, identifier):
     n = len(seq)
     primary_mask = make_wound_mask(n, props.winding_mode)
     schematic = props.winding_mode == "LADDER" and bool(props.ladder_uniform)
+    realistic = props.winding_mode == "LADDER" and bool(props.ladder_realistic)
 
     try:
         array = build_nucleic_acid(
@@ -106,6 +107,7 @@ def _build_dna_from_props(operator, context, identifier):
             double_stranded=props.double_stranded,
             wound_mask=primary_mask,
             schematic=schematic,
+            realistic_atoms=realistic,
         )
     except Exception as e:
         operator.report({"ERROR"}, f"Build failed: {e}")
@@ -127,6 +129,7 @@ def _build_dna_from_props(operator, context, identifier):
     obj["pb_style"] = props.style
     obj["pb_winding_mode"] = props.winding_mode
     obj["pb_ladder_uniform"] = bool(props.ladder_uniform)
+    obj["pb_ladder_realistic"] = bool(props.ladder_realistic)
 
     context.evaluated_depsgraph_get()
     _snapshot_real_res_name(obj)

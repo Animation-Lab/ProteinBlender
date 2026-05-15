@@ -165,6 +165,7 @@ def build_nucleic_acid(
     form: str = "B",
     wound_mask=None,
     schematic: bool = False,
+    realistic_atoms: bool = False,
 ) -> struc.AtomArray:
     """Build a nucleic-acid AtomArray from a sequence string.
 
@@ -182,6 +183,13 @@ def build_nucleic_acid(
         Per-base-pair wound state (length must match ``sequence``).
         ``True`` = wound (helical twist), ``False`` = unwound (ladder rung).
         If ``None`` (default), all bases are wound.  Used by LADDER mode.
+    realistic_atoms : bool
+        LADDER mode only. ``False`` (stylised, default) collapses every
+        residue to a flat 2D sheet (all atoms at z=0). ``True`` keeps a
+        natural 3D backbone extent so ball-and-stick reads as a real
+        nucleotide. Bases are always perfectly flat so MN's Cartoon
+        node renders rungs as flat blocks either way. Ignored in HELIX
+        mode (which always uses real 1BNA crystal templates).
 
     Returns
     -------
@@ -196,59 +204,38 @@ def build_nucleic_acid(
 
     cum_angle = _cumulative_twist(n, params["twist"], wound_mask)
 
-    # LADDER mode: every bp held at constant angle. Override the strand
-    # geometry to give a clean symmetric ladder — strands at exactly
-    # 180° apart at a common radius, and each base template pre-rotated
-    # so its base centre points the same way regardless of which residue
-    # in 1BNA it was extracted from.
+    # LADDER mode: every bp held at constant angle, strands placed at
+    # exactly 180° apart at a common radius. Templates come from
+    # canonical_geometry.py — procedural idealised geometries with base
+    # ring atoms placed exactly in the z=0 plane (so MN's Style Cartoon
+    # has no residual crystal-buckle to tilt the rungs). The anti
+    # template is sense's X-axis-flipped twin, putting paired bases in
+    # a Watson-Crick dyad and restoring antiparallel backbone direction.
     ladder_mode = (
         wound_mask is not None and len(wound_mask) > 0 and not any(wound_mask)
     )
     if ladder_mode:
+        from .canonical_geometry import get_canonical_templates, LADDER_RADIUS
         sense_phi = math.pi
         anti_phi = 0.0
-        ladder_radius = 0.5 * (tmpl.sense_radius + tmpl.anti_radius)
-        sense_radius = ladder_radius
-        anti_radius = ladder_radius
-        sense_tmpls = {k: _ladder_align_template(v) for k, v in tmpl.sense.items()}
-        if schematic:
-            # Uniform-rungs mode: share both backbone *and* the 6-membered
-            # ring atoms across all templates of a strand, then collapse
-            # the purine extension atoms (N7/C8/N9) onto the 6-ring
-            # centroid so MN's cartoon node renders every base with the
-            # same pyrimidine-style outline. The atoms stay in the array
-            # (only their coordinates move) so MN's per-atom
-            # classification still sees DA/DG as purines and our per-base
-            # Color attribute remains correctly applied.
-            sense_tmpls = _share_atoms(sense_tmpls, _SCHEMATIC_KEEP_ATOMS,
-                                       reference_key="DA")
-            sense_tmpls = {k: _collapse_purine_extension(v)
-                           for k, v in sense_tmpls.items()}
-        else:
-            # Realistic-atom ladder: only share the backbone so consecutive
-            # residues stack into a straight column (the bases keep their
-            # natural per-type sizes/decorations).
-            sense_tmpls = _share_backbone(sense_tmpls, reference_key="DA")
-        # Anti uses sense's chain-A templates flipped 180° around the X
-        # axis (y → -y, z → -z). Combined with the antipodal-angle
-        # placement (sense at π, anti at 0), each anti residue ends up
-        # as the Watson-Crick dyad partner of its paired sense residue:
-        # a 180° rotation around the helix-radial axis at that pair's Z.
-        # Why this matters for cartoon: MN's Style Cartoon orients each
-        # base block from atom positions, including a per-base in-plane
-        # frame. With a simple sense↔anti mirror (point reflection
-        # through the helix axis), that in-plane frame lands at +Y on
-        # one strand and -Y on the other, so the two rectangles meet at
-        # the helix axis 180°-rotated against each other — top-down view
-        # shows a twisted "X" instead of a flat rung. The X-axis flip
-        # rotates anti's in-plane direction so both halves' short axes
-        # point the same way, giving a clean continuous rung.
-        # Side benefit: the Z flip restores antiparallel backbone
-        # direction (anti's P above its C1', O3' below), so when the
-        # antisense strand is also placed in spatial reverse (j = N-1-i,
-        # below), each O3'(i) lands right next to P(i+1) and the
-        # backbone connects smoothly even though we skip the explicit
-        # inter-residue bonds in ladder mode.
+        sense_radius = anti_radius = LADDER_RADIUS
+        sense_tmpls = get_canonical_templates(
+            realistic=realistic_atoms, schematic=schematic
+        )
+        # Anti's template is sense's, X-axis-flipped (y → -y, z → -z).
+        # That single transform delivers two things at once:
+        #   (1) the in-plane base frame of anti and sense agree after
+        #       the antipodal-angle placement (sense at π, anti at 0),
+        #       so paired rungs form a flat continuous block in
+        #       top-down view instead of a twisted X; and
+        #   (2) the Z flip puts anti's P above its C1' and O3' below
+        #       (opposite of sense), restoring antiparallel backbone
+        #       direction so that with antiparallel placement (j=N-1-i),
+        #       each O3'(i) sits adjacent to P(i+1).
+        # No need for the chain-buckle workarounds we used to apply to
+        # 1BNA templates here — canonical templates have their base
+        # atoms at z=0 by construction, so the flip can't leak buckle
+        # asymmetry into the cartoon.
         anti_tmpls = {k: _flip_template_about_x(v) for k, v in sense_tmpls.items()}
     else:
         sense_phi = tmpl.phi_sense
@@ -442,160 +429,22 @@ def make_wound_mask(length: int, mode: str) -> list[bool] | None:
     raise ValueError(f"unknown winding mode: {mode!r}")
 
 
-# Common 6-membered ring atoms (pyrimidine ring, also part of every purine).
-# Used as a base-type-agnostic centre for ladder alignment.
-_BASE_RING_ATOMS = ("N1", "C2", "N3", "C4", "C5", "C6")
-
-
-_BACKBONE_ATOMS = ("P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'",
-                   "C3'", "O3'", "C2'", "C1'")
-
-# Atoms whose positions are shared across every template in "uniform
-# rungs" mode: backbone + 6-membered ring (which is present in both
-# purines and pyrimidines). Purine extras (N7/C8/N9) are not in this
-# list because the templates have them at offset positions; they are
-# collapsed onto the 6-ring centroid in a follow-up step instead.
-_SCHEMATIC_KEEP_ATOMS = tuple(set(_BACKBONE_ATOMS) | set(_BASE_RING_ATOMS))
-
-# Purine-only atoms forming the fused 5-membered extension. Collapsed
-# onto the 6-ring centroid in schematic mode so the cartoon node draws
-# every rung with an identical pyrimidine-style outline.
-_PURINE_EXTENSION_ATOMS = ("N7", "C8", "N9")
-
-
 def _flip_template_about_x(template):
     """Rotate template 180° around X axis through C1' (y → -y, z → -z).
 
     Applied to anti templates in LADDER mode so paired sense/anti
-    residues form a Watson-Crick dyad: a 180° rotation around the helix-
-    radial axis. This aligns the in-plane base frame of the two bases so
-    MN's Cartoon node renders each pair as a flat rung instead of a
-    twisted X, and as a side effect restores biological antiparallel
-    backbone direction inside each anti residue (P above C1', O3' below
-    — opposite of sense).
+    residues form a Watson-Crick dyad — a 180° rotation around the helix-
+    radial axis at the pair's Z. This aligns the in-plane base frame of
+    the two bases so MN's Cartoon renders each pair as one flat rung
+    instead of a twisted X, and as a side effect restores biological
+    antiparallel backbone direction inside each anti residue (P above
+    C1', O3' below — opposite of sense).
     """
     out = template.copy()
     coord = out.coord.copy()
     coord[:, 1] = -coord[:, 1]
     coord[:, 2] = -coord[:, 2]
     out.coord = coord
-    return out
-
-
-def _ladder_align_template(template, flip_in_plane: bool = False):
-    """Pre-rotate a template so every base type has identical orientation.
-
-    Each template was extracted from a different residue position in 1BNA
-    and only had its C1' rotated onto the +X axis. We pin all three axes
-    in one rotation so every base — regardless of type — ends up with:
-
-    - C1' at the origin (invariant: it's on every rotation axis we use)
-    - Base ring centroid at ``(-d, 0, 0)`` (centroid direction → -X)
-    - Base ring plane horizontal (plane normal → +Z)
-    - In-plane orientation pinned so the base can't spin around the
-      centroid axis from one template to the next.
-
-    Set ``flip_in_plane=True`` for the antisense strand to invert the
-    in-plane "right" direction. After placement at angle 0 (antisense)
-    vs angle π (sense), this makes both strands' bases face the same way
-    in world space rather than mirror-flipped about the centerline.
-    """
-    base_mask = np.array(
-        [name in _BASE_RING_ATOMS for name in template.atom_name]
-    )
-    if not base_mask.any():
-        return template
-
-    out = template.copy()
-    base_coords = out.coord[base_mask]
-    centroid = base_coords.mean(axis=0)
-    d = float(np.linalg.norm(centroid))
-    if d < 1e-6:
-        return out
-
-    # Source frame in template space.
-    v1 = centroid / d
-    centred = base_coords - centroid
-    cov = np.cov(centred.T)
-    _, evecs = np.linalg.eigh(cov)
-    v2 = evecs[:, 0]  # smallest eigenvalue = plane normal
-    if v2[2] < 0:
-        v2 = -v2
-    # Force v2 perpendicular to v1 to keep src orthonormal.
-    v2 -= np.dot(v2, v1) * v1
-    v2 /= np.linalg.norm(v2)
-    v3 = np.cross(v1, v2)
-
-    src = np.column_stack([v1, v2, v3])
-    target_v3 = np.array([0.0, -1.0, 0.0]) if flip_in_plane else np.array([0.0, 1.0, 0.0])
-    # When v3 target is flipped we also flip v2 target to keep the frame
-    # right-handed (so the rotation matrix is a pure rotation, not a
-    # reflection): (-X) × (-Z) = -Y, (-X) × (+Z) = +Y.
-    target_v2 = np.array([0.0, 0.0, -1.0]) if flip_in_plane else np.array([0.0, 0.0, 1.0])
-    tgt = np.column_stack([
-        np.array([-1.0, 0.0, 0.0]),  # centroid direction
-        target_v2,
-        target_v3,
-    ])
-    rot = Rotation.from_matrix(tgt @ src.T)
-    out.coord = rot.apply(out.coord)
-    return out
-
-
-def _share_atoms(templates: dict, atom_names, reference_key: str = "DA") -> dict:
-    """Force every aligned template in ``templates`` to use the same
-    positions for the atoms listed in ``atom_names``, taken from
-    ``reference_key``'s aligned template.
-
-    The default call shares only backbone atoms — that removes the
-    sugar/phosphate jitter between residues (each base type was
-    extracted from a different spot in 1BNA, so its backbone drifts
-    slightly under our alignment). In "uniform rungs" mode we extend
-    this to the 6-membered ring as well so every rung is identical.
-
-    Atoms not present in ``atom_names`` are left untouched.
-    """
-    if reference_key not in templates:
-        return templates
-    keep = set(atom_names)
-    ref = templates[reference_key]
-    ref_positions = {}
-    for nm, co in zip(ref.atom_name, ref.coord):
-        if nm in keep:
-            ref_positions[nm] = co.copy()
-
-    out = {}
-    for key, tmpl in templates.items():
-        new = tmpl.copy()
-        for i, nm in enumerate(new.atom_name):
-            if nm in ref_positions:
-                new.coord[i] = ref_positions[nm]
-        out[key] = new
-    return out
-
-
-def _share_backbone(templates: dict, reference_key: str = "DA") -> dict:
-    """Backwards-compatible shim: share only backbone atoms."""
-    return _share_atoms(templates, _BACKBONE_ATOMS, reference_key)
-
-
-def _collapse_purine_extension(template):
-    """Move purine N7/C8/N9 onto the 6-ring centroid for this template.
-
-    Pyrimidine templates lack those atoms and are returned unchanged.
-    For purines, the three extension atoms are repositioned to a single
-    point inside the 6-ring so MN's cartoon shape logic — which derives
-    the rung outline from the actual atom positions — produces the
-    same outline as a pyrimidine rung. The atoms themselves remain in
-    the array so MN's atom_name-based classification is unaffected.
-    """
-    out = template.copy()
-    ring_mask = np.isin(out.atom_name, _BASE_RING_ATOMS)
-    ext_mask = np.isin(out.atom_name, _PURINE_EXTENSION_ATOMS)
-    if not ext_mask.any() or not ring_mask.any():
-        return out
-    centroid = out.coord[ring_mask].mean(axis=0)
-    out.coord[ext_mask] = centroid
     return out
 
 

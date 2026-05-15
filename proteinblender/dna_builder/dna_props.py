@@ -82,6 +82,20 @@ class DNABuilderProperties(PropertyGroup):
         default=False,
     )
 
+    ladder_realistic: BoolProperty(
+        name="Realistic Atoms",
+        description=(
+            "In Ladder mode, control how the sugar-phosphate backbone is "
+            "laid out. Off (stylised): every atom forced to its residue's "
+            "z plane — each residue is a flat 2D sheet, cleanest geometric "
+            "look. On (realistic): backbone keeps a natural 3D extent so "
+            "ball-and-stick still reads as a real nucleotide. Bases stay "
+            "perfectly flat in both modes (so Cartoon style renders rungs "
+            "cleanly). Only applies in Ladder mode."
+        ),
+        default=False,
+    )
+
     style: EnumProperty(
         name="Style",
         items=[
@@ -222,6 +236,10 @@ def sync_props_from_object(props, obj) -> bool:
     lu = obj.get("pb_ladder_uniform")
     if lu is not None:
         _set("ladder_uniform", bool(lu))
+
+    lr = obj.get("pb_ladder_realistic")
+    if lr is not None:
+        _set("ladder_realistic", bool(lr))
 
     for key, prop_name in (
         ("a", "color_a"), ("t", "color_t"), ("g", "color_g"),
