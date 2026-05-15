@@ -266,6 +266,7 @@ class PROTEINBLENDER_PT_builders(Panel):
             BEND_CURVE_PROP,
             BEND_NODES_PROP,
             RES_DEFAULT, RES_MIN, RES_MAX,
+            get_bend_curve,
             get_bend_nodes,
         )
 
@@ -333,6 +334,25 @@ class PROTEINBLENDER_PT_builders(Panel):
 
             shape_box.label(
                 text="Click a node to grab it. Shift-click to multi-select.",
+                icon="INFO",
+            )
+
+        # Bend curve visibility toggle. The curve is a viewport-only guide
+        # (hide_render is forced True in bender.py), so toggling viewport
+        # visibility here lets the user clear the line out of the way without
+        # affecting the final rendered image.
+        curve_obj = get_bend_curve(dna_obj)
+        if curve_obj is not None:
+            shape_box.separator(factor=0.3)
+            vis_row = shape_box.row(align=True)
+            vis_row.prop(
+                curve_obj,
+                "hide_viewport",
+                text="Hide Bend Curve",
+                icon="HIDE_ON" if curve_obj.hide_viewport else "HIDE_OFF",
+            )
+            shape_box.label(
+                text="Bend curve is a guide only — never appears in renders.",
                 icon="INFO",
             )
 

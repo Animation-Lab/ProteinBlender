@@ -120,7 +120,12 @@ def get_bend_curve(dna_obj):
     name = dna_obj.get(BEND_CURVE_PROP)
     if not name:
         return None
-    return bpy.data.objects.get(name)
+    curve_obj = bpy.data.objects.get(name)
+    if curve_obj is not None and not curve_obj.hide_render:
+        # Migration for curves created before hide_render became the default.
+        # The curve is a visual guide, never part of the rendered scene.
+        curve_obj.hide_render = True
+    return curve_obj
 
 
 def get_bend_nodes(dna_obj):
@@ -210,8 +215,12 @@ def _create_bend_curve(name, dna_obj, height, n_points=RES_DEFAULT):
 
     # Curve is purely a visual guide: the user shouldn't be able to grab it
     # in the viewport and pull it away from the DNA. Hide it from selection
-    # but leave it visible so the bend path stays apparent.
+    # but leave it visible so the bend path stays apparent. It's also
+    # excluded from final renders — the panel surfaces this via the
+    # "Show Bend Curve" toggle so the user knows they can hide it without
+    # affecting the saved image.
     curve_obj.hide_select = True
+    curve_obj.hide_render = True
 
     coll = (dna_obj.users_collection[0]
             if dna_obj.users_collection else bpy.context.collection)
