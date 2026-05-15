@@ -211,9 +211,7 @@ def build_nucleic_acid(
     # has no residual crystal-buckle to tilt the rungs). The anti
     # template is sense's X-axis-flipped twin, putting paired bases in
     # a Watson-Crick dyad and restoring antiparallel backbone direction.
-    ladder_mode = (
-        wound_mask is not None and len(wound_mask) > 0 and not any(wound_mask)
-    )
+    ladder_mode = wound_mask is not None and not any(wound_mask)
     if ladder_mode:
         from .canonical_geometry import get_canonical_templates, LADDER_RADIUS
         sense_phi = math.pi

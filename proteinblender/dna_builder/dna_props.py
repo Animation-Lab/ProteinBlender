@@ -196,7 +196,10 @@ def sync_props_from_object(props, obj) -> bool:
         nonlocal changed
         try:
             cur = getattr(props, attr)
-            if isinstance(cur, (list, tuple)) or hasattr(cur, "__iter__") and not isinstance(cur, str):
+            is_seq = isinstance(cur, (list, tuple)) or (
+                hasattr(cur, "__iter__") and not isinstance(cur, str)
+            )
+            if is_seq:
                 cur_list = list(cur)
                 new_list = list(value)
                 if cur_list != new_list:

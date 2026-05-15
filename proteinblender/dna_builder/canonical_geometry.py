@@ -282,10 +282,6 @@ def _backbone_positions(realistic: bool) -> dict[str, tuple[float, float, float]
 # ---------------------------------------------------------------------------
 
 
-_BASE_NAME_FOR_TEMPLATE = {
-    "DA": "DA", "DG": "DG", "DC": "DC", "DT": "DT",
-}
-
 # MN's cartoon style for nucleotides samples a specific "far endpoint" ring
 # atom to build the base block's long axis: N1 for purine, N3 for pyrimidine
 # (see .Sample Nucleic Base Values in MN_data_file_*.blend — atom codes 62/64).

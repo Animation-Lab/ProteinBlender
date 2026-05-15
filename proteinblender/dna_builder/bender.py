@@ -120,12 +120,7 @@ def get_bend_curve(dna_obj):
     name = dna_obj.get(BEND_CURVE_PROP)
     if not name:
         return None
-    curve_obj = bpy.data.objects.get(name)
-    if curve_obj is not None and not curve_obj.hide_render:
-        # Migration for curves created before hide_render became the default.
-        # The curve is a visual guide, never part of the rendered scene.
-        curve_obj.hide_render = True
-    return curve_obj
+    return bpy.data.objects.get(name)
 
 
 def get_bend_nodes(dna_obj):
@@ -169,6 +164,18 @@ def get_dna_for_node(node_obj):
         if node_obj.name in names:
             return o
     return None
+
+
+def _resolve_dna(obj):
+    """Return the DNA molecule for *obj*: either *obj* itself if it's a DNA
+    mesh, or the DNA that owns *obj* as a bend node. Returns None otherwise.
+
+    Operators that accept either the DNA mesh or one of its bend control
+    nodes as the active object use this to find the underlying molecule.
+    """
+    if obj is not None and obj.get("pb_is_nucleic_acid", False):
+        return obj
+    return get_dna_for_node(obj)
 
 
 # ---------------------------------------------------------------------------
@@ -810,9 +817,7 @@ class PROTEINBLENDER_OT_dna_set_bend_resolution(Operator):
         return False
 
     def execute(self, context):
-        dna = context.active_object
-        if not (dna is not None and dna.get("pb_is_nucleic_acid", False)):
-            dna = get_dna_for_node(context.active_object)
+        dna = _resolve_dna(context.active_object)
         if dna is None:
             return {"CANCELLED"}
 
@@ -903,9 +908,7 @@ class PROTEINBLENDER_OT_dna_remove_bend(Operator):
         return False
 
     def execute(self, context):
-        dna = context.active_object
-        if not (dna is not None and dna.get("pb_is_nucleic_acid", False)):
-            dna = get_dna_for_node(context.active_object)
+        dna = _resolve_dna(context.active_object)
         if dna is None:
             return {"CANCELLED"}
 
@@ -1043,6 +1046,17 @@ def _load_post_cleanup(_dummy):
     _last_dna_names = None  # reset on file load
     try:
         cleanup_orphaned_bend_objects()
+    except Exception:
+        pass
+    # Migration: older bend curves were created without hide_render=True,
+    # so they would render as a thin tube in saved images. Force the flag
+    # here once per file load. New curves get hide_render=True at creation
+    # in _create_bend_curve, so this only matters for legacy files.
+    try:
+        for o in bpy.data.objects:
+            if o.type == "CURVE" and o.name.endswith("_BendCurve"):
+                if not o.hide_render:
+                    o.hide_render = True
     except Exception:
         pass
 
