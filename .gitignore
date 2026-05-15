@@ -67,6 +67,8 @@ docs/plans/
 
 # Claude Code
 .claude/skills/
+.claude/settings.local.json
+.claude/worktrees/
 
 # Temporary files
 *.log

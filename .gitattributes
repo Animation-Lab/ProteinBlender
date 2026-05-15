@@ -1,0 +1,9 @@
+# Enforce LF line endings in the repository regardless of the developer's
+# local core.autocrlf setting. Git auto-detects text vs binary; text files
+# are stored as LF in the index, binary files are left alone.
+#
+# Without this file, the Windows default core.autocrlf=true converts text
+# files to CRLF on checkout, which can cause `git status` to keep showing
+# files as "modified" when an editor or external tool writes them back
+# with LF endings.
+* text=auto eol=lf
