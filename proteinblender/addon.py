@@ -19,6 +19,7 @@ from .properties.pose_props import register as register_pose_props, unregister a
 from .properties.brownian_props import register as register_brownian_props, unregister as unregister_brownian_props
 from .linkers import register as register_linkers, unregister as unregister_linkers
 from .dna_builder import register as register_dna_builder, unregister as unregister_dna_builder
+from .membrane_builder import register as register_membrane_builder, unregister as unregister_membrane_builder
 from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -146,6 +147,9 @@ def register() -> None:
     # Register DNA/RNA builder module
     register_dna_builder()
 
+    # Register Membrane builder module
+    register_membrane_builder()
+
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
     
@@ -186,6 +190,12 @@ def unregister() -> None:
         frame_change_handler.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister frame change handler: {e}")
+
+    # Unregister Membrane builder module
+    try:
+        unregister_membrane_builder()
+    except Exception as e:
+        logger.debug(f"Failed to unregister membrane_builder: {e}")
 
     # Unregister DNA/RNA builder module
     try:
