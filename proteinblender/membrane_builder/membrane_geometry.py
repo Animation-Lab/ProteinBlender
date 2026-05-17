@@ -38,7 +38,8 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #   v2: six-axis per-lipid mosh-pit motion
 #   v3: holes redistribute lipids (radial push) instead of deleting them
 #   v4: Poisson-disk lipid distribution + realistic default density
-GN_TREE_VERSION = 4
+#   v5: holes are spheres — Z offset shrinks/closes the carved hole
+GN_TREE_VERSION = 5
 
 
 # ===========================================================================
@@ -453,6 +454,10 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         #     so lipids bunch into a compressed ring around the rim — they
         #     "feel" the hole and redistribute, affecting their neighbours.
         #
+        # The hole empty is treated as a real sphere — its Z position matters
+        # (see the effective-radius block below): sliding it out of the
+        # membrane shrinks and closes the hole.
+        #
         # Every hole's displacement is summed. Because Object Info reads the
         # empty live, animating a hole's scale or location makes the lipids
         # flow in real time (grow the hole → lipids stream outward; shrink it
@@ -500,7 +505,60 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                             name=f"ScaleH{h} L{leaflet_index}")
             scale_sep.location = (-1560, hy - 170)
             links.new(oi.outputs["Scale"], scale_sep.inputs[0])
-            radius = scale_sep.outputs["X"]
+
+            # ---- Z-aware effective radius ------------------------------
+            # Treat the hole empty as a real SPHERE of radius R. The hole it
+            # carves in THIS leaflet is the sphere's cross-section at the
+            # leaflet's height: effective radius = sqrt(R² - dz²), where dz
+            # is the vertical gap between the hole centre and the leaflet
+            # surface. Lift the sphere clear of the membrane (|dz| >= R) and
+            # the effective radius collapses to zero — a sphere parked above
+            # or below the membrane no longer punches through it.
+            sub_z = new("ShaderNodeSeparateXYZ",
+                        name=f"SubZH{h} L{leaflet_index}")
+            sub_z.location = (-1380, hy - 170)
+            links.new(sub_vec.outputs[0], sub_z.inputs[0])
+
+            # dz = (point.z - hole.z) + leaflet offset = leaflet surface
+            # height measured relative to the hole centre.
+            vgap = new("ShaderNodeMath", name=f"VGapH{h} L{leaflet_index}")
+            vgap.operation = "ADD"
+            vgap.location = (-1200, hy - 250)
+            links.new(sub_z.outputs["Z"], vgap.inputs[0])
+            links.new(signed_half.outputs[0], vgap.inputs[1])
+
+            gap_sq = new("ShaderNodeMath", name=f"GapSqH{h} L{leaflet_index}")
+            gap_sq.operation = "MULTIPLY"
+            gap_sq.location = (-1020, hy - 250)
+            links.new(vgap.outputs[0], gap_sq.inputs[0])
+            links.new(vgap.outputs[0], gap_sq.inputs[1])
+
+            r_sq = new("ShaderNodeMath", name=f"RSqH{h} L{leaflet_index}")
+            r_sq.operation = "MULTIPLY"
+            r_sq.location = (-1020, hy - 410)
+            links.new(scale_sep.outputs["X"], r_sq.inputs[0])
+            links.new(scale_sep.outputs["X"], r_sq.inputs[1])
+
+            eff_sq = new("ShaderNodeMath", name=f"EffSqH{h} L{leaflet_index}")
+            eff_sq.operation = "SUBTRACT"
+            eff_sq.location = (-840, hy - 330)
+            links.new(r_sq.outputs[0], eff_sq.inputs[0])
+            links.new(gap_sq.outputs[0], eff_sq.inputs[1])
+
+            # clamp the interior to >= 0 so the sqrt is always real
+            eff_clamp = new("ShaderNodeMath", name=f"EffClpH{h} L{leaflet_index}")
+            eff_clamp.operation = "MAXIMUM"
+            eff_clamp.inputs[1].default_value = 0.0
+            eff_clamp.location = (-660, hy - 330)
+            links.new(eff_sq.outputs[0], eff_clamp.inputs[0])
+
+            eff_r = new("ShaderNodeMath", name=f"EffRH{h} L{leaflet_index}")
+            eff_r.operation = "SQRT"
+            eff_r.location = (-480, hy - 330)
+            links.new(eff_clamp.outputs[0], eff_r.inputs[0])
+
+            # Everything downstream uses this Z-aware effective radius.
+            radius = eff_r.outputs[0]
 
             # area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
             dR = new("ShaderNodeCombineXYZ", name=f"dRH{h} L{leaflet_index}")

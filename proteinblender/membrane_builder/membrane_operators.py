@@ -375,12 +375,16 @@ class PROTEINBLENDER_OT_add_hole(Operator):
         hole = bpy.data.objects.new(hole_name, None)
         hole.empty_display_type = "SPHERE"
         hole.empty_display_size = 1.0
-        # Hole radius in BU. Default to 1 nm radius = 0.1 BU.
-        hole.scale = (0.1, 0.1, 0.1)
+        # The hole empty is a real sphere: the hole it carves is the sphere's
+        # cross-section with the membrane, so the default radius must reach
+        # past both leaflets or it wouldn't carve anything. Half the bilayer
+        # thickness (in BU) + a margin guarantees it spans the membrane.
+        half_thick_bu = float(root.get("pb_mem_bilayer_thickness", 4.0)) / (
+            2.0 * NM_PER_BU)
+        hole_radius = half_thick_bu + 0.15
+        hole.scale = (hole_radius, hole_radius, hole_radius)
         # Position slightly offset from origin so user can grab it easily,
-        # but stay within the membrane.
-        # Use root's bounding box center.
-        from mathutils import Vector
+        # and centred in Z (the bilayer midplane) so it carves both leaflets.
         offset = 0.1 * len(existing)
         hole.location = (offset, offset, 0.0)
         hole["pb_membrane_owner"] = root.name

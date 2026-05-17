@@ -236,6 +236,10 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
                         text="Lipids are pushed aside, not deleted — they pile up at the rim.",
                         icon="BLANK1",
                     )
+                    hole_box.label(
+                        text="The hole is a sphere — slide it up/down in Z to close it.",
+                        icon="BLANK1",
+                    )
 
         # ---- Action button ------------------------------------------------
         main_box.separator(factor=0.5)
