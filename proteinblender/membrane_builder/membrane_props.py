@@ -78,11 +78,16 @@ class MembraneBuilderProperties(PropertyGroup):
     # ------------------------------------------------------------------
     density: FloatProperty(
         name="Lipid Density",
-        description="Number of lipids per nm² (per leaflet). Real bilayers are ~0.6 lipids/nm².",
-        default=0.6,
+        description=(
+            "Lipids per nm² in each leaflet. A real fluid bilayer packs "
+            "~1.5 lipids/nm² (each lipid occupies ~0.65 nm²) — the default. "
+            "Lower values look sparse/artificial; raise it for a tighter, "
+            "more crowded membrane"
+        ),
+        default=1.5,
         min=0.05,
-        max=4.0,
-        soft_max=2.0,
+        max=5.0,
+        soft_max=3.0,
         update=_sync_to_active_membrane,
     )
 

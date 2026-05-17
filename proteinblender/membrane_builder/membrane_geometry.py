@@ -37,7 +37,8 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 # saved with an older tree are detected via this tag and rebuilt on load.
 #   v2: six-axis per-lipid mosh-pit motion
 #   v3: holes redistribute lipids (radial push) instead of deleting them
-GN_TREE_VERSION = 3
+#   v4: Poisson-disk lipid distribution + realistic default density
+GN_TREE_VERSION = 4
 
 
 # ===========================================================================
@@ -253,7 +254,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
     _new_input(tree, "Lipid Asset", "NodeSocketObject")
     _new_input(tree, "Density (per nm²)", "NodeSocketFloat",
-               default=0.6, min_val=0.05, max_val=4.0)
+               default=1.5, min_val=0.05, max_val=5.0)
     _new_input(tree, "Bilayer Thickness (nm)", "NodeSocketFloat",
                default=4.0, min_val=1.0, max_val=15.0)
     _new_input(tree, "Lipid Scale", "NodeSocketFloat",
@@ -297,20 +298,54 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     group_out.location = (2400, 0)
 
     # ------------------------------------------------------------------
-    # 1. Density conversion: density input is lipids/nm². Distribute Points
-    #    on Faces uses density in 1/BU². NM_PER_BU = 10, so 1 nm² = 0.01 BU²,
-    #    meaning 1 lipid/nm² = 100 lipids/BU².
+    # 1. Density handling. The user's "Density" is in lipids/nm²; the
+    #    Distribute Points node works in lipids/BU² (NM_PER_BU = 10, so
+    #    1 nm² = 0.01 BU² → ×100).
+    #
+    #    For POISSON-disk distribution the achieved density is governed by
+    #    Distance Min (the minimum spacing in the *result*), NOT Density Max
+    #    — so Distance Min is what we drive from the user's density: denser
+    #    membrane → smaller spacing. DistanceMin = sqrt(0.0042 / density)
+    #    was calibrated in Blender so the achieved lipids/nm² matches the
+    #    requested value (within a few %). Density Max only sizes the
+    #    candidate pool; kept 3× above the target so the blue-noise
+    #    elimination has enough samples to choose from.
     # ------------------------------------------------------------------
-    density_mul = new("ShaderNodeMath", name="Density nm²→BU²")
-    density_mul.operation = "MULTIPLY"
-    density_mul.inputs[1].default_value = NM_PER_BU * NM_PER_BU  # 100
-    density_mul.location = (-2500, 600)
-    links.new(get_in("Density (per nm²)"), density_mul.inputs[0])
+    density_bu2 = new("ShaderNodeMath", name="Density nm²→BU²")
+    density_bu2.operation = "MULTIPLY"
+    density_bu2.inputs[1].default_value = NM_PER_BU * NM_PER_BU  # 100
+    density_bu2.location = (-2700, 650)
+    links.new(get_in("Density (per nm²)"), density_bu2.inputs[0])
+
+    # Density Max — Poisson candidate pool, 3× the target for clean blue noise.
+    density_max = new("ShaderNodeMath", name="Density Max (pool)")
+    density_max.operation = "MULTIPLY"
+    density_max.inputs[1].default_value = 3.0
+    density_max.location = (-2500, 650)
+    links.new(density_bu2.outputs[0], density_max.inputs[0])
+
+    # Distance Min = sqrt(0.0042 / density_per_nm²)
+    dmin_inv = new("ShaderNodeMath", name="DistMin div")
+    dmin_inv.operation = "DIVIDE"
+    dmin_inv.inputs[0].default_value = 0.0042
+    dmin_inv.location = (-2700, 450)
+    links.new(get_in("Density (per nm²)"), dmin_inv.inputs[1])
+
+    dmin = new("ShaderNodeMath", name="DistMin sqrt")
+    dmin.operation = "SQRT"
+    dmin.location = (-2500, 450)
+    links.new(dmin_inv.outputs[0], dmin.inputs[0])
 
     # ------------------------------------------------------------------
     # 2. Distribute Points on Faces — produces one point per future lipid.
     #    Used twice: once for upper leaflet, once for lower leaflet, with
     #    different seeds so the two leaflets don't perfectly mirror.
+    #
+    #    POISSON (blue-noise) distribution, not RANDOM: a real bilayer is a
+    #    gap-free mosaic of lipids packed shoulder-to-shoulder. Pure random
+    #    placement clumps and leaves holes (Poisson-process clustering), so it
+    #    reads as a sparse scatter. Poisson-disk sampling spaces the lipids
+    #    evenly, which is what makes the sheet look like a membrane.
     # ------------------------------------------------------------------
     def make_leaflet(leaflet_index: int, y_pos: float):
         """Build a leaflet sub-graph at vertical layout y position."""
@@ -320,10 +355,11 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # Distribute points
         dist = new("GeometryNodeDistributePointsOnFaces",
                    name=f"Distribute {('Upper' if is_upper else 'Lower')}")
-        dist.distribute_method = "RANDOM"
+        dist.distribute_method = "POISSON"
         dist.location = (-2200, y_pos)
         links.new(get_in("Geometry"), dist.inputs["Mesh"])
-        links.new(density_mul.outputs[0], dist.inputs["Density"])
+        links.new(density_max.outputs[0], dist.inputs["Density Max"])
+        links.new(dmin.outputs[0], dist.inputs["Distance Min"])
 
         # Add seed offset so the two leaflets have different point sets
         seed_add = new("ShaderNodeMath", name=f"Seed {leaflet_index}")

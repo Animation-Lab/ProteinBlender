@@ -191,7 +191,7 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
 
     _set_mod_input(mod, "Lipid Asset", get_or_build_lipid_asset())
     _set_mod_input(mod, "Density (per nm²)",
-                   float(root_obj.get("pb_mem_density", 0.6)))
+                   float(root_obj.get("pb_mem_density", 1.5)))
     _set_mod_input(mod, "Bilayer Thickness (nm)",
                    float(root_obj.get("pb_mem_bilayer_thickness", 4.0)))
     _set_mod_input(mod, "Lipid Scale",
