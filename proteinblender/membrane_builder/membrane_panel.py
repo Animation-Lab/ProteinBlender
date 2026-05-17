@@ -232,6 +232,10 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
                         text="Animate r (scale) or hole position to grow/move it.",
                         icon="INFO",
                     )
+                    hole_box.label(
+                        text="Lipids are pushed aside, not deleted — they pile up at the rim.",
+                        icon="BLANK1",
+                    )
 
         # ---- Action button ------------------------------------------------
         main_box.separator(factor=0.5)

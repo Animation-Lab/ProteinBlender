@@ -35,7 +35,9 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 
 # Bump whenever _build_membrane_gn_tree's node structure changes. Membranes
 # saved with an older tree are detected via this tag and rebuilt on load.
-GN_TREE_VERSION = 2
+#   v2: six-axis per-lipid mosh-pit motion
+#   v3: holes redistribute lipids (radial push) instead of deleting them
+GN_TREE_VERSION = 3
 
 
 # ===========================================================================
@@ -402,76 +404,141 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(capture_n.outputs["Geometry"], set_pos.inputs["Geometry"])
         # Position input is *re-linked* below once bob_vec is known.
 
-        # ---- Compute hole mask -------------------------------------------
-        # For each hole slot, compute signed distance to current point in XY
-        # plane. If any signed distance < 0, the point is inside that hole.
-        # We aggregate using a chain of Boolean ORs.
-        hole_mask = None  # will become a Bool socket (True = should delete)
+        # ---- Compute hole redistribution displacement --------------------
+        # Holes do NOT delete lipids — they shove them aside, the way a real
+        # membrane parts around a pore. Each hole applies a radial, area-
+        # preserving displacement in the XY plane:
+        #
+        #   * A point at radius d from the hole centre is remapped to
+        #     d' = sqrt(d² + R²)  (R = hole radius). This exact map sends the
+        #     whole disk of radius R out into the annulus beyond R, conserving
+        #     lipid count — the hole interior empties, nothing vanishes.
+        #   * Beyond R the push tapers smoothly to zero at R · HOLE_INFLUENCE,
+        #     so lipids bunch into a compressed ring around the rim — they
+        #     "feel" the hole and redistribute, affecting their neighbours.
+        #
+        # Every hole's displacement is summed. Because Object Info reads the
+        # empty live, animating a hole's scale or location makes the lipids
+        # flow in real time (grow the hole → lipids stream outward; shrink it
+        # → the membrane heals closed).
+        HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the hole radius
+        hole_disp = None       # accumulates a Vector socket (total push)
         for h in range(1, MAX_HOLES + 1):
             enabled = get_in(f"Hole {h} Enabled")
             obj_in = get_in(f"Hole {h}")
+            hy = y_pos - 600 - h * 260
 
             oi = new("GeometryNodeObjectInfo", name=f"OI H{h} L{leaflet_index}")
             oi.transform_space = "RELATIVE"
-            oi.location = (-1600, y_pos - 600 - h * 200)
+            oi.location = (-1750, hy)
             links.new(obj_in, oi.inputs["Object"])
 
-            # Compute XY distance: (point.xy - obj.xy)
+            # delta = point.xy - hole.xy  (Z flattened so the hole is a
+            # vertical column regardless of where the empty sits in Z).
             sub_vec = new("ShaderNodeVectorMath", name=f"SubH{h} L{leaflet_index}")
             sub_vec.operation = "SUBTRACT"
-            sub_vec.location = (-1400, y_pos - 600 - h * 200)
+            sub_vec.location = (-1560, hy)
             links.new(pos.outputs[0], sub_vec.inputs[0])
             links.new(oi.outputs["Location"], sub_vec.inputs[1])
 
-            # Flatten Z: multiply by (1, 1, 0)
             flat_xy = new("ShaderNodeVectorMath", name=f"FlatH{h} L{leaflet_index}")
             flat_xy.operation = "MULTIPLY"
             flat_xy.inputs[1].default_value = (1.0, 1.0, 0.0)
-            flat_xy.location = (-1200, y_pos - 600 - h * 200)
+            flat_xy.location = (-1380, hy)
             links.new(sub_vec.outputs[0], flat_xy.inputs[0])
 
-            length_node = new("ShaderNodeVectorMath", name=f"LenH{h} L{leaflet_index}")
-            length_node.operation = "LENGTH"
-            length_node.location = (-1000, y_pos - 600 - h * 200)
-            links.new(flat_xy.outputs[0], length_node.inputs[0])
+            # d = |delta_xy|
+            dist = new("ShaderNodeVectorMath", name=f"LenH{h} L{leaflet_index}")
+            dist.operation = "LENGTH"
+            dist.location = (-1200, hy)
+            links.new(flat_xy.outputs[0], dist.inputs[0])
 
-            # Radius = Scale.X (uniform scale) of the empty
-            scale_sep = new("ShaderNodeSeparateXYZ", name=f"ScaleH{h} L{leaflet_index}")
-            scale_sep.location = (-1000, y_pos - 700 - h * 200)
+            # dir = normalize(delta_xy) — radial outward direction
+            direction = new("ShaderNodeVectorMath", name=f"DirH{h} L{leaflet_index}")
+            direction.operation = "NORMALIZE"
+            direction.location = (-1200, hy - 130)
+            links.new(flat_xy.outputs[0], direction.inputs[0])
+
+            # R = hole radius = Scale.X (uniform scale) of the empty
+            scale_sep = new("ShaderNodeSeparateXYZ",
+                            name=f"ScaleH{h} L{leaflet_index}")
+            scale_sep.location = (-1560, hy - 170)
             links.new(oi.outputs["Scale"], scale_sep.inputs[0])
+            radius = scale_sep.outputs["X"]
 
-            inside = new("FunctionNodeCompare", name=f"InsideH{h} L{leaflet_index}")
-            inside.data_type = "FLOAT"
-            inside.operation = "LESS_THAN"
-            inside.location = (-800, y_pos - 600 - h * 200)
-            links.new(length_node.outputs["Value"], inside.inputs[0])
-            links.new(scale_sep.outputs["X"], inside.inputs[1])
+            # area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
+            dR = new("ShaderNodeCombineXYZ", name=f"dRH{h} L{leaflet_index}")
+            dR.location = (-1000, hy)
+            links.new(dist.outputs["Value"], dR.inputs[0])
+            links.new(radius, dR.inputs[1])
+            dR.inputs[2].default_value = 0.0
 
-            # Gate by Enabled
-            and_node = new("FunctionNodeBooleanMath",
-                          name=f"AndH{h} L{leaflet_index}")
-            and_node.operation = "AND"
-            and_node.location = (-600, y_pos - 600 - h * 200)
-            links.new(inside.outputs["Result"], and_node.inputs[0])
-            links.new(enabled, and_node.inputs[1])
+            pushed_r = new("ShaderNodeVectorMath",
+                           name=f"PushedRH{h} L{leaflet_index}")
+            pushed_r.operation = "LENGTH"
+            pushed_r.location = (-820, hy)
+            links.new(dR.outputs[0], pushed_r.inputs[0])
 
-            if hole_mask is None:
-                hole_mask = and_node.outputs[0]
+            # raw push distance = d' - d  (always >= 0)
+            raw_push = new("ShaderNodeMath", name=f"RawPushH{h} L{leaflet_index}")
+            raw_push.operation = "SUBTRACT"
+            raw_push.location = (-640, hy)
+            links.new(pushed_r.outputs["Value"], raw_push.inputs[0])
+            links.new(dist.outputs["Value"], raw_push.inputs[1])
+
+            # influence radius = R · HOLE_INFLUENCE
+            r_inf = new("ShaderNodeMath", name=f"RInfH{h} L{leaflet_index}")
+            r_inf.operation = "MULTIPLY"
+            r_inf.inputs[1].default_value = HOLE_INFLUENCE
+            r_inf.location = (-820, hy - 170)
+            links.new(radius, r_inf.inputs[0])
+
+            # falloff: 1 for d <= R, smoothstep down to 0 at d >= R·INFLUENCE.
+            # Holding it at 1 inside R guarantees the hole interior fully
+            # clears (the exact area-preserving map applies there).
+            falloff = new("ShaderNodeMapRange",
+                          name=f"FalloffH{h} L{leaflet_index}")
+            falloff.interpolation_type = "SMOOTHSTEP"
+            falloff.clamp = True
+            falloff.location = (-640, hy - 170)
+            links.new(dist.outputs["Value"], falloff.inputs["Value"])
+            links.new(radius, falloff.inputs["From Min"])
+            links.new(r_inf.outputs[0], falloff.inputs["From Max"])
+            falloff.inputs["To Min"].default_value = 1.0
+            falloff.inputs["To Max"].default_value = 0.0
+
+            push_dist = new("ShaderNodeMath", name=f"PushH{h} L{leaflet_index}")
+            push_dist.operation = "MULTIPLY"
+            push_dist.location = (-440, hy)
+            links.new(raw_push.outputs[0], push_dist.inputs[0])
+            links.new(falloff.outputs["Result"], push_dist.inputs[1])
+
+            # displacement vector = dir · push_dist
+            disp = new("ShaderNodeVectorMath", name=f"DispH{h} L{leaflet_index}")
+            disp.operation = "SCALE"
+            disp.location = (-260, hy)
+            links.new(direction.outputs[0], disp.inputs[0])
+            links.new(push_dist.outputs[0], disp.inputs["Scale"])
+
+            # gate by Enabled — an unassigned slot must contribute nothing
+            # (Object Info on a None object reports Scale (1,1,1), which
+            # would otherwise carve a phantom hole at the origin).
+            gate = new("GeometryNodeSwitch", name=f"GateH{h} L{leaflet_index}")
+            gate.input_type = "VECTOR"
+            gate.location = (-80, hy)
+            gate.inputs["False"].default_value = (0.0, 0.0, 0.0)
+            links.new(enabled, gate.inputs["Switch"])
+            links.new(disp.outputs[0], gate.inputs["True"])
+
+            if hole_disp is None:
+                hole_disp = gate.outputs[0]
             else:
-                or_node = new("FunctionNodeBooleanMath",
-                             name=f"OrH{h} L{leaflet_index}")
-                or_node.operation = "OR"
-                or_node.location = (-400, y_pos - 600 - h * 200)
-                links.new(hole_mask, or_node.inputs[0])
-                links.new(and_node.outputs[0], or_node.inputs[1])
-                hole_mask = or_node.outputs[0]
-
-        # Delete points where hole_mask is True
-        delete = new("GeometryNodeDeleteGeometry", name=f"Delete L{leaflet_index}")
-        delete.domain = "POINT"
-        delete.location = (-200, y_pos)
-        links.new(set_pos.outputs["Geometry"], delete.inputs["Geometry"])
-        links.new(hole_mask, delete.inputs["Selection"])
+                acc = new("ShaderNodeVectorMath", name=f"AccH{h} L{leaflet_index}")
+                acc.operation = "ADD"
+                acc.location = (100, hy)
+                links.new(hole_disp, acc.inputs[0])
+                links.new(gate.outputs[0], acc.inputs[1])
+                hole_disp = acc.outputs[0]
 
         # ==================================================================
         # MOSH-PIT MOTION
@@ -661,17 +728,26 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(mosh_a.outputs[0], mosh_offset.inputs[0])
         links.new(swayB_vec.outputs[0], mosh_offset.inputs[1])
 
-        # Fold the mosh offset + half-thickness offset into the single
+        # Total motion offset = mosh jostling + hole redistribution push.
+        motion_sum = new("ShaderNodeVectorMath", name=f"MotionSum {leaflet_index}")
+        motion_sum.operation = "ADD"
+        motion_sum.location = (-1500, y_pos + 200)
+        links.new(mosh_offset.outputs[0], motion_sum.inputs[0])
+        links.new(hole_disp, motion_sum.inputs[1])
+
+        # Fold the motion offset + half-thickness offset into the single
         # SetPos Position write (a chained Set Position would reset position
         # to (0,0,0) because it writes its Position input even when unlinked).
         final_pos = new("ShaderNodeVectorMath", name=f"FinalPos {leaflet_index}")
         final_pos.operation = "ADD"
         final_pos.location = (-1300, y_pos)
         links.new(new_pos.outputs[0], final_pos.inputs[0])
-        links.new(mosh_offset.outputs[0], final_pos.inputs[1])
+        links.new(motion_sum.outputs[0], final_pos.inputs[1])
         links.new(final_pos.outputs[0], set_pos.inputs["Position"])
 
-        bob_set = delete  # alias so subsequent code reads bob_set.outputs["Geometry"]
+        # Holes redistribute lipids rather than deleting them, so there is no
+        # Delete node — instancing reads straight from Set Position.
+        bob_set = set_pos  # alias so subsequent code reads .outputs["Geometry"]
 
         # ---- Compute per-instance rotation -------------------------------
         # Align lipid +Z to the surface normal (-normal for the lower
