@@ -3,8 +3,8 @@
 Builds:
 - The lipid asset mesh (head sphere + two tail cylinders, one per leaflet).
 - The Geometry Nodes tree that distributes lipid instances across the
-  membrane surface with random Y-rotation, pseudo-random bobbing animation,
-  and animatable circular holes.
+  membrane surface with random Y-rotation, a 6-axis pseudo-random "mosh pit"
+  jostle animation (bob / sway / lean / twist), and animatable circular holes.
 
 The membrane object itself is a flat ``GeometryNodeMeshGrid``-style mesh
 that lives at the controller's local origin and gets shaped by a Lattice
@@ -32,6 +32,10 @@ GN_TREE_NAME = "ProteinBlender_Membrane_GN"
 LIPID_ASSET_NAME = "PB_Membrane_Lipid_Asset"
 HEAD_MATERIAL_NAME = "PB_Membrane_Head"
 TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
+
+# Bump whenever _build_membrane_gn_tree's node structure changes. Membranes
+# saved with an older tree are detected via this tag and rebuilt on load.
+GN_TREE_VERSION = 2
 
 
 # ===========================================================================
@@ -469,182 +473,308 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(set_pos.outputs["Geometry"], delete.inputs["Geometry"])
         links.new(hole_mask, delete.inputs["Selection"])
 
-        # ---- Apply bob offset along normal -------------------------------
-        # phase = random(index) * 2π
+        # ==================================================================
+        # MOSH-PIT MOTION
+        # ------------------------------------------------------------------
+        # Lipids in a real bilayer are packed shoulder-to-shoulder and
+        # constantly jostling their neighbours. To capture that churn each
+        # lipid is driven by SIX independent wobble channels:
+        #   * bob        — up / down along the surface normal
+        #   * sway T / B — lateral slosh in the surface tangent plane
+        #   * tilt T / B — leaning, by perturbing the alignment normal
+        #   * twist      — oscillating spin about the lipid's long axis
+        # Every channel's phase, frequency AND amplitude are randomised
+        # per-lipid (seeded by the point index), so no two lipids move alike
+        # and the whole sheet churns unpredictably — a mosh pit, not a
+        # marching band. It stays deterministic (index-seeded, not random
+        # state) so the animation plays back identically every time.
+        # ==================================================================
         idx = new("GeometryNodeInputIndex", name=f"Idx {leaflet_index}")
-        idx.location = (0, y_pos - 350)
+        idx.location = (-200, y_pos - 350)
 
-        # Random phase 0..2π per point
-        rand_phase = new("FunctionNodeRandomValue", name=f"RandPhase {leaflet_index}")
-        rand_phase.data_type = "FLOAT"
-        rand_phase.location = (200, y_pos - 350)
-        rand_phase.inputs[2].default_value = 0.0  # min
-        rand_phase.inputs[3].default_value = math.tau  # max
-        # seed = id + leaflet_offset
-        seed_phase = new("ShaderNodeMath", name=f"SeedPhase {leaflet_index}")
-        seed_phase.operation = "ADD"
-        seed_phase.inputs[1].default_value = float(7919 + leaflet_index * 13)
-        seed_phase.location = (200, y_pos - 500)
-        links.new(idx.outputs[0], seed_phase.inputs[0])
-        links.new(seed_phase.outputs[0], rand_phase.inputs["Seed"])
-
-        # time = scene seconds * speed
         scene_time = new("GeometryNodeInputSceneTime", name=f"Time {leaflet_index}")
-        scene_time.location = (0, y_pos - 600)
+        scene_time.location = (-200, y_pos - 500)
 
-        time_x_speed = new("ShaderNodeMath", name=f"TxS {leaflet_index}")
-        time_x_speed.operation = "MULTIPLY"
-        time_x_speed.location = (200, y_pos - 600)
-        links.new(scene_time.outputs["Seconds"], time_x_speed.inputs[0])
-        links.new(get_in("Bob Speed"), time_x_speed.inputs[1])
+        # ---- Master gate: Bob Amplitude when Animate Bob is on, else 0 ----
+        # Everything below scales off this, so flipping Animate Bob off
+        # zeroes all six channels at once.
+        anim_amp = new("GeometryNodeSwitch", name=f"AnimGate {leaflet_index}")
+        anim_amp.input_type = "FLOAT"
+        anim_amp.location = (0, y_pos - 650)
+        anim_amp.inputs["False"].default_value = 0.0
+        links.new(get_in("Animate Bob"), anim_amp.inputs[0])
+        links.new(get_in("Bob Amplitude (nm)"), anim_amp.inputs["True"])
 
-        # angle = time*speed*2π + phase
-        time_two_pi = new("ShaderNodeMath", name=f"T2π {leaflet_index}")
-        time_two_pi.operation = "MULTIPLY"
-        time_two_pi.inputs[1].default_value = math.tau
-        time_two_pi.location = (400, y_pos - 600)
-        links.new(time_x_speed.outputs[0], time_two_pi.inputs[0])
-
-        angle_add = new("ShaderNodeMath", name=f"Angle {leaflet_index}")
-        angle_add.operation = "ADD"
-        angle_add.location = (600, y_pos - 500)
-        links.new(time_two_pi.outputs[0], angle_add.inputs[0])
-        links.new(rand_phase.outputs["Value"], angle_add.inputs[1])
-
-        sine = new("ShaderNodeMath", name=f"Sin {leaflet_index}")
-        sine.operation = "SINE"
-        sine.location = (800, y_pos - 500)
-        links.new(angle_add.outputs[0], sine.inputs[0])
-
-        # amp_bu = bob_amplitude_nm / NM_PER_BU
+        # Per-family base amplitudes derived from the master amplitude.
         amp_bu = new("ShaderNodeMath", name=f"AmpBU {leaflet_index}")
         amp_bu.operation = "MULTIPLY"
-        amp_bu.inputs[1].default_value = 1.0 / NM_PER_BU
-        amp_bu.location = (200, y_pos - 800)
-        links.new(get_in("Bob Amplitude (nm)"), amp_bu.inputs[0])
+        amp_bu.inputs[1].default_value = 1.0 / NM_PER_BU   # nm → BU
+        amp_bu.location = (200, y_pos - 650)
+        links.new(anim_amp.outputs[0], amp_bu.inputs[0])
 
-        # gate by Animate Bob (multiply by 1.0 or 0.0)
-        anim_to_float = new("FunctionNodeCompare", name=f"BobGate {leaflet_index}")
-        anim_to_float.data_type = "INT"
-        anim_to_float.operation = "EQUAL"
-        anim_to_float.location = (200, y_pos - 950)
-        # We just need to convert bool→float. Use Switch instead.
-        bob_switch = new("GeometryNodeSwitch", name=f"BobSwitch {leaflet_index}")
-        bob_switch.input_type = "FLOAT"
-        bob_switch.location = (400, y_pos - 850)
-        bob_switch.inputs["False"].default_value = 0.0
-        links.new(get_in("Animate Bob"), bob_switch.inputs[0])  # Switch
-        links.new(amp_bu.outputs[0], bob_switch.inputs["True"])
+        sway_base = new("ShaderNodeMath", name=f"SwayBase {leaflet_index}")
+        sway_base.operation = "MULTIPLY"
+        sway_base.inputs[1].default_value = 0.8   # lateral slosh ≈ 80% of bob
+        sway_base.location = (400, y_pos - 650)
+        links.new(amp_bu.outputs[0], sway_base.inputs[0])
 
-        offset_amount = new("ShaderNodeMath", name=f"OffAmt {leaflet_index}")
-        offset_amount.operation = "MULTIPLY"
-        offset_amount.location = (1000, y_pos - 600)
-        links.new(sine.outputs[0], offset_amount.inputs[0])
-        links.new(bob_switch.outputs[0], offset_amount.inputs[1])
+        tilt_base = new("ShaderNodeMath", name=f"TiltBase {leaflet_index}")
+        tilt_base.operation = "MULTIPLY"
+        tilt_base.inputs[1].default_value = 0.5   # normal-perturb magnitude
+        tilt_base.location = (200, y_pos - 800)
+        links.new(anim_amp.outputs[0], tilt_base.inputs[0])
 
-        # Bob direction: scale (signed) — upper leaflet bobs up/down with
-        # normal; lower leaflet bobs in opposite direction to look natural.
+        twist_base = new("ShaderNodeMath", name=f"TwistBase {leaflet_index}")
+        twist_base.operation = "MULTIPLY"
+        twist_base.inputs[1].default_value = 0.45  # radians of spin wobble
+        twist_base.location = (400, y_pos - 800)
+        links.new(anim_amp.outputs[0], twist_base.inputs[0])
+
+        # ---- Per-lipid random helper -------------------------------------
+        # ID = point index (per-element variation); Seed = a constant unique
+        # to each channel so the channels are statistically independent.
+        def rand_float(seed_int, lo, hi, loc):
+            rv = new("FunctionNodeRandomValue",
+                     name=f"Rnd{seed_int} L{leaflet_index}")
+            rv.data_type = "FLOAT"
+            rv.location = loc
+            rv.inputs[2].default_value = lo            # Min (float)
+            rv.inputs[3].default_value = hi            # Max (float)
+            rv.inputs["Seed"].default_value = seed_int + leaflet_index * 10000
+            links.new(idx.outputs[0], rv.inputs["ID"])
+            return rv.outputs[1]                       # FLOAT "Value" output
+
+        # ---- Wobble channel ----------------------------------------------
+        # value = sin(t · BobSpeed · freqMul · 2π + phase) · baseAmp · ampMul
+        # freqMul / ampMul / phase are all randomised per lipid.
+        def wobble(seed, base_amp_socket, label, lx, ly):
+            phase = rand_float(seed + 0, 0.0, math.tau, (lx, ly))
+            fmul = rand_float(seed + 1, 0.55, 1.5, (lx, ly - 150))
+            amul = rand_float(seed + 2, 0.4, 1.6, (lx, ly - 300))
+
+            freq = new("ShaderNodeMath", name=f"{label} freq L{leaflet_index}")
+            freq.operation = "MULTIPLY"
+            freq.location = (lx + 200, ly)
+            links.new(get_in("Bob Speed"), freq.inputs[0])
+            links.new(fmul, freq.inputs[1])
+
+            tf = new("ShaderNodeMath", name=f"{label} t-f L{leaflet_index}")
+            tf.operation = "MULTIPLY"
+            tf.location = (lx + 380, ly)
+            links.new(scene_time.outputs["Seconds"], tf.inputs[0])
+            links.new(freq.outputs[0], tf.inputs[1])
+
+            ang = new("ShaderNodeMath", name=f"{label} 2pi L{leaflet_index}")
+            ang.operation = "MULTIPLY"
+            ang.inputs[1].default_value = math.tau
+            ang.location = (lx + 560, ly)
+            links.new(tf.outputs[0], ang.inputs[0])
+
+            ang2 = new("ShaderNodeMath", name=f"{label} phase L{leaflet_index}")
+            ang2.operation = "ADD"
+            ang2.location = (lx + 740, ly)
+            links.new(ang.outputs[0], ang2.inputs[0])
+            links.new(phase, ang2.inputs[1])
+
+            s = new("ShaderNodeMath", name=f"{label} sin L{leaflet_index}")
+            s.operation = "SINE"
+            s.location = (lx + 920, ly)
+            links.new(ang2.outputs[0], s.inputs[0])
+
+            amp = new("ShaderNodeMath", name=f"{label} amp L{leaflet_index}")
+            amp.operation = "MULTIPLY"
+            amp.location = (lx + 740, ly - 150)
+            links.new(base_amp_socket, amp.inputs[0])
+            links.new(amul, amp.inputs[1])
+
+            out = new("ShaderNodeMath", name=f"{label} val L{leaflet_index}")
+            out.operation = "MULTIPLY"
+            out.location = (lx + 1100, ly)
+            links.new(s.outputs[0], out.inputs[0])
+            links.new(amp.outputs[0], out.inputs[1])
+            return out.outputs[0]
+
+        bob_ch = wobble(100, amp_bu.outputs[0], "bob", 600, y_pos - 1000)
+        swayT_ch = wobble(200, sway_base.outputs[0], "swayT", 600, y_pos - 1500)
+        swayB_ch = wobble(300, sway_base.outputs[0], "swayB", 600, y_pos - 2000)
+        tiltT_ch = wobble(400, tilt_base.outputs[0], "tiltT", 600, y_pos - 2500)
+        tiltB_ch = wobble(500, tilt_base.outputs[0], "tiltB", 600, y_pos - 3000)
+        twist_ch = wobble(600, twist_base.outputs[0], "twist", 600, y_pos - 3500)
+
+        # ---- Surface tangent frame (T, B perpendicular to the normal) ----
+        # cross(N, worldX) is a stable tangent: the membrane normal is always
+        # close to world Z, so it is never parallel to X.
+        worldX = new("FunctionNodeInputVector", name=f"WorldX {leaflet_index}")
+        worldX.vector = (1.0, 0.0, 0.0)
+        worldX.location = (-200, y_pos - 700)
+
+        tan_raw = new("ShaderNodeVectorMath", name=f"TanRaw {leaflet_index}")
+        tan_raw.operation = "CROSS_PRODUCT"
+        tan_raw.location = (0, y_pos - 250)
+        links.new(normal.outputs[0], tan_raw.inputs[0])
+        links.new(worldX.outputs[0], tan_raw.inputs[1])
+
+        tan = new("ShaderNodeVectorMath", name=f"Tan {leaflet_index}")
+        tan.operation = "NORMALIZE"
+        tan.location = (200, y_pos - 250)
+        links.new(tan_raw.outputs[0], tan.inputs[0])
+
+        bit_raw = new("ShaderNodeVectorMath", name=f"BitRaw {leaflet_index}")
+        bit_raw.operation = "CROSS_PRODUCT"
+        bit_raw.location = (400, y_pos - 250)
+        links.new(normal.outputs[0], bit_raw.inputs[0])
+        links.new(tan.outputs[0], bit_raw.inputs[1])
+
+        bit = new("ShaderNodeVectorMath", name=f"Bit {leaflet_index}")
+        bit.operation = "NORMALIZE"
+        bit.location = (600, y_pos - 250)
+        links.new(bit_raw.outputs[0], bit.inputs[0])
+
+        # ---- Positional mosh offset: N·bob + T·swayT + B·swayB -----------
         bob_vec = new("ShaderNodeVectorMath", name=f"BobVec {leaflet_index}")
         bob_vec.operation = "SCALE"
-        bob_vec.location = (1200, y_pos - 600)
+        bob_vec.location = (1850, y_pos - 1000)
         links.new(normal.outputs[0], bob_vec.inputs[0])
-        links.new(offset_amount.outputs[0], bob_vec.inputs["Scale"])
+        links.new(bob_ch, bob_vec.inputs["Scale"])
 
-        # Fold bob_vec into the SetPos 0 Position (so the half-thickness
-        # offset survives). Chaining a second Set Position would reset the
-        # position to (0,0,0) because Set Position writes its Position input
-        # even when unlinked.
+        swayT_vec = new("ShaderNodeVectorMath", name=f"SwayTVec {leaflet_index}")
+        swayT_vec.operation = "SCALE"
+        swayT_vec.location = (1850, y_pos - 1500)
+        links.new(tan.outputs[0], swayT_vec.inputs[0])
+        links.new(swayT_ch, swayT_vec.inputs["Scale"])
+
+        swayB_vec = new("ShaderNodeVectorMath", name=f"SwayBVec {leaflet_index}")
+        swayB_vec.operation = "SCALE"
+        swayB_vec.location = (1850, y_pos - 2000)
+        links.new(bit.outputs[0], swayB_vec.inputs[0])
+        links.new(swayB_ch, swayB_vec.inputs["Scale"])
+
+        mosh_a = new("ShaderNodeVectorMath", name=f"MoshAdd1 {leaflet_index}")
+        mosh_a.operation = "ADD"
+        mosh_a.location = (2050, y_pos - 1250)
+        links.new(bob_vec.outputs[0], mosh_a.inputs[0])
+        links.new(swayT_vec.outputs[0], mosh_a.inputs[1])
+
+        mosh_offset = new("ShaderNodeVectorMath", name=f"MoshAdd2 {leaflet_index}")
+        mosh_offset.operation = "ADD"
+        mosh_offset.location = (2250, y_pos - 1500)
+        links.new(mosh_a.outputs[0], mosh_offset.inputs[0])
+        links.new(swayB_vec.outputs[0], mosh_offset.inputs[1])
+
+        # Fold the mosh offset + half-thickness offset into the single
+        # SetPos Position write (a chained Set Position would reset position
+        # to (0,0,0) because it writes its Position input even when unlinked).
         final_pos = new("ShaderNodeVectorMath", name=f"FinalPos {leaflet_index}")
         final_pos.operation = "ADD"
         final_pos.location = (-1300, y_pos)
         links.new(new_pos.outputs[0], final_pos.inputs[0])
-        links.new(bob_vec.outputs[0], final_pos.inputs[1])
+        links.new(mosh_offset.outputs[0], final_pos.inputs[1])
         links.new(final_pos.outputs[0], set_pos.inputs["Position"])
 
-        # Pass-through: keep the same downstream wiring but skip the
-        # redundant second SetPosition. delete.outputs["Geometry"] feeds
-        # directly into the next stage.
         bob_set = delete  # alias so subsequent code reads bob_set.outputs["Geometry"]
 
         # ---- Compute per-instance rotation -------------------------------
-        # Step 1: align lipid +Z to normal (upper) or -normal (lower).
+        # Align lipid +Z to the surface normal (-normal for the lower
+        # leaflet), then perturb that vector by the two tilt channels so
+        # each lipid leans and rocks over time. Normalising the perturbed
+        # vector keeps the lean angle bounded.
         if is_upper:
-            align_normal = normal.outputs[0]
+            align_base = normal.outputs[0]
         else:
             neg = new("ShaderNodeVectorMath", name=f"NegN {leaflet_index}")
-            neg.operation = "MULTIPLY"
-            neg.inputs[1].default_value = (-1.0, -1.0, -1.0)
-            neg.location = (0, y_pos - 150)
+            neg.operation = "SCALE"
+            neg.inputs["Scale"].default_value = -1.0
+            neg.location = (2400, y_pos - 250)
             links.new(normal.outputs[0], neg.inputs[0])
-            align_normal = neg.outputs[0]
+            align_base = neg.outputs[0]
+
+        tiltT_vec = new("ShaderNodeVectorMath", name=f"TiltTVec {leaflet_index}")
+        tiltT_vec.operation = "SCALE"
+        tiltT_vec.location = (1850, y_pos - 2500)
+        links.new(tan.outputs[0], tiltT_vec.inputs[0])
+        links.new(tiltT_ch, tiltT_vec.inputs["Scale"])
+
+        tiltB_vec = new("ShaderNodeVectorMath", name=f"TiltBVec {leaflet_index}")
+        tiltB_vec.operation = "SCALE"
+        tiltB_vec.location = (1850, y_pos - 3000)
+        links.new(bit.outputs[0], tiltB_vec.inputs[0])
+        links.new(tiltB_ch, tiltB_vec.inputs["Scale"])
+
+        tilt_a = new("ShaderNodeVectorMath", name=f"TiltAdd1 {leaflet_index}")
+        tilt_a.operation = "ADD"
+        tilt_a.location = (2600, y_pos - 2750)
+        links.new(align_base, tilt_a.inputs[0])
+        links.new(tiltT_vec.outputs[0], tilt_a.inputs[1])
+
+        tilt_b = new("ShaderNodeVectorMath", name=f"TiltAdd2 {leaflet_index}")
+        tilt_b.operation = "ADD"
+        tilt_b.location = (2800, y_pos - 2750)
+        links.new(tilt_a.outputs[0], tilt_b.inputs[0])
+        links.new(tiltB_vec.outputs[0], tilt_b.inputs[1])
+
+        align_normal = new("ShaderNodeVectorMath", name=f"AlignNorm {leaflet_index}")
+        align_normal.operation = "NORMALIZE"
+        align_normal.location = (3000, y_pos - 2750)
+        links.new(tilt_b.outputs[0], align_normal.inputs[0])
 
         align = new("FunctionNodeAlignRotationToVector",
                    name=f"AlignRot {leaflet_index}")
         align.axis = "Z"
         align.pivot_axis = "AUTO"
-        align.location = (200, y_pos - 150)
-        links.new(align_normal, align.inputs["Vector"])
-
-        # Step 2: random Y-rotation (around lipid's own Z axis, which after
-        # alignment points along the surface normal). We use the Rotate
-        # Instances node later — easier to incorporate the random Z rotation
-        # there. So we just produce the base alignment rotation here.
+        align.location = (3200, y_pos - 150)
+        links.new(align_normal.outputs[0], align.inputs["Vector"])
         base_rot = align.outputs["Rotation"]
 
         # ---- Instance lipid on points ------------------------------------
-        # Scale per-instance.
         scale_to_vec = new("ShaderNodeCombineXYZ", name=f"ScaleVec {leaflet_index}")
-        scale_to_vec.location = (1600, y_pos - 200)
+        scale_to_vec.location = (3200, y_pos - 350)
         links.new(get_in("Lipid Scale"), scale_to_vec.inputs[0])
         links.new(get_in("Lipid Scale"), scale_to_vec.inputs[1])
         links.new(get_in("Lipid Scale"), scale_to_vec.inputs[2])
 
         oi_lipid = new("GeometryNodeObjectInfo", name=f"OI Lipid {leaflet_index}")
         oi_lipid.transform_space = "ORIGINAL"
-        oi_lipid.location = (1400, y_pos - 400)
+        oi_lipid.location = (3200, y_pos - 500)
         links.new(get_in("Lipid Asset"), oi_lipid.inputs["Object"])
 
         iop = new("GeometryNodeInstanceOnPoints", name=f"IoP {leaflet_index}")
-        iop.location = (1800, y_pos)
+        iop.location = (3450, y_pos)
         links.new(bob_set.outputs["Geometry"], iop.inputs["Points"])
         links.new(oi_lipid.outputs["Geometry"], iop.inputs["Instance"])
         links.new(base_rot, iop.inputs["Rotation"])
         links.new(scale_to_vec.outputs[0], iop.inputs["Scale"])
 
-        # ---- Rotate Instances: random Y (around local Z, the lipid's long axis)
-        rand_yrot = new("FunctionNodeRandomValue", name=f"RandY {leaflet_index}")
-        rand_yrot.data_type = "FLOAT"
-        rand_yrot.location = (1600, y_pos - 600)
-        rand_yrot.inputs[2].default_value = 0.0
-        rand_yrot.inputs[3].default_value = math.tau
-        # seed: index + offset
-        seed_y = new("ShaderNodeMath", name=f"SeedY {leaflet_index}")
-        seed_y.operation = "ADD"
-        seed_y.inputs[1].default_value = float(31337 + leaflet_index * 7)
-        seed_y.location = (1400, y_pos - 600)
-        links.new(idx.outputs[0], seed_y.inputs[0])
-        links.new(seed_y.outputs[0], rand_yrot.inputs["Seed"])
+        # ---- Per-instance spin about the lipid's long axis ---------------
+        # Static random Y-rotation (gated by Random Rotation, so the top view
+        # isn't uniform) PLUS the time-varying twist channel (gated by
+        # Animate Bob). They're independent: one is the resting orientation,
+        # the other is mosh-pit twisting.
+        rand_yrot = rand_float(700, 0.0, math.tau, (3200, y_pos - 700))
 
-        # Gate by Random Rotation bool
         rot_switch = new("GeometryNodeSwitch", name=f"RotSwitch {leaflet_index}")
         rot_switch.input_type = "FLOAT"
-        rot_switch.location = (1800, y_pos - 600)
+        rot_switch.location = (3450, y_pos - 700)
         rot_switch.inputs["False"].default_value = 0.0
         links.new(get_in("Random Rotation"), rot_switch.inputs[0])
-        links.new(rand_yrot.outputs["Value"], rot_switch.inputs["True"])
+        links.new(rand_yrot, rot_switch.inputs["True"])
 
-        # Make Euler vector (0, 0, angle) — this is rotation in the
-        # INSTANCE's local space (because we set "Local Space" on the
-        # Rotate Instances node below).
+        spin = new("ShaderNodeMath", name=f"Spin {leaflet_index}")
+        spin.operation = "ADD"
+        spin.location = (3650, y_pos - 700)
+        links.new(rot_switch.outputs[0], spin.inputs[0])
+        links.new(twist_ch, spin.inputs[1])
+
+        # Euler vector (0, 0, spin) — rotation in the INSTANCE's local space
+        # (Rotate Instances has Local Space enabled below).
         rot_vec = new("ShaderNodeCombineXYZ", name=f"RotVec {leaflet_index}")
-        rot_vec.location = (2000, y_pos - 600)
+        rot_vec.location = (3850, y_pos - 700)
         rot_vec.inputs[0].default_value = 0.0
         rot_vec.inputs[1].default_value = 0.0
-        links.new(rot_switch.outputs[0], rot_vec.inputs[2])
+        links.new(spin.outputs[0], rot_vec.inputs[2])
 
         rotate_inst = new("GeometryNodeRotateInstances",
                          name=f"RotInst {leaflet_index}")
-        rotate_inst.location = (2200, y_pos)
+        rotate_inst.location = (4050, y_pos)
         rotate_inst.inputs["Local Space"].default_value = True
         links.new(iop.outputs["Instances"], rotate_inst.inputs["Instances"])
         links.new(rot_vec.outputs[0], rotate_inst.inputs["Rotation"])
@@ -662,14 +792,40 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
     links.new(join.outputs[0], group_out.inputs["Geometry"])
 
+    tree["pb_gn_version"] = GN_TREE_VERSION
     return tree
 
 
 def get_or_build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
-    """Return the membrane GN tree, building it if missing."""
+    """Return the membrane GN tree, building it if missing or out of date.
+
+    When an out-of-date tree is found (a membrane built with an older addon
+    version), it is rebuilt and every existing membrane is re-linked to the
+    fresh tree and has its stored settings re-applied — so old membranes pick
+    up new motion features without the user having to recreate them.
+    """
     tree = bpy.data.node_groups.get(GN_TREE_NAME)
-    if tree is None:
-        tree = _build_membrane_gn_tree()
+    if tree is not None and tree.get("pb_gn_version", 0) == GN_TREE_VERSION:
+        return tree
+
+    was_stale = tree is not None
+    tree = _build_membrane_gn_tree()  # removes the old datablock, builds fresh
+
+    if was_stale:
+        # _build_membrane_gn_tree removed the old tree, so any membrane
+        # modifier that referenced it now has node_group == None. Re-link
+        # each one and re-push its stored settings + hole assignments.
+        from . import membrane_operators as ops
+        for obj in bpy.data.objects:
+            if not obj.get("pb_is_membrane", False):
+                continue
+            for mod in obj.modifiers:
+                if mod.type == "NODES" and mod.name == ops.GN_MOD_NAME:
+                    mod.node_group = tree
+            try:
+                ops.reapply_membrane_settings(obj)
+            except Exception:
+                pass
     return tree
 
 

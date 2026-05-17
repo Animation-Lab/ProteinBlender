@@ -122,8 +122,12 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
             col.prop(props, "bob_speed")
             if props.animate_bob:
                 anim_box.label(
-                    text="Pseudo-random per-lipid phase; same every play.",
+                    text="Lipids jostle on 6 axes — bob, sway, lean, twist.",
                     icon="INFO",
+                )
+                anim_box.label(
+                    text="Per-lipid random timing; same every playback.",
+                    icon="BLANK1",
                 )
 
         # ---- Colors section ----------------------------------------------

@@ -177,6 +177,38 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     _refresh_modifier(mod)
 
 
+def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
+    """Re-push a membrane's stored (pb_mem_*) settings onto its GN modifier.
+
+    Called after a GN-tree version upgrade re-links the modifier to a fresh
+    tree — the new tree has fresh socket identifiers, so the modifier's input
+    values must be written again. Reads from the root's own custom properties
+    (not the scene props) so it works on any membrane, selected or not.
+    """
+    mod = _get_gn_modifier(root_obj)
+    if mod is None:
+        return
+
+    _set_mod_input(mod, "Lipid Asset", get_or_build_lipid_asset())
+    _set_mod_input(mod, "Density (per nm²)",
+                   float(root_obj.get("pb_mem_density", 0.6)))
+    _set_mod_input(mod, "Bilayer Thickness (nm)",
+                   float(root_obj.get("pb_mem_bilayer_thickness", 4.0)))
+    _set_mod_input(mod, "Lipid Scale",
+                   float(root_obj.get("pb_mem_lipid_scale", 1.0)))
+    _set_mod_input(mod, "Random Rotation",
+                   bool(root_obj.get("pb_mem_random_rotation", True)))
+    _set_mod_input(mod, "Animate Bob",
+                   bool(root_obj.get("pb_mem_animate_bob", False)))
+    _set_mod_input(mod, "Bob Amplitude (nm)",
+                   float(root_obj.get("pb_mem_bob_amplitude", 0.3)))
+    _set_mod_input(mod, "Bob Speed",
+                   float(root_obj.get("pb_mem_bob_speed", 0.6)))
+
+    _rebuild_hole_assignments(root_obj)
+    _refresh_modifier(mod)
+
+
 def _rebuild_hole_assignments(root_obj: bpy.types.Object) -> None:
     """Walk the root's tracked hole list and assign them to the GN modifier slots
     in order. Slots without a hole get cleared and disabled.

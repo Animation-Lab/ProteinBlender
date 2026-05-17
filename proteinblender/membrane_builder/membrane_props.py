@@ -121,17 +121,24 @@ class MembraneBuilderProperties(PropertyGroup):
     animate_bob: BoolProperty(
         name="Animate Bobbing",
         description=(
-            "Each lipid wiggles up and down with a deterministic phase offset, "
-            "so the membrane looks alive in renders. The pattern is the same "
-            "every time — it depends only on lipid index, not random state."
+            "Each lipid jostles like a crowd in a mosh pit — bobbing, "
+            "swaying sideways, leaning and twisting on six independent "
+            "axes. Phase, speed and amplitude are randomised per lipid, so "
+            "no two move alike. Fully deterministic (seeded by lipid index, "
+            "not random state) — the animation plays back identically "
+            "every time."
         ),
         default=False,
         update=_sync_to_active_membrane,
     )
 
     bob_amplitude: FloatProperty(
-        name="Bob Amplitude",
-        description="Maximum vertical wiggle of each lipid, in nm",
+        name="Motion Amount",
+        description=(
+            "Master amount of jostling, in nm. Scales every motion axis at "
+            "once (vertical bob, lateral sway, lean and twist). Each lipid "
+            "gets its own randomised fraction of this."
+        ),
         default=0.3,
         min=0.0,
         max=3.0,
@@ -140,8 +147,12 @@ class MembraneBuilderProperties(PropertyGroup):
     )
 
     bob_speed: FloatProperty(
-        name="Bob Speed",
-        description="Cycles per second for the bobbing animation",
+        name="Motion Speed",
+        description=(
+            "Master tempo of the jostling, in cycles per second. Each lipid "
+            "and each motion axis gets a randomised fraction of this, so the "
+            "crowd never moves in lockstep."
+        ),
         default=0.6,
         min=0.05,
         max=5.0,
@@ -312,6 +323,15 @@ def unregister_msgbus():
 @persistent
 def _load_post_handler(_dummy):
     register_msgbus()
+    # Upgrade any membranes built with an older GN tree so they pick up new
+    # motion features. get_or_build rebuilds + re-applies when it sees a
+    # stale version tag; skip the work entirely if there are no membranes.
+    try:
+        if any(o.get("pb_is_membrane", False) for o in bpy.data.objects):
+            from .membrane_geometry import get_or_build_membrane_gn_tree
+            get_or_build_membrane_gn_tree()
+    except Exception:
+        pass
 
 
 def register():
