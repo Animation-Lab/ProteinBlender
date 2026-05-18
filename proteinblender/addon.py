@@ -133,6 +133,17 @@ def register() -> None:
     if sync_molecule_list_after_undo not in bpy.app.handlers.redo_post:
         bpy.app.handlers.redo_post.append(sync_molecule_list_after_undo)
 
+    # Self-healing: purge orphaned molecule entries (objects deleted outside
+    # ProteinBlender) on file load and immediately after any object deletion.
+    from .utils.scene_manager import (
+        purge_orphaned_molecules_on_load,
+        detect_deleted_molecules,
+    )
+    if purge_orphaned_molecules_on_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(purge_orphaned_molecules_on_load)
+    if detect_deleted_molecules not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(detect_deleted_molecules)
+
     # Register selection sync handlers
     from .handlers import selection_sync
     selection_sync.register()
@@ -176,6 +187,19 @@ def unregister() -> None:
             bpy.app.handlers.redo_post.remove(sync_molecule_list_after_undo)
     except Exception as e:
         logger.debug(f"Failed to unregister undo/redo handler: {e}")
+
+    # Unregister self-healing (orphaned molecule) handlers
+    try:
+        from .utils.scene_manager import (
+            purge_orphaned_molecules_on_load,
+            detect_deleted_molecules,
+        )
+        if purge_orphaned_molecules_on_load in bpy.app.handlers.load_post:
+            bpy.app.handlers.load_post.remove(purge_orphaned_molecules_on_load)
+        if detect_deleted_molecules in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.remove(detect_deleted_molecules)
+    except Exception as e:
+        logger.debug(f"Failed to unregister self-healing handlers: {e}")
 
     # Unregister selection sync handlers
     try:

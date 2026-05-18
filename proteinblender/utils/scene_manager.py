@@ -14,6 +14,7 @@ on-demand.
 
 import json
 import bpy
+from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set, Tuple
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid, get_object_safe, refresh_ui_areas
@@ -1035,6 +1036,82 @@ def _handle_orphaned_proteins(scene_manager, scene) -> List[str]:
             print(f"Warning: Failed to handle orphaned protein {molecule_id}: {e}")
 
     return handled_ids
+
+
+# ---------------------------------------------------------------------------
+# Self-healing: purge molecule entries whose backing objects are gone
+# ---------------------------------------------------------------------------
+# A molecule is left "orphaned" when its objects are deleted outside
+# ProteinBlender's own delete path — e.g. with Blender's X key, or by a
+# script. The runtime registry, the molecule list and the protein outliner
+# then keep dead entries: a protein you can't see, an eye toggle that does
+# nothing, unselectable chains. These hooks heal that automatically — on
+# file load, and immediately when objects are deleted. (Undo/redo is already
+# healed by sync_molecule_list_after_undo below.)
+
+def purge_orphaned_molecules(verbose: bool = True) -> int:
+    """Remove molecule registry / list / outliner entries whose objects no
+    longer exist. Safe to call any time; a no-op when nothing is orphaned.
+
+    Returns the number of molecules purged.
+    """
+    try:
+        scene_manager = ProteinBlenderScene.get_instance()
+        scene = getattr(bpy.context, "scene", None)
+        if scene is None:
+            return 0
+        removed = _remove_invalid_wrappers(scene_manager, scene)
+        if removed:
+            if getattr(scene_manager, "active_molecule", None) in removed:
+                scene_manager.active_molecule = None
+            # Rebuild the outliner so the dead protein/chain rows disappear.
+            build_outliner_hierarchy(bpy.context)
+            if verbose:
+                print(f"[ProteinBlender] healed outliner — purged orphaned "
+                      f"molecule(s): {removed}")
+        return len(removed)
+    except Exception as e:
+        print(f"[ProteinBlender] purge_orphaned_molecules failed: {e}")
+        return 0
+
+
+# Object-count baseline for the depsgraph-based deletion detector.
+_object_count_cache = [-1]
+
+
+def _deferred_molecule_purge():
+    """One-shot timer body — runs the purge in a context where modifying
+    Blender data is safe (a depsgraph handler is not such a context)."""
+    purge_orphaned_molecules()
+    return None  # returning None unregisters the timer
+
+
+@persistent
+def detect_deleted_molecules(scene, depsgraph):
+    """depsgraph_update_post hook — heals the outliner after a deletion.
+
+    A depsgraph handler must not modify data, so this only watches for the
+    object count dropping (something was deleted) and defers the actual
+    purge to a one-shot timer. The common case — no deletion — costs a
+    single len() and an int compare.
+    """
+    try:
+        count = len(bpy.data.objects)
+        prev = _object_count_cache[0]
+        _object_count_cache[0] = count
+        if 0 <= prev and count < prev:
+            if not bpy.app.timers.is_registered(_deferred_molecule_purge):
+                bpy.app.timers.register(_deferred_molecule_purge,
+                                        first_interval=0.0)
+    except Exception:
+        pass
+
+
+@persistent
+def purge_orphaned_molecules_on_load(_dummy):
+    """load_post hook — heal a freshly opened file."""
+    _object_count_cache[0] = -1  # reset the baseline for the new file
+    purge_orphaned_molecules()
 
 
 def sync_molecule_list_after_undo(*args):
