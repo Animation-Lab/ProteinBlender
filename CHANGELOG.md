@@ -4,6 +4,30 @@ All notable changes to ProteinBlender are documented in this file.
 
 ---
 
+## [1.0.4] - 2026-05-19
+
+### Added
+- **DNA/RNA Builder** — generate nucleic acid structures from a sequence
+  - Build double- or single-stranded DNA or RNA from a typed or randomly generated sequence
+  - Helix and Ladder winding modes, with per-base (A/T/G/C/U) and backbone colouring
+  - In Ladder mode, realistic 3D backbone atoms are applied automatically for atom-based styles (Ball & Stick, Spheres, Sticks)
+  - Bend editing via a Bezier curve with draggable control nodes
+  - Swap-to-Complement to quickly build the antisense strand
+  - Selecting an existing DNA/RNA molecule turns the builder panel into an editor for it
+- **Membrane Builder** — Geometry Nodes-driven lipid bilayer
+  - Deformable bilayer with realistic lipid density and even Poisson-disk packing
+  - Holes that redistribute lipids instead of deleting them, with spherical cross-sections
+  - Per-lipid procedural motion
+
+### Changed
+- Flexible linker controls consolidated into a single inline editor in the builder panel
+
+### Fixed
+- Protein outliner now self-heals when molecule objects are deleted outside the addon
+- Per-chain visibility toggle in the protein outliner
+
+---
+
 ## [1.0.3] - 2026-03-31
 
 ### Added
