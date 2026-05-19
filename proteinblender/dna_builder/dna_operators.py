@@ -15,6 +15,13 @@ from bpy.props import StringProperty
 # style draws the same pyrimidine block for every base.
 _DT_CODE = 33
 
+# Styles that draw individual atoms. For these the ladder backbone keeps
+# a natural 3D extent ("realistic atoms") so the nucleotide reads as a
+# real molecule. Cartoon and surface don't draw atoms, so the backbone
+# stays collapsed flat. This is implied by the style — there is no
+# separate UI toggle.
+_REALISTIC_ATOM_STYLES = {"ball_and_stick", "spheres", "sticks"}
+
 
 def _snapshot_real_res_name(obj):
     """Copy the mesh's ``res_name`` attribute into ``pb_real_res_name``.
@@ -98,7 +105,10 @@ def _build_dna_from_props(operator, context, identifier):
     n = len(seq)
     primary_mask = make_wound_mask(n, props.winding_mode)
     schematic = props.winding_mode == "LADDER" and bool(props.ladder_uniform)
-    realistic = props.winding_mode == "LADDER" and bool(props.ladder_realistic)
+    realistic = (
+        props.winding_mode == "LADDER"
+        and props.style in _REALISTIC_ATOM_STYLES
+    )
 
     try:
         array = build_nucleic_acid(
@@ -129,7 +139,7 @@ def _build_dna_from_props(operator, context, identifier):
     obj["pb_style"] = props.style
     obj["pb_winding_mode"] = props.winding_mode
     obj["pb_ladder_uniform"] = bool(props.ladder_uniform)
-    obj["pb_ladder_realistic"] = bool(props.ladder_realistic)
+    obj["pb_ladder_realistic"] = bool(realistic)
 
     context.evaluated_depsgraph_get()
     _snapshot_real_res_name(obj)

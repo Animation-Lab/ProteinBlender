@@ -165,28 +165,6 @@ class PROTEINBLENDER_PT_builders(Panel):
                     text="Stylised flat ladder. Backbone is not atomically valid here.",
                     icon="INFO",
                 )
-                wind_box.prop(props, "ladder_realistic")
-                if props.ladder_realistic:
-                    wind_box.label(
-                        text="Backbone keeps a 3D extent (looks like a real nucleotide).",
-                        icon="INFO",
-                    )
-                else:
-                    wind_box.label(
-                        text="Every atom collapsed to its residue's z plane (flat 2D).",
-                        icon="INFO",
-                    )
-                wind_box.prop(props, "ladder_uniform")
-                if props.ladder_uniform:
-                    wind_box.label(
-                        text="All rungs share the same outline.",
-                        icon="INFO",
-                    )
-                    if props.style != "ball_and_stick":
-                        wind_box.label(
-                            text="Tip: use Ball & Stick for fully identical rungs.",
-                            icon="INFO",
-                        )
 
         # ---- Collapsible colour section ----------------------------------
         color_box = main_box.box()
