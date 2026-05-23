@@ -1,53 +1,53 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-05-22T04:33:45+00:00",
+  "generated_at": "2026-05-23T04:05:45+00:00",
   "summary": {
-    "views": 42,
+    "views": 43,
     "visitors": 15,
-    "clones": 458,
-    "cloners": 157
+    "clones": 474,
+    "cloners": 158
   },
   "all_time": {
-    "views": 453,
-    "visitors": 213,
-    "clones": 1676,
-    "cloners": 780,
-    "days_tracked": 65
+    "views": 458,
+    "visitors": 215,
+    "clones": 1706,
+    "cloners": 790,
+    "days_tracked": 66
   },
   "current_day": {
+    "date": "2026-05-21",
+    "views": 5,
+    "visitors": 2,
+    "clones": 30,
+    "cloners": 10
+  },
+  "previous_day": {
     "date": "2026-05-20",
     "views": 0,
     "visitors": 0,
     "clones": 19,
     "cloners": 11
   },
-  "previous_day": {
-    "date": "2026-05-19",
-    "views": 4,
-    "visitors": 1,
-    "clones": 25,
-    "cloners": 15
-  },
   "delta_since_previous_day": {
-    "views": -4,
-    "visitors": -1,
-    "clones": -6,
-    "cloners": -4
+    "views": 5,
+    "visitors": 2,
+    "clones": 11,
+    "cloners": -1
   },
   "referrers": [
+    {
+      "referrer": "animation-lab.github.io",
+      "count": 19,
+      "uniques": 11
+    },
     {
       "referrer": "Bing",
       "count": 16,
       "uniques": 1
     },
     {
-      "referrer": "animation-lab.github.io",
-      "count": 14,
-      "uniques": 9
-    },
-    {
       "referrer": "github.com",
-      "count": 7,
+      "count": 6,
       "uniques": 5
     }
   ],
@@ -55,14 +55,20 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 19,
-      "uniques": 13
+      "count": 17,
+      "uniques": 12
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 5,
-      "uniques": 3
+      "count": 6,
+      "uniques": 4
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.0.0",
+      "title": "/releases/tag/1.0.0",
+      "count": 3,
+      "uniques": 1
     },
     {
       "path": "/Animation-Lab/ProteinBlender/blob/main/CLAUDE.md",
@@ -103,12 +109,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/13",
       "title": "/discussions/13",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/discussions/7",
-      "title": "/discussions/7",
       "count": 1,
       "uniques": 1
     }
