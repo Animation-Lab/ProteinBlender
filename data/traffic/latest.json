@@ -1,38 +1,38 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-05-23T04:05:45+00:00",
+  "generated_at": "2026-05-24T04:36:41+00:00",
   "summary": {
-    "views": 43,
-    "visitors": 15,
-    "clones": 474,
-    "cloners": 158
+    "views": 25,
+    "visitors": 14,
+    "clones": 487,
+    "cloners": 162
   },
   "all_time": {
     "views": 458,
     "visitors": 215,
-    "clones": 1706,
-    "cloners": 790,
-    "days_tracked": 66
+    "clones": 1734,
+    "cloners": 801,
+    "days_tracked": 67
   },
   "current_day": {
+    "date": "2026-05-22",
+    "views": 0,
+    "visitors": 0,
+    "clones": 28,
+    "cloners": 11
+  },
+  "previous_day": {
     "date": "2026-05-21",
     "views": 5,
     "visitors": 2,
     "clones": 30,
     "cloners": 10
   },
-  "previous_day": {
-    "date": "2026-05-20",
-    "views": 0,
-    "visitors": 0,
-    "clones": 19,
-    "cloners": 11
-  },
   "delta_since_previous_day": {
-    "views": 5,
-    "visitors": 2,
-    "clones": 11,
-    "cloners": -1
+    "views": -5,
+    "visitors": -2,
+    "clones": -2,
+    "cloners": 1
   },
   "referrers": [
     {
@@ -41,22 +41,17 @@
       "uniques": 11
     },
     {
-      "referrer": "Bing",
-      "count": 16,
-      "uniques": 1
-    },
-    {
       "referrer": "github.com",
-      "count": 6,
-      "uniques": 5
+      "count": 4,
+      "uniques": 4
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 17,
-      "uniques": 12
+      "count": 13,
+      "uniques": 11
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
@@ -77,38 +72,8 @@
       "uniques": 1
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/discussions",
-      "title": "/discussions",
-      "count": 2,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/actions",
-      "title": "/actions",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/actions/runs/25300479205",
-      "title": "/actions/runs/25300479205",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/discussions/10",
-      "title": "/discussions/10",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/discussions/12",
-      "title": "/discussions/12",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/discussions/13",
-      "title": "/discussions/13",
+      "path": "/Animation-Lab/ProteinBlender/fork",
+      "title": "/fork",
       "count": 1,
       "uniques": 1
     }
