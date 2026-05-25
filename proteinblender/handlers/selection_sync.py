@@ -25,6 +25,9 @@ _subscribed_objects = set()  # Track which objects we've subscribed to
 # Viewport -> outliner polling (the reliable path)
 _POLL_INTERVAL = 0.2  # seconds
 _last_selection_key = None  # cache: (sorted selected names, active name)
+# Controllers we auto-selected because all of a puppet's chains were selected.
+# Tracked so we only auto-deselect those (not ones the user picked directly).
+_auto_selected_controllers = set()
 
 
 def on_selection_changed(*args):
@@ -190,16 +193,33 @@ def update_outliner_from_blender_selection():
     # Build set of selected object names for quick lookup
     selected_names = {obj.name for obj in selected_objects}
     
-    # A puppet ticks when its controller Empty is selected OR when its whole
-    # membership (all member chains) is selected.
+    # Puppet selection: when ALL of a puppet's chains are selected, the puppet
+    # is selected as a unit — so also select its controller Empty in the 3D
+    # view. Conversely, if a chain is later deselected, release the controller
+    # we auto-selected so the puppet de-selects as a unit. Controllers the user
+    # selected directly (puppet checkbox or clicking the Empty) are left alone.
     for item in scene.outliner_items:
-        if item.item_type == 'PUPPET':
-            controller_selected = False
-            if item.controller_object_name:
-                empty_obj = bpy.data.objects.get(item.controller_object_name)
-                controller_selected = bool(empty_obj and empty_obj.select_get())
-            item.is_selected = controller_selected or _puppet_members_all_selected(
-                scene, scene_manager, item, selected_names)
+        if item.item_type != 'PUPPET':
+            continue
+        empty_obj = (bpy.data.objects.get(item.controller_object_name)
+                     if item.controller_object_name else None)
+        if empty_obj is None:
+            item.is_selected = False
+            continue
+        all_members = _puppet_members_all_selected(scene, scene_manager, item, selected_names)
+        ctrl_selected = empty_obj.select_get()
+        if all_members and not ctrl_selected:
+            empty_obj.select_set(True)
+            _auto_selected_controllers.add(empty_obj.name)
+            ctrl_selected = True
+        elif (not all_members and ctrl_selected
+              and empty_obj.name in _auto_selected_controllers):
+            empty_obj.select_set(False)
+            _auto_selected_controllers.discard(empty_obj.name)
+            ctrl_selected = False
+        if not ctrl_selected:
+            _auto_selected_controllers.discard(empty_obj.name)
+        item.is_selected = ctrl_selected
     
     # Update outliner selection state for other items
     for item in scene.outliner_items:
@@ -407,6 +427,7 @@ def on_load_post(dummy):
     """Handler for file load to refresh subscriptions."""
     global _last_selection_key
     _last_selection_key = None  # force a resync against the freshly loaded file
+    _auto_selected_controllers.clear()
     refresh_object_subscriptions()
 
 
