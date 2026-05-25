@@ -1200,14 +1200,18 @@ def sync_molecule_list_after_undo(*args):
 
 
 def _sync_parent_render_visibility(molecule):
-    """Stop a molecule's parent object from double-rendering.
+    """Stop a molecule's parent object from showing on top of its chain objects.
 
     On import ProteinBlender creates a domain object for every chain, so the
-    per-chain objects already draw the whole surface. If the parent object's
-    MolecularNodes modifier also renders the full molecule you get a doubled
-    surface. So: disable the parent modifier whenever the molecule has domain
-    objects, and enable it when it has none (DNA/RNA, or a protein before any
-    domains exist). Idempotent — only writes when the state actually changes.
+    per-chain objects already draw the whole surface. The parent object must
+    then be suppressed — and not just its MolecularNodes modifier: with the
+    modifier off the parent's base mesh (atom bonds) shows as a wireframe in
+    the viewport. So hide the parent OBJECT as well. Domain-less molecules
+    (DNA/RNA, or a protein before any split) keep the parent visible.
+
+    hide_viewport is used deliberately (the monitor toggle): the per-item eye
+    toggle uses hide_set/hide_get, so the parent stays hidden across show/hide
+    of the protein. Idempotent — only writes when the state changes.
     """
     obj = getattr(molecule, 'object', None)
     if obj is None:
@@ -1216,11 +1220,16 @@ def _sync_parent_render_visibility(molecule):
         has_domains = any(getattr(d, 'object', None) for d in molecule.domains.values())
     except Exception:
         return
-    desired = not has_domains
+    # Hide the parent object (and its render) when domains carry the surface.
+    if obj.hide_viewport != has_domains:
+        obj.hide_viewport = has_domains
+    if obj.hide_render != has_domains:
+        obj.hide_render = has_domains
+    # Keep the modifier in step so a re-shown parent (DNA) draws its surface.
     for mod in obj.modifiers:
-        if mod.type == 'NODES' and mod.show_viewport != desired:
-            mod.show_viewport = desired
-            mod.show_render = desired
+        if mod.type == 'NODES' and mod.show_viewport == has_domains:
+            mod.show_viewport = not has_domains
+            mod.show_render = not has_domains
 
 
 def build_outliner_hierarchy(context=None):
