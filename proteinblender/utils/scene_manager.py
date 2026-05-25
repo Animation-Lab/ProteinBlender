@@ -1108,10 +1108,44 @@ def detect_deleted_molecules(scene, depsgraph):
         pass
 
 
+def _deferred_reconstruct_on_load():
+    """One-shot timer body — rebuild the runtime molecule registry from the
+    saved PropertyGroups after a file load, then heal any orphans.
+
+    reset_scene_manager_on_load clears the registry on load, but reconstruction
+    was only ever wired to undo/redo — so without this a freshly opened file
+    shows proteins in the outliner yet has an EMPTY registry, and colour /
+    split / centre / duplicate / pose all fail ("Molecule not found") until an
+    undo happens to trigger a rebuild. Deferring to a timer guarantees this
+    runs after every load_post handler (notably the reset) has finished,
+    independent of the order handlers were registered in.
+    """
+    try:
+        scene = getattr(bpy.context, "scene", None)
+        if scene is not None:
+            scene_manager = ProteinBlenderScene.get_instance()
+            restored = _reconstruct_wrappers_from_properties(scene_manager, scene)
+            if restored:
+                build_outliner_hierarchy(bpy.context)
+    except Exception as e:
+        print(f"[ProteinBlender] reconstruct on load failed: {e}")
+    # Re-baseline the deletion detector now the registry matches the file.
+    _object_count_cache[0] = len(bpy.data.objects)
+    return None  # returning None unregisters the timer
+
+
 @persistent
 def purge_orphaned_molecules_on_load(_dummy):
-    """load_post hook — heal a freshly opened file."""
+    """load_post hook — rebuild the runtime registry from the saved
+    PropertyGroups, then heal a freshly opened file.
+
+    The rebuild is deferred to a one-shot timer so it runs after every
+    load_post handler (notably reset_scene_manager_on_load, which clears the
+    registry) has completed, regardless of handler registration order.
+    """
     _object_count_cache[0] = -1  # reset the baseline for the new file
+    if not bpy.app.timers.is_registered(_deferred_reconstruct_on_load):
+        bpy.app.timers.register(_deferred_reconstruct_on_load, first_interval=0.0)
     purge_orphaned_molecules()
 
 
