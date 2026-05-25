@@ -15,6 +15,21 @@ class PuppetTransform(PropertyGroup):
     location: FloatVectorProperty(name="Location", size=3)
     rotation_euler: FloatVectorProperty(name="Rotation", size=3, subtype='EULER')
     scale: FloatVectorProperty(name="Scale", size=3, default=(1, 1, 1))
+
+    # When True this entry is the puppet's CONTROLLER, and its transform is
+    # stored relative to the parent protein (protein_object_name) rather than
+    # relative to the controller. Applying a pose restores the controller from
+    # this entry first, then the member chains relative to the controller.
+    # Defaults keep older poses (which have no controller entry) working as-is.
+    is_controller: BoolProperty(
+        name="Is Controller",
+        description="This entry stores the puppet controller relative to its protein",
+        default=False
+    )
+    protein_object_name: StringProperty(
+        name="Protein Object",
+        description="Parent protein object the controller transform is relative to"
+    )
     
     # Color data (RGBA)
     color: FloatVectorProperty(

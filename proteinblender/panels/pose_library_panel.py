@@ -6,6 +6,54 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, C
 from datetime import datetime
 
 
+def get_puppet_protein_object(context, puppet_id):
+    """The protein object a puppet was built from (its members' molecule).
+
+    A puppet's controller is positioned relative to this protein so a pose can
+    restore where the controller sits ON the protein, not only the chains
+    around the controller. Resolves via the molecule of the puppet's first
+    member chain. Returns None if it can't be determined (e.g. orphaned puppet)."""
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    puppet = next((it for it in context.scene.outliner_items
+                   if it.item_id == puppet_id and it.item_type == 'PUPPET'), None)
+    if not puppet or not puppet.puppet_memberships:
+        return None
+    by_id = {it.item_id: it for it in context.scene.outliner_items}
+    for member_id in puppet.puppet_memberships.split(','):
+        member = by_id.get(member_id)
+        mol_id = (member.parent_id if member and member.parent_id
+                  else member_id.split('_chain_')[0])
+        molecule = scene_manager.molecules.get(mol_id)
+        if molecule and molecule.object:
+            return molecule.object
+    return None
+
+
+def capture_controller_transform(context, pose, puppet_id, controller_obj):
+    """Append a pose entry storing the puppet controller RELATIVE TO its parent
+    protein, so applying the pose restores where the controller sits on the
+    protein (the missing half of a pose — the chains relative to the controller
+    are captured separately). No-op if the controller or protein can't be found."""
+    if not controller_obj:
+        return
+    protein_obj = get_puppet_protein_object(context, puppet_id)
+    if not protein_obj:
+        return
+    relative_matrix = protein_obj.matrix_world.inverted() @ controller_obj.matrix_world
+    puppet_name = next((it.name for it in context.scene.outliner_items
+                        if it.item_id == puppet_id and it.item_type == 'PUPPET'), puppet_id)
+    t = pose.transforms.add()
+    t.puppet_id = puppet_id
+    t.puppet_name = puppet_name
+    t.object_name = controller_obj.name
+    t.is_controller = True
+    t.protein_object_name = protein_obj.name
+    t.location = relative_matrix.to_translation()
+    t.rotation_euler = relative_matrix.to_euler()
+    t.scale = relative_matrix.to_scale()
+
+
 class GroupSelectionItem(PropertyGroup):
     """Helper class to store puppet selection state"""
     puppet_id: StringProperty(name="Puppet ID")
@@ -208,6 +256,9 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                         transform.has_color = True
                     else:
                         transform.has_color = False
+
+                # Also capture where the controller sits relative to its protein
+                capture_controller_transform(context, pose, puppet_id, controller_obj)
             except Exception as e:
                 print(f"Debug: ERROR processing puppet {puppet_id}: {e}")
                 import traceback
@@ -532,7 +583,8 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                 # Get current puppet objects for validation
                 current_objects = self.get_puppet_objects(context, item.item_id)
                 current_obj_names = {obj.name for obj in current_objects}
-                stored_obj_names = {t.object_name for t in puppets[item.item_id]['transforms']}
+                stored_obj_names = {t.object_name for t in puppets[item.item_id]['transforms']
+                                    if not t.is_controller}
                 
                 # Check for mismatches
                 in_pose_not_puppet = stored_obj_names - current_obj_names
@@ -558,11 +610,44 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                             print(f"Debug: Found controller '{controller_obj.name}' for puppet {puppet_id}")
                     break
 
+        # Restore each puppet CONTROLLER first, relative to its parent protein,
+        # so the whole puppet returns to where it sat on the protein. The member
+        # chains are then restored relative to the controller below. (Older poses
+        # have no controller entry, so this pass is a no-op for them.)
+        from mathutils import Matrix, Vector, Euler
+        for puppet_id, puppet_data in puppets.items():
+            controller_obj = puppet_data['controller']
+            if not controller_obj:
+                continue
+            for transform in puppet_data['transforms']:
+                if not transform.is_controller:
+                    continue
+                protein_obj = (bpy.data.objects.get(transform.protein_object_name)
+                               if transform.protein_object_name else None)
+                if protein_obj is None:
+                    print(f"Debug: controller protein '{transform.protein_object_name}' "
+                          f"not found; leaving controller in place")
+                    continue
+                relative_matrix = Matrix.Translation(Vector(transform.location))
+                relative_matrix @= Euler(transform.rotation_euler).to_matrix().to_4x4()
+                scale_matrix = Matrix()
+                for i in range(3):
+                    scale_matrix[i][i] = transform.scale[i]
+                relative_matrix @= scale_matrix
+                controller_obj.matrix_world = protein_obj.matrix_world @ relative_matrix
+                print(f"Debug: Restored controller '{controller_obj.name}' relative to "
+                      f"protein '{protein_obj.name}'")
+        # Push the controller moves through so children read the NEW controller
+        # world matrix when we restore them below.
+        context.view_layer.update()
+
         # Apply transforms
         for puppet_id, puppet_data in puppets.items():
             controller_obj = puppet_data['controller']
 
             for transform in puppet_data['transforms']:
+                if transform.is_controller:
+                    continue  # already restored above (relative to the protein)
                 print(f"Debug: Looking for object '{transform.object_name}'")
                 obj = bpy.data.objects.get(transform.object_name)
                 if obj:
@@ -715,7 +800,10 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                     transform.has_color = True
                 else:
                     transform.has_color = False
-        
+
+            # Also capture where the controller sits relative to its protein
+            capture_controller_transform(context, pose, puppet_id, controller_obj)
+
         # Update timestamp
         pose.modified_timestamp = datetime.now().isoformat()
         
