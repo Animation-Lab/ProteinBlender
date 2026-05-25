@@ -1199,11 +1199,35 @@ def sync_molecule_list_after_undo(*args):
         traceback.print_exc() 
 
 
+def _sync_parent_render_visibility(molecule):
+    """Stop a molecule's parent object from double-rendering.
+
+    On import ProteinBlender creates a domain object for every chain, so the
+    per-chain objects already draw the whole surface. If the parent object's
+    MolecularNodes modifier also renders the full molecule you get a doubled
+    surface. So: disable the parent modifier whenever the molecule has domain
+    objects, and enable it when it has none (DNA/RNA, or a protein before any
+    domains exist). Idempotent — only writes when the state actually changes.
+    """
+    obj = getattr(molecule, 'object', None)
+    if obj is None:
+        return
+    try:
+        has_domains = any(getattr(d, 'object', None) for d in molecule.domains.values())
+    except Exception:
+        return
+    desired = not has_domains
+    for mod in obj.modifiers:
+        if mod.type == 'NODES' and mod.show_viewport != desired:
+            mod.show_viewport = desired
+            mod.show_render = desired
+
+
 def build_outliner_hierarchy(context=None):
     """Build or rebuild the outliner hierarchy from current molecule data"""
     if context is None:
         context = bpy.context
-    
+
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
     
@@ -1321,6 +1345,10 @@ def build_outliner_hierarchy(context=None):
             mol_object = molecule.object
         elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
             mol_object = molecule.molecule.object
+
+        # Prevent the parent object from double-rendering on top of its
+        # per-chain/domain objects (see _sync_parent_render_visibility).
+        _sync_parent_render_visibility(molecule)
 
         # Detect DNA/RNA molecules via custom property
         is_nucleic = False
