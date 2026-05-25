@@ -139,6 +139,32 @@ def refresh_object_subscriptions():
         pass
 
 
+def _puppet_members_all_selected(scene, scene_manager, puppet_item, selected_names):
+    """True if every chain/domain member of a puppet has all of its objects
+    selected in the viewport. Lets the puppet row tick when its whole
+    membership is selected (not only when its controller Empty is)."""
+    members = [m for m in (puppet_item.puppet_memberships or "").split(",") if m]
+    if not members:
+        return False
+    by_id = {it.item_id: it for it in scene.outliner_items}
+    objects = []
+    for member_id in members:
+        member = by_id.get(member_id)
+        if member is None:
+            return False
+        if member.item_type == 'CHAIN':
+            resolved = get_chain_objects(scene_manager.molecules.get(member.parent_id), member)
+        elif member.object_name:
+            obj = bpy.data.objects.get(member.object_name)
+            resolved = [obj] if obj else []
+        else:
+            resolved = []
+        if not resolved:
+            return False
+        objects.extend(resolved)
+    return all(o.name in selected_names for o in objects)
+
+
 def update_outliner_from_blender_selection():
     """Update protein outliner selection based on Blender's selection"""
     scene = bpy.context.scene
@@ -164,21 +190,16 @@ def update_outliner_from_blender_selection():
     # Build set of selected object names for quick lookup
     selected_names = {obj.name for obj in selected_objects}
     
-    # Update puppet selection based ONLY on their controller Empty objects
-    # Puppets without controllers should always be deselected
+    # A puppet ticks when its controller Empty is selected OR when its whole
+    # membership (all member chains) is selected.
     for item in scene.outliner_items:
         if item.item_type == 'PUPPET':
+            controller_selected = False
             if item.controller_object_name:
-                # Check if the Empty controller is selected
                 empty_obj = bpy.data.objects.get(item.controller_object_name)
-                if empty_obj:
-                    item.is_selected = empty_obj.select_get()
-                else:
-                    # Controller doesn't exist, deselect puppet
-                    item.is_selected = False
-            else:
-                # No controller assigned, puppet should be deselected
-                item.is_selected = False
+                controller_selected = bool(empty_obj and empty_obj.select_get())
+            item.is_selected = controller_selected or _puppet_members_all_selected(
+                scene, scene_manager, item, selected_names)
     
     # Update outliner selection state for other items
     for item in scene.outliner_items:
