@@ -12,7 +12,7 @@ Key improvements in this refactored version:
 
 import bpy
 from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.blender_utils import is_object_valid
+from ..utils.chain_utils import get_chain_objects
 
 
 # Global variables for selection tracking
@@ -188,38 +188,14 @@ def update_outliner_from_blender_selection():
             else:
                 item.is_selected = False
         elif item.item_type == 'CHAIN':
-            # For chains, check if the chain object itself is selected in the viewport
-            # First, try to find the chain's object by checking if item has object_name
-            chain_object_selected = False
-
-            if item.object_name:
-                # Direct chain object (for full chain domains)
-                chain_object_selected = item.object_name in selected_names
-            else:
-                # Check if this is a chain item that references a domain
-                # Extract chain info and find the corresponding domain object
-                chain_id_str = item.item_id.split('_chain_')[-1] if '_chain_' in item.item_id else ""
-                if chain_id_str:
-                    try:
-                        chain_id = int(chain_id_str)
-                    except:
-                        chain_id = chain_id_str
-
-                    # Get parent molecule
-                    parent_molecule = scene_manager.molecules.get(item.parent_id)
-                    if parent_molecule:
-                        # Find the domain that represents this chain
-                        for domain in parent_molecule.domains.values():
-                            if domain.object and hasattr(domain, 'chain_id'):
-                                # Check if this domain belongs to the chain
-                                if str(domain.chain_id) == str(chain_id):
-                                    # Check if this domain's object is selected
-                                    if domain.object.name in selected_names:
-                                        chain_object_selected = True
-                                        break
-
-            # Update chain selection based on whether its object is selected
-            item.is_selected = chain_object_selected
+            # Resolve the chain to its backing object(s) — a single object for
+            # a whole chain or copy, several for a chain split into domains —
+            # then treat the chain as selected only when all of them are.
+            parent_molecule = scene_manager.molecules.get(item.parent_id)
+            chain_objs = get_chain_objects(parent_molecule, item)
+            item.is_selected = bool(chain_objs) and all(
+                o.name in selected_names for o in chain_objs
+            )
         else:
             # For other items without objects, deselect
             item.is_selected = False
@@ -325,104 +301,28 @@ def sync_outliner_to_blender_selection(context, item_id):
                         context.view_layer.objects.active = obj
                         
         elif item.item_type == 'CHAIN':
-            # IMPORTANT: Only select/deselect domains when the chain checkbox is EXPLICITLY clicked
-            # This function is called when the user clicks on the chain checkbox in the UI
-            # We still want chains to be able to select all their domains, but only when
-            # explicitly triggered by the user, not through automatic propagation
-
-            # Check if this is a chain copy (item_id is directly a domain_id)
-            # or a regular chain (item_id is "molecule_id_chain_X")
+            # Runs only when the user explicitly clicks a chain checkbox.
+            # Resolve the chain to its backing object(s): a single object for a
+            # whole chain or a copy, or every domain object once the chain has
+            # been split. (The chain-index vs. chain-letter mismatch this used
+            # to get wrong is now handled inside get_chain_objects.)
             parent_molecule = scene_manager.molecules.get(item.parent_id)
+            chain_objs = get_chain_objects(parent_molecule, item)
 
-            if parent_molecule:
-                # First check if item_id is directly a domain_id (for chain copies)
-                if item.item_id in parent_molecule.domains:
-                    # This is a chain copy - select only this specific domain
-                    target_domain = parent_molecule.domains[item.item_id]
+            active_set = False
+            for obj in chain_objs:
+                obj.select_set(item.is_selected)
+                if item.is_selected and not active_set:
+                    context.view_layer.objects.active = obj
+                    active_set = True
 
-                    if target_domain and target_domain.object:
-                        try:
-                            # Check if object is still valid before accessing it
-                            target_domain.object.name  # This will raise ReferenceError if invalid
-                            target_domain.object.select_set(item.is_selected)
-                            # Set as active if selected
-                            if item.is_selected:
-                                context.view_layer.objects.active = target_domain.object
-                        except ReferenceError:
-                            # Object has been removed, try to refresh from name
-                            if hasattr(target_domain, 'object_name') and target_domain.object_name:
-                                fresh_obj = bpy.data.objects.get(target_domain.object_name)
-                                if fresh_obj:
-                                    target_domain.object = fresh_obj
-                                    fresh_obj.select_set(item.is_selected)
-                                    if item.is_selected:
-                                        context.view_layer.objects.active = fresh_obj
-
-                else:
-                    # Regular chain - when user explicitly clicks chain checkbox,
-                    # select/deselect all non-copy domains belonging to this chain
-                    # Extract chain identifier from item_id (format: "molecule_id_chain_X")
-                    chain_id_str = item.item_id.split('_chain_')[-1]
-                    try:
-                        chain_id = int(chain_id_str)
-                    except:
-                        chain_id = chain_id_str
-
-                    # Select/deselect all non-copy domains of this chain
-                    # Also update the domain checkboxes in the outliner to match
-                    active_set = False
-                    for domain_id, domain in parent_molecule.domains.items():
-                        # Skip domain copies - they have their own chain items
-                        if hasattr(domain, 'is_copy') and domain.is_copy:
-                            continue
-
-                        # Check if domain belongs to this chain
-                        domain_chain_id = getattr(domain, 'chain_id', None)
-
-                        # Extract chain from domain name if needed
-                        if domain_chain_id is None and hasattr(domain, 'name'):
-                            import re
-                            match = re.search(r'Chain_([A-Z])', domain.name)
-                            if match:
-                                domain_chain_id = match.group(1)
-                            elif '_' in domain.name:
-                                match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                                if match2:
-                                    domain_chain_id = int(match2.group(1))
-
-                        # Check if this domain belongs to the chain
-                        if domain_chain_id is not None:
-                            domain_chain_str = str(domain_chain_id)
-                            chain_str = str(chain_id)
-
-                            if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                                # Update the domain's outliner checkbox to match chain selection
-                                # This ensures UI consistency when chain is selected
-                                for domain_item in scene.outliner_items:
-                                    if (domain_item.item_type == 'DOMAIN' and
-                                        domain_item.object_name == domain.object.name):
-                                        domain_item.is_selected = item.is_selected
-                                        break
-
-                                if domain.object:
-                                    try:
-                                        # Check if object is still valid before accessing it
-                                        domain.object.name  # This will raise ReferenceError if invalid
-                                        domain.object.select_set(item.is_selected)
-                                        # Set the first selected domain as active
-                                        if item.is_selected and not active_set:
-                                            context.view_layer.objects.active = domain.object
-                                            active_set = True
-                                    except ReferenceError:
-                                        # Object has been removed, try to refresh from name
-                                        if hasattr(domain, 'object_name') and domain.object_name:
-                                            fresh_obj = bpy.data.objects.get(domain.object_name)
-                                            if fresh_obj:
-                                                domain.object = fresh_obj
-                                                fresh_obj.select_set(item.is_selected)
-                                                if item.is_selected and not active_set:
-                                                    context.view_layer.objects.active = fresh_obj
-                                                    active_set = True
+            # Keep the chain's domain checkboxes in sync (split chains).
+            selected_obj_names = {o.name for o in chain_objs}
+            for domain_item in scene.outliner_items:
+                if (domain_item.item_type == 'DOMAIN'
+                        and domain_item.parent_id == item.item_id
+                        and domain_item.object_name in selected_obj_names):
+                    domain_item.is_selected = item.is_selected
         
         elif item.item_type == 'PUPPET':
             # Select/deselect the puppet's Empty controller if it exists

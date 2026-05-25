@@ -9,6 +9,8 @@ import bpy
 from typing import Dict, List, Tuple, Optional, Any
 import json
 
+from .blender_utils import get_object_safe
+
 
 def get_chain_mapping_from_string(mapping_str: str) -> Dict[int, str]:
     """Parse chain mapping from a comma-separated string format.
@@ -303,6 +305,112 @@ def get_possible_chain_ids(chain_id: Any) -> List[Any]:
             unique_ids.append(cid)
 
     return unique_ids
+
+
+def chain_match_tokens(molecule: Any, chain_token: Any) -> set:
+    """Return every string form a chain may be identified by.
+
+    The protein outliner identifies a chain by its numeric *index* ("2")
+    while a domain stores the author chain *letter* ("D"). ``chain_token``
+    may be either; this returns both forms (e.g. ``{"2", "D"}``) so callers
+    can match a domain's ``chain_id`` regardless of which convention it uses.
+
+    The index<->letter step goes through the molecule's own chain maps rather
+    than alphabet math (``chr(65 + idx)``), which is wrong for gapped chain
+    sets such as A, B, D — there index 2 is "D", not "C".
+    """
+    tokens = {str(chain_token)}
+    s = str(chain_token)
+    if s.isdigit():
+        letter = get_author_chain_id(molecule, int(s))
+        if letter:
+            tokens.add(str(letter))
+    else:
+        idx = get_chain_idx_from_author_id(molecule, s)
+        if idx is not None:
+            tokens.add(str(idx))
+    return tokens
+
+
+def domain_in_chain(molecule: Any, chain_token: Any, domain: Any) -> bool:
+    """True if ``domain`` belongs to the chain identified by ``chain_token``.
+
+    Bridges the chain-index vs. chain-letter mismatch via
+    :func:`chain_match_tokens`.
+    """
+    domain_chain_id = getattr(domain, "chain_id", None)
+    if domain_chain_id is None:
+        return False
+    return str(domain_chain_id) in chain_match_tokens(molecule, chain_token)
+
+
+def chain_token_from_item(chain_item: Any) -> str:
+    """Extract the chain identifier from a chain outliner row.
+
+    Regular chains use item_ids of the form ``<mol>_chain_<index>``; chain
+    copies use the domain id directly. Falls back to the row's ``chain_id``.
+    """
+    item_id = getattr(chain_item, "item_id", "") or ""
+    if "_chain_" in item_id:
+        return item_id.split("_chain_")[-1]
+    return getattr(chain_item, "chain_id", "") or item_id
+
+
+def get_chain_domains(molecule: Any, chain_item: Any) -> List[Tuple[str, Any]]:
+    """Return the ``(domain_id, domain)`` pairs a chain outliner row maps to.
+
+    * A chain copy's row carries the domain id as its item_id, so that single
+      domain is returned.
+    * A full or split chain returns every non-copy domain whose chain matches
+      the row (one domain for a whole chain, several once it is split).
+    """
+    if molecule is None:
+        return []
+
+    item_id = getattr(chain_item, "item_id", "") or ""
+    # Chain copy: the row's item_id is the domain id itself.
+    if item_id in molecule.domains:
+        return [(item_id, molecule.domains[item_id])]
+
+    token = chain_token_from_item(chain_item)
+    pairs = []
+    for domain_id, domain in molecule.domains.items():
+        if getattr(domain, "is_copy", False):
+            continue
+        if domain_in_chain(molecule, token, domain):
+            pairs.append((domain_id, domain))
+    return pairs
+
+
+def get_chain_objects(molecule: Any, chain_item: Any) -> List[bpy.types.Object]:
+    """Return every live Blender object a chain outliner row maps to.
+
+    This is the single source of truth for "what objects does this chain
+    refer to", shared by selection sync, colouring and splitting so they all
+    agree. Resolution order:
+
+      1. If the row is backed by a single object — the common "one object per
+         chain" case, and full-chain copies — its ``object_name`` points
+         straight at it.
+      2. Otherwise the chain has been split into domains: collect every
+         non-copy domain object belonging to the chain.
+    """
+    # 1. Single-object shortcut (full chain or chain copy).
+    name = getattr(chain_item, "object_name", "") or ""
+    obj = bpy.data.objects.get(name)
+    if obj is not None:
+        return [obj]
+
+    # 2. Split chain — gather the matching domain objects.
+    objects: List[bpy.types.Object] = []
+    seen = set()
+    for _domain_id, domain in get_chain_domains(molecule, chain_item):
+        live = get_object_safe(getattr(domain, "object", None),
+                               getattr(domain, "object_name", "") or "")
+        if live is not None and live.name not in seen:
+            seen.add(live.name)
+            objects.append(live)
+    return objects
 
 
 def build_chain_items_for_enum(molecule: Any) -> List[Tuple[str, str, str]]:

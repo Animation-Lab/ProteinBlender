@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.chain_utils import chain_match_tokens
 
 class MOLECULE_PB_OT_select(Operator):
     bl_idname = "molecule.select"
@@ -781,10 +782,13 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         # Capture state for undo (reuse existing pattern)
         scene_manager._capture_molecule_state(self.molecule_id)
 
-        # Find all domains belonging to this chain
+        # Find all domains belonging to this chain. self.chain_id arrives as
+        # the chain *index* ("2") from the outliner row while domains store the
+        # chain *letter* ("D"); match on any of the chain's identity forms.
+        chain_tokens = chain_match_tokens(molecule, self.chain_id)
         domains_to_delete = []
         for domain_id, domain in molecule.domains.items():
-            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id):
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
                 domains_to_delete.append(domain_id)
 
         if not domains_to_delete:
@@ -820,10 +824,11 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         if not molecule:
             return
 
-        # Collect all domain IDs for this chain
+        # Collect all domain IDs for this chain (index/letter agnostic)
+        chain_tokens = chain_match_tokens(molecule, chain_id)
         domain_ids_in_chain = []
         for domain_id, domain in molecule.domains.items():
-            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id):
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
                 domain_ids_in_chain.append(domain_id)
 
         # Remove from puppet memberships

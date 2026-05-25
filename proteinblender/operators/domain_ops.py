@@ -4,6 +4,7 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
+from ..utils.chain_utils import chain_match_tokens, get_chain_objects
 
 
 class PROTEINBLENDER_OT_split_domain_popup(Operator):
@@ -219,25 +220,13 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         if selected_item.item_type == 'CHAIN':
             molecule_id = selected_item.parent_id
             chain_id = selected_item.chain_id
-            # For chains, we need to find or create a temporary domain object for the full chain
+            # Isolate the chain's object: the resolver returns the full-chain
+            # object (or the chain's domain objects once split) and handles the
+            # chain-index vs. chain-letter bridge.
             molecule = scene_manager.molecules.get(molecule_id)
-            if molecule:
-                # Look for an existing domain that covers the full chain
-                for domain_id, domain in molecule.domains.items():
-                    if (hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id) and
-                        domain.start == selected_item.chain_start and 
-                        domain.end == selected_item.chain_end):
-                        if domain.object:
-                            target_object = domain.object
-                            break
-                
-                # If no full-chain domain exists, find any domain for this chain
-                if not target_object:
-                    for domain_id, domain in molecule.domains.items():
-                        if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(chain_id):
-                            if domain.object:
-                                target_object = domain.object
-                                break
+            chain_objects = get_chain_objects(molecule, selected_item)
+            if chain_objects:
+                target_object = chain_objects[0]
         else:  # DOMAIN
             # Find parent chain
             for chain_item in context.scene.outliner_items:
@@ -245,19 +234,13 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
                     molecule_id = chain_item.parent_id
                     chain_id = chain_item.chain_id
                     break
-            
-            # Find the domain in the molecule
+
+            # A domain row's item_id is the domain id, so look it up directly.
             molecule = scene_manager.molecules.get(molecule_id)
             if molecule:
-                # Look for domain by matching properties
-                for domain_id, domain in molecule.domains.items():
-                    if (hasattr(domain, 'start') and hasattr(domain, 'end') and
-                        domain.start == selected_item.domain_start and 
-                        domain.end == selected_item.domain_end and
-                        str(domain.chain_id) == str(chain_id)):
-                        if domain.object:
-                            target_object = domain.object
-                            break
+                domain = molecule.domains.get(selected_item.item_id)
+                if domain and domain.object:
+                    target_object = domain.object
         
         if not target_object or not molecule_id:
             print(f"Could not find target object for preview. molecule_id={molecule_id}, chain_id={chain_id}")
@@ -534,7 +517,12 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         if not molecule:
             self.report({'ERROR'}, "Molecule not found")
             return {'CANCELLED'}
-        
+
+        # self.chain_id may arrive as the chain *index* ("2") from the outliner
+        # while existing domains store the chain *letter* ("D"). Resolve every
+        # form once so the matches below work regardless of convention.
+        chain_tokens = chain_match_tokens(molecule, self.chain_id)
+
         # Capture molecule state before making changes (for undo/redo support)
         scene_manager._capture_molecule_state(self.molecule_id)
         
@@ -566,8 +554,8 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             if hasattr(domain, 'chain_id'):
                 self.report({'INFO'}, f"Checking domain {domain_id}: chain_id={domain.chain_id}, range={domain.start}-{domain.end}")
 
-                # Compare chain IDs as strings to handle type mismatches
-                if str(domain.chain_id) == str(self.chain_id):
+                # Match on any of the chain's identity forms (index or letter)
+                if str(domain.chain_id) in chain_tokens:
                     # Remove domains that overlap with our split range
                     # This includes:
                     # 1. Domains that span our entire split range (the domain being split)
@@ -658,7 +646,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             domain_outliner_id = None
             
             for domain_id, domain in molecule.domains.items():
-                if (hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id) and
+                if (hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens and
                     domain.start == start and domain.end == end):
                     domain_exists = True
                     # Domain ID already includes molecule ID, so use it directly
@@ -728,7 +716,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # Log final state
         self.report({'INFO'}, f"Domains after split:")
         for domain_id, domain in molecule.domains.items():
-            if hasattr(domain, 'chain_id') and str(domain.chain_id) == str(self.chain_id):
+            if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
                 self.report({'INFO'}, f"  Domain {domain_id}: range={domain.start}-{domain.end}, name={domain.name}")
         
         return {'FINISHED'}
@@ -898,19 +886,10 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     affected_groups[group_item.item_id] = domains_in_group
                     self.report({'INFO'}, f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
         
-        # Resolve the outliner's numeric chain id ("0", "1", ...) to the
-        # molecule's chain letter ("A", "B", ...). MoleculeWrapper domains
-        # store the letter on `domain.chain_id`, so without this mapping the
-        # removal loop's match condition silently never fires and the merge
-        # just stacks a new domain on top of the originals.
-        chain_letter = None
-        chain_id_int = int(parent_chain.chain_id) if parent_chain.chain_id.isdigit() else None
-        if (chain_id_int is not None
-                and hasattr(molecule, 'idx_to_label_asym_id_map')
-                and chain_id_int in molecule.idx_to_label_asym_id_map):
-            chain_letter = molecule.idx_to_label_asym_id_map[chain_id_int]
-        if chain_letter is None:
-            chain_letter = parent_chain.chain_id  # fallback for non-numeric ids
+        # parent_chain.chain_id is the chain *index* from the outliner while
+        # domains store the chain *letter*; chain_match_tokens bridges both
+        # forms (the single matching rule lives in chain_utils).
+        chain_tokens = chain_match_tokens(molecule, parent_chain.chain_id)
 
         # Remove the old domains (use actual domain items)
         for domain_item in actual_domain_items:
@@ -920,7 +899,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                 if (hasattr(domain, 'start') and hasattr(domain, 'end') and
                     domain.start == domain_item.domain_start and
                     domain.end == domain_item.domain_end and
-                    str(domain.chain_id) == str(chain_letter)):
+                    str(domain.chain_id) in chain_tokens):
                     domain_to_remove = domain_id
                     break
 

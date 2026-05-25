@@ -2,6 +2,29 @@ import bpy
 from bpy.types import Panel, UIList, Operator
 from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
+from ..utils.chain_utils import get_chain_objects, get_chain_domains, chain_token_from_item
+
+
+def _split_chain_is_visible(item, view_layer):
+    """Visibility for a chain row that has no single backing object.
+
+    Once a chain is split into domains its outliner row carries no
+    ``object_name``, so visibility has to be aggregated from the domain
+    objects. The chain reads as visible when any of its domains is visible —
+    that keeps the eye toggle reversible (hide-all then show-all).
+    """
+    scene_manager = ProteinBlenderScene.get_instance()
+    molecule = scene_manager.molecules.get(item.parent_id) if scene_manager else None
+    objects = get_chain_objects(molecule, item)
+    if not objects:
+        return True
+    for obj in objects:
+        try:
+            if not obj.hide_get(view_layer=view_layer):
+                return True
+        except (ReferenceError, RuntimeError):
+            continue
+    return False
 
 
 class PROTEINBLENDER_UL_outliner(UIList):
@@ -237,70 +260,37 @@ class PROTEINBLENDER_UL_outliner(UIList):
             # For domains, item_id is the domain_id directly
             if item.item_type == 'CHAIN':
                 scene_manager = ProteinBlenderScene.get_instance()
-                
-                # Check if this is a chain copy (item_id is a domain_id)
-                is_chain_copy = False
-                domain_for_chain = None
-                
-                # First check if item_id is directly a domain_id (for chain copies)
-                for molecule_id, molecule in scene_manager.molecules.items():
-                    if item.item_id in molecule.domains:
-                        domain_for_chain = molecule.domains[item.item_id]
-                        is_chain_copy = True
-                        break
-                
-                # If not a chain copy, extract molecule_id and find the matching domain
-                if not is_chain_copy:
-                    parts = item.item_id.rsplit('_chain_', 1)
-                    if len(parts) == 2:
-                        molecule_id = parts[0]
-                        chain_id = parts[1]
-                        molecule = scene_manager.molecules.get(molecule_id)
-                        if molecule:
-                            # Find the domain that represents this chain (full chain domain)
-                            for domain_id, domain in molecule.domains.items():
-                                if str(domain.chain_id) == chain_id:
-                                    domain_for_chain = domain
-                                    break
-                
-                # Add buttons based on what we found
-                if domain_for_chain:
-                    # Add reset transform button for all chains/domains
+
+                # Resolve the molecule and the domain(s) this chain row maps to
+                # through the shared resolver (handles full chains, copies and
+                # the chain-index vs. chain-letter bridge in one place).
+                molecule = scene_manager.molecules.get(item.parent_id)
+                chain_domains = get_chain_domains(molecule, item)
+
+                if chain_domains:
+                    primary_domain_id, primary_domain = chain_domains[0]
+                    is_chain_copy = getattr(primary_domain, 'is_copy', False)
+
+                    # Reset transform — acts on the chain's primary domain
                     reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
                     if reset_op:
-                        if is_chain_copy:
-                            reset_op.domain_id = item.item_id
-                        else:
-                            # Find the domain_id for this chain
-                            for domain_id, domain in molecule.domains.items():
-                                if domain == domain_for_chain:
-                                    reset_op.domain_id = domain_id
-                                    break
-                    
-                    # Add copy button for all chains
+                        reset_op.domain_id = primary_domain_id
+
+                    # Copy — duplicates the chain's primary domain
                     copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
                     if copy_op:
-                        if is_chain_copy:
-                            copy_op.domain_id = item.item_id
-                        else:
-                            # Find the domain_id for this chain
-                            for domain_id, domain in molecule.domains.items():
-                                if domain == domain_for_chain:
-                                    copy_op.domain_id = domain_id
-                                    break
+                        copy_op.domain_id = primary_domain_id
 
-                    # Add delete button
-                    if hasattr(domain_for_chain, 'is_copy') and domain_for_chain.is_copy:
-                        # For chain copies, use domain delete operator
+                    # Delete — a copy deletes itself; a real chain deletes the chain
+                    if is_chain_copy:
                         delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
                         if delete_op:
-                            delete_op.domain_id = item.item_id
+                            delete_op.domain_id = primary_domain_id
                     else:
-                        # For regular chains, use chain delete operator
                         delete_op = row.operator("molecule.delete_chain", text="", icon='TRASH', emboss=False)
                         if delete_op:
-                            delete_op.chain_id = chain_id
-                            delete_op.molecule_id = molecule_id
+                            delete_op.chain_id = chain_token_from_item(item)
+                            delete_op.molecule_id = item.parent_id
             else:
                 # For domains, use the item_id directly as domain_id
                 domain_id = item.item_id
@@ -369,12 +359,15 @@ class PROTEINBLENDER_UL_outliner(UIList):
     def _get_item_visibility(self, context, item):
         """Get visibility state directly from the Blender object."""
         if not item.object_name:
+            # A split chain has no single object — aggregate from its domains.
+            if item.item_type == 'CHAIN':
+                return _split_chain_is_visible(item, context.view_layer)
             return True
-        
+
         obj = bpy.data.objects.get(item.object_name)
         if not obj:
             return True
-        
+
         try:
             return not obj.hide_get(view_layer=context.view_layer)
         except (ReferenceError, RuntimeError):
@@ -696,6 +689,9 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
     def _get_object_visibility(self, item, view_layer):
         """Get visibility state from the Blender object."""
         if not item.object_name:
+            # A split chain has no single object — aggregate from its domains.
+            if item.item_type == 'CHAIN':
+                return _split_chain_is_visible(item, view_layer)
             return True
         obj = bpy.data.objects.get(item.object_name)
         if not obj:

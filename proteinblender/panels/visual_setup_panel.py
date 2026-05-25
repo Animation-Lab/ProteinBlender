@@ -5,174 +5,7 @@ from bpy.types import Panel, Operator
 from bpy.props import EnumProperty, FloatVectorProperty
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.molecularnodes.style import STYLE_ITEMS
-
-
-class PROTEINBLENDER_OT_apply_color(Operator):
-    """Apply color to selected items"""
-    bl_idname = "proteinblender.apply_color"
-    bl_label = "Apply Color"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    color: FloatVectorProperty(
-        name="Color",
-        subtype='COLOR',
-        size=4,
-        min=0.0,
-        max=1.0,
-        default=(0.8, 0.1, 0.8, 1.0)
-    )
-    
-    def execute(self, context):
-        scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Find selected items in outliner
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
-        if not selected_items:
-            self.report({'WARNING'}, "No items selected")
-            return {'CANCELLED'}
-        
-        # Apply color based on selection context
-        for item in selected_items:
-            if item.item_type == 'PROTEIN':
-                # Apply to protein and all children
-                self.apply_protein_color(scene_manager, item, self.color)
-            elif item.item_type == 'CHAIN':
-                # Apply to chain and its domains
-                self.apply_chain_color(scene_manager, item, self.color)
-            elif item.item_type == 'DOMAIN':
-                # Apply to domain only
-                self.apply_domain_color(scene_manager, item, self.color)
-        
-        # Update viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-    
-    def apply_protein_color(self, scene_manager, protein_item, color):
-        """Apply color to protein and all its domains"""
-        molecule = scene_manager.molecules.get(protein_item.item_id)
-        if not molecule:
-            return
-        
-        # Apply to main protein object if it exists
-        if molecule.object:
-            self._apply_color_to_object(molecule.object, color)
-        
-        # Apply to all domains
-        for domain in molecule.domains.values():
-            if domain.object:
-                self._apply_color_to_object(domain.object, color)
-    
-    def apply_chain_color(self, scene_manager, chain_item, color):
-        """Apply color to all domains in a chain"""
-        # Find parent molecule
-        parent_molecule = scene_manager.molecules.get(chain_item.parent_id)
-        
-        if parent_molecule:
-            # Extract chain identifier
-            chain_id_str = chain_item.item_id.split('_chain_')[-1]
-            try:
-                chain_id = int(chain_id_str)
-            except:
-                chain_id = chain_id_str
-            
-            # Apply to domains belonging to this chain
-            for domain_id, domain in parent_molecule.domains.items():
-                # Check if domain belongs to this chain
-                domain_chain_id = getattr(domain, 'chain_id', None)
-                
-                # Extract chain from domain name if needed
-                if domain_chain_id is None and hasattr(domain, 'name'):
-                    import re
-                    match = re.search(r'Chain_([A-Z])', domain.name)
-                    if match:
-                        domain_chain_id = match.group(1)
-                    elif '_' in domain.name:
-                        match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                        if match2:
-                            domain_chain_id = int(match2.group(1))
-                
-                # Check if this domain belongs to the chain
-                if domain_chain_id is not None:
-                    domain_chain_str = str(domain_chain_id)
-                    chain_str = str(chain_id)
-                    
-                    if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                        if domain.object:
-                            self._apply_color_to_object(domain.object, color)
-    
-    def apply_domain_color(self, scene_manager, domain_item, color):
-        """Apply color to a single domain"""
-        # Find the domain object
-        if domain_item.object_name:
-            obj = bpy.data.objects.get(domain_item.object_name)
-            if obj:
-                self._apply_color_to_object(obj, color)
-    
-    def _apply_color_to_object(self, obj, color):
-        """Apply color to a molecular object through its geometry nodes and set material transparency"""
-        # Apply transparency to the Style node's Material input
-        if len(color) >= 4:
-            apply_material_transparency_to_style_node(obj, color[3])
-        
-        # Find the MolecularNodes modifier
-        mod = None
-        for modifier in obj.modifiers:
-            if modifier.type == 'NODES' and 'MolecularNodes' in modifier.name:
-                mod = modifier
-                break
-        
-        if not mod or not mod.node_group:
-            return
-        
-        node_tree = mod.node_group
-        
-        # Look for a Color RGB node or create one
-        rgb_node = None
-        for node in node_tree.nodes:
-            if node.type == 'RGB':
-                rgb_node = node
-                break
-        
-        if not rgb_node:
-            # Create new RGB node
-            rgb_node = node_tree.nodes.new('ShaderNodeRGB')
-            rgb_node.location = (-400, 0)
-            rgb_node.name = "Custom Color"
-        
-        # Set the color
-        rgb_node.outputs[0].default_value = color
-        
-        # Find the Set Color node
-        set_color_node = None
-        for node in node_tree.nodes:
-            if 'Set Color' in node.name or (hasattr(node, 'node_tree') and node.node_tree and 'Set Color' in node.node_tree.name):
-                set_color_node = node
-                break
-        
-        if set_color_node:
-            # Connect RGB to Set Color
-            color_input = None
-            for input_socket in set_color_node.inputs:
-                if 'Color' in input_socket.name:
-                    color_input = input_socket
-                    break
-            
-            if color_input:
-                # Remove existing connections to the color input
-                for link in node_tree.links:
-                    if link.to_socket == color_input:
-                        node_tree.links.remove(link)
-                
-                # Create new connection
-                node_tree.links.new(rgb_node.outputs["Color"], color_input)
-        
-        # Force update
-        obj.data.update()
+from ..utils.chain_utils import get_chain_objects, get_chain_domains
 
 
 class PROTEINBLENDER_OT_apply_representation(Operator):
@@ -330,42 +163,10 @@ def apply_protein_color_direct(scene_manager, protein_item, color):
 
 
 def apply_chain_color_direct(scene_manager, chain_item, color):
-    """Apply color to all domains in a chain"""
-    # Find parent molecule
+    """Apply color to every object belonging to a chain (live update path)"""
     parent_molecule = scene_manager.molecules.get(chain_item.parent_id)
-    
-    if parent_molecule:
-        # Extract chain identifier
-        chain_id_str = chain_item.item_id.split('_chain_')[-1]
-        try:
-            chain_id = int(chain_id_str)
-        except:
-            chain_id = chain_id_str
-        
-        # Apply to domains belonging to this chain
-        for domain_id, domain in parent_molecule.domains.items():
-            # Check if domain belongs to this chain
-            domain_chain_id = getattr(domain, 'chain_id', None)
-            
-            # Extract chain from domain name if needed
-            if domain_chain_id is None and hasattr(domain, 'name'):
-                import re
-                match = re.search(r'Chain_([A-Z])', domain.name)
-                if match:
-                    domain_chain_id = match.group(1)
-                elif '_' in domain.name:
-                    match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                    if match2:
-                        domain_chain_id = int(match2.group(1))
-            
-            # Check if this domain belongs to the chain
-            if domain_chain_id is not None:
-                domain_chain_str = str(domain_chain_id)
-                chain_str = str(chain_id)
-                
-                if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                    if domain.object:
-                        apply_color_to_object(domain.object, color)
+    for obj in get_chain_objects(parent_molecule, chain_item):
+        apply_color_to_object(obj, color)
 
 
 def apply_domain_color_direct(scene_manager, domain_item, color):
@@ -801,43 +602,13 @@ def sync_color_to_selection(context):
             if molecule and molecule.object:
                 obj = molecule.object
         elif first_item.item_type == 'CHAIN':
-            # Find first domain in this chain
-            # First check if this is a domain ID (for chain copies)
-            domain_id = None
-            is_chain_copy = False
-        
-            # Check if item_id is directly a domain_id (for chain copies)
-            for molecule_id, molecule in scene_manager.molecules.items():
-                if first_item.item_id in molecule.domains:
-                    domain_id = first_item.item_id
-                    is_chain_copy = True
-                    break
-        
-            if is_chain_copy and domain_id:
-                # It's a chain copy - get the domain object directly
-                for molecule_id, molecule in scene_manager.molecules.items():
-                    if domain_id in molecule.domains:
-                        domain = molecule.domains[domain_id]
-                        if hasattr(domain, 'object'):
-                            obj = domain.object
-                        elif hasattr(domain, 'object_name'):
-                            obj = bpy.data.objects.get(domain.object_name)
-                        break
-            else:
-                # Regular chain - find first domain in this chain
-                parent_molecule = scene_manager.molecules.get(first_item.parent_id)
-                if parent_molecule:
-                    chain_id_str = first_item.item_id.split('_chain_')[-1]
-                    for domain_id, domain in parent_molecule.domains.items():
-                        # Check if domain belongs to this chain
-                        domain_chain_id = getattr(domain, 'chain_id', None)
-                        if domain_chain_id is not None and str(domain_chain_id) == chain_id_str:
-                            if hasattr(domain, 'object'):
-                                obj = domain.object
-                            elif hasattr(domain, 'object_name'):
-                                obj = bpy.data.objects.get(domain.object_name)
-                            if obj:
-                                break
+            # Read the colour from the chain's first backing object. The
+            # resolver handles full chains, chain copies and split chains, and
+            # the chain-index vs. chain-letter mismatch in one place.
+            parent_molecule = scene_manager.molecules.get(first_item.parent_id)
+            chain_objs = get_chain_objects(parent_molecule, first_item)
+            if chain_objs:
+                obj = chain_objs[0]
         elif first_item.item_type == 'DOMAIN':
             # For domains, first try to find it in the scene_manager
             domain_found = False
@@ -981,44 +752,13 @@ def apply_protein_style_direct(scene_manager, protein_item, style):
 
 
 def apply_chain_style_direct(scene_manager, chain_item, style):
-    """Apply style to all domains in a chain"""
-    # Find parent molecule
+    """Apply style to every domain in a chain (live update path)"""
     parent_molecule = scene_manager.molecules.get(chain_item.parent_id)
-
-    if parent_molecule:
-        # Extract chain identifier
-        chain_id_str = chain_item.item_id.split('_chain_')[-1]
-        try:
-            chain_id = int(chain_id_str)
-        except:
-            chain_id = chain_id_str
-
-        # Apply to domains belonging to this chain
-        for domain_id, domain in parent_molecule.domains.items():
-            # Check if domain belongs to this chain
-            domain_chain_id = getattr(domain, 'chain_id', None)
-
-            # Extract chain from domain name if needed
-            if domain_chain_id is None and hasattr(domain, 'name'):
-                import re
-                match = re.search(r'Chain_([A-Z])', domain.name)
-                if match:
-                    domain_chain_id = match.group(1)
-                elif '_' in domain.name:
-                    match2 = re.match(r'[^_]+_[^_]+_(\d+)_', domain.name)
-                    if match2:
-                        domain_chain_id = int(match2.group(1))
-
-            # Check if this domain belongs to the chain
-            if domain_chain_id is not None:
-                domain_chain_str = str(domain_chain_id)
-                chain_str = str(chain_id)
-
-                if domain_chain_str == chain_str or domain_chain_id == chain_id:
-                    if domain.object:
-                        apply_style_to_object(domain.object, style)
-                    # Update domain.style property
-                    domain.style = style
+    for domain_id, domain in get_chain_domains(parent_molecule, chain_item):
+        if domain.object:
+            apply_style_to_object(domain.object, style)
+        # Update domain.style property so it persists / is inherited
+        domain.style = style
 
 
 def apply_domain_style_direct(scene_manager, domain_item, style):
@@ -1205,7 +945,6 @@ def unregister_props():
 
 # Classes to register
 CLASSES = [
-    PROTEINBLENDER_OT_apply_color,
     PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_PT_visual_setup,
 ]

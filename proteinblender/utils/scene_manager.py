@@ -18,6 +18,7 @@ from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set, Tuple
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid, get_object_safe, refresh_ui_areas
+from .chain_utils import chain_match_tokens
 
 class ProteinBlenderScene:
     _instance = None
@@ -1480,15 +1481,11 @@ def build_outliner_hierarchy(context=None):
                                 domain_chain_id = int(match2.group(1))
                     
                     if domain_chain_id is not None:
-                        # Check if this domain belongs to the current chain
-                        domain_chain_str = str(domain_chain_id)
-                        chain_str = str(chain_id)
-                        
-                        match_found = (domain_chain_str == chain_str or 
-                                     domain_chain_str == chain_name or 
-                                     (isinstance(domain_chain_id, int) and domain_chain_id == chain_id))
-                        
-                        if match_found:
+                        # Single matching rule for the whole codebase: does this
+                        # domain belong to the current chain? chain_match_tokens
+                        # bridges the chain-index ("0") vs. chain-letter ("A")
+                        # gap via the molecule's real maps.
+                        if str(domain_chain_id) in chain_match_tokens(molecule, chain_id):
                             chain_domains.append((domain_id, domain))
 
                 # If this chain has no domains, remove the chain item and skip to next chain
