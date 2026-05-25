@@ -1,13 +1,14 @@
-"""Selection synchronization handler for two-way binding between Blender and ProteinBlender outliner.
+"""Two-way selection sync between Blender's viewport and the ProteinBlender outliner.
 
-This module handles synchronization between Blender's viewport selection and the
-ProteinBlender outliner checkboxes. It uses msgbus subscriptions for efficient
-notification of selection changes.
+Outliner -> viewport: handled directly by the outliner_select operator
+(sync_outliner_to_blender_selection).
 
-Key improvements in this refactored version:
-- Fixed race condition by keeping depth counter incremented until timer fires
-- Simplified handler structure
-- Removed redundant depsgraph handler (now only uses msgbus)
+Viewport -> outliner: handled by a lightweight polling timer (_selection_poll).
+Blender has no reliable event for selection changes — the msgbus "select" key is
+not a real Object RNA property in Blender 4.x+/5.x (so the subscription never
+fires), and selection changes do not emit depsgraph_update_post. Polling the
+selection set on a short timer is the robust, version-proof approach. The msgbus
+subscriptions are kept as a best-effort fast path where they happen to work.
 """
 
 import bpy
@@ -20,6 +21,10 @@ _update_pending = False  # Track if an update is already scheduled
 _update_in_progress = False  # Track if update is currently running
 _msgbus_owner = None  # Owner object for msgbus subscriptions
 _subscribed_objects = set()  # Track which objects we've subscribed to
+
+# Viewport -> outliner polling (the reliable path)
+_POLL_INTERVAL = 0.2  # seconds
+_last_selection_key = None  # cache: (sorted selected names, active name)
 
 
 def on_selection_changed(*args):
@@ -351,8 +356,36 @@ def update_outliner_selection_display(context):
             area.tag_redraw()
 
 
+def _selection_poll():
+    """Mirror the viewport selection into the outliner checkboxes.
+
+    Runs on a short repeating timer because Blender has no reliable selection
+    event (see module docstring). Cheap when nothing changed: build a key from
+    the selected-object names + active object and compare to the last one; only
+    do real work on an actual change.
+    """
+    global _last_selection_key, _update_pending
+    try:
+        if _update_in_progress or _update_pending:
+            return _POLL_INTERVAL
+        view_layer = getattr(bpy.context, "view_layer", None)
+        if view_layer is None:
+            return _POLL_INTERVAL
+        selected = tuple(sorted(o.name for o in view_layer.objects if o.select_get()))
+        active = view_layer.objects.active
+        key = (selected, active.name if active else None)
+        if key != _last_selection_key:
+            _last_selection_key = key
+            update_outliner_from_blender_selection()
+    except Exception:
+        pass
+    return _POLL_INTERVAL  # reschedule
+
+
 def on_load_post(dummy):
     """Handler for file load to refresh subscriptions."""
+    global _last_selection_key
+    _last_selection_key = None  # force a resync against the freshly loaded file
     refresh_object_subscriptions()
 
 
@@ -363,20 +396,18 @@ def _delayed_init():
 
 
 def register():
-    """Register all selection sync handlers.
-
-    Note: We no longer use depsgraph_update_post as it causes performance issues
-    and conflicts with the msgbus-based selection sync. The msgbus approach is
-    sufficient for tracking selection changes.
-    """
+    """Register selection sync: msgbus (best-effort) + the reliable poll timer."""
     # Clear any existing handlers
     clear_selection_handlers()
 
-    # Try to initialize msgbus subscriptions
+    # Best-effort msgbus subscriptions (fast path where supported)
     refresh_object_subscriptions()
-
-    # Schedule a delayed initialization in case Blender isn't fully ready yet
     bpy.app.timers.register(_delayed_init, first_interval=0.1, persistent=False)
+
+    # Reliable viewport -> outliner sync: poll the selection on a timer
+    if not bpy.app.timers.is_registered(_selection_poll):
+        bpy.app.timers.register(_selection_poll, first_interval=_POLL_INTERVAL,
+                                persistent=True)
 
     # Register load handler to refresh subscriptions after file load
     if on_load_post not in bpy.app.handlers.load_post:
@@ -387,6 +418,10 @@ def unregister():
     """Unregister all selection sync handlers."""
     # Clear msgbus subscriptions
     clear_selection_handlers()
+
+    # Stop the poll timer
+    if bpy.app.timers.is_registered(_selection_poll):
+        bpy.app.timers.unregister(_selection_poll)
 
     # Remove load handler
     if on_load_post in bpy.app.handlers.load_post:
