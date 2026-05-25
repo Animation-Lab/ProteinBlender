@@ -1961,8 +1961,37 @@ class MoleculeWrapper:
         for idx, auth_lab in self.auth_chain_id_map.items():
             if auth_lab == label_asym_id:
                 return idx
-        
+
         return None
+
+    def _resolve_chain_socket_name(self, chain_id) -> Optional[str]:
+        """Resolve a chain identifier to the chain-select iswitch socket name.
+
+        The chain-select iswitch's Index is the INT ``chain_id`` mesh attribute
+        (the sorted-label_asym_id index), and each boolean socket is NAMED after
+        ``idx_to_label_asym_id_map[index]``. So resolve ``chain_id`` to its
+        integer index first — handling an index string ("2"), an int, or an
+        author/label letter ("D") — then map that index back to the canonical
+        socket name. This avoids the author-vs-label ambiguity in
+        ``get_blender_chain_id`` that left per-chain mask terms empty (so the
+        parent's NOT(OR) selection became "all" and it re-rendered the whole
+        molecule).
+        """
+        chain_idx = None
+        if isinstance(chain_id, int):
+            chain_idx = chain_id
+        elif isinstance(chain_id, str) and chain_id.isdigit():
+            chain_idx = int(chain_id)
+        if chain_idx is None:
+            chain_idx = self.get_int_chain_index(str(chain_id))
+        if chain_idx is None:
+            for idx, auth in self.auth_chain_id_map.items():
+                if str(auth) == str(chain_id):
+                    chain_idx = idx
+                    break
+        if chain_idx is None:
+            return None
+        return self.idx_to_label_asym_id_map.get(chain_idx)
 
     def _setup_domain_network(self, domain: DomainDefinition, chain_id: str, start: int, end: int):
         """Set up the domain's node network using the same structure as the preview domain"""
@@ -2010,11 +2039,13 @@ class MoleculeWrapper:
                 chain_select.name = "Select Chain"
                 chain_select.location = (input_node.location.x + 200, input_node.location.y + 100)
             
-            # Set the selected chain using the robust resolver
-            blender_chain_id = self.get_blender_chain_id(chain_id)
+            # Set the selected chain. Resolve via the integer chain index (what
+            # the iswitch compares) so domain copies and the parent mask agree.
+            socket_name = self._resolve_chain_socket_name(chain_id)
             for input_socket in chain_select.inputs:
                 if input_socket.type == 'BOOLEAN':
-                    input_socket.default_value = (input_socket.name == blender_chain_id)
+                    input_socket.default_value = (
+                        socket_name is not None and input_socket.name == socket_name)
             
             # Look for residue range selection node
             select_res_id_range = None
@@ -2271,17 +2302,25 @@ class MoleculeWrapper:
                                       self.domain_join_node.location.y - 100 - len(self.domain_mask_nodes) * 100)
                 chain_select.name = chain_select_name
             
-            # Step 2: Configure chain selection
-            blender_chain_id = self.get_blender_chain_id(chain_id)
-            
+            # Step 2: Configure chain selection. Resolve via the integer chain
+            # index (what the iswitch's Index attribute is) rather than the
+            # author/label-ambiguous get_blender_chain_id, so the parent mask
+            # actually excludes this chain.
+            socket_name = self._resolve_chain_socket_name(chain_id)
+            matched = False
             for input_socket in chain_select.inputs:
                 if input_socket.type != 'BOOLEAN':
                     continue
-                
-                if input_socket.name == blender_chain_id:
-                    input_socket.default_value = True
-                else:
-                    input_socket.default_value = False
+                on = (socket_name is not None and input_socket.name == socket_name)
+                input_socket.default_value = on
+                matched = matched or on
+
+            if not matched:
+                # Fail loud: an unresolved chain leaves the mask term empty,
+                # which makes the parent re-render the whole molecule.
+                print(f"[ProteinBlender] domain mask: could not resolve chain "
+                      f"'{chain_id}' to a chain-select socket on {self.identifier}; "
+                      f"the parent object may render its full surface.")
             
             # Step 3: Create residue range selection node
             res_select_name = f"Domain_Res_Select_{domain_id}"

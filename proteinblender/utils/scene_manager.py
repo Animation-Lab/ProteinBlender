@@ -1199,39 +1199,6 @@ def sync_molecule_list_after_undo(*args):
         traceback.print_exc() 
 
 
-def _sync_parent_render_visibility(molecule):
-    """Stop a molecule's parent object from showing on top of its chain objects.
-
-    On import ProteinBlender creates a domain object for every chain, so the
-    per-chain objects already draw the whole surface. The parent object must
-    then be suppressed — and not just its MolecularNodes modifier: with the
-    modifier off the parent's base mesh (atom bonds) shows as a wireframe in
-    the viewport. So hide the parent OBJECT as well. Domain-less molecules
-    (DNA/RNA, or a protein before any split) keep the parent visible.
-
-    hide_viewport is used deliberately (the monitor toggle): the per-item eye
-    toggle uses hide_set/hide_get, so the parent stays hidden across show/hide
-    of the protein. Idempotent — only writes when the state changes.
-    """
-    obj = getattr(molecule, 'object', None)
-    if obj is None:
-        return
-    try:
-        has_domains = any(getattr(d, 'object', None) for d in molecule.domains.values())
-    except Exception:
-        return
-    # Hide the parent object (and its render) when domains carry the surface.
-    if obj.hide_viewport != has_domains:
-        obj.hide_viewport = has_domains
-    if obj.hide_render != has_domains:
-        obj.hide_render = has_domains
-    # Keep the modifier in step so a re-shown parent (DNA) draws its surface.
-    for mod in obj.modifiers:
-        if mod.type == 'NODES' and mod.show_viewport == has_domains:
-            mod.show_viewport = not has_domains
-            mod.show_render = not has_domains
-
-
 def build_outliner_hierarchy(context=None):
     """Build or rebuild the outliner hierarchy from current molecule data"""
     if context is None:
@@ -1354,10 +1321,6 @@ def build_outliner_hierarchy(context=None):
             mol_object = molecule.object
         elif hasattr(molecule, 'molecule') and hasattr(molecule.molecule, 'object'):
             mol_object = molecule.molecule.object
-
-        # Prevent the parent object from double-rendering on top of its
-        # per-chain/domain objects (see _sync_parent_render_visibility).
-        _sync_parent_render_visibility(molecule)
 
         # Detect DNA/RNA molecules via custom property
         is_nucleic = False
