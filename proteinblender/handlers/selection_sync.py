@@ -13,7 +13,7 @@ subscriptions are kept as a best-effort fast path where they happen to work.
 
 import bpy
 from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.chain_utils import get_chain_objects
+from ..utils.chain_utils import get_chain_objects, get_puppet_member_objects
 
 
 # Global variables for selection tracking
@@ -143,28 +143,14 @@ def refresh_object_subscriptions():
 
 
 def _puppet_members_all_selected(scene, scene_manager, puppet_item, selected_names):
-    """True if every chain/domain member of a puppet has all of its objects
-    selected in the viewport. Lets the puppet row tick when its whole
-    membership is selected (not only when its controller Empty is)."""
-    members = [m for m in (puppet_item.puppet_memberships or "").split(",") if m]
-    if not members:
+    """True if every member object of a puppet is selected in the viewport.
+
+    Lets the puppet row tick (and its controller auto-select) when its whole
+    membership is selected, not only when its controller Empty is. Resolution
+    goes through the shared chain_utils resolver so it agrees with keyframing."""
+    objects = get_puppet_member_objects(scene, scene_manager, puppet_item)
+    if not objects:
         return False
-    by_id = {it.item_id: it for it in scene.outliner_items}
-    objects = []
-    for member_id in members:
-        member = by_id.get(member_id)
-        if member is None:
-            return False
-        if member.item_type == 'CHAIN':
-            resolved = get_chain_objects(scene_manager.molecules.get(member.parent_id), member)
-        elif member.object_name:
-            obj = bpy.data.objects.get(member.object_name)
-            resolved = [obj] if obj else []
-        else:
-            resolved = []
-        if not resolved:
-            return False
-        objects.extend(resolved)
     return all(o.name in selected_names for o in objects)
 
 
@@ -418,8 +404,10 @@ def _selection_poll():
         if key != _last_selection_key:
             _last_selection_key = key
             update_outliner_from_blender_selection()
-    except Exception:
-        pass
+    except Exception as e:
+        # Don't let a transient error kill the timer (returning the interval
+        # keeps it alive), but surface it so sync failures aren't silent.
+        print(f"[ProteinBlender] selection poll error: {e}")
     return _POLL_INTERVAL  # reschedule
 
 

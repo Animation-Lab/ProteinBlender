@@ -258,55 +258,6 @@ def deserialize_residue_ranges(json_str: str) -> Dict[str, Tuple[int, int]]:
         return {}
 
 
-def get_possible_chain_ids(chain_id: Any) -> List[Any]:
-    """Get all possible representations of a chain ID for matching.
-
-    Chain IDs can be stored as strings or integers, and may need to be
-    matched in different formats. This function returns all possible
-    representations to try.
-
-    Args:
-        chain_id: The chain ID (can be int, str, etc.)
-
-    Returns:
-        List of possible representations to try for matching
-    """
-    search_ids = [chain_id]
-
-    # If it's a single letter, also try the numeric equivalent
-    if isinstance(chain_id, str) and len(chain_id) == 1 and chain_id.isalpha():
-        try:
-            numeric_chain = ord(chain_id.upper()) - ord('A')
-            search_ids.append(numeric_chain)
-            search_ids.append(str(numeric_chain))
-        except Exception:
-            pass
-
-    # If it's numeric (int or string of digits), also try the letter equivalent
-    elif isinstance(chain_id, (int, str)):
-        str_id = str(chain_id)
-        if str_id.isdigit():
-            try:
-                int_chain_id = int(str_id)
-                if 0 <= int_chain_id < 26:
-                    alpha_chain = chr(int_chain_id + ord('A'))
-                    search_ids.append(alpha_chain)
-                search_ids.append(int_chain_id)
-                search_ids.append(str_id)
-            except Exception:
-                pass
-
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_ids = []
-    for cid in search_ids:
-        if cid not in seen:
-            seen.add(cid)
-            unique_ids.append(cid)
-
-    return unique_ids
-
-
 def chain_match_tokens(molecule: Any, chain_token: Any) -> set:
     """Return every string form a chain may be identified by.
 
@@ -410,6 +361,38 @@ def get_chain_objects(molecule: Any, chain_item: Any) -> List[bpy.types.Object]:
         if live is not None and live.name not in seen:
             seen.add(live.name)
             objects.append(live)
+    return objects
+
+
+def get_puppet_member_objects(scene, scene_manager, puppet_item) -> List[bpy.types.Object]:
+    """Return every live Blender object belonging to a puppet's membership.
+
+    The single source of truth for "which objects make up this puppet", shared
+    by keyframing and selection sync so they agree. Chain members resolve via
+    :func:`get_chain_objects`; domain/copy members resolve via their stored
+    ``object_name``. Unresolvable members are skipped; duplicates are removed.
+    """
+    members = [m for m in (getattr(puppet_item, "puppet_memberships", "") or "").split(",") if m]
+    if not members:
+        return []
+    by_id = {it.item_id: it for it in scene.outliner_items}
+    objects: List[bpy.types.Object] = []
+    seen = set()
+    for member_id in members:
+        item = by_id.get(member_id)
+        if item is None:
+            continue
+        if item.item_type == 'CHAIN':
+            resolved = get_chain_objects(scene_manager.molecules.get(item.parent_id), item)
+        elif item.object_name:
+            obj = bpy.data.objects.get(item.object_name)
+            resolved = [obj] if obj else []
+        else:
+            resolved = []
+        for obj in resolved:
+            if obj is not None and obj.name not in seen:
+                seen.add(obj.name)
+                objects.append(obj)
     return objects
 
 

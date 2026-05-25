@@ -527,10 +527,10 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         scene_manager._capture_molecule_state(self.molecule_id)
         
         # Log existing domains before split
-        self.report({'INFO'}, f"Existing domains before split:")
+        print(f"Existing domains before split:")
         for domain_id, domain in molecule.domains.items():
             if hasattr(domain, 'chain_id'):
-                self.report({'INFO'}, f"  Domain {domain_id}: chain={domain.chain_id}, range={domain.start}-{domain.end}, name={domain.name}")
+                print(f"  Domain {domain_id}: chain={domain.chain_id}, range={domain.start}-{domain.end}, name={domain.name}")
         
         # Validate range
         if not self.validate_split_range(molecule):
@@ -547,12 +547,12 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # Track the parent domain's style before removal
         parent_domain_style = None
 
-        self.report({'INFO'}, f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
+        print(f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
 
         for domain_id, domain in molecule.domains.items():
             # Check if this domain belongs to our chain
             if hasattr(domain, 'chain_id'):
-                self.report({'INFO'}, f"Checking domain {domain_id}: chain_id={domain.chain_id}, range={domain.start}-{domain.end}")
+                print(f"Checking domain {domain_id}: chain_id={domain.chain_id}, range={domain.start}-{domain.end}")
 
                 # Match on any of the chain's identity forms (index or letter)
                 if str(domain.chain_id) in chain_tokens:
@@ -568,7 +568,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                         # First try to read from the property, then fallback to reading from geometry nodes
                         if hasattr(domain, 'style'):
                             parent_domain_style = domain.style
-                            self.report({'INFO'}, f"Captured style '{parent_domain_style}' from parent domain property")
+                            print(f"Captured style '{parent_domain_style}' from parent domain property")
 
                         # If style property seems to be default, read actual style from geometry nodes
                         if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
@@ -576,10 +576,10 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                             actual_style = get_object_style(domain.object)
                             if actual_style:
                                 parent_domain_style = actual_style
-                                self.report({'INFO'}, f"Read actual style '{parent_domain_style}' from parent domain's geometry nodes")
+                                print(f"Read actual style '{parent_domain_style}' from parent domain's geometry nodes")
 
                         domains_to_remove.append(domain_id)
-                        self.report({'INFO'}, f"Will remove domain that contains split range: {domain.name} ({domain.start}-{domain.end})")
+                        print(f"Will remove domain that contains split range: {domain.name} ({domain.start}-{domain.end})")
                     # Also check for any domains that would overlap with our split
                     elif ((domain.start >= self.split_start and domain.start <= self.split_end) or
                           (domain.end >= self.split_start and domain.end <= self.split_end)):
@@ -587,7 +587,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                         if parent_domain_style is None:
                             if hasattr(domain, 'style'):
                                 parent_domain_style = domain.style
-                                self.report({'INFO'}, f"Captured style '{parent_domain_style}' from overlapping domain property")
+                                print(f"Captured style '{parent_domain_style}' from overlapping domain property")
 
                             # If style property seems to be default, read actual style from geometry nodes
                             if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
@@ -595,13 +595,13 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                                 actual_style = get_object_style(domain.object)
                                 if actual_style:
                                     parent_domain_style = actual_style
-                                    self.report({'INFO'}, f"Read actual style '{parent_domain_style}' from overlapping domain's geometry nodes")
+                                    print(f"Read actual style '{parent_domain_style}' from overlapping domain's geometry nodes")
 
                         domains_to_remove.append(domain_id)
-                        self.report({'INFO'}, f"Will remove overlapping domain: {domain.name} ({domain.start}-{domain.end})")
+                        print(f"Will remove overlapping domain: {domain.name} ({domain.start}-{domain.end})")
         
         # Remove the domains
-        self.report({'INFO'}, f"Removing {len(domains_to_remove)} domains")
+        print(f"Removing {len(domains_to_remove)} domains")
         for domain_id in domains_to_remove:
             if domain_id in molecule.domains:
                 domain = molecule.domains[domain_id]
@@ -610,28 +610,27 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     try:
                         obj_name = domain.object.name
                         bpy.data.objects.remove(domain.object, do_unlink=True)
-                        self.report({'INFO'}, f"Removed Blender object {obj_name} for domain {domain_id}")
-                    except:
+                        print(f"Removed Blender object {obj_name} for domain {domain_id}")
+                    except (ReferenceError, RuntimeError):
                         self.report({'WARNING'}, f"Could not remove Blender object for domain {domain_id}")
                 # Remove from molecule's domains
                 del molecule.domains[domain_id]
-                self.report({'INFO'}, f"Removed domain {domain_id} from molecule")
+                print(f"Removed domain {domain_id} from molecule")
         
         # Check if the chain being split was in any groups
         chain_groups = []
         chain_outliner_id = f"{self.molecule_id}_chain_{self.chain_id}"
         
-        # Debug: print the chain ID we're looking for
-        self.report({'INFO'}, f"Looking for chain with outliner ID: {chain_outliner_id}")
+        print(f"Looking for chain with outliner ID: {chain_outliner_id}")
         
         # Find groups that contain this chain
         for item in context.scene.outliner_items:
             if item.item_type == 'PUPPET' and item.puppet_memberships:
                 member_ids = item.puppet_memberships.split(',')
-                self.report({'INFO'}, f"Group '{item.name}' has members: {member_ids}")
+                print(f"Group '{item.name}' has members: {member_ids}")
                 if chain_outliner_id in member_ids:
                     chain_groups.append(item)
-                    self.report({'INFO'}, f"Chain was in group: {item.name}")
+                    print(f"Chain was in group: {item.name}")
         
         # Create the new domains
         created_domains = []
@@ -651,7 +650,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                     domain_exists = True
                     # Domain ID already includes molecule ID, so use it directly
                     domain_outliner_id = domain_id
-                    self.report({'INFO'}, f"Domain {domain_name} already exists, skipping creation")
+                    print(f"Domain {domain_name} already exists, skipping creation")
                     created_domains.append(domain_id)
                     created_outliner_ids.append(domain_outliner_id)
                     break
@@ -680,28 +679,28 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                         if parent_domain_style and domain_id in molecule.domains:
                             domain = molecule.domains[domain_id]
                             domain.style = parent_domain_style
-                            self.report({'INFO'}, f"Applied inherited style '{parent_domain_style}' to {domain_name}")
+                            print(f"Applied inherited style '{parent_domain_style}' to {domain_name}")
 
                             # Also apply the style to the visual object
                             if domain.object:
                                 from ..panels.visual_setup_panel import apply_style_to_object
                                 apply_style_to_object(domain.object, parent_domain_style)
 
-                    self.report({'INFO'}, f"Created {domain_name}")
+                    print(f"Created {domain_name}")
                 else:
                     self.report({'WARNING'}, f"Failed to create domain {start}-{end}")
         
         # Set intelligent pivots for the split domains
         if len(all_created_domain_ids) >= 2:
-            self.report({'INFO'}, f"Setting intelligent pivots for {len(all_created_domain_ids)} split domains")
+            print(f"Setting intelligent pivots for {len(all_created_domain_ids)} split domains")
             molecule.set_domain_split_pivots(bpy.context, all_created_domain_ids, self.chain_id)
 
         # Update group memberships BEFORE rebuilding outliner
         # IMPORTANT: We keep the chain in the group, not individual domains
         # The hierarchy will show domains under the chain
         if chain_groups:
-            self.report({'INFO'}, f"Found {len(chain_groups)} groups containing the chain")
-            self.report({'INFO'}, f"Chain will remain in groups, with domains shown as children")
+            print(f"Found {len(chain_groups)} groups containing the chain")
+            print(f"Chain will remain in groups, with domains shown as children")
 
             # We don't need to update group memberships here because:
             # 1. The chain stays in the group
@@ -714,10 +713,10 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # They will be shown under their parent chain in the group view
         
         # Log final state
-        self.report({'INFO'}, f"Domains after split:")
+        print(f"Domains after split:")
         for domain_id, domain in molecule.domains.items():
             if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
-                self.report({'INFO'}, f"  Domain {domain_id}: range={domain.start}-{domain.end}, name={domain.name}")
+                print(f"  Domain {domain_id}: range={domain.start}-{domain.end}, name={domain.name}")
         
         return {'FINISHED'}
     
@@ -782,7 +781,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         if self.split_end < chain_end:
             domains.append((self.split_end + 1, chain_end))
         
-        self.report({'INFO'}, f"Auto-generated domains: {domains}")
+        print(f"Auto-generated domains: {domains}")
         return domains
 
 
@@ -884,7 +883,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                 domains_in_group = set(domain_outliner_ids) & member_ids
                 if domains_in_group:
                     affected_groups[group_item.item_id] = domains_in_group
-                    self.report({'INFO'}, f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
+                    print(f"Group '{group_item.name}' contains {len(domains_in_group)} of the merging domains")
         
         # parent_chain.chain_id is the chain *index* from the outliner while
         # domains store the chain *letter*; chain_match_tokens bridges both
@@ -910,7 +909,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     bpy.data.objects.remove(domain.object, do_unlink=True)
                 # Remove from molecule's domains
                 del molecule.domains[domain_to_remove]
-                self.report({'INFO'}, f"Removed domain: {domain_item.name}")
+                print(f"Removed domain: {domain_item.name}")
         
         # Create the merged domain
         created_domain_ids = molecule._create_domain_with_params(
@@ -923,7 +922,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         )
         
         if created_domain_ids:
-            self.report({'INFO'}, f"Created merged domain: {merged_name}")
+            print(f"Created merged domain: {merged_name}")
             
             # Check if all domains cover the entire chain
             chain_start, chain_end = merged_start, merged_end
@@ -944,7 +943,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
             # For groups, we only track chains, not individual domains
             # So we only need to update if merging creates a full chain
             if affected_groups and covers_entire_chain:
-                self.report({'INFO'}, "Domains cover entire chain - will add chain to groups")
+                print("Domains cover entire chain - will add chain to groups")
                 
                 # The chain might already be in the groups, but we'll ensure it's there
                 for group_id in affected_groups.keys():
@@ -965,9 +964,9 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                             current_members.add(chain_outliner_id)
                             # Update the group
                             group_item.puppet_memberships = ','.join(filter(None, current_members))
-                            self.report({'INFO'}, f"Added chain to group '{group_item.name}'")
+                            print(f"Added chain to group '{group_item.name}'")
                         else:
-                            self.report({'INFO'}, f"Chain already in group '{group_item.name}'")
+                            print(f"Chain already in group '{group_item.name}'")
         else:
             self.report({'ERROR'}, "Failed to create merged domain")
         
@@ -982,7 +981,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                     item_groups = set(item.puppet_memberships.split(',')) if item.puppet_memberships else set()
                     item_groups.update(affected_groups.keys())
                     item.puppet_memberships = ','.join(filter(None, item_groups))
-                    self.report({'INFO'}, f"Updated chain group memberships")
+                    print(f"Updated chain group memberships")
                     break
         
         return {'FINISHED'}

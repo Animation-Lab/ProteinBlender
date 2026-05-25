@@ -5,7 +5,7 @@ import json
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.chain_utils import get_chain_objects
+from ..utils.chain_utils import get_puppet_member_objects as _resolve_puppet_member_objects
 from ..utils.animation import (
     keyframe_transforms,
     delete_transform_keyframes,
@@ -225,33 +225,18 @@ def get_keyframe_frames(context):
 
 
 def get_puppet_member_objects(context, puppet_id):
-    """Return every Blender object belonging to a puppet: chains via the shared
-    chain resolver, domains/copies via their stored object_name."""
+    """Every Blender object belonging to a puppet, resolved by item_id.
+
+    Thin wrapper over the shared resolver in chain_utils (the single source of
+    truth, also used by selection sync) that looks the puppet row up by id."""
     scene = context.scene
-    scene_manager = ProteinBlenderScene.get_instance()
     puppet_item = next(
         (it for it in scene.outliner_items
          if it.item_id == puppet_id and it.item_type == 'PUPPET'), None)
-    if not puppet_item or not puppet_item.puppet_memberships:
+    if not puppet_item:
         return []
-    by_id = {it.item_id: it for it in scene.outliner_items}
-    objects, seen = [], set()
-    for member_id in puppet_item.puppet_memberships.split(','):
-        item = by_id.get(member_id)
-        if item is None:
-            continue
-        if item.item_type == 'CHAIN':
-            resolved = get_chain_objects(scene_manager.molecules.get(item.parent_id), item)
-        elif item.object_name:
-            obj = bpy.data.objects.get(item.object_name)
-            resolved = [obj] if obj else []
-        else:
-            resolved = []
-        for obj in resolved:
-            if obj is not None and obj.name not in seen:
-                seen.add(obj.name)
-                objects.append(obj)
-    return objects
+    return _resolve_puppet_member_objects(
+        scene, ProteinBlenderScene.get_instance(), puppet_item)
 
 
 def delete_keyframe_metadata(controller_obj, frame):
@@ -581,8 +566,10 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 if not controller_obj:
                     print(f"  Warning: Controller object '{puppet_item.controller_object_name}' not found")
             
-            # Get all domain objects belonging to this puppet
-            domain_objects = self.get_puppet_objects(context, puppet_id)
+            # Domain objects only apply to real puppets; a MOLECULE item (DNA/RNA)
+            # is keyframed on its own object transform, with no domains or poses.
+            domain_objects = (self.get_puppet_objects(context, puppet_id)
+                              if puppet_item.item_kind == 'PUPPET' else [])
             
             if not domain_objects and not controller_obj:
                 print(f"  Warning: No objects found for puppet '{puppet_name}'")

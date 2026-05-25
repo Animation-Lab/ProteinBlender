@@ -2681,31 +2681,6 @@ class MoleculeWrapper:
             # Mirror failure must never break the surrounding op.
             print(f"_mirror_domains_to_property_group: failed for {self.identifier}: {e}")
 
-    def get_blender_chain_id(self, chain_id: str) -> Optional[str]:
-        """
-        Robustly resolve a given chain identifier to the label_asym_id used by Blender nodes.
-
-        The input chain_id can be a label_id, an author_id, or a numeric index string.
-        This method ensures the correct identifier is returned for node socket matching.
-        """
-        # Create a reverse map for author IDs for easier lookup
-        auth_id_to_idx_map = {v: k for k, v in self.auth_chain_id_map.items()}
-
-        # Case 1: Is it already a valid label_asym_id?
-        if chain_id in self.idx_to_label_asym_id_map.values():
-            return chain_id
-
-        # Case 2: Is it an author_asym_id that needs mapping to a label_asym_id?
-        elif chain_id in auth_id_to_idx_map:
-            numeric_idx = auth_id_to_idx_map[chain_id]
-            blender_chain_id = self.idx_to_label_asym_id_map.get(numeric_idx)
-            return blender_chain_id
-
-        # Case 3: Is it a numeric index string?
-        elif chain_id.isdigit():
-            numeric_idx = int(chain_id)
-            blender_chain_id = self.idx_to_label_asym_id_map.get(numeric_idx)
-            return blender_chain_id
-
-        # Fallback if no mapping was found
-        return chain_id
+    # NOTE: the former author/label-ambiguous get_blender_chain_id() was removed;
+    # use _resolve_chain_socket_name() — it resolves to the integer chain index
+    # first, which is what the chain-select iswitch actually compares.

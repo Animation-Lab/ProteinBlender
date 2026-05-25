@@ -11,7 +11,6 @@ import bpy
 from bpy.types import Panel
 from bpy.props import IntProperty
 from ..utils.animation import (
-    get_fcurves_from_action,
     delete_transform_keyframes,
     remove_color_keyframes,
 )
@@ -21,19 +20,6 @@ from ..operators.keyframe_operators import (
     get_puppet_member_objects,
     delete_keyframe_metadata,
 )
-
-
-def has_keyframe_at_frame(context, frame):
-    """True if any keyframe target (puppet controller or DNA/RNA molecule) has a
-    keyframe at the given frame."""
-    for _label, obj, _kind, _item_id in get_keyframe_targets(context):
-        ad = obj.animation_data
-        if ad and ad.action:
-            for fc in get_fcurves_from_action(ad.action, ad):
-                for kp in fc.keyframe_points:
-                    if int(round(kp.co[0])) == frame:
-                        return True
-    return False
 
 
 class PROTEINBLENDER_PT_animation(Panel):
@@ -73,7 +59,7 @@ class PROTEINBLENDER_PT_animation(Panel):
         sub.operator("proteinblender.jump_to_keyframe", text="",
                      icon='PREV_KEYFRAME').frame = prev_frames[-1] if prev_frames else -1
 
-        if has_keyframe_at_frame(context, current):
+        if current in frames:
             nav.operator("proteinblender.create_keyframe", text="Edit Keyframe", icon='KEYFRAME')
         else:
             nav.operator("proteinblender.create_keyframe", text="Create Keyframe", icon='KEYFRAME_HLT')

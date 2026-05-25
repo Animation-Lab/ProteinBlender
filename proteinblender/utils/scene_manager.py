@@ -13,6 +13,7 @@ on-demand.
 """
 
 import json
+import re
 import bpy
 from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set, Tuple
@@ -1503,7 +1504,6 @@ def build_outliner_hierarchy(context=None):
                     # If no chain_id on domain, try to extract from name
                     if domain_chain_id is None and hasattr(domain, 'name'):
                         # Try to extract chain from domain name pattern like "3b75_001_0_1_197_Chain_A"
-                        import re
                         match = re.search(r'Chain_([A-Z])', domain.name)
                         if match:
                             domain_chain_id = match.group(1)
@@ -1584,7 +1584,6 @@ def build_outliner_hierarchy(context=None):
                             if hasattr(domain, 'start') and hasattr(domain, 'end'):
                                 # Only override with residue range for non-copies
                                 # Check if name ends with a number (copy format)
-                                import re
                                 if not re.search(r'\s+\d+$', domain.name):
                                     domain_display_name = f"Residues {domain.start}-{domain.end}"
                         
