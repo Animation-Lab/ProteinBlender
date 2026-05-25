@@ -5,6 +5,7 @@ import json
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.chain_utils import get_chain_objects
 from ..utils.animation import (
     keyframe_transforms,
     delete_transform_keyframes,
@@ -179,6 +180,94 @@ def validate_keyframe_metadata(controller_obj, domain_objects, frame, stored_set
 
 
 # ============================================================================
+# Keyframe target discovery (single source of truth)
+# ============================================================================
+
+def get_keyframe_targets(context):
+    """Return ``[(label, object, kind, item_id)]`` for everything ProteinBlender
+    can keyframe: puppet controllers (kind ``'PUPPET'``) and DNA/RNA molecule
+    objects (kind ``'MOLECULE'``, keyframed directly).
+
+    Shared by the Create dialog, the keyframe list and keyframe deletion so all
+    three agree on what is animatable.
+    """
+    scene = context.scene
+    sm = ProteinBlenderScene.get_instance()
+    targets, seen = [], set()
+    for item in scene.outliner_items:
+        if (item.item_type == 'PUPPET' and item.item_id != "puppets_separator"
+                and item.controller_object_name):
+            obj = bpy.data.objects.get(item.controller_object_name)
+            if obj and obj.name not in seen:
+                seen.add(obj.name)
+                targets.append((item.name, obj, 'PUPPET', item.item_id))
+    for item in scene.outliner_items:
+        if item.item_type == 'DNA_RNA':
+            mol = sm.molecules.get(item.item_id)
+            obj = (mol.object if mol else None) or bpy.data.objects.get(item.object_name)
+            if obj and obj.name not in seen:
+                seen.add(obj.name)
+                targets.append((item.name, obj, 'MOLECULE', item.item_id))
+    return targets
+
+
+def get_keyframe_frames(context):
+    """Sorted unique integer frames with a transform keyframe on any keyframe
+    target (puppet controllers and DNA/RNA molecules)."""
+    frames = set()
+    for _label, obj, _kind, _item_id in get_keyframe_targets(context):
+        ad = obj.animation_data
+        if ad and ad.action:
+            for fc in get_fcurves_from_action(ad.action, ad):
+                for kp in fc.keyframe_points:
+                    frames.add(int(round(kp.co[0])))
+    return sorted(frames)
+
+
+def get_puppet_member_objects(context, puppet_id):
+    """Return every Blender object belonging to a puppet: chains via the shared
+    chain resolver, domains/copies via their stored object_name."""
+    scene = context.scene
+    scene_manager = ProteinBlenderScene.get_instance()
+    puppet_item = next(
+        (it for it in scene.outliner_items
+         if it.item_id == puppet_id and it.item_type == 'PUPPET'), None)
+    if not puppet_item or not puppet_item.puppet_memberships:
+        return []
+    by_id = {it.item_id: it for it in scene.outliner_items}
+    objects, seen = [], set()
+    for member_id in puppet_item.puppet_memberships.split(','):
+        item = by_id.get(member_id)
+        if item is None:
+            continue
+        if item.item_type == 'CHAIN':
+            resolved = get_chain_objects(scene_manager.molecules.get(item.parent_id), item)
+        elif item.object_name:
+            obj = bpy.data.objects.get(item.object_name)
+            resolved = [obj] if obj else []
+        else:
+            resolved = []
+        for obj in resolved:
+            if obj is not None and obj.name not in seen:
+                seen.add(obj.name)
+                objects.append(obj)
+    return objects
+
+
+def delete_keyframe_metadata(controller_obj, frame):
+    """Remove a single frame's entry from an object's pb_keyframe_metadata."""
+    if not controller_obj or 'pb_keyframe_metadata' not in controller_obj:
+        return
+    try:
+        meta = json.loads(controller_obj['pb_keyframe_metadata'])
+    except (ValueError, TypeError):
+        return
+    if str(frame) in meta:
+        del meta[str(frame)]
+        controller_obj['pb_keyframe_metadata'] = json.dumps(meta)
+
+
+# ============================================================================
 # Property Groups and Operators
 # ============================================================================
 
@@ -187,6 +276,9 @@ class PuppetKeyframeSettings(PropertyGroup):
     puppet_id: StringProperty(name="Puppet ID")
     puppet_name: StringProperty(name="Puppet Name")
     controller_object_name: StringProperty(name="Controller Object")
+    # 'PUPPET' (controller Empty + domain poses) or 'MOLECULE' (a DNA/RNA
+    # molecule object, keyframed directly — no controller, no domain poses).
+    item_kind: StringProperty(name="Item Kind", default='PUPPET')
     
     # Main checkbox to enable/disable this puppet
     use_puppet: BoolProperty(
@@ -252,96 +344,9 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
 
 
     def get_puppet_objects(self, context, puppet_id):
-        """Get all Blender objects that belong to a puppet group"""
-        objects = []
-        
-        # Find puppet item
-        puppet_item = None
-        if hasattr(context.scene, 'outliner_items'):
-            for item in context.scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    puppet_item = item
-                    break
-        
-        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
-            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
-            return objects
-        
-        if not puppet_item.puppet_memberships:
-            print(f"Debug: Empty memberships for puppet {puppet_id}")
-            return objects
-        
-        # Parse member IDs and find corresponding objects
-        member_ids = puppet_item.puppet_memberships.split(',')
-        print(f"Debug: Puppet '{puppet_item.name}' has members: {member_ids}")
-        
-        # Import scene manager to access molecules
-        from ..utils.scene_manager import ProteinBlenderScene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        for member_id in member_ids:
-            # Member IDs are in format: molecule_id_domain_id
-            if '_' in member_id:
-                # Try to intelligently parse the member_id
-                # First, check if it contains '_chain_'
-                if '_chain_' in member_id:
-                    # Split at '_chain_' to separate molecule_id from chain identifier
-                    parts = member_id.rsplit('_chain_', 1)
-                    mol_id = parts[0]
-                    domain_id = 'chain_' + parts[1]
-                else:
-                    # For custom domains, find where molecule_id ends
-                    import re
-                    match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
-                    if match:
-                        mol_id = match.group(1)
-                        domain_id = match.group(2)
-                    else:
-                        # Fallback to splitting on last underscore
-                        parts = member_id.rsplit('_', 1)
-                        if len(parts) == 2:
-                            mol_id = parts[0]
-                            domain_id = parts[1]
-                        else:
-                            print(f"Debug: Could not parse member_id '{member_id}'")
-                            continue
-                
-                print(f"Debug: Looking for mol_id='{mol_id}', domain_id='{domain_id}'")
-                
-                # Try to find the domain object
-                if mol_id in scene_manager.molecules:
-                    molecule = scene_manager.molecules[mol_id]
-                    
-                    # First try direct lookup
-                    if domain_id in molecule.domains:
-                        domain = molecule.domains[domain_id]
-                        if domain.object:
-                            objects.append(domain.object)
-                            print(f"Debug: Found domain object '{domain.object.name}' for {member_id}")
-                    else:
-                        # If domain_id is like 'chain_4', try to find the matching domain
-                        if domain_id.startswith('chain_'):
-                            chain_index = domain_id.replace('chain_', '')
-                            # Find domain that starts with mol_id_chainindex_
-                            for dom_id, dom in molecule.domains.items():
-                                if dom_id.startswith(f"{mol_id}_{chain_index}_"):
-                                    if dom.object:
-                                        objects.append(dom.object)
-                                        print(f"Debug: Found chain object '{dom.object.name}' for {member_id}")
-                                    break
-            
-            # Always check outliner items as fallback
-            for item in context.scene.outliner_items:
-                if item.item_id == member_id:
-                    if item.object_name:
-                        obj = bpy.data.objects.get(item.object_name)
-                        if obj and obj not in objects:
-                            objects.append(obj)
-                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
-                    break
-        
-        print(f"Debug: Total objects found for puppet: {len(objects)}")
-        return objects
+        """Every Blender object belonging to a puppet (see
+        :func:`get_puppet_member_objects`)."""
+        return get_puppet_member_objects(context, puppet_id)
     
     def invoke(self, context, event):
         scene = context.scene
@@ -404,6 +409,31 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                         else:
                             puppet_item.brownian_enabled = False
 
+        # Add DNA/RNA molecules as directly-keyframable items. Unlike puppets
+        # (controller Empty + domain poses), a nucleic-acid molecule is
+        # keyframed on its own object's transform — no controller, no poses.
+        sm = ProteinBlenderScene.get_instance()
+        for item in scene.outliner_items:
+            if item.item_type != 'DNA_RNA':
+                continue
+            mol = sm.molecules.get(item.item_id)
+            obj = (mol.object if mol else None) or bpy.data.objects.get(item.object_name)
+            if not obj:
+                continue
+            mol_item = self.puppet_items.add()
+            mol_item.item_kind = 'MOLECULE'
+            mol_item.puppet_id = item.item_id
+            mol_item.puppet_name = item.name
+            mol_item.controller_object_name = obj.name
+            existing = get_keyframe_metadata(obj, self.frame_number)
+            mol_item.use_puppet = existing.get('use_puppet', False) if existing else False
+            mol_item.keyframe_location = existing.get('location', True) if existing else True
+            mol_item.keyframe_rotation = existing.get('rotation', True) if existing else True
+            mol_item.keyframe_scale = existing.get('scale', True) if existing else True
+            mol_item.keyframe_pose = False    # nucleic acids have no domain poses
+            mol_item.keyframe_color = False   # per-base colour handled elsewhere
+            mol_item.brownian_enabled = False
+
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
     
@@ -453,19 +483,21 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 # Checkbox for selecting the puppet
                 row.prop(item, "use_puppet", text="")
 
-                # Puppet name with icon
+                # Name with icon (puppet vs. directly-keyframed molecule)
+                is_puppet = item.item_kind == 'PUPPET'
                 name_col = row.column()
                 name_col.alignment = 'LEFT'
                 name_row = name_col.row(align=True)
-                name_row.label(text=item.puppet_name, icon='GROUP')
+                name_row.label(text=item.puppet_name,
+                               icon='GROUP' if is_puppet else 'RNA')
 
                 # Add spacer to push transform checkboxes to the right
                 row.separator(factor=2.0)
 
-                # Transform checkboxes - enabled only when puppet is selected
-                # Pose first (leftmost)
+                # Transform checkboxes - enabled only when the row is selected.
+                # Pose is puppet-only (molecules have no domain poses).
                 pose_row = row.row()
-                pose_row.enabled = item.use_puppet
+                pose_row.enabled = item.use_puppet and is_puppet
                 pose_row.prop(item, "keyframe_pose", text="")
 
                 loc_row = row.row()
@@ -480,18 +512,19 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 scale_row.enabled = item.use_puppet
                 scale_row.prop(item, "keyframe_scale", text="")
 
+                # Colour and Brownian are puppet-only (per-domain features).
                 color_row = row.row()
-                color_row.enabled = item.use_puppet
+                color_row.enabled = item.use_puppet and is_puppet
                 color_row.prop(item, "keyframe_color", text="")
 
                 # Brownian motion checkbox
                 brownian_row = row.row()
-                brownian_row.enabled = item.use_puppet
+                brownian_row.enabled = item.use_puppet and is_puppet
                 brownian_row.prop(item, "brownian_enabled", text="")
 
                 # Settings button (gear icon)
                 settings_row = row.row()
-                settings_row.enabled = item.use_puppet
+                settings_row.enabled = item.use_puppet and is_puppet
                 settings_op = settings_row.operator(
                     "proteinblender.brownian_settings",
                     text="",
@@ -518,11 +551,11 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
-        # Get selected puppets
+        # Get selected items (puppets and/or DNA/RNA molecules)
         selected_puppets = [item for item in self.puppet_items if item.use_puppet]
-        
+
         if not selected_puppets:
-            self.report({'WARNING'}, "No puppets selected")
+            self.report({'WARNING'}, "Nothing selected to keyframe")
             return {'CANCELLED'}
         
         # Store current frame

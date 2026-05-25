@@ -1,58 +1,43 @@
-"""Animation panel for keyframe creation and management"""
+"""Animation panel: keyframe creation, navigation and deletion.
+
+All keyframe state shown here is read directly from the actual F-Curves on the
+keyframe targets (puppet controllers + DNA/RNA molecules) via
+``get_keyframe_frames`` — there is no parallel keyframe list to drift out of
+sync. Everything is reachable from this panel, so users never need Blender's
+native timeline to manage ProteinBlender keyframes.
+"""
 
 import bpy
-from bpy.types import Panel, UIList
-from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.animation import get_fcurves_from_action
+from bpy.types import Panel
+from bpy.props import IntProperty
+from ..utils.animation import (
+    get_fcurves_from_action,
+    delete_transform_keyframes,
+    remove_color_keyframes,
+)
+from ..operators.keyframe_operators import (
+    get_keyframe_targets,
+    get_keyframe_frames,
+    get_puppet_member_objects,
+    delete_keyframe_metadata,
+)
 
 
 def has_keyframe_at_frame(context, frame):
-    """Check if any puppet controller has a keyframe at the specified frame.
-
-    Returns True if at least one puppet controller object has animation data
-    with a keyframe at the given frame.
-    """
-    scene = context.scene
-
-    # Check puppet controller objects for keyframes
-    if hasattr(scene, 'outliner_items'):
-        for item in scene.outliner_items:
-            if item.item_type == 'PUPPET' and item.controller_object_name:
-                controller_obj = bpy.data.objects.get(item.controller_object_name)
-                if controller_obj and controller_obj.animation_data and controller_obj.animation_data.action:
-                    action = controller_obj.animation_data.action
-                    # Use the helper function for Blender 4.4+/5.0 compatibility
-                    fcurves = get_fcurves_from_action(action, controller_obj.animation_data)
-                    for fcurve in fcurves:
-                        for keyframe in fcurve.keyframe_points:
-                            if int(keyframe.co[0]) == frame:
-                                return True
-
+    """True if any keyframe target (puppet controller or DNA/RNA molecule) has a
+    keyframe at the given frame."""
+    for _label, obj, _kind, _item_id in get_keyframe_targets(context):
+        ad = obj.animation_data
+        if ad and ad.action:
+            for fc in get_fcurves_from_action(ad.action, ad):
+                for kp in fc.keyframe_points:
+                    if int(round(kp.co[0])) == frame:
+                        return True
     return False
 
 
-class PROTEINBLENDER_UL_keyframe_list(UIList):
-    """UI List for displaying keyframes"""
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            row = layout.row(align=True)
-            
-            # Frame number
-            row.label(text=f"Frame {item.frame}", icon='KEYFRAME')
-            
-            # Keyframe name
-            if item.name:
-                row.label(text=item.name)
-            else:
-                row.label(text="(unnamed)")
-        
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text=str(item.frame))
-
-
 class PROTEINBLENDER_PT_animation(Panel):
-    """Animation panel with keyframe creation tools"""
+    """Animation panel: create, navigate and delete keyframes."""
     bl_label = "Animate Scene"
     bl_idname = "PROTEINBLENDER_PT_animation"
     bl_space_type = 'PROPERTIES'
@@ -60,99 +45,109 @@ class PROTEINBLENDER_PT_animation(Panel):
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
     bl_order = 9  # After Builders panel
-    
+
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Create a box for the entire panel content
+        current = scene.frame_current
+        frames = get_keyframe_frames(context)
+
         main_box = layout.box()
-        
-        # Add panel title inside the box
         main_box.label(text="Animate Scene", icon='PLAY')
         main_box.separator()
-        
-        # Main column
         col = main_box.column(align=True)
-        
-        # Keyframe Creation Section
-        keyframe_box = col.box()
-        keyframe_col = keyframe_box.column(align=True)
-        
-        # Section header
-        keyframe_col.label(text="Keyframe Tools", icon='KEYFRAME')
-        keyframe_col.separator()
-        
-        # Create/Edit Keyframe button - changes based on whether current frame has keyframes
-        row = keyframe_col.row(align=True)
-        row.scale_y = 1.5
 
-        # Check if there's a keyframe at the current frame
-        if has_keyframe_at_frame(context, scene.frame_current):
-            row.operator("proteinblender.create_keyframe", text="Edit Keyframe", icon='KEYFRAME')
+        # --- Keyframe tools:  |< prev  |  Create/Edit  |  next >|  ---
+        tools = col.box().column(align=True)
+        tools.label(text="Keyframe Tools", icon='KEYFRAME')
+        tools.separator()
+
+        nav = tools.row(align=True)
+        nav.scale_y = 1.4
+
+        prev_frames = [f for f in frames if f < current]
+        next_frames = [f for f in frames if f > current]
+
+        sub = nav.row(align=True)
+        sub.enabled = bool(prev_frames)
+        sub.operator("proteinblender.jump_to_keyframe", text="",
+                     icon='PREV_KEYFRAME').frame = prev_frames[-1] if prev_frames else -1
+
+        if has_keyframe_at_frame(context, current):
+            nav.operator("proteinblender.create_keyframe", text="Edit Keyframe", icon='KEYFRAME')
         else:
-            row.operator("proteinblender.create_keyframe", text="Create Keyframe", icon='KEYFRAME_HLT')
-        
-        keyframe_col.separator()
-        
-        # Current frame info
-        row = keyframe_col.row(align=True)
-        row.label(text=f"Current Frame: {scene.frame_current}", icon='TIME')
-        
-        
-        # Add bottom spacing
+            nav.operator("proteinblender.create_keyframe", text="Create Keyframe", icon='KEYFRAME_HLT')
+
+        sub = nav.row(align=True)
+        sub.enabled = bool(next_frames)
+        sub.operator("proteinblender.jump_to_keyframe", text="",
+                     icon='NEXT_KEYFRAME').frame = next_frames[0] if next_frames else -1
+
+        tools.separator()
+        tools.label(text=f"Current Frame: {current}", icon='TIME')
+
+        # --- Keyframe list: one row per frame, with jump + delete ---
+        list_box = col.box()
+        list_box.label(text=f"Keyframes ({len(frames)})", icon='KEYFRAME')
+        if frames:
+            for f in frames:
+                r = list_box.row(align=True)
+                is_cur = (f == current)
+                op = r.operator("proteinblender.jump_to_keyframe",
+                                text=f"Frame {f}",
+                                icon='KEYFRAME_HLT' if is_cur else 'KEYFRAME',
+                                depress=is_cur)
+                op.frame = f
+                r.operator("proteinblender.delete_keyframe", text="", icon='X').frame = f
+        else:
+            list_box.label(text="No keyframes yet", icon='INFO')
+
         layout.separator()
 
 
-# Placeholder operators for future implementation
-class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
-    """Delete selected keyframe"""
-    bl_idname = "proteinblender.delete_keyframe"
-    bl_label = "Delete Keyframe"
-    bl_options = {'REGISTER', 'UNDO'}
-    
+class PROTEINBLENDER_OT_jump_to_keyframe(bpy.types.Operator):
+    """Move the playhead to this keyframe"""
+    bl_idname = "proteinblender.jump_to_keyframe"
+    bl_label = "Jump to Keyframe"
+
+    frame: IntProperty(default=-1)
+
     def execute(self, context):
-        scene = context.scene
-        
-        # Get active molecule
-        for item in scene.molecule_list_items:
-            if item.identifier == scene.selected_molecule_id:
-                if 0 <= item.active_keyframe_index < len(item.keyframes):
-                    item.keyframes.remove(item.active_keyframe_index)
-                    
-                    # Adjust index if needed
-                    if item.active_keyframe_index >= len(item.keyframes) and item.active_keyframe_index > 0:
-                        item.active_keyframe_index -= 1
-                    
-                    self.report({'INFO'}, "Keyframe deleted")
-                break
-        
+        if self.frame >= 0:
+            context.scene.frame_set(self.frame)
         return {'FINISHED'}
 
 
-class PROTEINBLENDER_OT_jump_to_keyframe(bpy.types.Operator):
-    """Jump to selected keyframe"""
-    bl_idname = "proteinblender.jump_to_keyframe"
-    bl_label = "Jump to Keyframe"
-    
+class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
+    """Delete every ProteinBlender keyframe at this frame — across all puppets
+    and DNA/RNA molecules, including puppet domain pose/colour keyframes"""
+    bl_idname = "proteinblender.delete_keyframe"
+    bl_label = "Delete Keyframe"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    frame: IntProperty(default=-1)
+
     def execute(self, context):
-        scene = context.scene
-        
-        # Get active molecule
-        for item in scene.molecule_list_items:
-            if item.identifier == scene.selected_molecule_id:
-                if 0 <= item.active_keyframe_index < len(item.keyframes):
-                    active_kf = item.keyframes[item.active_keyframe_index]
-                    scene.frame_set(active_kf.frame)
-                break
-        
+        if self.frame < 0:
+            return {'CANCELLED'}
+        for _label, obj, kind, item_id in get_keyframe_targets(context):
+            objs = [obj]
+            if kind == 'PUPPET':
+                objs += get_puppet_member_objects(context, item_id)
+            for o in objs:
+                delete_transform_keyframes(o, self.frame)
+                remove_color_keyframes(o, self.frame)
+            delete_keyframe_metadata(obj, self.frame)
+
+        for area in context.screen.areas:
+            if area.type in ('PROPERTIES', 'VIEW_3D', 'DOPESHEET_EDITOR', 'TIMELINE'):
+                area.tag_redraw()
+        self.report({'INFO'}, f"Deleted keyframe at frame {self.frame}")
         return {'FINISHED'}
 
 
 # Classes to register
 CLASSES = [
-    PROTEINBLENDER_UL_keyframe_list,
     PROTEINBLENDER_PT_animation,
     PROTEINBLENDER_OT_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
