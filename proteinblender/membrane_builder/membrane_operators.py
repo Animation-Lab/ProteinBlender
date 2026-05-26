@@ -387,6 +387,14 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         else:
             msg = f"Created {name}: {shape.lower()} r={props.radius:.1f} nm"
         self.report({"INFO"}, msg)
+
+        # Surface the new membrane in the PB Outliner.
+        try:
+            from ..utils.scene_manager import build_outliner_hierarchy
+            build_outliner_hierarchy(context)
+        except Exception:
+            pass
+
         return {"FINISHED"}
 
 
@@ -689,19 +697,40 @@ class PROTEINBLENDER_OT_reset_deform(Operator):
 # ---------------------------------------------------------------------------
 
 class PROTEINBLENDER_OT_delete_membrane(Operator):
-    """Delete the active membrane and all of its children (lattice, holes)"""
+    """Delete a membrane and all of its children (lattice, holes).
+
+    When invoked from the PB Outliner pass ``membrane_name``; when invoked
+    from the Membrane Builder panel (no arg), it falls back to the active
+    object's membrane root so the existing button still works.
+    """
 
     bl_idname = "proteinblender.delete_membrane"
     bl_label = "Delete Membrane"
     bl_options = {"REGISTER", "UNDO"}
 
+    membrane_name: StringProperty(
+        name="Membrane Name",
+        description="Name of the membrane root to delete (empty = active object)",
+        default="",
+    )
+
     @classmethod
     def poll(cls, context):
-        return _get_membrane_root(context.active_object) is not None
+        # Always pollable — if there's no explicit name we'll check the
+        # active object inside execute.
+        return True
 
     def execute(self, context):
-        root = _get_membrane_root(context.active_object)
+        # Prefer the explicit name (outliner path); fall back to active.
+        root = None
+        if self.membrane_name:
+            candidate = bpy.data.objects.get(self.membrane_name)
+            if candidate is not None and candidate.get("pb_is_membrane", False):
+                root = candidate
         if root is None:
+            root = _get_membrane_root(context.active_object)
+        if root is None:
+            self.report({"WARNING"}, "No membrane to delete.")
             return {"CANCELLED"}
 
         coll_name = f"{root.name}_Group"
@@ -722,6 +751,13 @@ class PROTEINBLENDER_OT_delete_membrane(Operator):
                 bpy.data.collections.remove(coll)
             except Exception:
                 pass
+
+        # Rebuild the outliner so the membrane row disappears.
+        try:
+            from ..utils.scene_manager import build_outliner_hierarchy
+            build_outliner_hierarchy(context)
+        except Exception:
+            pass
 
         return {"FINISHED"}
 

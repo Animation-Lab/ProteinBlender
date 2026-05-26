@@ -228,6 +228,11 @@ def update_outliner_from_blender_selection():
             item.is_selected = bool(chain_objs) and all(
                 o.name in selected_names for o in chain_objs
             )
+        elif item.item_type in ('MEMBRANE', 'DNA_RNA'):
+            # Single-object rows — selected iff that object is selected.
+            item.is_selected = bool(
+                item.object_name and item.object_name in selected_names
+            )
         else:
             # For other items without objects, deselect
             item.is_selected = False
@@ -369,6 +374,17 @@ def sync_outliner_to_blender_selection(context, item_id):
                         context.view_layer.objects.active = empty_obj
 
             # Don't cascade to members - puppet checkbox only controls the controller
+
+        elif item.item_type == 'MEMBRANE':
+            # Select / deselect the membrane root object — Membrane Builder
+            # panel keys off active_object, so this also flips the panel
+            # into edit mode for the selected membrane.
+            if item.object_name:
+                root = bpy.data.objects.get(item.object_name)
+                if root:
+                    root.select_set(item.is_selected)
+                    if item.is_selected:
+                        context.view_layer.objects.active = root
             return
 
     finally:

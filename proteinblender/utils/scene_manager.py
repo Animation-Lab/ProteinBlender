@@ -1682,6 +1682,37 @@ def build_outliner_hierarchy(context=None):
                                 if domain_id in item_expansion_states:
                                     chain_copy_item.is_expanded = item_expansion_states[domain_id]
     
+    # Add membrane items — top-level rows for each ``pb_is_membrane`` root,
+    # placed after the molecules so the user gets a single combined list.
+    # Children of the root (lattice, hole controllers, force-field proxies)
+    # are NOT shown in the outliner; the membrane row controls them as a
+    # group via visibility / delete cascading.
+    for obj in bpy.data.objects:
+        try:
+            if not obj.get("pb_is_membrane", False):
+                continue
+        except (ReferenceError, AttributeError):
+            continue
+
+        mem_item = scene.outliner_items.add()
+        mem_item.item_type = 'MEMBRANE'
+        mem_item.item_id = f"membrane_{obj.name}"
+        mem_item.parent_id = ""
+        mem_item.name = obj.name
+        mem_item.object_name = obj.name
+        mem_item.indent_level = 0
+        mem_item.icon = 'MOD_FLUIDSIM'
+        try:
+            mem_item.is_visible = not obj.hide_get(view_layer=context.view_layer)
+        except (ReferenceError, RuntimeError):
+            mem_item.is_visible = True
+        # Restore selection / expansion states
+        if mem_item.item_id in item_selection_states:
+            mem_item.is_selected = item_selection_states[mem_item.item_id]
+        if mem_item.item_id in item_expansion_states:
+            mem_item.is_expanded = item_expansion_states[mem_item.item_id]
+        mem_item.tooltip = f"Membrane: {obj.name}"
+
     # Restore group memberships to items
     # IMPORTANT: Only restore memberships for chains and molecules, not domains
     # Domains should only appear in groups as children of their parent chains

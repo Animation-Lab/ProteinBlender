@@ -334,6 +334,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
             delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
             if delete_op:
                 delete_op.molecule_id = item.item_id
+        elif item.item_type == 'MEMBRANE':
+            # Delete button — routes through the addon's own membrane
+            # deleter (which also tears down lattice + hole children + the
+            # per-membrane collection).
+            delete_op = row.operator(
+                "proteinblender.delete_membrane",
+                text="", icon='TRASH', emboss=False,
+            )
+            if delete_op:
+                delete_op.membrane_name = item.object_name
         elif item.item_type == 'PUPPET':
             # Delete button (trash can) - use the edit_puppet operator with DELETE action
             op = row.operator("proteinblender.edit_puppet", text="", icon='TRASH', emboss=False)
@@ -756,7 +766,15 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                 obj = bpy.data.objects.get(item.controller_object_name)
                 if obj:
                     self._set_object_visibility(obj, visible, view_layer)
-    
+
+        elif item.item_type == 'MEMBRANE':
+            # Hide the root + every child (lattice, hole controllers).
+            root = bpy.data.objects.get(item.object_name)
+            if root:
+                self._set_object_visibility(root, visible, view_layer)
+                for child in root.children:
+                    self._set_object_visibility(child, visible, view_layer)
+
     def _set_object_visibility(self, obj, visible, view_layer):
         """Set both viewport and render visibility on an object."""
         try:
@@ -843,8 +861,8 @@ class PROTEINBLENDER_OT_outliner_item_info(Operator):
 
 
 class PROTEINBLENDER_PT_outliner(Panel):
-    """Protein outliner panel"""
-    bl_label = "Protein Outliner"
+    """PB outliner panel — shows proteins, DNA/RNA and membranes"""
+    bl_label = "PB Outliner"
     bl_idname = "PROTEINBLENDER_PT_outliner"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
@@ -860,12 +878,12 @@ class PROTEINBLENDER_PT_outliner(Panel):
         box = layout.box()
         
         # Add panel title inside the box
-        box.label(text="Protein Outliner", icon='OUTLINER')
+        box.label(text="PB Outliner", icon='OUTLINER')
         box.separator()
-        
+
         # Check if outliner items exist
         if len(scene.outliner_items) == 0:
-            box.label(text="No proteins loaded", icon='INFO')
+            box.label(text="Nothing loaded yet", icon='INFO')
             return
         
         # UIList inside the box - disable row selection by not tracking index
