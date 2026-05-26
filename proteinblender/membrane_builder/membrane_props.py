@@ -110,6 +110,24 @@ class MembraneBuilderProperties(PropertyGroup):
         update=_sync_to_active_membrane,
     )
 
+    # Render style — picks which collection feeds the GN modifier's
+    # Lipid Collection input. Items are pulled into a static tuple at
+    # class-build time (callback-style EnumProperty doesn't support a
+    # ``default=`` argument).
+    from . import lipid_assets as _la
+    render_style: EnumProperty(
+        name="Render Style",
+        description=(
+            "How each lipid is drawn. Stylized = head sphere + two bent "
+            "tail tubes following the PDB pose; Ball and Stick = real "
+            "PDB atoms + bonds"
+        ),
+        items=_la.RENDER_STYLE_ITEMS,
+        default=_la.DEFAULT_STYLE,
+        update=_sync_to_active_membrane,
+    )
+    del _la
+
     random_rotation: BoolProperty(
         name="Randomize Lipid Rotation",
         description=(
@@ -237,6 +255,7 @@ _PROP_KEYS = (
     "bob_speed",
     "color_head",
     "color_tail",
+    "render_style",
 )
 
 _msgbus_owner = object()
