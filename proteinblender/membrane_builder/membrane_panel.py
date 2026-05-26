@@ -146,8 +146,14 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
         )
         if props.show_colors_section:
             c = col_box.column(align=True)
-            c.prop(props, "color_head")
-            c.prop(props, "color_tail")
+            # SURFACE style fuses head + tail into one mesh — a single
+            # picker controls it. Other styles keep the head/tail split.
+            from . import lipid_assets as _la
+            if props.render_style == _la.STYLE_SURFACE:
+                c.prop(props, "color_surface")
+            else:
+                c.prop(props, "color_head")
+                c.prop(props, "color_tail")
             col_box.label(
                 text="Colors are shared across all membranes.",
                 icon="INFO",

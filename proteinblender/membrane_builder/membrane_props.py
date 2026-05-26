@@ -248,6 +248,19 @@ class MembraneBuilderProperties(PropertyGroup):
         default=(0.98, 0.82, 0.30, 1.0),
     )
 
+    # Single colour for the SURFACE render style — head and tail share it,
+    # which is the whole point of that style. Default off-white matches
+    # the reference render the user picked the style from.
+    color_surface: FloatVectorProperty(
+        name="Lipid Color",
+        subtype="COLOR",
+        size=4,
+        min=0.0,
+        max=1.0,
+        default=(0.92, 0.92, 0.92, 1.0),
+        update=_sync_to_active_membrane,
+    )
+
     # ------------------------------------------------------------------
     # Name
     # ------------------------------------------------------------------
@@ -288,6 +301,7 @@ _PROP_KEYS = (
     "bob_speed",
     "color_head",
     "color_tail",
+    "color_surface",
     "render_style",
 )
 

@@ -86,10 +86,20 @@ def _ensure_material(name: str, color: Tuple[float, float, float, float],
 
 def set_membrane_colors(membrane_obj: bpy.types.Object,
                          color_head: Tuple[float, float, float, float],
-                         color_tail: Tuple[float, float, float, float]) -> None:
-    """Re-color the shared lipid head/tail materials."""
+                         color_tail: Tuple[float, float, float, float],
+                         color_surface: Optional[
+                             Tuple[float, float, float, float]] = None) -> None:
+    """Re-color the shared lipid materials.
+
+    Head/tail are used by the STYLIZED and BALL_AND_STICK styles. The
+    optional surface colour drives the SURFACE style's single material.
+    All three live as shared datablocks — re-colouring updates every
+    membrane in the scene at once, by design.
+    """
     _ensure_material(HEAD_MATERIAL_NAME, color_head, roughness=0.35)
     _ensure_material(TAIL_MATERIAL_NAME, color_tail, roughness=0.55)
+    if color_surface is not None:
+        lipid_assets.set_surface_color(color_surface)
 
 
 # ===========================================================================

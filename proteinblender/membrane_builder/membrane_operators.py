@@ -204,10 +204,16 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     root_obj["pb_mem_height"] = float(props.height)
     root_obj["pb_mem_radius"] = float(props.radius)
 
-    # Update shared materials in case head/tail colour props were changed.
-    set_membrane_colors(root_obj, tuple(props.color_head), tuple(props.color_tail))
+    # Update shared materials in case any colour prop was changed.
+    set_membrane_colors(
+        root_obj,
+        tuple(props.color_head),
+        tuple(props.color_tail),
+        tuple(props.color_surface),
+    )
     root_obj["pb_mem_color_head"] = list(props.color_head)
     root_obj["pb_mem_color_tail"] = list(props.color_tail)
+    root_obj["pb_mem_color_surface"] = list(props.color_surface)
 
     _refresh_modifier(mod)
 

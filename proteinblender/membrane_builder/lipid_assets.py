@@ -1,7 +1,15 @@
 """Lipid variant assets for the Membrane Builder.
 
-Two render styles, each in its own collection — the user picks one in the
-panel and the GN modifier re-points its ``Lipid Collection`` input.
+Three render styles, each in its own collection — the user picks one in
+the panel and the GN modifier re-points its ``Lipid Collection`` input.
+
+* ``SURFACE`` (4 assets, default)
+    Smooth molecular-surface blob. Each atom is a metaball BALL element
+    in a single MetaBall datablock; Blender's marching-cubes evaluator
+    fuses overlapping balls into one continuous shaded surface, then we
+    bake the polygonized result into a regular mesh. Single material
+    (white by default) covers head + tail uniformly — head/tail are
+    visually indistinguishable, matching the user-requested look.
 
 * ``STYLIZED`` (4 assets)
     One head sphere + two bent tail chains following the carbon
@@ -38,24 +46,30 @@ from typing import Dict, List, Optional, Tuple
 # Render styles
 # ---------------------------------------------------------------------------
 
+STYLE_SURFACE = "SURFACE"
 STYLE_STYLIZED = "STYLIZED"
 STYLE_BALL_AND_STICK = "BALL_AND_STICK"
 
 RENDER_STYLE_ITEMS = (
+    (STYLE_SURFACE, "Surface",
+     "Smooth fused-atom surface (metaball-evaluated); single colour covers "
+     "head + tail uniformly"),
     (STYLE_STYLIZED, "Stylized",
      "Abstract head sphere + two tail chains that follow each PDB pose"),
     (STYLE_BALL_AND_STICK, "Ball and Stick",
      "Real PX4 conformations: atoms as spheres, bonds as cylinders"),
 )
 
-DEFAULT_STYLE = STYLE_BALL_AND_STICK
+DEFAULT_STYLE = STYLE_SURFACE
 
 _COLLECTION_NAMES: Dict[str, str] = {
+    STYLE_SURFACE: "PB_Membrane_Lipid_Variants_SmoothSurface",
     STYLE_STYLIZED: "PB_Membrane_Lipid_Variants_Stylized",
     STYLE_BALL_AND_STICK: "PB_Membrane_Lipid_Variants_BallStick",
 }
 
 RENDER_STYLE_VARIANT_COUNT: Dict[str, int] = {
+    STYLE_SURFACE: 4,
     STYLE_STYLIZED: 4,
     STYLE_BALL_AND_STICK: 4,
 }
@@ -74,7 +88,7 @@ LIPID_PDB_NAMES: Tuple[str, ...] = (
 )
 NUM_LIPID_VARIANTS: int = len(LIPID_PDB_NAMES)
 
-LIPID_COLLECTION_NAME = _COLLECTION_NAMES[STYLE_BALL_AND_STICK]
+LIPID_COLLECTION_NAME = _COLLECTION_NAMES[STYLE_SURFACE]
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +123,25 @@ _STYLIZED_FALLBACK_TAIL_OFFSET_X_BU = 0.018
 
 # Bond inference cutoff in Å — covers C-C / C-O / C-N / C-P bonds in PX4.
 _BOND_CUTOFF_ANG = 1.85
+
+# ---- Surface (metaball) sizing ----
+# Element radii (BU) for the metaball blob. Slightly larger than VDW so
+# bonded neighbours visibly fuse, while keeping per-atom bumps readable.
+_SURFACE_RADIUS_BU = {
+    "P": 0.045,
+    "O": 0.038,
+    "N": 0.040,
+    "C": 0.035,
+}
+_SURFACE_DEFAULT_RADIUS_BU = 0.033
+# Marching-cubes voxel size (smaller = finer mesh, slower bake). 0.006 BU
+# ≈ 0.6 Å — gives a smooth surface at this scale while keeping bake under
+# a couple of seconds per variant.
+_SURFACE_RESOLUTION_BU = 0.006
+_SURFACE_RENDER_RESOLUTION_BU = 0.006
+# Default Blender threshold (0.6) reads each element's described radius
+# as the iso-surface — bumps and fusion look exactly as picked.
+_SURFACE_THRESHOLD = 0.6
 
 # Atoms treated as "head group" (slot 0) vs tail (slot 1) for ball-and-
 # stick colouring. Element-based — matches standard B&S convention.
@@ -320,6 +353,11 @@ def _find_acyl_tails(
 
 HEAD_MATERIAL_NAME = "PB_Membrane_Head"
 TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
+SURFACE_MATERIAL_NAME = "PB_Membrane_Surface"
+
+# Default colour for the SURFACE style — soft off-white, matches the
+# reference render. Operator overrides this once the user picks a colour.
+SURFACE_DEFAULT_COLOR = (0.92, 0.92, 0.92, 1.0)
 
 
 def _ensure_material(name, color, roughness=0.4):
@@ -347,6 +385,18 @@ def _attach_head_tail_materials(mesh):
     if not mesh.materials:
         mesh.materials.append(head_mat)
         mesh.materials.append(tail_mat)
+
+
+def _ensure_surface_material():
+    """Single shared material for the SURFACE style — re-coloured by the
+    operator whenever the user changes the surface colour prop."""
+    return _ensure_material(SURFACE_MATERIAL_NAME, SURFACE_DEFAULT_COLOR, 0.35)
+
+
+def _attach_surface_material(mesh):
+    mat = _ensure_surface_material()
+    if not mesh.materials:
+        mesh.materials.append(mat)
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +521,100 @@ def _build_ball_and_stick(pdb_path: Path, name: str) -> bpy.types.Object:
 
 
 # ---------------------------------------------------------------------------
+# Style: SURFACE (metaball-fused molecular blob, per-PDB)
+# ---------------------------------------------------------------------------
+
+def _build_surface(pdb_path: Path, name: str) -> bpy.types.Object:
+    """Bake a smooth, atom-fused molecular surface from this PDB pose.
+
+    Each heavy atom becomes a BALL element in a single MetaBall datablock.
+    Blender polygonises the merged field into a continuous surface that
+    keeps the lumpy per-atom character while smoothly fusing bonded
+    neighbours together — matches the reference look the user picked.
+
+    The metaball object is linked into the scene just long enough for the
+    depsgraph to evaluate it, then we bake the result with
+    ``new_from_object`` and drop both the metaball object and its data.
+
+    A single material (``PB_Membrane_Surface``, white by default) covers
+    the whole mesh — head and tail are intentionally the same colour.
+    Hydrogens are skipped: at this resolution they only add noise.
+    """
+    atoms = _orient_to_zaxis(_parse_pdb(pdb_path))
+
+    mb_data = bpy.data.metaballs.new(name + "_mb")
+    mb_data.resolution = _SURFACE_RESOLUTION_BU
+    mb_data.render_resolution = _SURFACE_RENDER_RESOLUTION_BU
+    mb_data.threshold = _SURFACE_THRESHOLD
+
+    placed = 0
+    for el, pos_ang in atoms:
+        if el == "H":
+            continue
+        pos_bu = pos_ang * _ANG_TO_BU
+        radius = _SURFACE_RADIUS_BU.get(el, _SURFACE_DEFAULT_RADIUS_BU)
+        elt = mb_data.elements.new(type="BALL")
+        elt.co = pos_bu
+        elt.radius = radius
+        elt.stiffness = 2.0
+        placed += 1
+
+    if placed == 0:
+        # Pathological PDB — fall back to a single sphere so the variant
+        # still renders something rather than a hole in the bilayer.
+        bm = bmesh.new()
+        _add_icosphere(bm, Vector((0.0, 0.0, 0.0)),
+                       _STYLIZED_HEAD_RADIUS_BU, 2, 0)
+        mesh = bpy.data.meshes.new(name + "_mesh")
+        bm.to_mesh(mesh)
+        bm.free()
+        _attach_surface_material(mesh)
+        for poly in mesh.polygons:
+            poly.use_smooth = True
+        bpy.data.metaballs.remove(mb_data)
+        return bpy.data.objects.new(name, mesh)
+
+    mb_obj = bpy.data.objects.new(name + "_mb_tmp", mb_data)
+    scene = bpy.context.scene
+    scene.collection.objects.link(mb_obj)
+    try:
+        # Metaballs only polygonise after the depsgraph sees them in a
+        # view layer — force an update so ``new_from_object`` reads the
+        # evaluated tessellation rather than an empty mesh.
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        mb_eval = mb_obj.evaluated_get(depsgraph)
+        baked = bpy.data.meshes.new_from_object(
+            mb_eval, preserve_all_data_layers=False, depsgraph=depsgraph)
+    finally:
+        try:
+            scene.collection.objects.unlink(mb_obj)
+        except Exception:
+            pass
+        bpy.data.objects.remove(mb_obj, do_unlink=True)
+        bpy.data.metaballs.remove(mb_data)
+
+    if baked is None or len(baked.vertices) == 0:
+        # new_from_object can return None / empty on some Blender builds
+        # when the metaball field doesn't cross the threshold. Fall back
+        # to a head sphere.
+        if baked is not None:
+            bpy.data.meshes.remove(baked)
+        bm = bmesh.new()
+        _add_icosphere(bm, Vector((0.0, 0.0, 0.0)),
+                       _STYLIZED_HEAD_RADIUS_BU, 2, 0)
+        baked = bpy.data.meshes.new(name + "_mesh")
+        bm.to_mesh(baked)
+        bm.free()
+
+    baked.name = name + "_mesh"
+    _attach_surface_material(baked)
+    for poly in baked.polygons:
+        poly.use_smooth = True
+    return bpy.data.objects.new(name, baked)
+
+
+# ---------------------------------------------------------------------------
 # Style: STYLIZED (bent tails, per-PDB)
 # ---------------------------------------------------------------------------
 
@@ -552,6 +696,7 @@ def _build_stylized(pdb_path: Path, name: str) -> bpy.types.Object:
 # Suffix per style — included in the asset name so style transitions and
 # any future builder revisions don't collide with stale objects.
 _STYLE_ASSET_SUFFIX = {
+    STYLE_SURFACE: "SmoothSurface",
     STYLE_STYLIZED: "StylizedBent",
     STYLE_BALL_AND_STICK: "BallStick",
 }
@@ -581,6 +726,7 @@ def get_or_build_lipid_collection(style: str = DEFAULT_STYLE) -> bpy.types.Colle
         coll = bpy.data.collections.new(coll_name)
 
     builder = {
+        STYLE_SURFACE: _build_surface,
         STYLE_STYLIZED: _build_stylized,
         STYLE_BALL_AND_STICK: _build_ball_and_stick,
     }[style]
@@ -616,6 +762,12 @@ def variant_count_for_style(style: str) -> int:
     """Number of variants in ``style``'s collection — drives the random
     Instance Index max on the GN modifier."""
     return RENDER_STYLE_VARIANT_COUNT.get(style, 1)
+
+
+def set_surface_color(color) -> None:
+    """Re-tint the shared SURFACE-style material. Called by the operator
+    whenever the user changes the surface colour prop."""
+    _ensure_material(SURFACE_MATERIAL_NAME, tuple(color), roughness=0.35)
 
 
 # ---------------------------------------------------------------------------
