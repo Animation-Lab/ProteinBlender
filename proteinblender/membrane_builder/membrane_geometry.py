@@ -58,7 +58,14 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       gate per-hole distance/direction between flat-XY and geodesic
 #       (tangent-plane on sphere). Same tree handles flat sheet, full
 #       sphere, and hemisphere bowl base meshes built outside the tree.
-GN_TREE_VERSION = 12
+#   v13: collision-aware motion — sway / tilt phases come from a position-
+#       sampled 3D noise texture, so adjacent lipids share roughly the
+#       same phase and drift together rather than into each other. Per-
+#       lipid freq + amp ranges tightened for sway/tilt so neighbours
+#       stay correlated for several seconds. Sway amplitude is clamped
+#       to a density-derived "safe half-spacing" so even at max user
+#       settings translations can't exceed the gap to a neighbour.
+GN_TREE_VERSION = 13
 
 
 # ===========================================================================
@@ -729,11 +736,43 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         amp_bu.location = (200, y_pos - 650)
         links.new(anim_amp.outputs[0], amp_bu.inputs[0])
 
+        sway_raw = new("ShaderNodeMath", name=f"SwayRaw {leaflet_index}")
+        sway_raw.operation = "MULTIPLY"
+        sway_raw.inputs[1].default_value = 0.8   # lateral slosh ≈ 80% of bob
+        sway_raw.location = (400, y_pos - 650)
+        links.new(amp_bu.outputs[0], sway_raw.inputs[0])
+
+        # ---- Density-derived safe sway cap (v13) -------------------------
+        # Lipid centre-to-centre spacing ≈ sqrt(1/density) nm. To prevent
+        # neighbour clipping under aggressive Bob Amplitude settings the
+        # per-lipid sway amplitude is clipped to half the spacing minus a
+        # 5% gap, divided by the max amul (so even the most active lipid
+        # in the distribution can't exceed the gap).
+        #   safe_BU = sqrt(1/density) * SWAY_SAFE_COEF
+        # SWAY_SAFE_COEF = 0.45 / amul_max / NM_PER_BU
+        # With amul_max = 1.3 (tightened in v13): 0.45/1.3/10 ≈ 0.0346.
+        inv_d = new("ShaderNodeMath", name=f"InvD {leaflet_index}")
+        inv_d.operation = "DIVIDE"
+        inv_d.inputs[0].default_value = 1.0
+        inv_d.location = (200, y_pos - 780)
+        links.new(get_in("Density (per nm²)"), inv_d.inputs[1])
+
+        spacing_nm = new("ShaderNodeMath", name=f"SpacingNm {leaflet_index}")
+        spacing_nm.operation = "SQRT"
+        spacing_nm.location = (400, y_pos - 780)
+        links.new(inv_d.outputs[0], spacing_nm.inputs[0])
+
+        safe_sway = new("ShaderNodeMath", name=f"SafeSwayBU {leaflet_index}")
+        safe_sway.operation = "MULTIPLY"
+        safe_sway.inputs[1].default_value = 0.45 / 1.3 / NM_PER_BU
+        safe_sway.location = (600, y_pos - 780)
+        links.new(spacing_nm.outputs[0], safe_sway.inputs[0])
+
         sway_base = new("ShaderNodeMath", name=f"SwayBase {leaflet_index}")
-        sway_base.operation = "MULTIPLY"
-        sway_base.inputs[1].default_value = 0.8   # lateral slosh ≈ 80% of bob
-        sway_base.location = (400, y_pos - 650)
-        links.new(amp_bu.outputs[0], sway_base.inputs[0])
+        sway_base.operation = "MINIMUM"
+        sway_base.location = (800, y_pos - 720)
+        links.new(sway_raw.outputs[0], sway_base.inputs[0])
+        links.new(safe_sway.outputs[0], sway_base.inputs[1])
 
         # Tilt amplitude in radians per nm of master amp. v9: cut from
         # 0.5 → 0.20 — combined with the new "apply tilt as local Euler"
@@ -767,14 +806,73 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(idx.outputs[0], rv.inputs["ID"])
             return rv.outputs[1]                       # FLOAT "Value" output
 
+        # ---- Position-correlated phase noise (v13) -----------------------
+        # Sway and tilt phases are sampled from a smooth 3D noise texture
+        # at the lipid's point position, so neighbouring lipids see almost
+        # the same noise value and therefore the same sine phase — they
+        # drift together instead of into each other. Two independent noise
+        # samples (different position offset) give sway and tilt indepe-
+        # ndent phases per lipid, so the motion still reads as varied.
+        # Bob phase stays random because vertical bob doesn't clip lateral
+        # neighbours. The noise sample is static in time (no time input):
+        # each lipid has a fixed-phase signature, and the time-varying
+        # part is purely the sine sweep on top.
+        pos_in = new("GeometryNodeInputPosition",
+                     name=f"PosIn L{leaflet_index}")
+        pos_in.location = (-200, y_pos - 1000)
+
+        # Sway noise sampled at point position.
+        sway_n = new("ShaderNodeTexNoise", name=f"SwayPhaseN L{leaflet_index}")
+        sway_n.noise_dimensions = "3D"
+        sway_n.inputs["Scale"].default_value = 0.5     # ~smooth-across-cluster
+        sway_n.inputs["Detail"].default_value = 2.0
+        sway_n.location = (0, y_pos - 1000)
+        links.new(pos_in.outputs[0], sway_n.inputs["Vector"])
+
+        sway_phase_socket = new("ShaderNodeMath",
+                                name=f"SwayPhase L{leaflet_index}")
+        sway_phase_socket.operation = "MULTIPLY"
+        sway_phase_socket.inputs[1].default_value = math.tau
+        sway_phase_socket.location = (200, y_pos - 1000)
+        links.new(sway_n.outputs["Fac"], sway_phase_socket.inputs[0])
+
+        # Tilt noise: same position offset by a constant so the phase
+        # field is a different sample of noise space — within-lipid sway
+        # and tilt remain uncorrelated, but each is neighbour-correlated.
+        tilt_off = new("ShaderNodeVectorMath",
+                       name=f"TiltOff L{leaflet_index}")
+        tilt_off.operation = "ADD"
+        tilt_off.inputs[1].default_value = (7.13, 11.27, 5.49)
+        tilt_off.location = (0, y_pos - 1150)
+        links.new(pos_in.outputs[0], tilt_off.inputs[0])
+
+        tilt_n = new("ShaderNodeTexNoise", name=f"TiltPhaseN L{leaflet_index}")
+        tilt_n.noise_dimensions = "3D"
+        tilt_n.inputs["Scale"].default_value = 0.6
+        tilt_n.inputs["Detail"].default_value = 2.0
+        tilt_n.location = (200, y_pos - 1150)
+        links.new(tilt_off.outputs[0], tilt_n.inputs["Vector"])
+
+        tilt_phase_socket = new("ShaderNodeMath",
+                                name=f"TiltPhase L{leaflet_index}")
+        tilt_phase_socket.operation = "MULTIPLY"
+        tilt_phase_socket.inputs[1].default_value = math.tau
+        tilt_phase_socket.location = (400, y_pos - 1150)
+        links.new(tilt_n.outputs["Fac"], tilt_phase_socket.inputs[0])
+
         # ---- Wobble channel ----------------------------------------------
         # value = sin(t · BobSpeed · freqMul · 2π + phase) · baseAmp · ampMul
-        # freqMul / ampMul / phase are all randomised per lipid. Channels
-        # can opt into tighter freq/amp ranges (e.g. twist clamps both so
-        # rotations stay gentle even at large user-set BobSpeed / Bob Amp).
+        # freqMul / ampMul are randomised per lipid; phase is either random
+        # (bob) or sampled from the smooth position noise (sway / tilt).
+        # Channels can opt into tighter freq/amp ranges (twist & tilt) so
+        # rotations stay gentle even at large user-set BobSpeed / Bob Amp.
         def wobble(seed, base_amp_socket, label, lx, ly,
-                   fmul_range=(0.55, 1.5), amul_range=(0.4, 1.6)):
-            phase = rand_float(seed + 0, 0.0, math.tau, (lx, ly))
+                   fmul_range=(0.55, 1.5), amul_range=(0.4, 1.6),
+                   phase_override=None):
+            if phase_override is None:
+                phase = rand_float(seed + 0, 0.0, math.tau, (lx, ly))
+            else:
+                phase = phase_override
             fmul = rand_float(seed + 1, fmul_range[0], fmul_range[1], (lx, ly - 150))
             amul = rand_float(seed + 2, amul_range[0], amul_range[1], (lx, ly - 300))
 
@@ -821,14 +919,24 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             return out.outputs[0]
 
         bob_ch = wobble(100, amp_bu.outputs[0], "bob", 600, y_pos - 1000)
-        swayT_ch = wobble(200, sway_base.outputs[0], "swayT", 600, y_pos - 1500)
-        swayB_ch = wobble(300, sway_base.outputs[0], "swayB", 600, y_pos - 2000)
-        # Tilt also gets tighter freq/amul ranges than translations — the
-        # lipid's lean is more visually disruptive than a sway/bob nudge.
+        # Sway: tight freq + amp ranges (v13) so the per-lipid spread can't
+        # walk neighbours out of phase faster than the noise can hold them
+        # together. amul_max 1.3 matches the SafeSwayBU coefficient above.
+        swayT_ch = wobble(200, sway_base.outputs[0], "swayT", 600, y_pos - 1500,
+                          fmul_range=(0.85, 1.15), amul_range=(0.7, 1.3),
+                          phase_override=sway_phase_socket.outputs[0])
+        swayB_ch = wobble(300, sway_base.outputs[0], "swayB", 600, y_pos - 2000,
+                          fmul_range=(0.85, 1.15), amul_range=(0.7, 1.3),
+                          phase_override=sway_phase_socket.outputs[0])
+        # Tilt: even tighter amul (rotational sweep is more clip-prone than
+        # translation) and the same noise-phase trick so neighbours lean
+        # together rather than into each other.
         tiltT_ch = wobble(400, tilt_base.outputs[0], "tiltT", 600, y_pos - 2500,
-                          fmul_range=(0.4, 0.9), amul_range=(0.4, 1.0))
+                          fmul_range=(0.7, 1.0), amul_range=(0.7, 1.0),
+                          phase_override=tilt_phase_socket.outputs[0])
         tiltB_ch = wobble(500, tilt_base.outputs[0], "tiltB", 600, y_pos - 3000,
-                          fmul_range=(0.4, 0.9), amul_range=(0.4, 1.0))
+                          fmul_range=(0.7, 1.0), amul_range=(0.7, 1.0),
+                          phase_override=tilt_phase_socket.outputs[0])
         # ---- Continuous-rotation twist channel (v10) ---------------------
         # spin_rate = anim_gate × BobSpeed × signed_unit × COEFF
         # angle    = spin_rate × scene_time
