@@ -69,7 +69,19 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       Per-protein toggle on the molecule list drives which slots are
 #       filled; the math reuses the hole pusher (sphere cross-section in
 #       flat mode, geodesic-projected disc in sphere mode).
-GN_TREE_VERSION = 13
+#   v14: sphere-mode geodesic distance switched from |tangent_away|
+#       (= R·sin θ) to R·arccos(p̂·ĥ) (= true arc length). The old
+#       formula folded to zero at θ = π, so a pusher near one side of a
+#       sphere / hemisphere bowl carved a mirror hole on the opposite
+#       side. arccos keeps the distance monotonic out to π.
+#   v15: sphere-mode distance switched again — to plain 3D Euclidean
+#       |lipid − pusher|. Both the chord-projection and arc-length
+#       formulas only used the pusher's *direction* (h_norm), so a
+#       protein near the centre of a sphere still carved at the
+#       surface point in its direction. Real 3D distance accounts for
+#       the pusher's radial position and the carving fades correctly
+#       as it moves inward / outward.
+GN_TREE_VERSION = 15
 
 
 # ===========================================================================
@@ -535,12 +547,26 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(sub_sphere.outputs[0], tangent_away.inputs[0])
             links.new(radial_part.outputs[0], tangent_away.inputs[1])
 
+            # Distance is the true 3D Euclidean separation between lipid
+            # and the pusher's centre. The earlier arc-length / projected-
+            # tangent formulas only considered the *angular* position of
+            # the pusher (h_norm) and discarded its radial distance from
+            # the membrane's origin — so a protein near the centre of a
+            # sphere still carved a hole at the surface point in its
+            # direction. Real 3D distance falls off naturally as the
+            # protein moves inward (or outward), and the carving
+            # disappears once it leaves the FF's influence sphere.
             dist_sphere = new("ShaderNodeVectorMath",
-                              name=f"LenSph{slot_label} L{leaflet_index}")
+                              name=f"Dist3D{slot_label} L{leaflet_index}")
             dist_sphere.operation = "LENGTH"
-            dist_sphere.location = (-300, hy - 700)
-            links.new(tangent_away.outputs[0], dist_sphere.inputs[0])
+            dist_sphere.location = (-300, hy - 540)
+            links.new(sub_vec.outputs[0], dist_sphere.inputs[0])
 
+            # Push direction is still the tangent-plane "away from
+            # pusher" vector — keeps lipids sliding along the shell
+            # rather than off it. Undefined right at the pusher's
+            # tangent-projected centre, but the radial component zeros
+            # the displacement there anyway, so no visible artefact.
             dir_sphere = new("ShaderNodeVectorMath",
                              name=f"DirSph{slot_label} L{leaflet_index}")
             dir_sphere.operation = "NORMALIZE"
