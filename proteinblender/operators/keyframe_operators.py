@@ -224,14 +224,35 @@ def get_dna_bend_nodes(dna_obj):
         return []
 
 
+def get_dna_bend_objects(dna_obj):
+    """The bend curve plus its control-node empties — every object whose
+    transform shapes a DNA/RNA bend (empty list if there's no bend rig). All
+    must be keyframed with FULL transforms: a hook responds to a node's
+    rotation and scale, not only its location, so location-only keys would drop
+    any twist the user dialed in."""
+    if dna_obj is None:
+        return []
+    objs = []
+    try:
+        from ..dna_builder.bender import get_bend_curve
+        curve = get_bend_curve(dna_obj)
+        if curve is not None:
+            objs.append(curve)
+    except Exception:
+        pass
+    objs.extend(get_dna_bend_nodes(dna_obj))
+    return objs
+
+
 def get_keyframe_animated_objects(obj, kind):
     """Every object whose transform F-curves make up one keyframe target's
     animation. The target object itself, plus — for a DNA/RNA molecule (kind
-    'MOLECULE') — its bend control nodes, so a single DNA keyframe captures the
-    strand's bend automatically through the same Animate panel (no extra step)."""
+    'MOLECULE') — its bend curve and control nodes, so a single DNA keyframe
+    captures the strand's bend (position AND rotation) automatically through the
+    same Animate panel (no extra step)."""
     objs = [obj]
     if kind == 'MOLECULE':
-        objs.extend(get_dna_bend_nodes(obj))
+        objs.extend(get_dna_bend_objects(obj))
     return objs
 
 
@@ -662,11 +683,14 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             # "Create Keyframe" action, so the user never leaves the panel.
             if (puppet_item.item_kind == 'MOLECULE' and puppet_item.use_puppet
                     and controller_obj):
-                bend_nodes = get_dna_bend_nodes(controller_obj)
-                for node in bend_nodes:
-                    node.keyframe_insert(data_path="location", frame=self.frame_number)
-                if bend_nodes:
-                    print(f"  ✓ Keyframed {len(bend_nodes)} DNA bend node(s) at frame {self.frame_number}")
+                bend_objs = get_dna_bend_objects(controller_obj)
+                for bend_obj in bend_objs:
+                    # Full transform (location + rotation + scale) so a twisted
+                    # bend — a rotated/scaled control node — is captured too, not
+                    # just node positions.
+                    keyframe_transforms(bend_obj, self.frame_number)
+                if bend_objs:
+                    print(f"  ✓ Keyframed {len(bend_objs)} DNA bend object(s) at frame {self.frame_number}")
                     total_keyframed += 1
 
             # Keyframe domain relative transforms (local space) based on pose checkbox
