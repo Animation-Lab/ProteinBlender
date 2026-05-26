@@ -17,6 +17,7 @@ from ..utils.animation import (
 from ..operators.keyframe_operators import (
     get_keyframe_targets,
     get_keyframe_frames,
+    get_keyframe_animated_objects,
     get_puppet_member_objects,
     delete_keyframe_metadata,
 )
@@ -117,7 +118,7 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
         if self.frame < 0:
             return {'CANCELLED'}
         for _label, obj, kind, item_id in get_keyframe_targets(context):
-            objs = [obj]
+            objs = list(get_keyframe_animated_objects(obj, kind))  # molecule + DNA bend nodes
             if kind == 'PUPPET':
                 objs += get_puppet_member_objects(context, item_id)
             for o in objs:

@@ -211,16 +211,41 @@ def get_keyframe_targets(context):
     return targets
 
 
+def get_dna_bend_nodes(dna_obj):
+    """Bend control-node empties for a DNA/RNA object, or [] if it has no bend
+    rig. These empties drive the bend curve, so they must be keyframed for a
+    bend to animate — the molecule's own transform does NOT capture the shape."""
+    if dna_obj is None:
+        return []
+    try:
+        from ..dna_builder.bender import get_bend_nodes
+        return get_bend_nodes(dna_obj)
+    except Exception:
+        return []
+
+
+def get_keyframe_animated_objects(obj, kind):
+    """Every object whose transform F-curves make up one keyframe target's
+    animation. The target object itself, plus — for a DNA/RNA molecule (kind
+    'MOLECULE') — its bend control nodes, so a single DNA keyframe captures the
+    strand's bend automatically through the same Animate panel (no extra step)."""
+    objs = [obj]
+    if kind == 'MOLECULE':
+        objs.extend(get_dna_bend_nodes(obj))
+    return objs
+
+
 def get_keyframe_frames(context):
     """Sorted unique integer frames with a transform keyframe on any keyframe
-    target (puppet controllers and DNA/RNA molecules)."""
+    target (puppet controllers, DNA/RNA molecules, and DNA bend nodes)."""
     frames = set()
-    for _label, obj, _kind, _item_id in get_keyframe_targets(context):
-        ad = obj.animation_data
-        if ad and ad.action:
-            for fc in get_fcurves_from_action(ad.action, ad):
-                for kp in fc.keyframe_points:
-                    frames.add(int(round(kp.co[0])))
+    for _label, obj, kind, _item_id in get_keyframe_targets(context):
+        for o in get_keyframe_animated_objects(obj, kind):
+            ad = o.animation_data
+            if ad and ad.action:
+                for fc in get_fcurves_from_action(ad.action, ad):
+                    for kp in fc.keyframe_points:
+                        frames.add(int(round(kp.co[0])))
     return sorted(frames)
 
 
@@ -629,7 +654,21 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 if keyframed_properties:
                     print(f"  Controller: Keyframed {', '.join(keyframed_properties)}")
                     total_keyframed += 1
-            
+
+            # DNA/RNA: also capture the bend rig automatically. The bend is
+            # driven by separate control-node empties, not the molecule's own
+            # transform, so without this the strand's SHAPE would not animate
+            # between keyframes — only its position would. Captured in the same
+            # "Create Keyframe" action, so the user never leaves the panel.
+            if (puppet_item.item_kind == 'MOLECULE' and puppet_item.use_puppet
+                    and controller_obj):
+                bend_nodes = get_dna_bend_nodes(controller_obj)
+                for node in bend_nodes:
+                    node.keyframe_insert(data_path="location", frame=self.frame_number)
+                if bend_nodes:
+                    print(f"  ✓ Keyframed {len(bend_nodes)} DNA bend node(s) at frame {self.frame_number}")
+                    total_keyframed += 1
+
             # Keyframe domain relative transforms (local space) based on pose checkbox
             for domain_obj in domain_objects:
                 if puppet_item.keyframe_pose:
