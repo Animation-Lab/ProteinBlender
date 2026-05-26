@@ -164,7 +164,7 @@ def _orient_to_zaxis(atoms: List[Tuple[str, Vector]]) -> List[Tuple[str, Vector]
     axis /= n
 
     rot = _rotation_aligning(axis, np.array([0.0, 0.0, -1.0]))
-    rotated = rot.apply(all_pts - all_pts.mean(axis=0))
+    rotated = (all_pts - all_pts.mean(axis=0)) @ rot.T
 
     p_indices = [i for i, (el, _) in enumerate(atoms) if el == "P"]
     if p_indices:
@@ -177,25 +177,43 @@ def _orient_to_zaxis(atoms: List[Tuple[str, Vector]]) -> List[Tuple[str, Vector]
 
 
 def _rotation_aligning(from_vec, to_vec):
-    """Scipy Rotation that rotates ``from_vec`` onto ``to_vec`` (Rodrigues)."""
-    import numpy as np
-    from scipy.spatial.transform import Rotation
+    """Return the 3×3 rotation matrix that aligns ``from_vec`` onto ``to_vec``.
 
-    a = from_vec / np.linalg.norm(from_vec)
-    b = to_vec / np.linalg.norm(to_vec)
+    Pure numpy — no scipy dependency. Uses the trig-free form of
+    Rodrigues' formula: ``R = I + [v]× + [v]×² / (1 + c)`` where
+    ``v = a × b`` and ``c = a · b`` (both inputs first normalised).
+    The 180° edge case (``c ≈ -1``) is handled separately because the
+    formula has a 1/(1+c) singularity there.
+
+    Apply to a batch of row-vector points with ``points @ R.T``.
+    """
+    import numpy as np
+
+    a = np.asarray(from_vec, dtype=float)
+    b = np.asarray(to_vec, dtype=float)
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
     v = np.cross(a, b)
     c = float(np.dot(a, b))
     s = float(np.linalg.norm(v))
+
     if s < 1e-8:
         if c > 0.0:
-            return Rotation.identity()
+            return np.eye(3)
+        # 180° flip: rotate around any axis perpendicular to ``a``.
         perp = np.cross(a, np.array([1.0, 0.0, 0.0]))
         if np.linalg.norm(perp) < 1e-6:
             perp = np.cross(a, np.array([0.0, 1.0, 0.0]))
-        perp /= np.linalg.norm(perp)
-        return Rotation.from_rotvec(perp * np.pi)
-    angle = float(np.arctan2(s, c))
-    return Rotation.from_rotvec((v / s) * angle)
+        perp = perp / np.linalg.norm(perp)
+        # R = 2·(perp⊗perp) − I  is a 180° rotation about ``perp``.
+        return 2.0 * np.outer(perp, perp) - np.eye(3)
+
+    K = np.array([
+        [0.0,  -v[2],  v[1]],
+        [v[2],   0.0, -v[0]],
+        [-v[1], v[0],   0.0],
+    ])
+    return np.eye(3) + K + (K @ K) / (1.0 + c)
 
 
 # ---------------------------------------------------------------------------
