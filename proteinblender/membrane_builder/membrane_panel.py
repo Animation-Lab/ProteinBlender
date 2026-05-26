@@ -99,6 +99,7 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
             emboss=False,
         )
         if props.show_lipid_section:
+            lip_box.prop(props, "render_style", text="Style")
             col = lip_box.column(align=True)
             col.prop(props, "density")
             col.prop(props, "bilayer_thickness")

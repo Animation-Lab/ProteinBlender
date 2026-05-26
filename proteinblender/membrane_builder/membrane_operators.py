@@ -13,14 +13,13 @@ from bpy.types import Operator
 from bpy.props import IntProperty, StringProperty
 from typing import Optional
 
+from . import lipid_assets
 from .membrane_geometry import (
     NM_PER_BU,
     MAX_HOLES,
     GN_TREE_NAME,
-    LIPID_ASSET_NAME,
     HEAD_MATERIAL_NAME,
     TAIL_MATERIAL_NAME,
-    get_or_build_lipid_asset,
     get_or_build_membrane_gn_tree,
     set_membrane_colors,
     build_membrane_lattice,
@@ -128,12 +127,19 @@ def _set_mod_input(mod: bpy.types.Modifier, socket_name: str, value) -> None:
 def _refresh_modifier(mod: bpy.types.Modifier) -> None:
     """Force the modifier to recompute (Blender doesn't always re-eval on prop set).
 
-    Toggling show_render then back works as a "kick" without visible side
-    effects.
+    Toggling show_render flips the visibility flag for a re-eval kick. We
+    also tag the owning object so the depsgraph treats it as dirty — for
+    Collection-typed inputs (Lipid Collection), writing ``mod[id] = coll``
+    alone does NOT invalidate the cached Collection Info contents, so the
+    viewport keeps showing the previous style until something else dirties
+    the object. ``update_tag()`` forces a re-evaluation.
     """
     try:
         mod.show_render = not mod.show_render
         mod.show_render = not mod.show_render
+        obj = mod.id_data
+        if obj is not None:
+            obj.update_tag()
     except Exception:
         pass
 
@@ -157,6 +163,15 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     _set_mod_input(mod, "Bob Amplitude (nm)", float(props.bob_amplitude))
     _set_mod_input(mod, "Bob Speed", float(props.bob_speed))
 
+    # Render style — swap which collection feeds the GN modifier and push
+    # the matching variant count so the per-point random Instance Index
+    # stays inside the collection's range.
+    style = str(props.render_style)
+    _set_mod_input(mod, "Lipid Collection",
+                   lipid_assets.get_or_build_lipid_collection(style))
+    _set_mod_input(mod, "Lipid Variant Count",
+                   lipid_assets.variant_count_for_style(style))
+
     # Mirror onto the root as custom properties (so size-edit operator can
     # detect what's needed, and so we can re-sync to panel when reselected).
     root_obj["pb_mem_density"] = float(props.density)
@@ -166,6 +181,7 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     root_obj["pb_mem_animate_bob"] = bool(props.animate_bob)
     root_obj["pb_mem_bob_amplitude"] = float(props.bob_amplitude)
     root_obj["pb_mem_bob_speed"] = float(props.bob_speed)
+    root_obj["pb_mem_render_style"] = style
     root_obj["pb_mem_width"] = float(props.width)
     root_obj["pb_mem_height"] = float(props.height)
 
@@ -189,7 +205,11 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     if mod is None:
         return
 
-    _set_mod_input(mod, "Lipid Asset", get_or_build_lipid_asset())
+    style = str(root_obj.get("pb_mem_render_style", lipid_assets.DEFAULT_STYLE))
+    _set_mod_input(mod, "Lipid Collection",
+                   lipid_assets.get_or_build_lipid_collection(style))
+    _set_mod_input(mod, "Lipid Variant Count",
+                   lipid_assets.variant_count_for_style(style))
     _set_mod_input(mod, "Density (per nm²)",
                    float(root_obj.get("pb_mem_density", 1.5)))
     _set_mod_input(mod, "Bilayer Thickness (nm)",
@@ -285,9 +305,8 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         gn_mod = root.modifiers.new(GN_MOD_NAME, "NODES")
         gn_mod.node_group = tree
 
-        # 4. Wire the lipid asset and props into the modifier.
-        lipid = get_or_build_lipid_asset()
-        _set_mod_input(gn_mod, "Lipid Asset", lipid)
+        # 4. Push props (which also picks the right Lipid Collection for the
+        # selected render style) and wire the hole assignments.
         apply_props_to_membrane(root, props)
         _rebuild_hole_assignments(root)
 

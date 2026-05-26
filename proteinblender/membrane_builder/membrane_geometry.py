@@ -29,7 +29,6 @@ MAX_HOLES = 8
 # Geometry Nodes group / asset names — kept stable so we can find them again
 # across rebuilds.
 GN_TREE_NAME = "ProteinBlender_Membrane_GN"
-LIPID_ASSET_NAME = "PB_Membrane_Lipid_Asset"
 HEAD_MATERIAL_NAME = "PB_Membrane_Head"
 TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 
@@ -39,7 +38,23 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #   v3: holes redistribute lipids (radial push) instead of deleting them
 #   v4: Poisson-disk lipid distribution + realistic default density
 #   v5: holes are spheres — Z offset shrinks/closes the carved hole
-GN_TREE_VERSION = 5
+#   v6: lipids picked randomly from a 4-variant collection (real PDB
+#       conformations) instead of one hand-built mesh
+#   v7: render style switchable (stylized/ball-and-stick/surface) — collection
+#       is swapped at runtime; rand pick range driven by "Lipid Variant Count"
+#   v8: twist channel tamed (smaller amp coefficient + tighter freq/amul
+#       range) so even max user settings can't make a lipid spin like a top
+#   v9: AlignRotationToVector fed un-perturbed normal — auto-pivot was
+#       flipping the quaternion when its input swung with tilt, producing
+#       single-frame Z jumps up to ~180°. Tilt now applied as local-space
+#       Euler X/Y in the same RotateInstances call as the Z twist.
+#   v10: twist channel is continuous rotation (angle = per-lipid signed
+#       rate × scene time), not a sine wobble — lipids now slowly spin
+#       like tops, each at its own rate and direction.
+#   v11: spin rate coefficient doubled (0.5 → 1.0 rad/sec per BobSpeed
+#       unit). The quaternion-flip bug had made v9 act faster than its
+#       formula said; now that's fixed we can run the real rate hotter.
+GN_TREE_VERSION = 11
 
 
 # ===========================================================================
@@ -74,134 +89,19 @@ def set_membrane_colors(membrane_obj: bpy.types.Object,
 
 
 # ===========================================================================
-# Lipid asset mesh
+# Lipid asset collection
 # ===========================================================================
+# The 4 PDB-derived lipid variants live in lipid_assets.py. The GN tree
+# reads them via a Collection Info node + Pick Instance, so each lipid in
+# the membrane is randomly one of the four real conformations.
 
-def _build_lipid_mesh() -> bpy.types.Object:
-    """Build the lipid asset object (a head sphere + two tails) once.
-
-    The lipid is oriented with the head at +Z and tails extending toward -Z.
-    Origin sits at the head/tail junction so that "position on surface" maps
-    cleanly to "head sphere centre at +half_thickness, tails reaching into
-    the bilayer interior".
-
-    Returns the existing asset if it already exists.
-    """
-    existing = bpy.data.objects.get(LIPID_ASSET_NAME)
-    if existing is not None:
-        return existing
-
-    head_mat = _ensure_material(HEAD_MATERIAL_NAME, (0.92, 0.30, 0.55, 1.0), 0.35)
-    tail_mat = _ensure_material(TAIL_MATERIAL_NAME, (0.98, 0.82, 0.30, 1.0), 0.55)
-
-    # Hidden building collection — we'll create the parts there, join into one
-    # mesh, then move the result to the asset stash.
-    import bmesh
-
-    # --- Head -----------------------------------------------------------
-    HEAD_RADIUS = 0.04  # ~4 Å
-    bm = bmesh.new()
-    bmesh.ops.create_icosphere(
-        bm,
-        subdivisions=2,
-        radius=HEAD_RADIUS,
-    )
-    # Position head at +Z = +HEAD_RADIUS so the sphere sits *above* the
-    # tail junction.
-    for v in bm.verts:
-        v.co.z += HEAD_RADIUS
-
-    mesh = bpy.data.meshes.new(LIPID_ASSET_NAME + "_mesh")
-    bm.to_mesh(mesh)
-    bm.free()
-
-    obj = bpy.data.objects.new(LIPID_ASSET_NAME, mesh)
-
-    # --- Materials: head first (slot 0), tail second (slot 1) ----------
-    mesh.materials.append(head_mat)
-    mesh.materials.append(tail_mat)
-    # Initial verts (head sphere) belong to material 0 (head) — already correct
-    # since polys default to material 0.
-
-    # --- Tails (two cylinders extending downward) ----------------------
-    TAIL_RADIUS = 0.012
-    TAIL_LENGTH = 0.18  # tails extend 0.18 BU = 18 Å into the bilayer
-    TAIL_OFFSET_X = 0.018  # split slightly so two tails are visible
-
-    for sign_x in (-1.0, 1.0):
-        bm = bmesh.new()
-        bmesh.ops.create_cone(
-            bm,
-            cap_ends=True,
-            cap_tris=False,
-            segments=8,
-            radius1=TAIL_RADIUS,
-            radius2=TAIL_RADIUS,
-            depth=TAIL_LENGTH,
-        )
-        # Default cylinder is centered on origin along z. Shift so its top
-        # sits at z=0 (tail extends from z=0 to z=-TAIL_LENGTH).
-        for v in bm.verts:
-            v.co.z -= TAIL_LENGTH / 2.0
-            v.co.x += sign_x * TAIL_OFFSET_X
-
-        tmp_mesh = bpy.data.meshes.new("_tail_tmp")
-        bm.to_mesh(tmp_mesh)
-        bm.free()
-
-        # Join tmp_mesh into the main mesh using a temp object + mesh join.
-        # Simpler: use bmesh to merge directly.
-        bm_main = bmesh.new()
-        bm_main.from_mesh(mesh)
-        bm_tail = bmesh.new()
-        bm_tail.from_mesh(tmp_mesh)
-
-        # The faces from bm_tail need material_index = 1 (tail).
-        tail_face_offset = len(bm_main.faces)
-        for f in bm_tail.faces:
-            f.material_index = 1
-
-        # Append tail geometry into main bmesh.
-        bm_main_verts = []
-        for v in bm_tail.verts:
-            new_v = bm_main.verts.new(v.co.copy())
-            bm_main_verts.append(new_v)
-        bm_main.verts.ensure_lookup_table()
-        for f in bm_tail.faces:
-            try:
-                bm_main.faces.new([bm_main_verts[v.index] for v in f.verts])
-            except ValueError:
-                # Duplicate face — skip.
-                pass
-        # Assign material_index = 1 to the appended tail faces.
-        bm_main.faces.ensure_lookup_table()
-        for i, f in enumerate(bm_main.faces):
-            if i >= tail_face_offset:
-                f.material_index = 1
-
-        bm_main.to_mesh(mesh)
-        bm_main.free()
-        bm_tail.free()
-        bpy.data.meshes.remove(tmp_mesh)
-
-    mesh.update()
-
-    # Smooth-shade the asset for nicer renders. Per-face smoothing in
-    # Blender 5 requires the shade_smooth flag on each polygon.
-    for poly in mesh.polygons:
-        poly.use_smooth = True
-
-    # Park the asset object outside the scene by *not* linking it to any
-    # collection. It can be referenced via bpy.data.objects.get(...) and used
-    # as a GN Object Info input without appearing in the outliner.
-    # However, Object Info nodes need the object to exist as a Blender obj
-    # but not necessarily in a scene. So we leave it unlinked.
-    return obj
+from . import lipid_assets
 
 
-def get_or_build_lipid_asset() -> bpy.types.Object:
-    """Public accessor for the shared lipid asset object."""
-    return _build_lipid_mesh()
+def get_or_build_lipid_collection(
+        style: str = lipid_assets.DEFAULT_STYLE) -> bpy.types.Collection:
+    """Public accessor for a render-style lipid collection."""
+    return lipid_assets.get_or_build_lipid_collection(style)
 
 
 # ===========================================================================
@@ -253,7 +153,12 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
     )
 
-    _new_input(tree, "Lipid Asset", "NodeSocketObject")
+    _new_input(tree, "Lipid Collection", "NodeSocketCollection")
+    # How many variants live in the collection. Drives the per-point random
+    # Instance Index max: rand(0, count-1). Stylized = 1; ball-and-stick /
+    # surface = 4. Pushed by the operator whenever render style changes.
+    _new_input(tree, "Lipid Variant Count", "NodeSocketInt",
+               default=lipid_assets.NUM_LIPID_VARIANTS, min_val=1, max_val=32)
     _new_input(tree, "Density (per nm²)", "NodeSocketFloat",
                default=1.5, min_val=0.05, max_val=5.0)
     _new_input(tree, "Bilayer Thickness (nm)", "NodeSocketFloat",
@@ -679,17 +584,23 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         sway_base.location = (400, y_pos - 650)
         links.new(amp_bu.outputs[0], sway_base.inputs[0])
 
+        # Tilt amplitude in radians per nm of master amp. v9: cut from
+        # 0.5 → 0.20 — combined with the new "apply tilt as local Euler"
+        # path (no more quaternion flips), this keeps the lipid's lean
+        # gentle even at max user settings.
         tilt_base = new("ShaderNodeMath", name=f"TiltBase {leaflet_index}")
         tilt_base.operation = "MULTIPLY"
-        tilt_base.inputs[1].default_value = 0.5   # normal-perturb magnitude
+        tilt_base.inputs[1].default_value = 0.20
         tilt_base.location = (200, y_pos - 800)
         links.new(anim_amp.outputs[0], tilt_base.inputs[0])
 
-        twist_base = new("ShaderNodeMath", name=f"TwistBase {leaflet_index}")
-        twist_base.operation = "MULTIPLY"
-        twist_base.inputs[1].default_value = 0.45  # radians of spin wobble
-        twist_base.location = (400, y_pos - 800)
-        links.new(anim_amp.outputs[0], twist_base.inputs[0])
+        # Twist is special — unlike the other channels (translations that
+        # naturally read as wiggles), a sine-bounded rotation reads as
+        # back-and-forth swinging, not "spinning like a top". v10 makes
+        # twist a *continuous* rotation: angle = per-lipid signed rate ×
+        # scene time, so each lipid slowly turns in one direction (some
+        # CW, some CCW, all at different rates). The rate is wired up
+        # below — no twist_base node is needed.
 
         # ---- Per-lipid random helper -------------------------------------
         # ID = point index (per-element variation); Seed = a constant unique
@@ -707,11 +618,14 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
         # ---- Wobble channel ----------------------------------------------
         # value = sin(t · BobSpeed · freqMul · 2π + phase) · baseAmp · ampMul
-        # freqMul / ampMul / phase are all randomised per lipid.
-        def wobble(seed, base_amp_socket, label, lx, ly):
+        # freqMul / ampMul / phase are all randomised per lipid. Channels
+        # can opt into tighter freq/amp ranges (e.g. twist clamps both so
+        # rotations stay gentle even at large user-set BobSpeed / Bob Amp).
+        def wobble(seed, base_amp_socket, label, lx, ly,
+                   fmul_range=(0.55, 1.5), amul_range=(0.4, 1.6)):
             phase = rand_float(seed + 0, 0.0, math.tau, (lx, ly))
-            fmul = rand_float(seed + 1, 0.55, 1.5, (lx, ly - 150))
-            amul = rand_float(seed + 2, 0.4, 1.6, (lx, ly - 300))
+            fmul = rand_float(seed + 1, fmul_range[0], fmul_range[1], (lx, ly - 150))
+            amul = rand_float(seed + 2, amul_range[0], amul_range[1], (lx, ly - 300))
 
             freq = new("ShaderNodeMath", name=f"{label} freq L{leaflet_index}")
             freq.operation = "MULTIPLY"
@@ -758,9 +672,71 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         bob_ch = wobble(100, amp_bu.outputs[0], "bob", 600, y_pos - 1000)
         swayT_ch = wobble(200, sway_base.outputs[0], "swayT", 600, y_pos - 1500)
         swayB_ch = wobble(300, sway_base.outputs[0], "swayB", 600, y_pos - 2000)
-        tiltT_ch = wobble(400, tilt_base.outputs[0], "tiltT", 600, y_pos - 2500)
-        tiltB_ch = wobble(500, tilt_base.outputs[0], "tiltB", 600, y_pos - 3000)
-        twist_ch = wobble(600, twist_base.outputs[0], "twist", 600, y_pos - 3500)
+        # Tilt also gets tighter freq/amul ranges than translations — the
+        # lipid's lean is more visually disruptive than a sway/bob nudge.
+        tiltT_ch = wobble(400, tilt_base.outputs[0], "tiltT", 600, y_pos - 2500,
+                          fmul_range=(0.4, 0.9), amul_range=(0.4, 1.0))
+        tiltB_ch = wobble(500, tilt_base.outputs[0], "tiltB", 600, y_pos - 3000,
+                          fmul_range=(0.4, 0.9), amul_range=(0.4, 1.0))
+        # ---- Continuous-rotation twist channel (v10) ---------------------
+        # spin_rate = anim_gate × BobSpeed × signed_unit × COEFF
+        # angle    = spin_rate × scene_time
+        # Result: each lipid steadily turns about its long axis at its own
+        # rate (some CW, some CCW) — reads as "lipids spinning like tops"
+        # rather than wobbling. Disabling Animate Bob zeroes the rate so
+        # every lipid freezes at its static random orientation.
+        #
+        # The signed unit is built as ±[0.5, 1.0] so no lipid is stuck
+        # near-stationary; sign is independent of magnitude, so the spread
+        # of rates is half-fast-CW + half-fast-CCW with nothing dead.
+        SPIN_RATE_COEFF = 1.0  # rad/sec per unit BobSpeed at full magnitude
+
+        anim_gate = new("GeometryNodeSwitch", name=f"SpinGate {leaflet_index}")
+        anim_gate.input_type = "FLOAT"
+        anim_gate.location = (600, y_pos - 3500)
+        anim_gate.inputs["False"].default_value = 0.0
+        anim_gate.inputs["True"].default_value = 1.0
+        links.new(get_in("Animate Bob"), anim_gate.inputs[0])
+
+        spin_mag = rand_float(600, 0.5, 1.0, (600, y_pos - 3650))
+        spin_sign_src = rand_float(601, -1.0, 1.0, (600, y_pos - 3800))
+
+        spin_sign = new("ShaderNodeMath", name=f"SpinSign {leaflet_index}")
+        spin_sign.operation = "SIGN"
+        spin_sign.location = (800, y_pos - 3800)
+        links.new(spin_sign_src, spin_sign.inputs[0])
+
+        spin_signed = new("ShaderNodeMath", name=f"SpinSigned {leaflet_index}")
+        spin_signed.operation = "MULTIPLY"
+        spin_signed.location = (1000, y_pos - 3650)
+        links.new(spin_mag, spin_signed.inputs[0])
+        links.new(spin_sign.outputs[0], spin_signed.inputs[1])
+
+        rate1 = new("ShaderNodeMath", name=f"SpinRate1 {leaflet_index}")
+        rate1.operation = "MULTIPLY"
+        rate1.location = (800, y_pos - 3500)
+        links.new(anim_gate.outputs[0], rate1.inputs[0])
+        links.new(get_in("Bob Speed"), rate1.inputs[1])
+
+        rate2 = new("ShaderNodeMath", name=f"SpinRate2 {leaflet_index}")
+        rate2.operation = "MULTIPLY"
+        rate2.location = (1200, y_pos - 3500)
+        links.new(rate1.outputs[0], rate2.inputs[0])
+        links.new(spin_signed.outputs[0], rate2.inputs[1])
+
+        rate3 = new("ShaderNodeMath", name=f"SpinRate3 {leaflet_index}")
+        rate3.operation = "MULTIPLY"
+        rate3.inputs[1].default_value = SPIN_RATE_COEFF
+        rate3.location = (1400, y_pos - 3500)
+        links.new(rate2.outputs[0], rate3.inputs[0])
+
+        twist_angle = new("ShaderNodeMath", name=f"TwistAngle {leaflet_index}")
+        twist_angle.operation = "MULTIPLY"
+        twist_angle.location = (1600, y_pos - 3500)
+        links.new(rate3.outputs[0], twist_angle.inputs[0])
+        links.new(scene_time.outputs["Seconds"], twist_angle.inputs[1])
+
+        twist_ch = twist_angle.outputs[0]
 
         # ---- Surface tangent frame (T, B perpendicular to the normal) ----
         # cross(N, worldX) is a stable tangent: the membrane normal is always
@@ -844,10 +820,21 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         bob_set = set_pos  # alias so subsequent code reads .outputs["Geometry"]
 
         # ---- Compute per-instance rotation -------------------------------
-        # Align lipid +Z to the surface normal (-normal for the lower
-        # leaflet), then perturb that vector by the two tilt channels so
-        # each lipid leans and rocks over time. Normalising the perturbed
-        # vector keeps the lean angle bounded.
+        # ORIGINAL APPROACH (v6-v8) — feed a time-varying perturbed normal
+        # (normal + tilt vectors) into AlignRotationToVector. That node's
+        # AUTO pivot picks the rotation axis based on its input; as the
+        # input swings frame-to-frame, the chosen pivot can flip
+        # discontinuously, producing single-frame quaternion jumps up to
+        # ~180° even when the perturbation itself is bounded. Measured
+        # peak step at amp=1.0/speed=1.0 was 177°.
+        #
+        # NEW APPROACH (v9+) — feed the *un-perturbed* normal (static per
+        # surface location) into AlignRotationToVector → a stable rotation
+        # whose local frame doesn't change with time. Apply the time-
+        # varying tilt as a small Euler rotation around local X / Y in
+        # the *same* RotateInstances call that handles the Z twist. Tilt
+        # is bounded by the tilt amplitude (no quaternion flips), and the
+        # alignment is rebuilt only when the surface deforms.
         if is_upper:
             align_base = normal.outputs[0]
         else:
@@ -858,41 +845,12 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(normal.outputs[0], neg.inputs[0])
             align_base = neg.outputs[0]
 
-        tiltT_vec = new("ShaderNodeVectorMath", name=f"TiltTVec {leaflet_index}")
-        tiltT_vec.operation = "SCALE"
-        tiltT_vec.location = (1850, y_pos - 2500)
-        links.new(tan.outputs[0], tiltT_vec.inputs[0])
-        links.new(tiltT_ch, tiltT_vec.inputs["Scale"])
-
-        tiltB_vec = new("ShaderNodeVectorMath", name=f"TiltBVec {leaflet_index}")
-        tiltB_vec.operation = "SCALE"
-        tiltB_vec.location = (1850, y_pos - 3000)
-        links.new(bit.outputs[0], tiltB_vec.inputs[0])
-        links.new(tiltB_ch, tiltB_vec.inputs["Scale"])
-
-        tilt_a = new("ShaderNodeVectorMath", name=f"TiltAdd1 {leaflet_index}")
-        tilt_a.operation = "ADD"
-        tilt_a.location = (2600, y_pos - 2750)
-        links.new(align_base, tilt_a.inputs[0])
-        links.new(tiltT_vec.outputs[0], tilt_a.inputs[1])
-
-        tilt_b = new("ShaderNodeVectorMath", name=f"TiltAdd2 {leaflet_index}")
-        tilt_b.operation = "ADD"
-        tilt_b.location = (2800, y_pos - 2750)
-        links.new(tilt_a.outputs[0], tilt_b.inputs[0])
-        links.new(tiltB_vec.outputs[0], tilt_b.inputs[1])
-
-        align_normal = new("ShaderNodeVectorMath", name=f"AlignNorm {leaflet_index}")
-        align_normal.operation = "NORMALIZE"
-        align_normal.location = (3000, y_pos - 2750)
-        links.new(tilt_b.outputs[0], align_normal.inputs[0])
-
         align = new("FunctionNodeAlignRotationToVector",
                    name=f"AlignRot {leaflet_index}")
         align.axis = "Z"
         align.pivot_axis = "AUTO"
         align.location = (3200, y_pos - 150)
-        links.new(align_normal.outputs[0], align.inputs["Vector"])
+        links.new(align_base, align.inputs["Vector"])
         base_rot = align.outputs["Rotation"]
 
         # ---- Instance lipid on points ------------------------------------
@@ -902,15 +860,53 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(get_in("Lipid Scale"), scale_to_vec.inputs[1])
         links.new(get_in("Lipid Scale"), scale_to_vec.inputs[2])
 
-        oi_lipid = new("GeometryNodeObjectInfo", name=f"OI Lipid {leaflet_index}")
-        oi_lipid.transform_space = "ORIGINAL"
-        oi_lipid.location = (3200, y_pos - 500)
-        links.new(get_in("Lipid Asset"), oi_lipid.inputs["Object"])
+        # ---- Lipid variants: 4 conformations picked randomly per point ---
+        # Collection Info with Separate Children outputs each child of the
+        # variant collection as its own top-level instance. Instance on
+        # Points with Pick Instance + Instance Index then chooses ONE of
+        # those variants per lipid point — so the bilayer reads as a real
+        # mix of lipid states instead of a repeated cookie-cutter shape.
+        ci_lipid = new("GeometryNodeCollectionInfo",
+                       name=f"CI Lipid {leaflet_index}")
+        ci_lipid.transform_space = "ORIGINAL"
+        # Separate Children = each child becomes its own pickable instance.
+        # Reset Children = False keeps each variant's own local origin.
+        ci_lipid.inputs["Separate Children"].default_value = True
+        ci_lipid.inputs["Reset Children"].default_value = False
+        ci_lipid.location = (3200, y_pos - 500)
+        links.new(get_in("Lipid Collection"), ci_lipid.inputs["Collection"])
+
+        # Per-lipid random integer 0..(VariantCount-1) selecting which
+        # variant to use. Seeded by point index so the choice is stable
+        # across frames (no flickering) and differs per leaflet (different
+        # lipid mosaic on each side).
+        rand_pick = new("FunctionNodeRandomValue",
+                        name=f"RandPick {leaflet_index}")
+        rand_pick.data_type = "INT"
+        rand_pick.location = (3200, y_pos - 850)
+        # INT Min / Max live at indices 4 / 5 on FunctionNodeRandomValue
+        # (the node carries inputs for every data type; only the matching
+        # pair is active per data_type).
+        rand_pick.inputs[4].default_value = 0
+        rand_pick.inputs["Seed"].default_value = 800 + leaflet_index * 10000
+        links.new(idx.outputs[0], rand_pick.inputs["ID"])
+
+        # max = VariantCount - 1, driven from the modifier input so the
+        # range follows whichever style's collection is plugged in.
+        pick_max = new("ShaderNodeMath", name=f"PickMax {leaflet_index}")
+        pick_max.operation = "SUBTRACT"
+        pick_max.inputs[1].default_value = 1.0
+        pick_max.location = (3000, y_pos - 990)
+        links.new(get_in("Lipid Variant Count"), pick_max.inputs[0])
+        links.new(pick_max.outputs[0], rand_pick.inputs[5])
 
         iop = new("GeometryNodeInstanceOnPoints", name=f"IoP {leaflet_index}")
         iop.location = (3450, y_pos)
+        iop.inputs["Pick Instance"].default_value = True
         links.new(bob_set.outputs["Geometry"], iop.inputs["Points"])
-        links.new(oi_lipid.outputs["Geometry"], iop.inputs["Instance"])
+        links.new(ci_lipid.outputs["Instances"], iop.inputs["Instance"])
+        # INT output of FunctionNodeRandomValue is at index 2.
+        links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
         links.new(base_rot, iop.inputs["Rotation"])
         links.new(scale_to_vec.outputs[0], iop.inputs["Scale"])
 
@@ -934,12 +930,15 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(rot_switch.outputs[0], spin.inputs[0])
         links.new(twist_ch, spin.inputs[1])
 
-        # Euler vector (0, 0, spin) — rotation in the INSTANCE's local space
-        # (Rotate Instances has Local Space enabled below).
+        # Euler (tiltT, tiltB, spin) — applied in the INSTANCE's local
+        # space (Rotate Instances has Local Space enabled below). Tilt
+        # rotates around local X / Y, twist around local Z; for small
+        # angles the compose-order doesn't matter, and each channel is
+        # bounded by its own sine amplitude — no quaternion flips.
         rot_vec = new("ShaderNodeCombineXYZ", name=f"RotVec {leaflet_index}")
         rot_vec.location = (3850, y_pos - 700)
-        rot_vec.inputs[0].default_value = 0.0
-        rot_vec.inputs[1].default_value = 0.0
+        links.new(tiltT_ch, rot_vec.inputs[0])
+        links.new(tiltB_ch, rot_vec.inputs[1])
         links.new(spin.outputs[0], rot_vec.inputs[2])
 
         rotate_inst = new("GeometryNodeRotateInstances",
@@ -980,6 +979,8 @@ def get_or_build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
     was_stale = tree is not None
     tree = _build_membrane_gn_tree()  # removes the old datablock, builds fresh
+    # Drop the v5 procedural single-lipid asset if it's still around.
+    lipid_assets.cleanup_legacy_lipid_asset()
 
     if was_stale:
         # _build_membrane_gn_tree removed the old tree, so any membrane
