@@ -20,11 +20,16 @@ from .membrane_geometry import (
     GN_TREE_NAME,
     HEAD_MATERIAL_NAME,
     TAIL_MATERIAL_NAME,
+    SHAPE_FLAT,
+    SHAPE_SPHERE,
+    SHAPE_HEMISPHERE,
+    SHAPE_MODE_INT,
     get_or_build_membrane_gn_tree,
     set_membrane_colors,
     build_membrane_lattice,
-    _build_grid_mesh,
-    update_grid_mesh,
+    build_membrane_base_mesh,
+    update_base_mesh,
+    update_lattice_for_shape,
 )
 
 
@@ -155,6 +160,18 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     if mod is None:
         return
 
+    # Shape change is destructive — rebuild the base mesh + lattice in
+    # place before pushing the other settings. The mesh and lattice
+    # datablocks themselves are kept so all the modifier references
+    # remain valid.
+    new_shape = str(props.shape)
+    old_shape = str(root_obj.get("pb_mem_shape", SHAPE_FLAT))
+    needs_shape_rebuild = (new_shape != old_shape)
+    if needs_shape_rebuild:
+        _rebuild_membrane_for_shape(root_obj, props)
+
+    _set_mod_input(mod, "Shape Mode", int(SHAPE_MODE_INT[new_shape]))
+    _set_mod_input(mod, "Sphere Radius (nm)", float(props.radius))
     _set_mod_input(mod, "Density (per nm²)", float(props.density))
     _set_mod_input(mod, "Bilayer Thickness (nm)", float(props.bilayer_thickness))
     _set_mod_input(mod, "Lipid Scale", float(props.lipid_scale))
@@ -174,6 +191,7 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
 
     # Mirror onto the root as custom properties (so size-edit operator can
     # detect what's needed, and so we can re-sync to panel when reselected).
+    root_obj["pb_mem_shape"] = new_shape
     root_obj["pb_mem_density"] = float(props.density)
     root_obj["pb_mem_bilayer_thickness"] = float(props.bilayer_thickness)
     root_obj["pb_mem_lipid_scale"] = float(props.lipid_scale)
@@ -184,6 +202,7 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     root_obj["pb_mem_render_style"] = style
     root_obj["pb_mem_width"] = float(props.width)
     root_obj["pb_mem_height"] = float(props.height)
+    root_obj["pb_mem_radius"] = float(props.radius)
 
     # Update shared materials in case head/tail colour props were changed.
     set_membrane_colors(root_obj, tuple(props.color_head), tuple(props.color_tail))
@@ -191,6 +210,26 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     root_obj["pb_mem_color_tail"] = list(props.color_tail)
 
     _refresh_modifier(mod)
+
+
+def _rebuild_membrane_for_shape(root_obj: bpy.types.Object, props) -> None:
+    """Destructively rebuild the base mesh and lattice for a new shape.
+
+    Keeps the mesh / lattice datablocks (modifier references stay valid)
+    but discards any prior lattice deformation. Called from
+    ``apply_props_to_membrane`` when the shape prop changes.
+    """
+    shape = str(props.shape)
+    update_base_mesh(root_obj.data, shape,
+                     float(props.width), float(props.height),
+                     float(props.radius))
+    for child in root_obj.children:
+        if child.type == "LATTICE":
+            update_lattice_for_shape(child, shape,
+                                     float(props.width),
+                                     float(props.height),
+                                     float(props.radius))
+            break
 
 
 def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
@@ -210,6 +249,10 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
                    lipid_assets.get_or_build_lipid_collection(style))
     _set_mod_input(mod, "Lipid Variant Count",
                    lipid_assets.variant_count_for_style(style))
+    shape = str(root_obj.get("pb_mem_shape", SHAPE_FLAT))
+    _set_mod_input(mod, "Shape Mode", int(SHAPE_MODE_INT.get(shape, 0)))
+    _set_mod_input(mod, "Sphere Radius (nm)",
+                   float(root_obj.get("pb_mem_radius", 15.0)))
     _set_mod_input(mod, "Density (per nm²)",
                    float(root_obj.get("pb_mem_density", 1.5)))
     _set_mod_input(mod, "Bilayer Thickness (nm)",
@@ -278,18 +321,27 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         prefix = props.name_prefix or "Membrane"
         name = _next_membrane_name(prefix)
 
-        # 1. Build the base grid mesh and root object.
-        mesh = _build_grid_mesh(props.width, props.height)
+        shape = str(props.shape)
+
+        # 1. Build the base mesh for the requested shape and the root object.
+        mesh = build_membrane_base_mesh(shape, props.width, props.height,
+                                         props.radius)
         mesh.name = f"{name}_mesh"
         root = bpy.data.objects.new(name, mesh)
         root["pb_is_membrane"] = True
+        # Seed the shape custom prop so apply_props_to_membrane below sees
+        # a matching old_shape and doesn't trigger a redundant rebuild.
+        root["pb_mem_shape"] = shape
 
         coll = _ensure_membrane_collection(context.scene, name)
         _link_to_coll(coll, root)
 
-        # 2. Build the Lattice deformer and parent it to the root.
-        lattice = build_membrane_lattice(props.width, props.height,
-                                         resolution=int(props.lattice_resolution))
+        # 2. Build the Lattice deformer (sized for the shape) and parent
+        # it to the root.
+        lattice = build_membrane_lattice(
+            shape, props.width, props.height, props.radius,
+            resolution=int(props.lattice_resolution),
+        )
         lattice.name = f"{name}.lattice"
         lattice["pb_membrane_owner"] = name
         _link_to_coll(coll, lattice)
@@ -315,8 +367,11 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         root.select_set(True)
         context.view_layer.objects.active = root
 
-        self.report({"INFO"},
-                    f"Created {name}: {props.width:.1f} × {props.height:.1f} nm")
+        if shape == SHAPE_FLAT:
+            msg = f"Created {name}: {props.width:.1f} × {props.height:.1f} nm"
+        else:
+            msg = f"Created {name}: {shape.lower()} r={props.radius:.1f} nm"
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
@@ -341,26 +396,37 @@ class PROTEINBLENDER_OT_resize_membrane(Operator):
             return {"CANCELLED"}
         props = context.scene.membrane_builder_props
 
-        # Rebuild the grid mesh in place.
-        update_grid_mesh(root.data, props.width, props.height)
+        shape = str(props.shape)
 
-        # Resize the lattice.
+        # Rebuild the base mesh in place for the current shape + size.
+        update_base_mesh(root.data, shape,
+                         float(props.width), float(props.height),
+                         float(props.radius))
+
+        # Resize the lattice to match.
         for child in root.children:
             if child.type == "LATTICE":
-                child.scale = (props.width / NM_PER_BU,
-                               props.height / NM_PER_BU,
-                               1.0)
+                update_lattice_for_shape(child, shape,
+                                         float(props.width),
+                                         float(props.height),
+                                         float(props.radius))
                 break
 
+        root["pb_mem_shape"] = shape
         root["pb_mem_width"] = float(props.width)
         root["pb_mem_height"] = float(props.height)
+        root["pb_mem_radius"] = float(props.radius)
 
         mod = _get_gn_modifier(root)
         if mod is not None:
+            _set_mod_input(mod, "Sphere Radius (nm)", float(props.radius))
             _refresh_modifier(mod)
 
-        self.report({"INFO"},
-                    f"Resized to {props.width:.1f} × {props.height:.1f} nm")
+        if shape == SHAPE_FLAT:
+            msg = f"Resized to {props.width:.1f} × {props.height:.1f} nm"
+        else:
+            msg = f"Resized to {shape.lower()} r={props.radius:.1f} nm"
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 

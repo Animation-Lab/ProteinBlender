@@ -80,10 +80,14 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
         else:
             main_box.label(text="Build a new lipid bilayer", icon="INFO")
 
-        # ---- Size ---------------------------------------------------------
-        size_row = main_box.row(align=True)
-        size_row.prop(props, "width", text="Width (nm)")
-        size_row.prop(props, "height", text="Height (nm)")
+        # ---- Shape + size -------------------------------------------------
+        main_box.prop(props, "shape", text="Shape")
+        if props.shape == "FLAT":
+            size_row = main_box.row(align=True)
+            size_row.prop(props, "width", text="Width (nm)")
+            size_row.prop(props, "height", text="Height (nm)")
+        else:
+            main_box.prop(props, "radius", text="Radius (nm)")
 
         if not editing:
             main_box.prop(props, "name_prefix", text="Name")
@@ -245,13 +249,18 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
         # ---- Action button ------------------------------------------------
         main_box.separator(factor=0.5)
         if editing:
-            # In edit mode, width/height don't auto-apply (they need a mesh
-            # rebuild). Surface a Resize button.
+            # In edit mode, size changes don't auto-apply (they need a mesh
+            # rebuild). Surface a Resize button labelled for the shape.
+            if props.shape == "FLAT":
+                resize_label = (
+                    f"↻ Resize to {props.width:.1f} × {props.height:.1f} nm")
+            else:
+                resize_label = f"↻ Resize to r={props.radius:.1f} nm"
             resize_row = main_box.row()
             resize_row.scale_y = 1.4
             resize_row.operator(
                 "proteinblender.resize_membrane",
-                text=f"↻ Resize to {props.width:.1f} × {props.height:.1f} nm",
+                text=resize_label,
                 icon="FILE_REFRESH",
             )
             new_row = main_box.row(align=True)

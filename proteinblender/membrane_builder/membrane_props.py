@@ -74,6 +74,37 @@ class MembraneBuilderProperties(PropertyGroup):
     )
 
     # ------------------------------------------------------------------
+    # Shape
+    # ------------------------------------------------------------------
+    shape: EnumProperty(
+        name="Shape",
+        description=(
+            "Sheet = a flat patch. Sphere = a closed vesicle (lipids on both "
+            "the outer and inner surfaces). Hemisphere = an open-top bowl, "
+            "so you can look down inside the cell"
+        ),
+        items=(
+            ("FLAT", "Sheet", "A flat membrane patch (default)"),
+            ("SPHERE", "Sphere", "A closed spherical vesicle"),
+            ("HEMISPHERE", "Hemisphere", "Open-top bowl — useful for "
+             "cell-cutaway visualisations"),
+        ),
+        default="FLAT",
+        update=_sync_to_active_membrane,
+    )
+
+    radius: FloatProperty(
+        name="Radius",
+        description="Membrane radius in nanometers (used in Sphere / Hemisphere mode)",
+        default=15.0,
+        min=2.0,
+        max=200.0,
+        soft_max=80.0,
+        unit="NONE",
+        update=_sync_to_active_membrane,
+    )
+
+    # ------------------------------------------------------------------
     # Lipid look
     # ------------------------------------------------------------------
     density: FloatProperty(
@@ -244,8 +275,10 @@ CLASSES = (MembraneBuilderProperties,)
 # ---------------------------------------------------------------------------
 
 _PROP_KEYS = (
+    "shape",
     "width",
     "height",
+    "radius",
     "density",
     "bilayer_thickness",
     "lipid_scale",

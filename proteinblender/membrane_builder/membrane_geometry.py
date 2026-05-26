@@ -54,7 +54,11 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #   v11: spin rate coefficient doubled (0.5 → 1.0 rad/sec per BobSpeed
 #       unit). The quaternion-flip bug had made v9 act faster than its
 #       formula said; now that's fixed we can run the real rate hotter.
-GN_TREE_VERSION = 11
+#   v12: shape-aware hole math — Shape Mode + Sphere Radius (nm) inputs
+#       gate per-hole distance/direction between flat-XY and geodesic
+#       (tangent-plane on sphere). Same tree handles flat sheet, full
+#       sphere, and hemisphere bowl base meshes built outside the tree.
+GN_TREE_VERSION = 12
 
 
 # ===========================================================================
@@ -172,6 +176,14 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     _new_input(tree, "Bob Speed", "NodeSocketFloat",
                default=0.6, min_val=0.05, max_val=5.0)
     _new_input(tree, "Random Seed", "NodeSocketInt", default=0)
+    # Shape Mode: 0 = flat sheet, 1 = sphere, 2 = hemisphere bowl. Used
+    # to gate hole math (geodesic on sphere vs flat XY on sheet). The
+    # base mesh itself is built outside the GN tree; this just tells the
+    # tree how to *interpret* point positions for holes.
+    _new_input(tree, "Shape Mode", "NodeSocketInt",
+               default=0, min_val=0, max_val=2)
+    _new_input(tree, "Sphere Radius (nm)", "NodeSocketFloat",
+               default=15.0, min_val=1.0, max_val=200.0)
 
     # Hole controllers — 8 fixed slots. Each has an "Enabled" bool that gates
     # the slot so unassigned slots don't carve a phantom hole at the origin.
@@ -369,6 +381,18 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # → the membrane heals closed).
         HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the hole radius
         hole_disp = None       # accumulates a Vector socket (total push)
+
+        # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
+        # false for flat sheet. Used to swap the per-hole distance and
+        # direction computation between "flat XY distance" and
+        # "geodesic-projected tangent-plane distance on a sphere".
+        is_curved_node = new("ShaderNodeMath", name=f"IsCurved L{leaflet_index}")
+        is_curved_node.operation = "GREATER_THAN"
+        is_curved_node.inputs[1].default_value = 0.5
+        is_curved_node.location = (-2000, y_pos - 550)
+        links.new(get_in("Shape Mode"), is_curved_node.inputs[0])
+        is_curved = is_curved_node.outputs[0]
+
         for h in range(1, MAX_HOLES + 1):
             enabled = get_in(f"Hole {h} Enabled")
             obj_in = get_in(f"Hole {h}")
@@ -379,31 +403,136 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             oi.location = (-1750, hy)
             links.new(obj_in, oi.inputs["Object"])
 
-            # delta = point.xy - hole.xy  (Z flattened so the hole is a
-            # vertical column regardless of where the empty sits in Z).
+            # sub_vec = point - hole.location (3D, used by both paths).
             sub_vec = new("ShaderNodeVectorMath", name=f"SubH{h} L{leaflet_index}")
             sub_vec.operation = "SUBTRACT"
             sub_vec.location = (-1560, hy)
             links.new(pos.outputs[0], sub_vec.inputs[0])
             links.new(oi.outputs["Location"], sub_vec.inputs[1])
 
+            # ============================================================
+            # FLAT path: hole is a vertical column, distance/direction in XY
+            # ============================================================
             flat_xy = new("ShaderNodeVectorMath", name=f"FlatH{h} L{leaflet_index}")
             flat_xy.operation = "MULTIPLY"
             flat_xy.inputs[1].default_value = (1.0, 1.0, 0.0)
             flat_xy.location = (-1380, hy)
             links.new(sub_vec.outputs[0], flat_xy.inputs[0])
 
-            # d = |delta_xy|
-            dist = new("ShaderNodeVectorMath", name=f"LenH{h} L{leaflet_index}")
-            dist.operation = "LENGTH"
-            dist.location = (-1200, hy)
-            links.new(flat_xy.outputs[0], dist.inputs[0])
+            dist_flat = new("ShaderNodeVectorMath",
+                            name=f"LenFlatH{h} L{leaflet_index}")
+            dist_flat.operation = "LENGTH"
+            dist_flat.location = (-1200, hy)
+            links.new(flat_xy.outputs[0], dist_flat.inputs[0])
 
-            # dir = normalize(delta_xy) — radial outward direction
-            direction = new("ShaderNodeVectorMath", name=f"DirH{h} L{leaflet_index}")
-            direction.operation = "NORMALIZE"
-            direction.location = (-1200, hy - 130)
-            links.new(flat_xy.outputs[0], direction.inputs[0])
+            dir_flat = new("ShaderNodeVectorMath",
+                           name=f"DirFlatH{h} L{leaflet_index}")
+            dir_flat.operation = "NORMALIZE"
+            dir_flat.location = (-1200, hy - 130)
+            links.new(flat_xy.outputs[0], dir_flat.inputs[0])
+
+            # ============================================================
+            # SPHERE path: lipid sits on a sphere centred at the membrane
+            # root's origin. The hole's "surface projection" is the point
+            # on the sphere in the direction of hole_location, at the
+            # same radius as the lipid (so a deformed sphere still picks
+            # the right rim). The geodesic distance is approximated by
+            # the length of the projection of (lipid - h_surf) onto the
+            # tangent plane at the lipid — exact for small angles, an
+            # under-estimate of true arc length for large ones.
+            # ============================================================
+            p_len = new("ShaderNodeVectorMath",
+                        name=f"PLenH{h} L{leaflet_index}")
+            p_len.operation = "LENGTH"
+            p_len.location = (-1380, hy - 420)
+            links.new(pos.outputs[0], p_len.inputs[0])
+
+            p_norm = new("ShaderNodeVectorMath",
+                         name=f"PNormH{h} L{leaflet_index}")
+            p_norm.operation = "NORMALIZE"
+            p_norm.location = (-1380, hy - 560)
+            links.new(pos.outputs[0], p_norm.inputs[0])
+
+            h_norm = new("ShaderNodeVectorMath",
+                         name=f"HNormH{h} L{leaflet_index}")
+            h_norm.operation = "NORMALIZE"
+            h_norm.location = (-1380, hy - 700)
+            links.new(oi.outputs["Location"], h_norm.inputs[0])
+
+            # h_surf = h_norm × |pos|   (sphere surface point in h direction)
+            h_surf = new("ShaderNodeVectorMath",
+                         name=f"HSurfH{h} L{leaflet_index}")
+            h_surf.operation = "SCALE"
+            h_surf.location = (-1200, hy - 700)
+            links.new(h_norm.outputs[0], h_surf.inputs[0])
+            links.new(p_len.outputs["Value"], h_surf.inputs["Scale"])
+
+            # sub_sphere = pos - h_surf
+            sub_sphere = new("ShaderNodeVectorMath",
+                             name=f"SubSphH{h} L{leaflet_index}")
+            sub_sphere.operation = "SUBTRACT"
+            sub_sphere.location = (-1020, hy - 700)
+            links.new(pos.outputs[0], sub_sphere.inputs[0])
+            links.new(h_surf.outputs[0], sub_sphere.inputs[1])
+
+            # Project out the radial component to get the tangent vector
+            # at the lipid pointing away from the hole.
+            sub_dot_n = new("ShaderNodeVectorMath",
+                            name=f"SubDotNH{h} L{leaflet_index}")
+            sub_dot_n.operation = "DOT_PRODUCT"
+            sub_dot_n.location = (-840, hy - 700)
+            links.new(sub_sphere.outputs[0], sub_dot_n.inputs[0])
+            links.new(p_norm.outputs[0], sub_dot_n.inputs[1])
+
+            radial_part = new("ShaderNodeVectorMath",
+                              name=f"RadPartH{h} L{leaflet_index}")
+            radial_part.operation = "SCALE"
+            radial_part.location = (-660, hy - 700)
+            links.new(p_norm.outputs[0], radial_part.inputs[0])
+            links.new(sub_dot_n.outputs["Value"], radial_part.inputs["Scale"])
+
+            tangent_away = new("ShaderNodeVectorMath",
+                               name=f"TanAwayH{h} L{leaflet_index}")
+            tangent_away.operation = "SUBTRACT"
+            tangent_away.location = (-480, hy - 700)
+            links.new(sub_sphere.outputs[0], tangent_away.inputs[0])
+            links.new(radial_part.outputs[0], tangent_away.inputs[1])
+
+            dist_sphere = new("ShaderNodeVectorMath",
+                              name=f"LenSphH{h} L{leaflet_index}")
+            dist_sphere.operation = "LENGTH"
+            dist_sphere.location = (-300, hy - 700)
+            links.new(tangent_away.outputs[0], dist_sphere.inputs[0])
+
+            dir_sphere = new("ShaderNodeVectorMath",
+                             name=f"DirSphH{h} L{leaflet_index}")
+            dir_sphere.operation = "NORMALIZE"
+            dir_sphere.location = (-300, hy - 840)
+            links.new(tangent_away.outputs[0], dir_sphere.inputs[0])
+
+            # ============================================================
+            # Switch between flat and sphere paths
+            # ============================================================
+            dist_sw = new("GeometryNodeSwitch",
+                          name=f"DistSwH{h} L{leaflet_index}")
+            dist_sw.input_type = "FLOAT"
+            dist_sw.location = (-120, hy)
+            links.new(is_curved, dist_sw.inputs[0])
+            links.new(dist_flat.outputs["Value"], dist_sw.inputs["False"])
+            links.new(dist_sphere.outputs["Value"], dist_sw.inputs["True"])
+
+            dir_sw = new("GeometryNodeSwitch",
+                         name=f"DirSwH{h} L{leaflet_index}")
+            dir_sw.input_type = "VECTOR"
+            dir_sw.location = (-120, hy - 140)
+            links.new(is_curved, dir_sw.inputs[0])
+            links.new(dir_flat.outputs[0], dir_sw.inputs["False"])
+            links.new(dir_sphere.outputs[0], dir_sw.inputs["True"])
+
+            # ``dist`` and ``direction`` aliases keep downstream node
+            # names + wiring readable (matches the original code).
+            dist = dist_sw  # dist.outputs["Output"] used as dist.outputs["Value"]
+            direction = dir_sw
 
             # R = hole radius = Scale.X (uniform scale) of the empty
             scale_sep = new("ShaderNodeSeparateXYZ",
@@ -411,14 +540,14 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             scale_sep.location = (-1560, hy - 170)
             links.new(oi.outputs["Scale"], scale_sep.inputs[0])
 
-            # ---- Z-aware effective radius ------------------------------
+            # ---- Z-aware effective radius (FLAT path only) -------------
             # Treat the hole empty as a real SPHERE of radius R. The hole it
             # carves in THIS leaflet is the sphere's cross-section at the
             # leaflet's height: effective radius = sqrt(R² - dz²), where dz
             # is the vertical gap between the hole centre and the leaflet
-            # surface. Lift the sphere clear of the membrane (|dz| >= R) and
-            # the effective radius collapses to zero — a sphere parked above
-            # or below the membrane no longer punches through it.
+            # surface. On a curved (sphere/hemisphere) membrane this trick
+            # doesn't apply — the surface isn't horizontal — so the sphere
+            # path just uses the plain hole radius.
             sub_z = new("ShaderNodeSeparateXYZ",
                         name=f"SubZH{h} L{leaflet_index}")
             sub_z.location = (-1380, hy - 170)
@@ -450,25 +579,39 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(r_sq.outputs[0], eff_sq.inputs[0])
             links.new(gap_sq.outputs[0], eff_sq.inputs[1])
 
-            # clamp the interior to >= 0 so the sqrt is always real
             eff_clamp = new("ShaderNodeMath", name=f"EffClpH{h} L{leaflet_index}")
             eff_clamp.operation = "MAXIMUM"
             eff_clamp.inputs[1].default_value = 0.0
             eff_clamp.location = (-660, hy - 330)
             links.new(eff_sq.outputs[0], eff_clamp.inputs[0])
 
-            eff_r = new("ShaderNodeMath", name=f"EffRH{h} L{leaflet_index}")
-            eff_r.operation = "SQRT"
-            eff_r.location = (-480, hy - 330)
-            links.new(eff_clamp.outputs[0], eff_r.inputs[0])
+            eff_r_flat = new("ShaderNodeMath",
+                             name=f"EffRFlatH{h} L{leaflet_index}")
+            eff_r_flat.operation = "SQRT"
+            eff_r_flat.location = (-480, hy - 330)
+            links.new(eff_clamp.outputs[0], eff_r_flat.inputs[0])
 
-            # Everything downstream uses this Z-aware effective radius.
-            radius = eff_r.outputs[0]
+            # On sphere mode, the hole is a circle of radius scale.x on
+            # the sphere surface; no leaflet-Z modulation.
+            r_sw = new("GeometryNodeSwitch",
+                       name=f"REffSwH{h} L{leaflet_index}")
+            r_sw.input_type = "FLOAT"
+            r_sw.location = (-300, hy - 330)
+            links.new(is_curved, r_sw.inputs[0])
+            links.new(eff_r_flat.outputs[0], r_sw.inputs["False"])
+            links.new(scale_sep.outputs["X"], r_sw.inputs["True"])
+
+            radius = r_sw.outputs[0]
+
+            # ``dist`` is a GeometryNodeSwitch (FLOAT); its single output is
+            # at index 0. ``direction`` is the VECTOR switch.
+            dist_out = dist.outputs[0]
+            dir_out = direction.outputs[0]
 
             # area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
             dR = new("ShaderNodeCombineXYZ", name=f"dRH{h} L{leaflet_index}")
             dR.location = (-1000, hy)
-            links.new(dist.outputs["Value"], dR.inputs[0])
+            links.new(dist_out, dR.inputs[0])
             links.new(radius, dR.inputs[1])
             dR.inputs[2].default_value = 0.0
 
@@ -483,7 +626,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             raw_push.operation = "SUBTRACT"
             raw_push.location = (-640, hy)
             links.new(pushed_r.outputs["Value"], raw_push.inputs[0])
-            links.new(dist.outputs["Value"], raw_push.inputs[1])
+            links.new(dist_out, raw_push.inputs[1])
 
             # influence radius = R · HOLE_INFLUENCE
             r_inf = new("ShaderNodeMath", name=f"RInfH{h} L{leaflet_index}")
@@ -493,14 +636,12 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(radius, r_inf.inputs[0])
 
             # falloff: 1 for d <= R, smoothstep down to 0 at d >= R·INFLUENCE.
-            # Holding it at 1 inside R guarantees the hole interior fully
-            # clears (the exact area-preserving map applies there).
             falloff = new("ShaderNodeMapRange",
                           name=f"FalloffH{h} L{leaflet_index}")
             falloff.interpolation_type = "SMOOTHSTEP"
             falloff.clamp = True
             falloff.location = (-640, hy - 170)
-            links.new(dist.outputs["Value"], falloff.inputs["Value"])
+            links.new(dist_out, falloff.inputs["Value"])
             links.new(radius, falloff.inputs["From Min"])
             links.new(r_inf.outputs[0], falloff.inputs["From Max"])
             falloff.inputs["To Min"].default_value = 1.0
@@ -516,7 +657,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             disp = new("ShaderNodeVectorMath", name=f"DispH{h} L{leaflet_index}")
             disp.operation = "SCALE"
             disp.location = (-260, hy)
-            links.new(direction.outputs[0], disp.inputs[0])
+            links.new(dir_out, disp.inputs[0])
             links.new(push_dist.outputs[0], disp.inputs["Scale"])
 
             # gate by Enabled — an unassigned slot must contribute nothing
@@ -1001,33 +1142,36 @@ def get_or_build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
 
 # ===========================================================================
-# Base grid mesh
+# Base mesh (flat / sphere / hemisphere)
 # ===========================================================================
 
-def _build_grid_mesh(width_nm: float, height_nm: float,
-                     subdivisions_per_nm: float = 0.5) -> bpy.types.Mesh:
-    """Build a subdivided plane mesh for the membrane base.
+# Shape identifiers (kept stable — also used as enum identifiers in the
+# props module and as the int values pushed to the GN tree's Shape Mode
+# input via SHAPE_MODE_INT).
+SHAPE_FLAT = "FLAT"
+SHAPE_SPHERE = "SPHERE"
+SHAPE_HEMISPHERE = "HEMISPHERE"
 
-    The subdivisions give the lattice + distribute-points enough resolution
-    to look smooth when deformed. We aim for at least 0.5 subdivisions/nm.
-    """
+SHAPE_MODE_INT = {
+    SHAPE_FLAT: 0,
+    SHAPE_SPHERE: 1,
+    SHAPE_HEMISPHERE: 2,
+}
+
+
+def _build_flat_mesh(width_nm: float, height_nm: float,
+                     subdivisions_per_nm: float = 0.5) -> bpy.types.Mesh:
+    """Subdivided plane sized in nm. Subdivisions give lattice + distribute
+    enough resolution to look smooth when deformed."""
     import bmesh
 
     width_bu = width_nm / NM_PER_BU
     height_bu = height_nm / NM_PER_BU
-
-    # Subdivisions: clamp to a sensible range
     x_subs = max(8, int(width_nm * subdivisions_per_nm))
     y_subs = max(8, int(height_nm * subdivisions_per_nm))
 
     bm = bmesh.new()
-    bmesh.ops.create_grid(
-        bm,
-        x_segments=x_subs,
-        y_segments=y_subs,
-        size=1.0,  # will scale separately
-    )
-    # create_grid creates a unit square. Scale to the desired size.
+    bmesh.ops.create_grid(bm, x_segments=x_subs, y_segments=y_subs, size=1.0)
     sx = width_bu / 2.0
     sy = height_bu / 2.0
     for v in bm.verts:
@@ -1040,46 +1184,159 @@ def _build_grid_mesh(width_nm: float, height_nm: float,
     return mesh
 
 
-def update_grid_mesh(mesh: bpy.types.Mesh, width_nm: float,
-                     height_nm: float) -> None:
-    """Rebuild the given grid mesh in place to the new size.
+def _uv_sphere_segments(radius_nm: float) -> tuple:
+    """Pick (u_segments, v_segments) for a UV-sphere big enough that
+    Poisson-disk distribution gets uniform-ish coverage. Scales with
+    radius so larger spheres aren't undersampled. Capped to keep build
+    + per-frame GN eval snappy."""
+    # ~12 segs per nm of circumference along u; v gets half that (poles).
+    circumf_nm = 2 * 3.141592 * radius_nm
+    u = max(24, min(128, int(circumf_nm * 1.5)))
+    v = max(12, min(64, u // 2))
+    # Force even v so the equator is a clean ring (matters for hemisphere cut).
+    if v % 2:
+        v += 1
+    return u, v
 
-    Used by the resize operator when the user changes width/height. We keep
-    the existing mesh datablock so modifier references (Lattice, GN) stay
-    valid — just replace its geometry.
+
+def _build_sphere_mesh(radius_nm: float) -> bpy.types.Mesh:
+    """Closed UV-sphere centred at origin, radius in nm. Vertex normals
+    point outward; Distribute Points on Faces reads those, so 'upper
+    leaflet' = outer surface and 'lower leaflet' = inner surface."""
+    import bmesh
+
+    radius_bu = radius_nm / NM_PER_BU
+    u_segs, v_segs = _uv_sphere_segments(radius_nm)
+
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(
+        bm, u_segments=u_segs, v_segments=v_segs, radius=radius_bu,
+    )
+    mesh = bpy.data.meshes.new("PB_Membrane_Sphere")
+    bm.to_mesh(mesh)
+    bm.free()
+    return mesh
+
+
+def _build_hemisphere_mesh(radius_nm: float) -> bpy.types.Mesh:
+    """Open-top bowl: lower half of a UV-sphere (z ≤ 0), with the cut
+    edge at z = 0 left open (no flat cap) so the user can see inside
+    the cell when looking down. Vertex normals on the curved shell
+    still point outward, so 'upper leaflet' = outer side of the bowl."""
+    import bmesh
+
+    radius_bu = radius_nm / NM_PER_BU
+    u_segs, v_segs = _uv_sphere_segments(radius_nm)
+
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(
+        bm, u_segments=u_segs, v_segments=v_segs, radius=radius_bu,
+    )
+    # Drop everything above the equator. v_segs even → the equator is a
+    # clean ring at z = 0, so deleting verts with z > tiny_epsilon leaves
+    # the bowl with an open ring at z = 0.
+    upper = [v for v in bm.verts if v.co.z > 1e-4]
+    if upper:
+        bmesh.ops.delete(bm, geom=upper, context="VERTS")
+
+    mesh = bpy.data.meshes.new("PB_Membrane_Hemisphere")
+    bm.to_mesh(mesh)
+    bm.free()
+    return mesh
+
+
+def build_membrane_base_mesh(shape: str, width_nm: float, height_nm: float,
+                              radius_nm: float) -> bpy.types.Mesh:
+    """Dispatch: build the right base mesh for ``shape``."""
+    if shape == SHAPE_SPHERE:
+        return _build_sphere_mesh(radius_nm)
+    if shape == SHAPE_HEMISPHERE:
+        return _build_hemisphere_mesh(radius_nm)
+    return _build_flat_mesh(width_nm, height_nm)
+
+
+def update_base_mesh(mesh: bpy.types.Mesh, shape: str, width_nm: float,
+                     height_nm: float, radius_nm: float) -> None:
+    """Rebuild the given mesh in place to match ``shape`` + dimensions.
+
+    Used by the resize and shape-change operators so the existing mesh
+    datablock stays put (modifier references stay valid).
     """
-    new_mesh_data = _build_grid_mesh(width_nm, height_nm)
-    bpy_verts = [v.co.copy() for v in new_mesh_data.vertices]
-    bpy_edges = [tuple(e.vertices) for e in new_mesh_data.edges]
-    bpy_faces = [tuple(p.vertices) for p in new_mesh_data.polygons]
+    new_mesh = build_membrane_base_mesh(shape, width_nm, height_nm, radius_nm)
+    bpy_verts = [v.co.copy() for v in new_mesh.vertices]
+    bpy_edges = [tuple(e.vertices) for e in new_mesh.edges]
+    bpy_faces = [tuple(p.vertices) for p in new_mesh.polygons]
     mesh.clear_geometry()
     mesh.from_pydata(bpy_verts, bpy_edges, bpy_faces)
     mesh.update()
-    bpy.data.meshes.remove(new_mesh_data)
+    bpy.data.meshes.remove(new_mesh)
+
+
+# Backwards-compat shims for callers that still import the old names.
+_build_grid_mesh = _build_flat_mesh
+
+def update_grid_mesh(mesh, width_nm, height_nm):
+    update_base_mesh(mesh, SHAPE_FLAT, width_nm, height_nm, 0.0)
 
 
 # ===========================================================================
 # Lattice (deformation)
 # ===========================================================================
 
-def build_membrane_lattice(width_nm: float, height_nm: float,
-                            resolution: int = 5) -> bpy.types.Object:
-    """Create a Lattice object sized to fit the membrane, returns the object.
+def _lattice_dims_for_shape(shape: str, width_nm: float, height_nm: float,
+                             radius_nm: float) -> tuple:
+    """Return (scale_xyz_BU, location_xyz_BU) for a lattice that encloses
+    the shape exactly. Lattice center is at the geometric center of the
+    enclosing box; for hemisphere bowl the box is offset down so it
+    bounds z ∈ [-R, 0]."""
+    if shape == SHAPE_SPHERE:
+        r = radius_nm / NM_PER_BU
+        return (2 * r, 2 * r, 2 * r), (0.0, 0.0, 0.0)
+    if shape == SHAPE_HEMISPHERE:
+        r = radius_nm / NM_PER_BU
+        # Bowl occupies z ∈ [-r, 0]; lattice cube centered at z = -r/2.
+        return (2 * r, 2 * r, r), (0.0, 0.0, -r / 2.0)
+    # Flat: width × height × 1 BU (= 10 nm, plenty of vertical headroom).
+    return (width_nm / NM_PER_BU, height_nm / NM_PER_BU, 1.0), (0.0, 0.0, 0.0)
 
-    The lattice is created at the scene origin and *not* linked to any
-    collection — callers should link it themselves.
+
+def build_membrane_lattice(shape: str, width_nm: float, height_nm: float,
+                            radius_nm: float, resolution: int = 5
+                            ) -> bpy.types.Object:
+    """Create a Lattice object sized to enclose the membrane base mesh.
+
+    Returns the object (not linked to any collection; caller links it).
+    For sphere/hemisphere shapes the lattice is a 3-D box around the
+    curved mesh, so the user can deform the sphere into ellipsoids or
+    dent the bowl in place.
     """
     lattice_data = bpy.data.lattices.new("PB_Membrane_Lattice")
     obj = bpy.data.objects.new("PB_Membrane_Lattice", lattice_data)
 
-    # Lattice default size is 1x1x1; the lattice's dimensions = scale of obj.
-    width_bu = width_nm / NM_PER_BU
-    height_bu = height_nm / NM_PER_BU
-    obj.scale = (width_bu, height_bu, 1.0)  # 1 BU tall (= 10 nm) is plenty
+    scale, loc = _lattice_dims_for_shape(shape, width_nm, height_nm, radius_nm)
+    obj.scale = scale
+    obj.location = loc
     lattice_data.points_u = resolution
     lattice_data.points_v = resolution
-    lattice_data.points_w = 2  # 2 layers in Z is enough for membrane bending
+    # For shapes with real Z extent (sphere/hemisphere) give a bit more
+    # vertical resolution so deformation has somewhere to bend.
+    lattice_data.points_w = (resolution if shape != SHAPE_FLAT else 2)
     lattice_data.interpolation_type_u = "KEY_BSPLINE"
     lattice_data.interpolation_type_v = "KEY_BSPLINE"
     lattice_data.interpolation_type_w = "KEY_BSPLINE"
     return obj
+
+
+def update_lattice_for_shape(lattice_obj: bpy.types.Object, shape: str,
+                              width_nm: float, height_nm: float,
+                              radius_nm: float) -> None:
+    """Resize / reposition an existing lattice in place to fit ``shape``.
+
+    Lattice points get reset to their rest pose (any prior deformation is
+    discarded — destructive shape switching by design).
+    """
+    scale, loc = _lattice_dims_for_shape(shape, width_nm, height_nm, radius_nm)
+    lattice_obj.scale = scale
+    lattice_obj.location = loc
+    for p in lattice_obj.data.points:
+        p.co_deform = tuple(p.co)
