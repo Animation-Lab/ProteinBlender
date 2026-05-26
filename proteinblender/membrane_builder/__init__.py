@@ -12,15 +12,18 @@ Builds lipid bilayer membranes using Geometry Nodes:
 from . import membrane_props
 from . import membrane_operators
 from . import membrane_panel
+from . import force_fields
 
 
 def register():
     membrane_props.register()
     membrane_operators.register()
     membrane_panel.register()
+    force_fields.register()
 
 
 def unregister():
+    force_fields.unregister()
     membrane_panel.unregister()
     membrane_operators.unregister()
     membrane_props.unregister()

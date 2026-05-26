@@ -14,6 +14,7 @@ from bpy.props import IntProperty, StringProperty
 from typing import Optional
 
 from . import lipid_assets
+from . import force_fields
 from .membrane_geometry import (
     NM_PER_BU,
     MAX_HOLES,
@@ -275,6 +276,12 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
                    float(root_obj.get("pb_mem_bob_speed", 0.6)))
 
     _rebuild_hole_assignments(root_obj)
+    # Re-push protein force fields too — a GN tree upgrade clears the new
+    # slots' identifiers along with everything else.
+    try:
+        force_fields.apply_force_fields_to_membrane(root_obj)
+    except Exception:
+        pass
     _refresh_modifier(mod)
 
 
@@ -367,6 +374,8 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         # selected render style) and wire the hole assignments.
         apply_props_to_membrane(root, props)
         _rebuild_hole_assignments(root)
+        # New membrane inherits the scene's current FF-enabled proteins.
+        force_fields.apply_force_fields_to_membrane(root, context.scene)
 
         # 5. Make root the active object so the panel switches to edit mode.
         bpy.ops.object.select_all(action="DESELECT")

@@ -25,6 +25,11 @@ from mathutils import Vector
 # 1 BU = 10 nm. The MN convention is 1 BU = 100 Å.
 NM_PER_BU = 10.0
 MAX_HOLES = 8
+# Slots reserved for per-protein force fields. Each ProteinBlender molecule
+# whose force_field_enabled toggle is on gets one slot on every membrane;
+# membranes silently drop overflow if more than this many proteins have the
+# toggle on (capacity warning surfaced in the UI).
+MAX_PROTEIN_FFS = 8
 
 # Geometry Nodes group / asset names — kept stable so we can find them again
 # across rebuilds.
@@ -58,7 +63,13 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       gate per-hole distance/direction between flat-XY and geodesic
 #       (tangent-plane on sphere). Same tree handles flat sheet, full
 #       sphere, and hemisphere bowl base meshes built outside the tree.
-GN_TREE_VERSION = 12
+#   v13: protein force-field slots — 8 additional pushers parallel to the
+#       hole slots, but radius is supplied as an explicit Float (so the GN
+#       can size the push around a protein object whose own scale is 1).
+#       Per-protein toggle on the molecule list drives which slots are
+#       filled; the math reuses the hole pusher (sphere cross-section in
+#       flat mode, geodesic-projected disc in sphere mode).
+GN_TREE_VERSION = 13
 
 
 # ===========================================================================
@@ -200,6 +211,18 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     for i in range(1, MAX_HOLES + 1):
         _new_input(tree, f"Hole {i} Enabled", "NodeSocketBool", default=False)
         _new_input(tree, f"Hole {i}", "NodeSocketObject")
+
+    # Protein force-field slots — same pusher math as a hole, but the radius
+    # is an explicit Float (BU). The object input is the protein itself
+    # (whose own scale stays the user's to control). The owning operator
+    # writes these whenever a protein's force_field_enabled / spacing
+    # changes, or when a new membrane is built.
+    for i in range(1, MAX_PROTEIN_FFS + 1):
+        _new_input(tree, f"Protein FF {i} Enabled", "NodeSocketBool",
+                   default=False)
+        _new_input(tree, f"Protein FF {i}", "NodeSocketObject")
+        _new_input(tree, f"Protein FF {i} Radius", "NodeSocketFloat",
+                   default=0.0, min_val=0.0, max_val=50.0)
 
     nodes = tree.nodes
     links = tree.links
@@ -389,8 +412,8 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # empty live, animating a hole's scale or location makes the lipids
         # flow in real time (grow the hole → lipids stream outward; shrink it
         # → the membrane heals closed).
-        HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the hole radius
-        hole_disp = None       # accumulates a Vector socket (total push)
+        HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the pusher radius
+        hole_disp = None       # accumulates the total push from holes + FFs
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
@@ -403,119 +426,123 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         links.new(get_in("Shape Mode"), is_curved_node.inputs[0])
         is_curved = is_curved_node.outputs[0]
 
-        for h in range(1, MAX_HOLES + 1):
-            enabled = get_in(f"Hole {h} Enabled")
-            obj_in = get_in(f"Hole {h}")
-            hy = y_pos - 600 - h * 260
+        def _build_pusher(slot_label, enabled_sock, obj_sock,
+                          radius_provider, hy):
+            """Build the per-slot pusher subgraph and return its gated
+            displacement vector socket.
 
-            oi = new("GeometryNodeObjectInfo", name=f"OI H{h} L{leaflet_index}")
+            ``radius_provider(oi_node, hy)`` returns a Float socket carrying
+            the "raw R" (in BU) for this slot. For holes it reads
+            Object Info → Scale.x; for protein force fields it returns the
+            external Float input wired by the operator.
+            """
+            oi = new("GeometryNodeObjectInfo",
+                     name=f"OI {slot_label} L{leaflet_index}")
             oi.transform_space = "RELATIVE"
             oi.location = (-1750, hy)
-            links.new(obj_in, oi.inputs["Object"])
+            links.new(obj_sock, oi.inputs["Object"])
 
-            # sub_vec = point - hole.location (3D, used by both paths).
-            sub_vec = new("ShaderNodeVectorMath", name=f"SubH{h} L{leaflet_index}")
+            # sub_vec = point - object.location (3D, used by both paths).
+            sub_vec = new("ShaderNodeVectorMath",
+                          name=f"Sub{slot_label} L{leaflet_index}")
             sub_vec.operation = "SUBTRACT"
             sub_vec.location = (-1560, hy)
             links.new(pos.outputs[0], sub_vec.inputs[0])
             links.new(oi.outputs["Location"], sub_vec.inputs[1])
 
             # ============================================================
-            # FLAT path: hole is a vertical column, distance/direction in XY
+            # FLAT path: pusher is a vertical column, distance/direction in XY
             # ============================================================
-            flat_xy = new("ShaderNodeVectorMath", name=f"FlatH{h} L{leaflet_index}")
+            flat_xy = new("ShaderNodeVectorMath",
+                          name=f"Flat{slot_label} L{leaflet_index}")
             flat_xy.operation = "MULTIPLY"
             flat_xy.inputs[1].default_value = (1.0, 1.0, 0.0)
             flat_xy.location = (-1380, hy)
             links.new(sub_vec.outputs[0], flat_xy.inputs[0])
 
             dist_flat = new("ShaderNodeVectorMath",
-                            name=f"LenFlatH{h} L{leaflet_index}")
+                            name=f"LenFlat{slot_label} L{leaflet_index}")
             dist_flat.operation = "LENGTH"
             dist_flat.location = (-1200, hy)
             links.new(flat_xy.outputs[0], dist_flat.inputs[0])
 
             dir_flat = new("ShaderNodeVectorMath",
-                           name=f"DirFlatH{h} L{leaflet_index}")
+                           name=f"DirFlat{slot_label} L{leaflet_index}")
             dir_flat.operation = "NORMALIZE"
             dir_flat.location = (-1200, hy - 130)
             links.new(flat_xy.outputs[0], dir_flat.inputs[0])
 
             # ============================================================
             # SPHERE path: lipid sits on a sphere centred at the membrane
-            # root's origin. The hole's "surface projection" is the point
-            # on the sphere in the direction of hole_location, at the
-            # same radius as the lipid (so a deformed sphere still picks
-            # the right rim). The geodesic distance is approximated by
-            # the length of the projection of (lipid - h_surf) onto the
-            # tangent plane at the lipid — exact for small angles, an
+            # root's origin. The pusher's "surface projection" is the
+            # point on the sphere in the direction of pusher_location, at
+            # the same radius as the lipid (so a deformed sphere still
+            # picks the right rim). The geodesic distance is approximated
+            # by the length of the projection of (lipid - h_surf) onto
+            # the tangent plane at the lipid — exact for small angles, an
             # under-estimate of true arc length for large ones.
             # ============================================================
             p_len = new("ShaderNodeVectorMath",
-                        name=f"PLenH{h} L{leaflet_index}")
+                        name=f"PLen{slot_label} L{leaflet_index}")
             p_len.operation = "LENGTH"
             p_len.location = (-1380, hy - 420)
             links.new(pos.outputs[0], p_len.inputs[0])
 
             p_norm = new("ShaderNodeVectorMath",
-                         name=f"PNormH{h} L{leaflet_index}")
+                         name=f"PNorm{slot_label} L{leaflet_index}")
             p_norm.operation = "NORMALIZE"
             p_norm.location = (-1380, hy - 560)
             links.new(pos.outputs[0], p_norm.inputs[0])
 
             h_norm = new("ShaderNodeVectorMath",
-                         name=f"HNormH{h} L{leaflet_index}")
+                         name=f"HNorm{slot_label} L{leaflet_index}")
             h_norm.operation = "NORMALIZE"
             h_norm.location = (-1380, hy - 700)
             links.new(oi.outputs["Location"], h_norm.inputs[0])
 
-            # h_surf = h_norm × |pos|   (sphere surface point in h direction)
             h_surf = new("ShaderNodeVectorMath",
-                         name=f"HSurfH{h} L{leaflet_index}")
+                         name=f"HSurf{slot_label} L{leaflet_index}")
             h_surf.operation = "SCALE"
             h_surf.location = (-1200, hy - 700)
             links.new(h_norm.outputs[0], h_surf.inputs[0])
             links.new(p_len.outputs["Value"], h_surf.inputs["Scale"])
 
-            # sub_sphere = pos - h_surf
             sub_sphere = new("ShaderNodeVectorMath",
-                             name=f"SubSphH{h} L{leaflet_index}")
+                             name=f"SubSph{slot_label} L{leaflet_index}")
             sub_sphere.operation = "SUBTRACT"
             sub_sphere.location = (-1020, hy - 700)
             links.new(pos.outputs[0], sub_sphere.inputs[0])
             links.new(h_surf.outputs[0], sub_sphere.inputs[1])
 
-            # Project out the radial component to get the tangent vector
-            # at the lipid pointing away from the hole.
             sub_dot_n = new("ShaderNodeVectorMath",
-                            name=f"SubDotNH{h} L{leaflet_index}")
+                            name=f"SubDotN{slot_label} L{leaflet_index}")
             sub_dot_n.operation = "DOT_PRODUCT"
             sub_dot_n.location = (-840, hy - 700)
             links.new(sub_sphere.outputs[0], sub_dot_n.inputs[0])
             links.new(p_norm.outputs[0], sub_dot_n.inputs[1])
 
             radial_part = new("ShaderNodeVectorMath",
-                              name=f"RadPartH{h} L{leaflet_index}")
+                              name=f"RadPart{slot_label} L{leaflet_index}")
             radial_part.operation = "SCALE"
             radial_part.location = (-660, hy - 700)
             links.new(p_norm.outputs[0], radial_part.inputs[0])
             links.new(sub_dot_n.outputs["Value"], radial_part.inputs["Scale"])
 
             tangent_away = new("ShaderNodeVectorMath",
-                               name=f"TanAwayH{h} L{leaflet_index}")
+                               name=f"TanAway{slot_label} L{leaflet_index}")
             tangent_away.operation = "SUBTRACT"
             tangent_away.location = (-480, hy - 700)
             links.new(sub_sphere.outputs[0], tangent_away.inputs[0])
             links.new(radial_part.outputs[0], tangent_away.inputs[1])
 
             dist_sphere = new("ShaderNodeVectorMath",
-                              name=f"LenSphH{h} L{leaflet_index}")
+                              name=f"LenSph{slot_label} L{leaflet_index}")
             dist_sphere.operation = "LENGTH"
             dist_sphere.location = (-300, hy - 700)
             links.new(tangent_away.outputs[0], dist_sphere.inputs[0])
 
             dir_sphere = new("ShaderNodeVectorMath",
-                             name=f"DirSphH{h} L{leaflet_index}")
+                             name=f"DirSph{slot_label} L{leaflet_index}")
             dir_sphere.operation = "NORMALIZE"
             dir_sphere.location = (-300, hy - 840)
             links.new(tangent_away.outputs[0], dir_sphere.inputs[0])
@@ -524,7 +551,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             # Switch between flat and sphere paths
             # ============================================================
             dist_sw = new("GeometryNodeSwitch",
-                          name=f"DistSwH{h} L{leaflet_index}")
+                          name=f"DistSw{slot_label} L{leaflet_index}")
             dist_sw.input_type = "FLOAT"
             dist_sw.location = (-120, hy)
             links.new(is_curved, dist_sw.inputs[0])
@@ -532,122 +559,119 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(dist_sphere.outputs["Value"], dist_sw.inputs["True"])
 
             dir_sw = new("GeometryNodeSwitch",
-                         name=f"DirSwH{h} L{leaflet_index}")
+                         name=f"DirSw{slot_label} L{leaflet_index}")
             dir_sw.input_type = "VECTOR"
             dir_sw.location = (-120, hy - 140)
             links.new(is_curved, dir_sw.inputs[0])
             links.new(dir_flat.outputs[0], dir_sw.inputs["False"])
             links.new(dir_sphere.outputs[0], dir_sw.inputs["True"])
 
-            # ``dist`` and ``direction`` aliases keep downstream node
-            # names + wiring readable (matches the original code).
-            dist = dist_sw  # dist.outputs["Output"] used as dist.outputs["Value"]
+            # ``dist`` is the FLOAT switch; ``direction`` the VECTOR switch.
+            dist = dist_sw
             direction = dir_sw
 
-            # R = hole radius = Scale.X (uniform scale) of the empty
-            scale_sep = new("ShaderNodeSeparateXYZ",
-                            name=f"ScaleH{h} L{leaflet_index}")
-            scale_sep.location = (-1560, hy - 170)
-            links.new(oi.outputs["Scale"], scale_sep.inputs[0])
+            # Raw radius source: holes pull from Object Info → Scale.X,
+            # protein force fields pull from a Float input set by the
+            # operator. The provider keeps the helper unaware of which.
+            raw_radius_sock = radius_provider(oi, hy)
 
             # ---- Z-aware effective radius (FLAT path only) -------------
-            # Treat the hole empty as a real SPHERE of radius R. The hole it
+            # Treat the pusher as a real SPHERE of radius R. The disc it
             # carves in THIS leaflet is the sphere's cross-section at the
-            # leaflet's height: effective radius = sqrt(R² - dz²), where dz
-            # is the vertical gap between the hole centre and the leaflet
-            # surface. On a curved (sphere/hemisphere) membrane this trick
-            # doesn't apply — the surface isn't horizontal — so the sphere
-            # path just uses the plain hole radius.
+            # leaflet's height: effective radius = sqrt(R² - dz²), where
+            # dz is the vertical gap between the pusher centre and the
+            # leaflet surface. On a curved membrane this trick doesn't
+            # apply — surface isn't horizontal — so the sphere path uses
+            # the plain radius.
             sub_z = new("ShaderNodeSeparateXYZ",
-                        name=f"SubZH{h} L{leaflet_index}")
+                        name=f"SubZ{slot_label} L{leaflet_index}")
             sub_z.location = (-1380, hy - 170)
             links.new(sub_vec.outputs[0], sub_z.inputs[0])
 
-            # dz = (point.z - hole.z) + leaflet offset = leaflet surface
-            # height measured relative to the hole centre.
-            vgap = new("ShaderNodeMath", name=f"VGapH{h} L{leaflet_index}")
+            vgap = new("ShaderNodeMath",
+                       name=f"VGap{slot_label} L{leaflet_index}")
             vgap.operation = "ADD"
             vgap.location = (-1200, hy - 250)
             links.new(sub_z.outputs["Z"], vgap.inputs[0])
             links.new(signed_half.outputs[0], vgap.inputs[1])
 
-            gap_sq = new("ShaderNodeMath", name=f"GapSqH{h} L{leaflet_index}")
+            gap_sq = new("ShaderNodeMath",
+                         name=f"GapSq{slot_label} L{leaflet_index}")
             gap_sq.operation = "MULTIPLY"
             gap_sq.location = (-1020, hy - 250)
             links.new(vgap.outputs[0], gap_sq.inputs[0])
             links.new(vgap.outputs[0], gap_sq.inputs[1])
 
-            r_sq = new("ShaderNodeMath", name=f"RSqH{h} L{leaflet_index}")
+            r_sq = new("ShaderNodeMath",
+                       name=f"RSq{slot_label} L{leaflet_index}")
             r_sq.operation = "MULTIPLY"
             r_sq.location = (-1020, hy - 410)
-            links.new(scale_sep.outputs["X"], r_sq.inputs[0])
-            links.new(scale_sep.outputs["X"], r_sq.inputs[1])
+            links.new(raw_radius_sock, r_sq.inputs[0])
+            links.new(raw_radius_sock, r_sq.inputs[1])
 
-            eff_sq = new("ShaderNodeMath", name=f"EffSqH{h} L{leaflet_index}")
+            eff_sq = new("ShaderNodeMath",
+                         name=f"EffSq{slot_label} L{leaflet_index}")
             eff_sq.operation = "SUBTRACT"
             eff_sq.location = (-840, hy - 330)
             links.new(r_sq.outputs[0], eff_sq.inputs[0])
             links.new(gap_sq.outputs[0], eff_sq.inputs[1])
 
-            eff_clamp = new("ShaderNodeMath", name=f"EffClpH{h} L{leaflet_index}")
+            eff_clamp = new("ShaderNodeMath",
+                            name=f"EffClp{slot_label} L{leaflet_index}")
             eff_clamp.operation = "MAXIMUM"
             eff_clamp.inputs[1].default_value = 0.0
             eff_clamp.location = (-660, hy - 330)
             links.new(eff_sq.outputs[0], eff_clamp.inputs[0])
 
             eff_r_flat = new("ShaderNodeMath",
-                             name=f"EffRFlatH{h} L{leaflet_index}")
+                             name=f"EffRFlat{slot_label} L{leaflet_index}")
             eff_r_flat.operation = "SQRT"
             eff_r_flat.location = (-480, hy - 330)
             links.new(eff_clamp.outputs[0], eff_r_flat.inputs[0])
 
-            # On sphere mode, the hole is a circle of radius scale.x on
-            # the sphere surface; no leaflet-Z modulation.
             r_sw = new("GeometryNodeSwitch",
-                       name=f"REffSwH{h} L{leaflet_index}")
+                       name=f"REffSw{slot_label} L{leaflet_index}")
             r_sw.input_type = "FLOAT"
             r_sw.location = (-300, hy - 330)
             links.new(is_curved, r_sw.inputs[0])
             links.new(eff_r_flat.outputs[0], r_sw.inputs["False"])
-            links.new(scale_sep.outputs["X"], r_sw.inputs["True"])
+            links.new(raw_radius_sock, r_sw.inputs["True"])
 
             radius = r_sw.outputs[0]
 
-            # ``dist`` is a GeometryNodeSwitch (FLOAT); its single output is
-            # at index 0. ``direction`` is the VECTOR switch.
             dist_out = dist.outputs[0]
             dir_out = direction.outputs[0]
 
-            # area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
-            dR = new("ShaderNodeCombineXYZ", name=f"dRH{h} L{leaflet_index}")
+            # Area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
+            dR = new("ShaderNodeCombineXYZ",
+                     name=f"dR{slot_label} L{leaflet_index}")
             dR.location = (-1000, hy)
             links.new(dist_out, dR.inputs[0])
             links.new(radius, dR.inputs[1])
             dR.inputs[2].default_value = 0.0
 
             pushed_r = new("ShaderNodeVectorMath",
-                           name=f"PushedRH{h} L{leaflet_index}")
+                           name=f"PushedR{slot_label} L{leaflet_index}")
             pushed_r.operation = "LENGTH"
             pushed_r.location = (-820, hy)
             links.new(dR.outputs[0], pushed_r.inputs[0])
 
-            # raw push distance = d' - d  (always >= 0)
-            raw_push = new("ShaderNodeMath", name=f"RawPushH{h} L{leaflet_index}")
+            raw_push = new("ShaderNodeMath",
+                           name=f"RawPush{slot_label} L{leaflet_index}")
             raw_push.operation = "SUBTRACT"
             raw_push.location = (-640, hy)
             links.new(pushed_r.outputs["Value"], raw_push.inputs[0])
             links.new(dist_out, raw_push.inputs[1])
 
-            # influence radius = R · HOLE_INFLUENCE
-            r_inf = new("ShaderNodeMath", name=f"RInfH{h} L{leaflet_index}")
+            r_inf = new("ShaderNodeMath",
+                        name=f"RInf{slot_label} L{leaflet_index}")
             r_inf.operation = "MULTIPLY"
             r_inf.inputs[1].default_value = HOLE_INFLUENCE
             r_inf.location = (-820, hy - 170)
             links.new(radius, r_inf.inputs[0])
 
-            # falloff: 1 for d <= R, smoothstep down to 0 at d >= R·INFLUENCE.
             falloff = new("ShaderNodeMapRange",
-                          name=f"FalloffH{h} L{leaflet_index}")
+                          name=f"Falloff{slot_label} L{leaflet_index}")
             falloff.interpolation_type = "SMOOTHSTEP"
             falloff.clamp = True
             falloff.location = (-640, hy - 170)
@@ -657,37 +681,93 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             falloff.inputs["To Min"].default_value = 1.0
             falloff.inputs["To Max"].default_value = 0.0
 
-            push_dist = new("ShaderNodeMath", name=f"PushH{h} L{leaflet_index}")
+            push_dist = new("ShaderNodeMath",
+                            name=f"Push{slot_label} L{leaflet_index}")
             push_dist.operation = "MULTIPLY"
             push_dist.location = (-440, hy)
             links.new(raw_push.outputs[0], push_dist.inputs[0])
             links.new(falloff.outputs["Result"], push_dist.inputs[1])
 
-            # displacement vector = dir · push_dist
-            disp = new("ShaderNodeVectorMath", name=f"DispH{h} L{leaflet_index}")
+            disp = new("ShaderNodeVectorMath",
+                       name=f"Disp{slot_label} L{leaflet_index}")
             disp.operation = "SCALE"
             disp.location = (-260, hy)
             links.new(dir_out, disp.inputs[0])
             links.new(push_dist.outputs[0], disp.inputs["Scale"])
 
-            # gate by Enabled — an unassigned slot must contribute nothing
-            # (Object Info on a None object reports Scale (1,1,1), which
+            # Gate by Enabled — an unassigned slot must contribute nothing
+            # (Object Info on a None object reports Location (0,0,0), which
             # would otherwise carve a phantom hole at the origin).
-            gate = new("GeometryNodeSwitch", name=f"GateH{h} L{leaflet_index}")
+            gate = new("GeometryNodeSwitch",
+                       name=f"Gate{slot_label} L{leaflet_index}")
             gate.input_type = "VECTOR"
             gate.location = (-80, hy)
             gate.inputs["False"].default_value = (0.0, 0.0, 0.0)
-            links.new(enabled, gate.inputs["Switch"])
+            links.new(enabled_sock, gate.inputs["Switch"])
             links.new(disp.outputs[0], gate.inputs["True"])
 
+            return gate.outputs[0]
+
+        def _hole_radius_provider(oi_node, hy):
+            """Radius source for hole slots: the object's uniform Scale.X."""
+            scale_sep = new("ShaderNodeSeparateXYZ",
+                            name=f"Scale{oi_node.name} L{leaflet_index}")
+            scale_sep.location = (-1560, hy - 170)
+            links.new(oi_node.outputs["Scale"], scale_sep.inputs[0])
+            return scale_sep.outputs["X"]
+
+        def _ff_radius_provider_factory(slot_idx):
+            """Radius source for protein-FF slots: the per-slot Float input."""
+            radius_in = get_in(f"Protein FF {slot_idx} Radius")
+
+            def provider(_oi_node, _hy):
+                return radius_in
+            return provider
+
+        # ---- Hole slots --------------------------------------------------
+        for h in range(1, MAX_HOLES + 1):
+            slot_disp = _build_pusher(
+                slot_label=f"H{h}",
+                enabled_sock=get_in(f"Hole {h} Enabled"),
+                obj_sock=get_in(f"Hole {h}"),
+                radius_provider=_hole_radius_provider,
+                hy=y_pos - 600 - h * 260,
+            )
             if hole_disp is None:
-                hole_disp = gate.outputs[0]
+                hole_disp = slot_disp
             else:
-                acc = new("ShaderNodeVectorMath", name=f"AccH{h} L{leaflet_index}")
+                acc = new("ShaderNodeVectorMath",
+                          name=f"AccH{h} L{leaflet_index}")
                 acc.operation = "ADD"
-                acc.location = (100, hy)
+                acc.location = (100, y_pos - 600 - h * 260)
                 links.new(hole_disp, acc.inputs[0])
-                links.new(gate.outputs[0], acc.inputs[1])
+                links.new(slot_disp, acc.inputs[1])
+                hole_disp = acc.outputs[0]
+
+        # ---- Protein force-field slots ----------------------------------
+        # Parallel pusher loop — same physics as the hole loop, but each
+        # slot's R comes from a Float input (the operator computes it from
+        # the protein's bounding sphere + the user's spacing) rather than
+        # from the object's uniform scale. Laid out below the hole stack
+        # so the node tree stays readable in the editor.
+        ff_y_base = y_pos - 600 - (MAX_HOLES + 1) * 260
+        for f in range(1, MAX_PROTEIN_FFS + 1):
+            slot_disp = _build_pusher(
+                slot_label=f"FF{f}",
+                enabled_sock=get_in(f"Protein FF {f} Enabled"),
+                obj_sock=get_in(f"Protein FF {f}"),
+                radius_provider=_ff_radius_provider_factory(f),
+                hy=ff_y_base - f * 260,
+            )
+            if hole_disp is None:
+                hole_disp = slot_disp
+            else:
+                acc = new("ShaderNodeVectorMath",
+                          name=f"AccFF{f} L{leaflet_index}")
+                acc.operation = "ADD"
+                acc.location = (100, ff_y_base - f * 260)
+                links.new(hole_disp, acc.inputs[0])
+                links.new(slot_disp, acc.inputs[1])
                 hole_disp = acc.outputs[0]
 
         # ==================================================================

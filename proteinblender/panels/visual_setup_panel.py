@@ -141,6 +141,40 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
             row.operator("proteinblender.set_pivot_custom", text="Custom")
             row.operator("proteinblender.set_pivot_last", text="Last")
 
+        # ---- Membrane Force Field (per-protein) ---------------------------
+        # Only shown when exactly one PROTEIN is selected — the toggle and
+        # spacing live on that protein's MoleculeListItem. When on, every
+        # membrane in the scene parts around this protein (same physics as
+        # a membrane hole, lipids pushed aside).
+        if proteins == 1:
+            protein_item = next(
+                (it for it in selected_items if it.item_type == 'PROTEIN'),
+                None,
+            )
+            mol_item = None
+            if protein_item is not None:
+                for mi in scene.molecule_list_items:
+                    if mi.identifier == protein_item.item_id:
+                        mol_item = mi
+                        break
+
+            if mol_item is not None:
+                box.separator()
+                ff_box = box.box()
+                ff_box.prop(
+                    mol_item, "force_field_enabled",
+                    text="Membrane Force Field",
+                    icon='FORCE_FORCE',
+                )
+                if mol_item.force_field_enabled:
+                    spacing_row = ff_box.row(align=True)
+                    spacing_row.prop(mol_item, "force_field_spacing",
+                                      text="Spacing (nm)")
+                    ff_box.label(
+                        text="Lipids part around this protein in any membrane.",
+                        icon='INFO',
+                    )
+
         # Add bottom spacing
         layout.separator()
 

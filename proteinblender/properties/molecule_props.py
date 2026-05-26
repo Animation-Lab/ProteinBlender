@@ -249,7 +249,35 @@ class MoleculeListItem(PropertyGroup):
     )
     
     domains: CollectionProperty(type=Domain)
-    
+
+    # Membrane force-field: when enabled, this protein pushes lipids aside on
+    # every membrane in the scene (same physics as a membrane hole, sized by
+    # the protein's own bounding sphere + the user's spacing).
+    force_field_enabled: BoolProperty(
+        name="Membrane Force Field",
+        description=(
+            "When on, lipid bilayers in the scene part around this protein as "
+            "it gets close — like the membrane's own hole controllers, the "
+            "lipids are pushed aside, not deleted"
+        ),
+        default=False,
+        update=lambda self, context: _on_force_field_changed(context),
+    )
+
+    force_field_spacing: FloatProperty(
+        name="Force Field Spacing",
+        description=(
+            "Extra clearance (in nm) added beyond the protein's bounding "
+            "sphere. Bigger value → wider gap in the membrane around the "
+            "protein"
+        ),
+        default=1.0,
+        min=0.0,
+        max=20.0,
+        soft_max=5.0,
+        update=lambda self, context: _on_force_field_changed(context),
+    )
+
     poses: CollectionProperty(type=MoleculePose, description="Saved poses for this molecule")
     active_pose_index: IntProperty(name="Active Pose", default=0, min=0)
     keyframes: CollectionProperty(type=MoleculeKeyframe, description="Saved keyframes for this molecule")
@@ -285,6 +313,20 @@ class MoleculeListItem(PropertyGroup):
             self.domain_end = self.domain_start
         elif changed_prop == "end" and self.domain_start > self.domain_end:
             self.domain_start = self.domain_end
+
+def _on_force_field_changed(context):
+    """Re-apply protein force fields to every membrane in the scene.
+
+    Fired whenever a protein's force_field_enabled toggle or spacing slider
+    moves. Imported lazily so molecule_props doesn't depend on the
+    membrane_builder module at import time.
+    """
+    try:
+        from ..membrane_builder.force_fields import apply_to_all_membranes
+        apply_to_all_membranes(context.scene if context else None)
+    except Exception:
+        pass
+
 
 def get_max_residue_for_chain(molecule, chain_id):
     print(f"Getting max residue for chain: {chain_id}")
