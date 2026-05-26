@@ -262,7 +262,7 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     _set_mod_input(mod, "Density (per nm²)",
                    float(root_obj.get("pb_mem_density", 1.5)))
     _set_mod_input(mod, "Bilayer Thickness (nm)",
-                   float(root_obj.get("pb_mem_bilayer_thickness", 4.0)))
+                   float(root_obj.get("pb_mem_bilayer_thickness", 3.2)))
     _set_mod_input(mod, "Lipid Scale",
                    float(root_obj.get("pb_mem_lipid_scale", 1.0)))
     _set_mod_input(mod, "Random Rotation",

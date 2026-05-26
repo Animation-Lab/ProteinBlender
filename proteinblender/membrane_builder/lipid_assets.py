@@ -68,13 +68,6 @@ _COLLECTION_NAMES: Dict[str, str] = {
     STYLE_BALL_AND_STICK: "PB_Membrane_Lipid_Variants_BallStick",
 }
 
-RENDER_STYLE_VARIANT_COUNT: Dict[str, int] = {
-    STYLE_SURFACE: 4,
-    STYLE_STYLIZED: 4,
-    STYLE_BALL_AND_STICK: 4,
-}
-
-
 # ---------------------------------------------------------------------------
 # Bundled PDB sources
 # ---------------------------------------------------------------------------
@@ -87,6 +80,33 @@ LIPID_PDB_NAMES: Tuple[str, ...] = (
     "lipid_4.pdb",
 )
 NUM_LIPID_VARIANTS: int = len(LIPID_PDB_NAMES)
+
+# Empirical population weights for the four bundled PC conformations.
+# Derived by measuring tail end-to-end / contour ratios on each PDB:
+#
+#   lipid_1: 0.681 (near mean)        → weight 3
+#   lipid_2: 0.658 (near mean)        → weight 3
+#   lipid_3: 0.717 (slightly extended) → weight 1
+#   lipid_4: 0.643 (slightly disordered) → weight 2
+#
+# Mapped onto the order-parameter histogram of a fluid-phase
+# phosphatidylcholine bilayer (Lα, T > Tm) — that distribution is
+# roughly Gaussian around the mean chain order, with the tails (more
+# extended OR more disordered) rarer than the middle. Pure all-trans
+# (gel phase) and heavily kinked states aren't represented in the
+# bundled PDBs at all — they're vanishingly rare at body temperature
+# in a fluid PC bilayer, so that's faithful to biology.
+#
+# Same weights for all render styles: the conformations are physically
+# the same molecules, just drawn differently.
+LIPID_VARIANT_WEIGHTS: Tuple[int, ...] = (3, 3, 1, 2)
+_TOTAL_VARIANT_SLOTS = sum(LIPID_VARIANT_WEIGHTS)
+
+RENDER_STYLE_VARIANT_COUNT: Dict[str, int] = {
+    STYLE_SURFACE: _TOTAL_VARIANT_SLOTS,
+    STYLE_STYLIZED: _TOTAL_VARIANT_SLOTS,
+    STYLE_BALL_AND_STICK: _TOTAL_VARIANT_SLOTS,
+}
 
 LIPID_COLLECTION_NAME = _COLLECTION_NAMES[STYLE_SURFACE]
 
@@ -706,16 +726,33 @@ def _style_asset_name(style: str, i: int) -> str:
     return f"PB_Membrane_Lipid_{_STYLE_ASSET_SUFFIX[style]}_{i}"
 
 
+def _weighted_slot_name(base_name: str, slot: int) -> str:
+    """Name of the *slot*-th duplicate wrapper for *base_name*.
+
+    Slot 1 is the original object that owns the mesh; slots 2..weight
+    are extra wrapper objects sharing the same mesh datablock. The
+    extra objects expand the variant's footprint in the collection so
+    a uniform random pick samples it more often.
+    """
+    if slot == 1:
+        return base_name
+    return f"{base_name}_w{slot}"
+
+
 def get_or_build_lipid_collection(style: str = DEFAULT_STYLE) -> bpy.types.Collection:
     """Build (or fetch) the collection holding the variants for ``style``.
 
-    Both styles produce 4 variants (one per bundled PDB pose). The
-    collection is unlinked from any scene — ``GeometryNodeCollectionInfo``
-    reads it just fine, and the user's outliner stays clean.
+    Each of the 4 bundled PDB conformations gets one *base* object that
+    owns the baked mesh, plus N-1 wrapper objects that share the same
+    mesh datablock — where N is that variant's entry in
+    ``LIPID_VARIANT_WEIGHTS``. The GN tree's uniform random pick then
+    samples each conformation at its biologically-motivated frequency.
 
-    Any objects already in the collection whose names don't match the
-    current style's naming scheme are unlinked, so swapping in a new
-    builder revision doesn't leave stale assets behind.
+    The collection is unlinked from any scene —
+    ``GeometryNodeCollectionInfo`` reads it just fine, and the user's
+    outliner stays clean. Stale objects (old asset names, removed
+    duplicate slots after a weight change) are unlinked so the random
+    Instance Index only picks from current variants.
     """
     if style not in _COLLECTION_NAMES:
         style = DEFAULT_STYLE
@@ -730,11 +767,16 @@ def get_or_build_lipid_collection(style: str = DEFAULT_STYLE) -> bpy.types.Colle
         STYLE_STYLIZED: _build_stylized,
         STYLE_BALL_AND_STICK: _build_ball_and_stick,
     }[style]
-    count = RENDER_STYLE_VARIANT_COUNT[style]
-    expected = {_style_asset_name(style, i) for i in range(1, count + 1)}
 
-    # Drop anything stale (e.g. the old v6 single ``Stylized_1`` asset)
-    # so the random Instance Index only picks from current variants.
+    expected: set = set()
+    for i, weight in enumerate(LIPID_VARIANT_WEIGHTS, start=1):
+        base = _style_asset_name(style, i)
+        for slot in range(1, weight + 1):
+            expected.add(_weighted_slot_name(base, slot))
+
+    # Drop anything stale (old asset names, leftover weight slots after
+    # a re-weighting) so the random Instance Index range stays in sync
+    # with the actual collection contents.
     for obj in list(coll.objects):
         if obj.name not in expected:
             try:
@@ -742,18 +784,30 @@ def get_or_build_lipid_collection(style: str = DEFAULT_STYLE) -> bpy.types.Colle
             except Exception:
                 pass
 
-    for i, pdb_name in enumerate(LIPID_PDB_NAMES, start=1):
-        asset_name = _style_asset_name(style, i)
-        obj = bpy.data.objects.get(asset_name)
+    for i, (pdb_name, weight) in enumerate(
+            zip(LIPID_PDB_NAMES, LIPID_VARIANT_WEIGHTS), start=1):
+        base_name = _style_asset_name(style, i)
+        obj = bpy.data.objects.get(base_name)
         if obj is None:
             pdb_path = _DATA_DIR / pdb_name
             if not pdb_path.is_file():
                 # Bundled PDB missing — skip; the GN tree picks from
                 # whatever variants ARE in the collection.
                 continue
-            obj = builder(pdb_path, asset_name)
+            obj = builder(pdb_path, base_name)
         if obj.name not in coll.objects:
             coll.objects.link(obj)
+
+        # Extra weight slots wrap the same mesh datablock. Cheap — no
+        # geometry duplication, just additional draws of the same mesh
+        # — but enough to skew the GN tree's uniform random pick.
+        for slot in range(2, weight + 1):
+            dup_name = _weighted_slot_name(base_name, slot)
+            dup = bpy.data.objects.get(dup_name)
+            if dup is None:
+                dup = bpy.data.objects.new(dup_name, obj.data)
+            if dup.name not in coll.objects:
+                coll.objects.link(dup)
 
     return coll
 

@@ -124,8 +124,15 @@ class MembraneBuilderProperties(PropertyGroup):
 
     bilayer_thickness: FloatProperty(
         name="Bilayer Thickness",
-        description="Distance between the two leaflets' head groups, in nm",
-        default=4.0,
+        description=(
+            "Distance between the two leaflets' head groups, in nm. The "
+            "default (3.2 nm) is tuned so an average lipid's acyl tails "
+            "meet the opposing leaflet at the midplane — deeper tails "
+            "interdigitate slightly, matching the closed-hydrophobic-"
+            "interior look of a real fluid bilayer with no empty space "
+            "between the leaflets"
+        ),
+        default=3.2,
         min=1.0,
         max=15.0,
         soft_max=8.0,
