@@ -114,7 +114,24 @@ class MoleculeWrapper:
             return
             
         parent_node_group = parent_modifier.node_group
-        
+
+        # Idempotency / self-heal. __init__ runs this every time a wrapper is
+        # built — INCLUDING when wrappers are reconstructed on file load / undo,
+        # at which point the node group already contains the Domain_Boolean_Join
+        # and Domain_Final_Not nodes saved in the file. The old code blindly
+        # created a SECOND Join->NOT layer wrapping the existing selection; a
+        # second NOT inverts the mask from "select all" to "select nothing", so
+        # a molecule with no separate per-chain objects (DNA/RNA, or an unsplit
+        # protein) renders nothing — "only a point where the DNA was". If the
+        # infrastructure already exists, reuse it and collapse any stacked
+        # duplicate layers instead of adding another.
+        existing_join = parent_node_group.nodes.get("Domain_Boolean_Join")
+        existing_not = parent_node_group.nodes.get("Domain_Final_Not")
+        if existing_join and existing_not:
+            self._rebind_domain_infrastructure(
+                parent_node_group, existing_join, existing_not)
+            return
+
         try:
             # Find main style node
             main_style_node = self.get_main_style_node()
@@ -180,7 +197,47 @@ class MoleculeWrapper:
             if link.from_node != final_not:
                 parent_node_group.links.remove(link)
         '''
-        
+
+    def _rebind_domain_infrastructure(self, parent_node_group, join_node, final_not):
+        """Reuse domain-mask nodes already present in the node group (file load /
+        undo reconstruction) instead of rebuilding them, and collapse any
+        duplicate Join/NOT layers a previous non-idempotent run stacked, so the
+        style Selection ends up driven by exactly one Final NOT. See the
+        idempotency note in _setup_protein_domain_infrastructure."""
+        # Drop duplicate copies Blender auto-suffixed (".001", ".002", ...) when
+        # a prior reconstruction recreated nodes that already existed. Genuine
+        # overflow joins use an underscore ("Domain_Boolean_Join_2"), so the
+        # dot-suffixed ones are always stale duplicates.
+        for node in list(parent_node_group.nodes):
+            if (node.name.startswith("Domain_Boolean_Join.")
+                    or node.name.startswith("Domain_Final_Not.")):
+                parent_node_group.nodes.remove(node)
+
+        # Re-establish join -> NOT -> style Selection through the canonical nodes
+        # only (the duplicate layer we just removed may have been in between).
+        for link in list(final_not.inputs[0].links):
+            parent_node_group.links.remove(link)
+        parent_node_group.links.new(join_node.outputs["Result"], final_not.inputs[0])
+
+        main_style_node = self.get_main_style_node()
+        if main_style_node:
+            for link in list(main_style_node.inputs["Selection"].links):
+                parent_node_group.links.remove(link)
+            parent_node_group.links.new(
+                final_not.outputs["Boolean"], main_style_node.inputs["Selection"])
+
+        # Rebind tracked references: primary join + any underscore overflow joins.
+        self.domain_join_node = join_node
+        self.final_not = final_not
+        self.join_nodes = [join_node]
+        i = 2
+        while True:
+            overflow = parent_node_group.nodes.get(f"Domain_Boolean_Join_{i}")
+            if not overflow:
+                break
+            self.join_nodes.append(overflow)
+            i += 1
+
     @property
     def object(self) -> Optional[bpy.types.Object]:
         """Get the Blender object, healing reference if needed."""
