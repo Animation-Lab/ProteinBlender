@@ -196,15 +196,24 @@ def apply_to_all_membranes(scene: Optional[bpy.types.Scene] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Handlers — keep the FF slots in sync with the live scene
+# Handlers — keep the FF slots and viewport in sync with the live scene
 # ---------------------------------------------------------------------------
 #
-# When a force-field-enabled protein is deleted, the membrane modifier's slot
-# still holds a stale object pointer + non-zero radius — the GN tree reads
-# Location (0,0,0) and would carve a phantom hole at the origin until something
-# else re-applied. The depsgraph handler below watches for object count drops
-# and schedules a deferred ``apply_to_all_membranes`` (deferred because
-# modifying data inside a depsgraph handler is unsafe).
+# Two distinct sync paths live here, both driven by ``depsgraph_update_post``:
+#
+# 1. **Deletion of an FF-enabled protein.** The membrane modifier's slot
+#    still holds a stale object pointer + non-zero radius — without a
+#    re-apply the GN tree would read Location (0,0,0) and carve a phantom
+#    hole at the origin. We detect deletions by watching the total object
+#    count drop and schedule a deferred ``apply_to_all_membranes`` (deferred
+#    because modifying data inside a depsgraph handler is unsafe).
+#
+# 2. **Movement of an FF-enabled protein.** GN modifier inputs assigned via
+#    ``mod[ident] = obj`` don't always register the depsgraph relation that
+#    would re-evaluate the membrane modifier when the source protein moves
+#    — so without this handler the carved gap stays at the protein's old
+#    position. We tag every membrane object so the next viewport refresh
+#    re-evaluates Object Info against the protein's live transform.
 
 _object_count_cache = [-1]
 
@@ -217,9 +226,50 @@ def _deferred_ff_reapply():
     return None  # one-shot
 
 
+def _deferred_membrane_refresh():
+    """Kick every membrane modifier to re-evaluate against the live
+    protein transforms. Runs outside the depsgraph handler so it can
+    safely mutate modifier state (which inside the handler is racy).
+
+    Toggling ``show_viewport`` False -> True (with an explicit
+    intermediate value, not ``not show_viewport`` twice) is what
+    actually dirties the viewport-evaluated mesh. Without that, the
+    GN Object Info node keeps returning the protein's stale location.
+    """
+    try:
+        for obj in bpy.data.objects:
+            if not obj.get("pb_is_membrane", False):
+                continue
+            for mod in obj.modifiers:
+                if mod.type == "NODES":
+                    mod.show_viewport = False
+                    mod.show_viewport = True
+            obj.update_tag()
+        # Force the depsgraph to immediately re-evaluate. Without this,
+        # the toggle is queued but not applied before the next viewport
+        # redraw, and the gap still looks stale.
+        if bpy.context and bpy.context.view_layer:
+            bpy.context.view_layer.update()
+    except Exception:
+        pass
+    return None  # one-shot
+
+
+def _ff_protein_names(scene) -> set:
+    """Names of the objects currently driving an enabled force field."""
+    out = set()
+    if scene is None or not hasattr(scene, "molecule_list_items"):
+        return out
+    for item in scene.molecule_list_items:
+        if getattr(item, "force_field_enabled", False) and item.object_name:
+            out.add(item.object_name)
+    return out
+
+
 @persistent
 def _on_depsgraph_check(scene, depsgraph):
     try:
+        # --- Deletion path ---
         count = len(bpy.data.objects)
         prev = _object_count_cache[0]
         _object_count_cache[0] = count
@@ -227,6 +277,25 @@ def _on_depsgraph_check(scene, depsgraph):
             if not bpy.app.timers.is_registered(_deferred_ff_reapply):
                 bpy.app.timers.register(_deferred_ff_reapply,
                                         first_interval=0.0)
+
+        # --- Movement path ---
+        # If any FF-enabled protein transformed this update, schedule a
+        # deferred membrane refresh. We defer (rather than dirty inline)
+        # because mutating modifier state inside the depsgraph handler
+        # is unreliable — the toggles get coalesced and the modifier
+        # ends up reading the same stale Object Info value.
+        ff_names = _ff_protein_names(scene)
+        if not ff_names:
+            return
+        moved = any(
+            isinstance(upd.id, bpy.types.Object)
+            and upd.is_updated_transform
+            and upd.id.name in ff_names
+            for upd in depsgraph.updates
+        )
+        if moved and not bpy.app.timers.is_registered(_deferred_membrane_refresh):
+            bpy.app.timers.register(_deferred_membrane_refresh,
+                                    first_interval=0.0)
     except Exception:
         pass
 
