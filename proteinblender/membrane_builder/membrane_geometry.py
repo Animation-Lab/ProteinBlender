@@ -425,7 +425,9 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # flow in real time (grow the hole → lipids stream outward; shrink it
         # → the membrane heals closed).
         HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the pusher radius
-        hole_disp = None       # accumulates the total push from holes + FFs
+        # Accumulates displacement contributions from every hole slot AND
+        # every protein-FF slot. The motion-sum further down reads this.
+        pusher_disp = None
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
@@ -439,14 +441,16 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         is_curved = is_curved_node.outputs[0]
 
         def _build_pusher(slot_label, enabled_sock, obj_sock,
-                          radius_provider, hy):
+                          radius_source, hy):
             """Build the per-slot pusher subgraph and return its gated
             displacement vector socket.
 
-            ``radius_provider(oi_node, hy)`` returns a Float socket carrying
-            the "raw R" (in BU) for this slot. For holes it reads
-            Object Info → Scale.x; for protein force fields it returns the
-            external Float input wired by the operator.
+            ``radius_source`` is either:
+              * a Float socket — used directly as the "raw R" (FFs do this,
+                pulling from a per-slot input set by the operator), or
+              * a callable ``(oi_node, hy) -> socket`` that builds a sub-
+                graph and returns the resulting Float socket (holes do
+                this — they derive R from Object Info → Scale.x).
             """
             oi = new("GeometryNodeObjectInfo",
                      name=f"OI {slot_label} L{leaflet_index}")
@@ -596,10 +600,11 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             dist = dist_sw
             direction = dir_sw
 
-            # Raw radius source: holes pull from Object Info → Scale.X,
-            # protein force fields pull from a Float input set by the
-            # operator. The provider keeps the helper unaware of which.
-            raw_radius_sock = radius_provider(oi, hy)
+            # Raw radius source: holes pull from Object Info → Scale.X
+            # (via the callable form), FFs pass a Float socket directly.
+            raw_radius_sock = (radius_source(oi, hy)
+                               if callable(radius_source)
+                               else radius_source)
 
             # ---- Z-aware effective radius (FLAT path only) -------------
             # Treat the pusher as a real SPHERE of radius R. The disc it
@@ -734,7 +739,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
             return gate.outputs[0]
 
-        def _hole_radius_provider(oi_node, hy):
+        def _hole_radius_source(oi_node, hy):
             """Radius source for hole slots: the object's uniform Scale.X."""
             scale_sep = new("ShaderNodeSeparateXYZ",
                             name=f"Scale{oi_node.name} L{leaflet_index}")
@@ -742,59 +747,48 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(oi_node.outputs["Scale"], scale_sep.inputs[0])
             return scale_sep.outputs["X"]
 
-        def _ff_radius_provider_factory(slot_idx):
-            """Radius source for protein-FF slots: the per-slot Float input."""
-            radius_in = get_in(f"Protein FF {slot_idx} Radius")
-
-            def provider(_oi_node, _hy):
-                return radius_in
-            return provider
+        def _add_pusher_slot(slot_label, enabled_sock, obj_sock,
+                             radius_source, hy):
+            """Build one pusher and fold its displacement into ``pusher_disp``."""
+            nonlocal pusher_disp
+            slot_disp = _build_pusher(slot_label, enabled_sock, obj_sock,
+                                       radius_source, hy)
+            if pusher_disp is None:
+                pusher_disp = slot_disp
+                return
+            acc = new("ShaderNodeVectorMath",
+                      name=f"Acc{slot_label} L{leaflet_index}")
+            acc.operation = "ADD"
+            acc.location = (100, hy)
+            links.new(pusher_disp, acc.inputs[0])
+            links.new(slot_disp, acc.inputs[1])
+            pusher_disp = acc.outputs[0]
 
         # ---- Hole slots --------------------------------------------------
+        # Spherical hole controllers; R from each empty's uniform scale.
         for h in range(1, MAX_HOLES + 1):
-            slot_disp = _build_pusher(
+            _add_pusher_slot(
                 slot_label=f"H{h}",
                 enabled_sock=get_in(f"Hole {h} Enabled"),
                 obj_sock=get_in(f"Hole {h}"),
-                radius_provider=_hole_radius_provider,
+                radius_source=_hole_radius_source,
                 hy=y_pos - 600 - h * 260,
             )
-            if hole_disp is None:
-                hole_disp = slot_disp
-            else:
-                acc = new("ShaderNodeVectorMath",
-                          name=f"AccH{h} L{leaflet_index}")
-                acc.operation = "ADD"
-                acc.location = (100, y_pos - 600 - h * 260)
-                links.new(hole_disp, acc.inputs[0])
-                links.new(slot_disp, acc.inputs[1])
-                hole_disp = acc.outputs[0]
 
         # ---- Protein force-field slots ----------------------------------
-        # Parallel pusher loop — same physics as the hole loop, but each
-        # slot's R comes from a Float input (the operator computes it from
-        # the protein's bounding sphere + the user's spacing) rather than
-        # from the object's uniform scale. Laid out below the hole stack
-        # so the node tree stays readable in the editor.
+        # Same physics, but R comes from a per-slot Float input that the
+        # operator computes from the protein's bounding sphere + user
+        # spacing. Laid out below the hole stack to keep the node tree
+        # readable in the editor.
         ff_y_base = y_pos - 600 - (MAX_HOLES + 1) * 260
         for f in range(1, MAX_PROTEIN_FFS + 1):
-            slot_disp = _build_pusher(
+            _add_pusher_slot(
                 slot_label=f"FF{f}",
                 enabled_sock=get_in(f"Protein FF {f} Enabled"),
                 obj_sock=get_in(f"Protein FF {f}"),
-                radius_provider=_ff_radius_provider_factory(f),
+                radius_source=get_in(f"Protein FF {f} Radius"),
                 hy=ff_y_base - f * 260,
             )
-            if hole_disp is None:
-                hole_disp = slot_disp
-            else:
-                acc = new("ShaderNodeVectorMath",
-                          name=f"AccFF{f} L{leaflet_index}")
-                acc.operation = "ADD"
-                acc.location = (100, ff_y_base - f * 260)
-                links.new(hole_disp, acc.inputs[0])
-                links.new(slot_disp, acc.inputs[1])
-                hole_disp = acc.outputs[0]
 
         # ==================================================================
         # MOSH-PIT MOTION
@@ -1060,7 +1054,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         motion_sum.operation = "ADD"
         motion_sum.location = (-1500, y_pos + 200)
         links.new(mosh_offset.outputs[0], motion_sum.inputs[0])
-        links.new(hole_disp, motion_sum.inputs[1])
+        links.new(pusher_disp, motion_sum.inputs[1])
 
         # Fold the motion offset + half-thickness offset into the single
         # SetPos Position write (a chained Set Position would reset position

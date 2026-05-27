@@ -8,11 +8,16 @@ are active, computes each one's effective radius, and writes the values
 into the GN modifier's Protein FF slots.
 
 Sizing:
-    R_BU = max(obj.dimensions) / 2  +  spacing_nm / NM_PER_BU
+    R_BU = _protein_tallest_dim_bu(obj) / 2  +  spacing_nm / NM_PER_BU
 
-That is, the bounding-cube half-diagonal of the rendered protein plus the
-user's clearance. The bounding box already includes the protein's world
-scale, so resizing the protein scales the force field with it.
+That is, half the protein's longest atom-cloud extent (NOT ``obj.dimensions``
+— the MN modifier's output mesh under-reports the rendered size) plus the
+user's clearance.
+
+Two depsgraph-driven sync paths live at the bottom of the module:
+  * deletion → re-apply (clear stale slots)
+  * movement → membrane refresh (kick the modifier so Object Info re-reads
+    the protein's live transform)
 """
 
 from __future__ import annotations
