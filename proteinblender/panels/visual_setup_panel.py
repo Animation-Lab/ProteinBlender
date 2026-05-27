@@ -8,6 +8,39 @@ from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.chain_utils import get_chain_objects, get_chain_domains
 
 
+def _resolve_single_protein_owner(scene, selected_items):
+    """Return the molecule identifier if every selected non-reference item
+    shares a single protein owner, else ``""``. Walks parent_id chains so
+    a chain or domain selection resolves to its parent PROTEIN.
+    """
+    # Build a quick lookup of item_id -> item for parent walks.
+    by_id = {it.item_id: it for it in scene.outliner_items}
+
+    def protein_owner(item):
+        # Walk up parent_id until we hit a PROTEIN, or run out.
+        cur = item
+        seen = set()
+        while cur is not None and cur.item_id not in seen:
+            seen.add(cur.item_id)
+            if cur.item_type == 'PROTEIN':
+                return cur.item_id
+            cur = by_id.get(cur.parent_id) if cur.parent_id else None
+        return None
+
+    owners = set()
+    for it in selected_items:
+        oid = protein_owner(it)
+        if oid is None:
+            # A non-protein item with no resolvable protein parent (e.g.
+            # a PUPPET or MEMBRANE) — bail; the FF UI is protein-only.
+            return ""
+        owners.add(oid)
+        if len(owners) > 1:
+            return ""
+
+    return next(iter(owners), "")
+
+
 class PROTEINBLENDER_OT_apply_representation(Operator):
     """Apply representation style to selected items"""
     bl_idname = "proteinblender.apply_representation"
@@ -142,22 +175,19 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
             row.operator("proteinblender.set_pivot_last", text="Last")
 
         # ---- Membrane Force Field (per-protein) ---------------------------
-        # Only shown when exactly one PROTEIN is selected — the toggle and
-        # spacing live on that protein's MoleculeListItem. When on, every
-        # membrane in the scene parts around this protein (same physics as
-        # a membrane hole, lipids pushed aside).
-        if proteins == 1:
-            protein_item = next(
-                (it for it in selected_items if it.item_type == 'PROTEIN'),
+        # Shown whenever the selection resolves to exactly one protein.
+        # That covers: clicking the PROTEIN row directly, clicking any
+        # chain or domain (we walk up to the owning protein), or
+        # multi-selecting chains within the same protein. When the
+        # selection spans multiple proteins the FF UI is hidden — there's
+        # no single protein to set the toggle on.
+        protein_id = _resolve_single_protein_owner(scene, selected_items)
+        if protein_id:
+            mol_item = next(
+                (mi for mi in scene.molecule_list_items
+                 if mi.identifier == protein_id),
                 None,
             )
-            mol_item = None
-            if protein_item is not None:
-                for mi in scene.molecule_list_items:
-                    if mi.identifier == protein_item.item_id:
-                        mol_item = mi
-                        break
-
             if mol_item is not None:
                 box.separator()
                 ff_box = box.box()
