@@ -40,16 +40,85 @@ def compute_force_field_radius_bu(obj: bpy.types.Object,
                                    spacing_nm: float) -> float:
     """Return the force-field radius in Blender Units.
 
-    Uses the object's world-space bounding cube half-diagonal as a
-    conservative protein extent — same value in any orientation, so a
-    spinning protein doesn't pulse the membrane.
+    Half the protein's tallest extent (the bounding-cube radius along its
+    longest axis) plus the user's clearance. Uses the atom point cloud
+    rather than ``obj.dimensions`` because the MN modifier's output mesh
+    massively under-reports the rendered size — see ``_protein_tallest
+    _dim_bu`` for the gory details.
     """
     if obj is None:
         return 0.0
-    dim = obj.dimensions  # world-space, already in BU
-    half_extent_bu = max(dim.x, dim.y, dim.z) / 2.0
+    half_extent_bu = _protein_tallest_dim_bu(obj) / 2.0
     spacing_bu = max(0.0, float(spacing_nm)) / NM_PER_BU
     return half_extent_bu + spacing_bu
+
+
+# Floor for the auto-computed default — keeps tiny proteins (small
+# peptides, single-residue fragments) from getting a near-zero spacing
+# that's invisible in the viewport.
+DEFAULT_SPACING_MIN_NM = 1.0
+# The default scales with the protein's longest dimension. 0.75 keeps it
+# generous enough that lipids visibly part around even a chunky protein,
+# without being so wide that a small protein produces a giant void.
+DEFAULT_SPACING_FRACTION = 0.75
+
+
+def _protein_tallest_dim_bu(obj: bpy.types.Object) -> float:
+    """Return the protein's longest extent in BU, atom-cloud aware.
+
+    For MN-rendered proteins ``obj.dimensions`` reflects whatever subset
+    the MolecularNodes modifier emits, not the real atom cloud — for a
+    typical actin import it reads ~20× smaller than the real size. Use
+    the raw vertex bbox of ``obj.data`` when available (that's the
+    persisted atom point cloud), and only fall back to ``obj.dimensions``
+    for non-mesh objects or empty meshes.
+    """
+    if obj is None:
+        return 0.0
+    data = getattr(obj, "data", None)
+    verts = getattr(data, "vertices", None) if data is not None else None
+    if verts and len(verts) > 0:
+        xs = [v.co.x for v in verts]
+        ys = [v.co.y for v in verts]
+        zs = [v.co.z for v in verts]
+        span = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+        # Object's world scale stretches the rendered protein — fold it in.
+        try:
+            span *= max(abs(s) for s in obj.scale)
+        except Exception:
+            pass
+        return float(span)
+    dim = obj.dimensions
+    return float(max(dim.x, dim.y, dim.z))
+
+
+def compute_default_force_field_spacing_nm(obj: bpy.types.Object) -> float:
+    """Suggested initial Spacing (nm) for a freshly-imported protein.
+
+    At least ``DEFAULT_SPACING_FRACTION`` of the protein's tallest world-
+    space dimension, with a small floor so peptides don't get a useless
+    near-zero default.
+    """
+    if obj is None:
+        return DEFAULT_SPACING_MIN_NM
+    tallest_nm = _protein_tallest_dim_bu(obj) * NM_PER_BU
+    return max(DEFAULT_SPACING_FRACTION * tallest_nm, DEFAULT_SPACING_MIN_NM)
+
+
+def init_default_force_field_spacing(item, obj: bpy.types.Object) -> None:
+    """Set ``item.force_field_spacing`` to the protein-size-aware default.
+
+    Call this once at protein-import time, right after ``molecule_list_items
+    .add()``. The user's update callback fires when we set the spacing — it's
+    a no-op while ``force_field_enabled`` is still False (its default), so no
+    membranes get touched yet.
+    """
+    if item is None:
+        return
+    try:
+        item.force_field_spacing = compute_default_force_field_spacing_nm(obj)
+    except Exception:
+        pass
 
 
 def iter_active_force_fields(scene: bpy.types.Scene
