@@ -271,7 +271,7 @@ class MoleculeListItem(PropertyGroup):
             "sphere. Bigger value → wider gap in the membrane around the "
             "protein"
         ),
-        default=1.0,
+        default=1.5,
         min=0.0,
         max=20.0,
         soft_max=5.0,

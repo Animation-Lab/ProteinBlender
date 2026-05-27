@@ -53,16 +53,6 @@ def compute_force_field_radius_bu(obj: bpy.types.Object,
     return half_extent_bu + spacing_bu
 
 
-# Floor for the auto-computed default — keeps tiny proteins (small
-# peptides, single-residue fragments) from getting a near-zero spacing
-# that's invisible in the viewport.
-DEFAULT_SPACING_MIN_NM = 1.0
-# The default scales with the protein's longest dimension. 0.75 keeps it
-# generous enough that lipids visibly part around even a chunky protein,
-# without being so wide that a small protein produces a giant void.
-DEFAULT_SPACING_FRACTION = 0.75
-
-
 def _protein_tallest_dim_bu(obj: bpy.types.Object) -> float:
     """Return the protein's longest extent in BU, atom-cloud aware.
 
@@ -90,35 +80,6 @@ def _protein_tallest_dim_bu(obj: bpy.types.Object) -> float:
         return float(span)
     dim = obj.dimensions
     return float(max(dim.x, dim.y, dim.z))
-
-
-def compute_default_force_field_spacing_nm(obj: bpy.types.Object) -> float:
-    """Suggested initial Spacing (nm) for a freshly-imported protein.
-
-    At least ``DEFAULT_SPACING_FRACTION`` of the protein's tallest world-
-    space dimension, with a small floor so peptides don't get a useless
-    near-zero default.
-    """
-    if obj is None:
-        return DEFAULT_SPACING_MIN_NM
-    tallest_nm = _protein_tallest_dim_bu(obj) * NM_PER_BU
-    return max(DEFAULT_SPACING_FRACTION * tallest_nm, DEFAULT_SPACING_MIN_NM)
-
-
-def init_default_force_field_spacing(item, obj: bpy.types.Object) -> None:
-    """Set ``item.force_field_spacing`` to the protein-size-aware default.
-
-    Call this once at protein-import time, right after ``molecule_list_items
-    .add()``. The user's update callback fires when we set the spacing — it's
-    a no-op while ``force_field_enabled`` is still False (its default), so no
-    membranes get touched yet.
-    """
-    if item is None:
-        return
-    try:
-        item.force_field_spacing = compute_default_force_field_spacing_nm(obj)
-    except Exception:
-        pass
 
 
 def iter_active_force_fields(scene: bpy.types.Scene

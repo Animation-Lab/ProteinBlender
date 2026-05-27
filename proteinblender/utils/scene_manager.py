@@ -210,14 +210,6 @@ class ProteinBlenderScene:
         if molecule.object:
             item.object_name = molecule.object.name
         item.sync_from_wrapper(molecule)
-        # Size the FF spacing to the protein on first import — a fixed
-        # 1 nm default is invisible against a 13 nm protein and overkill
-        # against a 3 nm peptide.
-        try:
-            from ..membrane_builder.force_fields import init_default_force_field_spacing
-            init_default_force_field_spacing(item, molecule.object)
-        except Exception:
-            pass
         scene.molecule_list_index = len(scene.molecule_list_items) - 1
         # Auto-domain creation ran BEFORE the list item existed, so each
         # _create_domain_with_params call mirrored into a None list item
@@ -251,11 +243,6 @@ class ProteinBlenderScene:
         if molecule.object:
             item.object_name = molecule.object.name
         item.sync_from_wrapper(molecule)
-        try:
-            from ..membrane_builder.force_fields import init_default_force_field_spacing
-            init_default_force_field_spacing(item, molecule.object)
-        except Exception:
-            pass
         scene.molecule_list_index = len(scene.molecule_list_items) - 1
         self.active_molecule = molecule.identifier
 
@@ -685,13 +672,6 @@ def _refresh_molecule_ui(scene_manager, scene):
                     item.sync_from_wrapper(molecule)
                 except Exception as e:
                     print(f"sync_from_wrapper failed for {identifier}: {e}")
-            # No prior FF state to restore for an adopted orphan — give it
-            # the protein-size-aware default the same as a fresh import.
-            try:
-                from ..membrane_builder.force_fields import init_default_force_field_spacing
-                init_default_force_field_spacing(item, molecule.object)
-            except Exception:
-                pass
 
     # Update active molecule
     if scene_manager.active_molecule not in scene_manager.molecules:
