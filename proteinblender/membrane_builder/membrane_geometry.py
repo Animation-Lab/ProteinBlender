@@ -81,7 +81,15 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       surface point in its direction. Real 3D distance accounts for
 #       the pusher's radial position and the carving fades correctly
 #       as it moves inward / outward.
-GN_TREE_VERSION = 15
+#   v16: slot accumulator switched from SUM to strongest-push-wins.
+#       Multiple FFs / holes whose influence zones overlap used to
+#       have their per-lipid displacements added, so a lipid in the
+#       intersection got pushed twice as far as either FF intended —
+#       the gap stretched in the direction of the extra pusher.
+#       Now each lipid picks just the slot proposing the strongest
+#       push, so overlapping pushers behave as the union of their
+#       gaps instead of cumulatively over-shooting.
+GN_TREE_VERSION = 16
 
 
 # ===========================================================================
@@ -425,9 +433,12 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # flow in real time (grow the hole → lipids stream outward; shrink it
         # → the membrane heals closed).
         HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the pusher radius
-        # Accumulates displacement contributions from every hole slot AND
-        # every protein-FF slot. The motion-sum further down reads this.
+        # Per-lipid "winning" push: every slot proposes a displacement and
+        # a strength (push magnitude). The accumulator below keeps only
+        # the strongest proposal per lipid — so two FFs that both want to
+        # push the same lipid don't add up and over-shoot the gap.
         pusher_disp = None
+        pusher_strength = None
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
@@ -737,7 +748,20 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(enabled_sock, gate.inputs["Switch"])
             links.new(disp.outputs[0], gate.inputs["True"])
 
-            return gate.outputs[0]
+            # Push *strength* (scalar magnitude) — same Enabled gate, so
+            # disabled slots report zero strength and lose every "is
+            # strongest" comparison the accumulator runs. The downstream
+            # selector uses this to pick a single dominant pusher per
+            # lipid instead of summing competing contributions.
+            strength_gate = new("GeometryNodeSwitch",
+                                name=f"Strength{slot_label} L{leaflet_index}")
+            strength_gate.input_type = "FLOAT"
+            strength_gate.location = (-80, hy - 200)
+            strength_gate.inputs["False"].default_value = 0.0
+            links.new(enabled_sock, strength_gate.inputs["Switch"])
+            links.new(push_dist.outputs[0], strength_gate.inputs["True"])
+
+            return gate.outputs[0], strength_gate.outputs[0]
 
         def _hole_radius_source(oi_node, hy):
             """Radius source for hole slots: the object's uniform Scale.X."""
@@ -749,20 +773,50 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
 
         def _add_pusher_slot(slot_label, enabled_sock, obj_sock,
                              radius_source, hy):
-            """Build one pusher and fold its displacement into ``pusher_disp``."""
-            nonlocal pusher_disp
-            slot_disp = _build_pusher(slot_label, enabled_sock, obj_sock,
-                                       radius_source, hy)
+            """Build one pusher and fold its proposal into the per-lipid
+            "strongest wins" selector.
+
+            Each slot returns ``(disp, strength)``; the accumulator keeps
+            whichever slot proposes the strongest push for each lipid.
+            That fixes over-shoot in regions where two pushers overlap:
+            instead of summing both pushes, the lipid only feels the
+            dominant one.
+            """
+            nonlocal pusher_disp, pusher_strength
+            slot_disp, slot_strength = _build_pusher(
+                slot_label, enabled_sock, obj_sock, radius_source, hy)
             if pusher_disp is None:
                 pusher_disp = slot_disp
+                pusher_strength = slot_strength
                 return
-            acc = new("ShaderNodeVectorMath",
-                      name=f"Acc{slot_label} L{leaflet_index}")
-            acc.operation = "ADD"
-            acc.location = (100, hy)
-            links.new(pusher_disp, acc.inputs[0])
-            links.new(slot_disp, acc.inputs[1])
-            pusher_disp = acc.outputs[0]
+
+            # is_stronger = slot_strength > pusher_strength
+            cmp_node = new("FunctionNodeCompare",
+                           name=f"StrCmp{slot_label} L{leaflet_index}")
+            cmp_node.data_type = "FLOAT"
+            cmp_node.operation = "GREATER_THAN"
+            cmp_node.location = (100, hy - 200)
+            links.new(slot_strength, cmp_node.inputs[0])
+            links.new(pusher_strength, cmp_node.inputs[1])
+
+            # New disp = is_stronger ? slot_disp : pusher_disp
+            disp_pick = new("GeometryNodeSwitch",
+                            name=f"DispPick{slot_label} L{leaflet_index}")
+            disp_pick.input_type = "VECTOR"
+            disp_pick.location = (280, hy)
+            links.new(cmp_node.outputs["Result"], disp_pick.inputs["Switch"])
+            links.new(pusher_disp, disp_pick.inputs["False"])
+            links.new(slot_disp, disp_pick.inputs["True"])
+            pusher_disp = disp_pick.outputs[0]
+
+            # New running strength = max(slot_strength, pusher_strength)
+            str_max = new("ShaderNodeMath",
+                          name=f"StrMax{slot_label} L{leaflet_index}")
+            str_max.operation = "MAXIMUM"
+            str_max.location = (280, hy - 200)
+            links.new(pusher_strength, str_max.inputs[0])
+            links.new(slot_strength, str_max.inputs[1])
+            pusher_strength = str_max.outputs[0]
 
         # ---- Hole slots --------------------------------------------------
         # Spherical hole controllers; R from each empty's uniform scale.
