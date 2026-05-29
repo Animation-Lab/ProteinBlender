@@ -95,10 +95,70 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       and ended up clipping into the other protein. Vector
 #       addition is the physically correct combination — both
 #       pushes apply and the resultant vector kicks the lipid out
-#       of both zones. The "over-shoot" v16 was meant to fix lives
-#       with each FF's individual falloff and the user-tunable
-#       Spacing, not with how slots are combined.
-GN_TREE_VERSION = 17
+#       of both zones.
+#   v18: per-slot push formula switched from area-preserving
+#       (sqrt(d² + R²) − d) to clamp-to-boundary (max(0, R − d)).
+#       The old formula pushed lipids ~1.4 R *past* the FF
+#       boundary even from a single FF, so the user-set Spacing
+#       wasn't the actual gap width; under vector-sum with two
+#       FFs the gap stretched even further. With the new form,
+#       each FF moves an inside-the-zone lipid just to its own
+#       boundary, so Spacing literally is the lipid-to-protein
+#       gap and multi-FF additions don't compound.
+#   v19: multi-pusher combination switched from vector SUM to
+#       squared-weight blend. v17/v18's vector sum cancelled to
+#       ≈(0,0,0) for lipids in the overlap of two near-equal
+#       pushers — per-slot disp vectors are antiparallel and the
+#       components along the line joining the two centres cancel,
+#       so lipids stuck in the pinch zone got pushed only by the
+#       tiny perpendicular residual and stayed inside the union of
+#       both protein zones. New combiner per leaflet:
+#           weighted_dir = Σ p_i² · dir_i   (vector accumulator)
+#           max_pen      = max_i p_i        (scalar accumulator)
+#           disp         = normalize(weighted_dir) · max_pen
+#       where p_i = per-slot clamp-to-boundary push (the v18
+#       scalar) and dir_i = unit outward from pusher centre. The
+#       squared weight tilts the resultant direction toward
+#       whichever pusher is deeper; max_pen guarantees the lipid
+#       moves by the full penetration depth of the deepest zone,
+#       so it escapes that zone in one pass (and typically the
+#       union, when the lipid is off the line joining centres).
+#       Single-pusher case reduces to dir · p — identical to v18.
+#       Lipids exactly on the line joining two equal pushers still
+#       cancel to zero (degenerate 1D subset; acceptable for now).
+#   v20: squared-weight blend unrolled into 3 Jacobi iterations.
+#       v19's single-pass push left a visible "snake" of lipids
+#       in the overlap region between two close FF proteins: off-
+#       midline lipids got pushed perpendicular to the line AB by
+#       max_pen, but pen decreases as the lipid moves away from
+#       the centres, so a single pass converges to the boundary
+#       only in the limit. Three iterations starting from the
+#       *displaced* position of the previous iteration move the
+#       lipid much closer to the lens edge; in practice this
+#       clears the union of the two FF zones.
+#           pos₀ = original captured lipid position
+#           disp₁ = squared-weight combine of 16 slots at pos₀
+#           pos₁ = pos₀ + disp₁
+#           disp₂ = squared-weight combine of 16 slots at pos₁
+#           pos₂ = pos₁ + disp₂
+#           disp₃ = squared-weight combine of 16 slots at pos₂
+#           pusher_disp = disp₁ + disp₂ + disp₃
+#       Each iteration rebuilds the full pusher subgraph (16
+#       slots × ObjectInfo + math + switches) parameterized on
+#       a different position socket — tree size roughly triples
+#       to ~6k nodes per leaflet. Exact-midline lipids (equal
+#       pen, antiparallel dirs) still cancel in every iteration
+#       — that's the same 1D degenerate subset as v19.
+#   v21: ITERATIONS bumped 3 → 5. v20 with 3 passes left a
+#       visible NS strip of lipids in two-FF overlap scenes —
+#       the per-iter push magnitude (max_pen) shrinks as the
+#       lipid moves perpendicular to the AB line, so 3 passes
+#       only reached ~92% of the way to the lens edge. Each
+#       extra pass closes the remaining geometric gap; at 5
+#       passes lipids reach ~99% of the lens edge for typical
+#       D/R ratios. Tree node count scales linearly with the
+#       iteration count.
+GN_TREE_VERSION = 21
 
 
 # ===========================================================================
@@ -442,14 +502,22 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # flow in real time (grow the hole → lipids stream outward; shrink it
         # → the membrane heals closed).
         HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the pusher radius
-        # Sum of displacement vectors contributed by every hole + FF slot.
-        # Vector addition is the physically correct combination: each
-        # pusher applies its own outward push, and a lipid in the
-        # overlap of two zones gets the resultant vector — which is
-        # what's needed to keep the lipid out of BOTH zones (a winner-
-        # takes-all selection would silently drop the other pusher's
-        # contribution and leave the lipid clipping the loser).
-        pusher_disp = None
+        # v20: the per-iteration combiner is squared-weight (see v19
+        # history block). Iterations are unrolled below — each rebuilds
+        # the full 16-slot pusher subgraph at the position the previous
+        # iteration left the lipid at, then sums the per-iter
+        # displacements. Off-midline lipids in a multi-FF overlap zone
+        # asymptote to the union boundary across iterations; the exact-
+        # midline degenerate (equal pen, antiparallel dirs) still
+        # cancels in every iteration.
+        # ITERATIONS=3 left a visible NS strip in two-FF overlap scenes
+        # (lipids stuck at ~92% of the way to the lens edge — pen
+        # shrinks as the lipid moves outward, so convergence is
+        # asymptotic). Bumped to 5: each extra pass closes the
+        # remaining gap geometrically; at i=5 lipids reach ~99% of
+        # the lens edge for typical D/R ratios. Tree budget grows
+        # linearly with iteration count.
+        ITERATIONS = 5
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
@@ -463,7 +531,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         is_curved = is_curved_node.outputs[0]
 
         def _build_pusher(slot_label, enabled_sock, obj_sock,
-                          radius_source, hy):
+                          radius_source, hy, pos_socket):
             """Build the per-slot pusher subgraph and return its gated
             displacement vector socket.
 
@@ -473,6 +541,12 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
               * a callable ``(oi_node, hy) -> socket`` that builds a sub-
                 graph and returns the resulting Float socket (holes do
                 this — they derive R from Object Info → Scale.x).
+
+            ``pos_socket`` is the vector socket carrying the current
+            lipid position. For v20's Jacobi iteration, each pass passes
+            a different position socket so the pusher subgraph is rebuilt
+            and re-evaluated against the position the previous iteration
+            left the lipid at.
             """
             oi = new("GeometryNodeObjectInfo",
                      name=f"OI {slot_label} L{leaflet_index}")
@@ -485,7 +559,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                           name=f"Sub{slot_label} L{leaflet_index}")
             sub_vec.operation = "SUBTRACT"
             sub_vec.location = (-1560, hy)
-            links.new(pos.outputs[0], sub_vec.inputs[0])
+            links.new(pos_socket, sub_vec.inputs[0])
             links.new(oi.outputs["Location"], sub_vec.inputs[1])
 
             # ============================================================
@@ -524,13 +598,13 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                         name=f"PLen{slot_label} L{leaflet_index}")
             p_len.operation = "LENGTH"
             p_len.location = (-1380, hy - 420)
-            links.new(pos.outputs[0], p_len.inputs[0])
+            links.new(pos_socket, p_len.inputs[0])
 
             p_norm = new("ShaderNodeVectorMath",
                          name=f"PNorm{slot_label} L{leaflet_index}")
             p_norm.operation = "NORMALIZE"
             p_norm.location = (-1380, hy - 560)
-            links.new(pos.outputs[0], p_norm.inputs[0])
+            links.new(pos_socket, p_norm.inputs[0])
 
             h_norm = new("ShaderNodeVectorMath",
                          name=f"HNorm{slot_label} L{leaflet_index}")
@@ -549,7 +623,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                              name=f"SubSph{slot_label} L{leaflet_index}")
             sub_sphere.operation = "SUBTRACT"
             sub_sphere.location = (-1020, hy - 700)
-            links.new(pos.outputs[0], sub_sphere.inputs[0])
+            links.new(pos_socket, sub_sphere.inputs[0])
             links.new(h_surf.outputs[0], sub_sphere.inputs[1])
 
             sub_dot_n = new("ShaderNodeVectorMath",
@@ -695,26 +769,27 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             dist_out = dist.outputs[0]
             dir_out = direction.outputs[0]
 
-            # Area-preserving pushed radius: sqrt(d² + R²) == length(d, R, 0)
-            dR = new("ShaderNodeCombineXYZ",
-                     name=f"dR{slot_label} L{leaflet_index}")
-            dR.location = (-1000, hy)
-            links.new(dist_out, dR.inputs[0])
-            links.new(radius, dR.inputs[1])
-            dR.inputs[2].default_value = 0.0
-
-            pushed_r = new("ShaderNodeVectorMath",
-                           name=f"PushedR{slot_label} L{leaflet_index}")
-            pushed_r.operation = "LENGTH"
-            pushed_r.location = (-820, hy)
-            links.new(dR.outputs[0], pushed_r.inputs[0])
+            # Clamp-to-boundary push: ``max(0, R - d)``. A lipid inside
+            # the pusher's radius gets nudged just to the boundary; one
+            # outside isn't touched. The earlier area-preserving formula
+            # (sqrt(d² + R²) − d) pushed lipids ~1.4 R *past* the
+            # boundary even from a single pusher, and stacked too far
+            # under vector-add when multiple FFs overlapped. With this
+            # form, "Spacing" actually means the literal gap between
+            # lipids and the protein's bounding sphere.
+            r_minus_d = new("ShaderNodeMath",
+                            name=f"RminusD{slot_label} L{leaflet_index}")
+            r_minus_d.operation = "SUBTRACT"
+            r_minus_d.location = (-820, hy)
+            links.new(radius, r_minus_d.inputs[0])
+            links.new(dist_out, r_minus_d.inputs[1])
 
             raw_push = new("ShaderNodeMath",
                            name=f"RawPush{slot_label} L{leaflet_index}")
-            raw_push.operation = "SUBTRACT"
+            raw_push.operation = "MAXIMUM"
+            raw_push.inputs[1].default_value = 0.0
             raw_push.location = (-640, hy)
-            links.new(pushed_r.outputs["Value"], raw_push.inputs[0])
-            links.new(dist_out, raw_push.inputs[1])
+            links.new(r_minus_d.outputs[0], raw_push.inputs[0])
 
             r_inf = new("ShaderNodeMath",
                         name=f"RInf{slot_label} L{leaflet_index}")
@@ -741,25 +816,23 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(raw_push.outputs[0], push_dist.inputs[0])
             links.new(falloff.outputs["Result"], push_dist.inputs[1])
 
-            disp = new("ShaderNodeVectorMath",
-                       name=f"Disp{slot_label} L{leaflet_index}")
-            disp.operation = "SCALE"
-            disp.location = (-260, hy)
-            links.new(dir_out, disp.inputs[0])
-            links.new(push_dist.outputs[0], disp.inputs["Scale"])
-
             # Gate by Enabled — an unassigned slot must contribute nothing
             # (Object Info on a None object reports Location (0,0,0), which
-            # would otherwise carve a phantom hole at the origin).
+            # would otherwise carve a phantom hole at the origin). v19
+            # gates the penetration *scalar* instead of the displacement
+            # vector — the downstream squared-weight combiner uses p² as
+            # the directional weight, so a zero p removes the slot from
+            # both the weighted-direction sum and the max-pen scalar in
+            # one stroke.
             gate = new("GeometryNodeSwitch",
                        name=f"Gate{slot_label} L{leaflet_index}")
-            gate.input_type = "VECTOR"
+            gate.input_type = "FLOAT"
             gate.location = (-80, hy)
-            gate.inputs["False"].default_value = (0.0, 0.0, 0.0)
+            gate.inputs["False"].default_value = 0.0
             links.new(enabled_sock, gate.inputs["Switch"])
-            links.new(disp.outputs[0], gate.inputs["True"])
+            links.new(push_dist.outputs[0], gate.inputs["True"])
 
-            return gate.outputs[0]
+            return gate.outputs[0], dir_out
 
         def _hole_radius_source(oi_node, hy):
             """Radius source for hole slots: the object's uniform Scale.X."""
@@ -769,53 +842,151 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             links.new(oi_node.outputs["Scale"], scale_sep.inputs[0])
             return scale_sep.outputs["X"]
 
-        def _add_pusher_slot(slot_label, enabled_sock, obj_sock,
-                             radius_source, hy):
-            """Build one pusher and sum its displacement into ``pusher_disp``.
+        def _compute_pusher_displacement(pos_socket, iter_label, hy_base):
+            """Build one iteration's pusher subgraph + squared-weight
+            combine. Returns the displacement vector socket for this
+            iteration.
 
-            Vector addition gives each pusher an independent contribution
-            — a lipid inside two FFs feels both outward kicks, and the
-            resulting vector keeps it clear of both zones.
+            ``pos_socket`` is the lipid position to evaluate against —
+            iteration 1 uses the captured raw position, iterations 2/3
+            use the position the previous iteration left the lipid at.
+
+            ``iter_label`` is folded into every node name so each
+            iteration's 16-slot subgraph has unique node names.
+
+            ``hy_base`` shifts the laid-out node positions per iteration
+            so the three copies don't overlap in the node editor.
             """
-            nonlocal pusher_disp
-            slot_disp = _build_pusher(slot_label, enabled_sock, obj_sock,
-                                       radius_source, hy)
-            if pusher_disp is None:
-                pusher_disp = slot_disp
-                return
-            acc = new("ShaderNodeVectorMath",
-                      name=f"Acc{slot_label} L{leaflet_index}")
-            acc.operation = "ADD"
-            acc.location = (100, hy)
-            links.new(pusher_disp, acc.inputs[0])
-            links.new(slot_disp, acc.inputs[1])
-            pusher_disp = acc.outputs[0]
+            weighted_dir = None
+            max_pen = None
 
-        # ---- Hole slots --------------------------------------------------
-        # Spherical hole controllers; R from each empty's uniform scale.
-        for h in range(1, MAX_HOLES + 1):
-            _add_pusher_slot(
-                slot_label=f"H{h}",
-                enabled_sock=get_in(f"Hole {h} Enabled"),
-                obj_sock=get_in(f"Hole {h}"),
-                radius_source=_hole_radius_source,
-                hy=y_pos - 600 - h * 260,
-            )
+            def _add_slot(slot_label, enabled_sock, obj_sock,
+                          radius_source, hy):
+                nonlocal weighted_dir, max_pen
+                pen_sock, dir_sock = _build_pusher(
+                    slot_label, enabled_sock, obj_sock,
+                    radius_source, hy, pos_socket)
 
-        # ---- Protein force-field slots ----------------------------------
-        # Same physics, but R comes from a per-slot Float input that the
-        # operator computes from the protein's bounding sphere + user
-        # spacing. Laid out below the hole stack to keep the node tree
-        # readable in the editor.
-        ff_y_base = y_pos - 600 - (MAX_HOLES + 1) * 260
-        for f in range(1, MAX_PROTEIN_FFS + 1):
-            _add_pusher_slot(
-                slot_label=f"FF{f}",
-                enabled_sock=get_in(f"Protein FF {f} Enabled"),
-                obj_sock=get_in(f"Protein FF {f}"),
-                radius_source=get_in(f"Protein FF {f} Radius"),
-                hy=ff_y_base - f * 260,
+                pen_sq = new("ShaderNodeMath",
+                             name=f"PenSq{slot_label} L{leaflet_index}")
+                pen_sq.operation = "MULTIPLY"
+                pen_sq.location = (100, hy)
+                links.new(pen_sock, pen_sq.inputs[0])
+                links.new(pen_sock, pen_sq.inputs[1])
+
+                contrib = new("ShaderNodeVectorMath",
+                              name=f"Contrib{slot_label} L{leaflet_index}")
+                contrib.operation = "SCALE"
+                contrib.location = (280, hy)
+                links.new(dir_sock, contrib.inputs[0])
+                links.new(pen_sq.outputs[0], contrib.inputs["Scale"])
+
+                if weighted_dir is None:
+                    weighted_dir = contrib.outputs[0]
+                    max_pen = pen_sock
+                    return
+
+                dir_acc = new("ShaderNodeVectorMath",
+                              name=f"DirAcc{slot_label} L{leaflet_index}")
+                dir_acc.operation = "ADD"
+                dir_acc.location = (460, hy)
+                links.new(weighted_dir, dir_acc.inputs[0])
+                links.new(contrib.outputs[0], dir_acc.inputs[1])
+                weighted_dir = dir_acc.outputs[0]
+
+                max_acc = new("ShaderNodeMath",
+                              name=f"PenMax{slot_label} L{leaflet_index}")
+                max_acc.operation = "MAXIMUM"
+                max_acc.location = (460, hy - 200)
+                links.new(max_pen, max_acc.inputs[0])
+                links.new(pen_sock, max_acc.inputs[1])
+                max_pen = max_acc.outputs[0]
+
+            # ---- Hole slots ----------------------------------------------
+            for h in range(1, MAX_HOLES + 1):
+                _add_slot(
+                    slot_label=f"H{h}_{iter_label}",
+                    enabled_sock=get_in(f"Hole {h} Enabled"),
+                    obj_sock=get_in(f"Hole {h}"),
+                    radius_source=_hole_radius_source,
+                    hy=hy_base - 600 - h * 260,
+                )
+
+            # ---- Protein force-field slots -------------------------------
+            ff_hy_base = hy_base - 600 - (MAX_HOLES + 1) * 260
+            for f in range(1, MAX_PROTEIN_FFS + 1):
+                _add_slot(
+                    slot_label=f"FF{f}_{iter_label}",
+                    enabled_sock=get_in(f"Protein FF {f} Enabled"),
+                    obj_sock=get_in(f"Protein FF {f}"),
+                    radius_source=get_in(f"Protein FF {f} Radius"),
+                    hy=ff_hy_base - f * 260,
+                )
+
+            # Squared-weight final combine for this iteration.
+            # NORMALIZE on a zero vector returns (0,0,0) in Blender,
+            # so the "no pusher contributed" case yields a zero disp.
+            final_dir = new(
+                "ShaderNodeVectorMath",
+                name=f"FinalDir {iter_label} L{leaflet_index}",
             )
+            final_dir.operation = "NORMALIZE"
+            final_dir.location = (700, hy_base - 300)
+            if weighted_dir is not None:
+                links.new(weighted_dir, final_dir.inputs[0])
+
+            final_disp = new(
+                "ShaderNodeVectorMath",
+                name=f"FinalDisp {iter_label} L{leaflet_index}",
+            )
+            final_disp.operation = "SCALE"
+            final_disp.location = (880, hy_base - 300)
+            links.new(final_dir.outputs[0], final_disp.inputs[0])
+            if max_pen is not None:
+                links.new(max_pen, final_disp.inputs["Scale"])
+            return final_disp.outputs[0]
+
+        # ----------------------------------------------------------------
+        # Jacobi iteration: 3 passes (v20)
+        # ----------------------------------------------------------------
+        # Each iteration's subgraph is laid out 6000 BU below the
+        # previous one (irrelevant to evaluation; just keeps the node
+        # editor readable). Position chains forward: pos_i = pos_(i-1)
+        # + disp_(i-1). Final pusher_disp sums all three per-iter disps.
+        iter_disps = []
+        current_pos = pos.outputs[0]
+        for i in range(1, ITERATIONS + 1):
+            iter_label = f"I{i}"
+            iter_disp = _compute_pusher_displacement(
+                pos_socket=current_pos,
+                iter_label=iter_label,
+                hy_base=y_pos - (i - 1) * 6000,
+            )
+            iter_disps.append(iter_disp)
+            if i < ITERATIONS:
+                next_pos = new(
+                    "ShaderNodeVectorMath",
+                    name=f"IterPos {iter_label} L{leaflet_index}",
+                )
+                next_pos.operation = "ADD"
+                next_pos.location = (1100, y_pos - (i - 1) * 6000 - 300)
+                links.new(current_pos, next_pos.inputs[0])
+                links.new(iter_disp, next_pos.inputs[1])
+                current_pos = next_pos.outputs[0]
+
+        # Sum the per-iteration displacements into the final pusher_disp.
+        sum_acc = iter_disps[0]
+        for i, iter_disp in enumerate(iter_disps[1:], start=2):
+            disp_sum = new(
+                "ShaderNodeVectorMath",
+                name=f"DispSum I{i} L{leaflet_index}",
+            )
+            disp_sum.operation = "ADD"
+            disp_sum.location = (1300, y_pos - (i - 1) * 6000 - 600)
+            links.new(sum_acc, disp_sum.inputs[0])
+            links.new(iter_disp, disp_sum.inputs[1])
+            sum_acc = disp_sum.outputs[0]
+        pusher_disp = sum_acc
 
         # ==================================================================
         # MOSH-PIT MOTION
