@@ -1,69 +1,64 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-05-28T04:37:05+00:00",
+  "generated_at": "2026-05-29T04:39:55+00:00",
   "summary": {
-    "views": 20,
-    "visitors": 12,
-    "clones": 497,
+    "views": 19,
+    "visitors": 11,
+    "clones": 489,
     "cloners": 157
   },
   "all_time": {
-    "views": 460,
-    "visitors": 217,
-    "clones": 1840,
-    "cloners": 846,
-    "days_tracked": 71
+    "views": 461,
+    "visitors": 218,
+    "clones": 1858,
+    "cloners": 855,
+    "days_tracked": 72
   },
   "current_day": {
+    "date": "2026-05-27",
+    "views": 1,
+    "visitors": 1,
+    "clones": 18,
+    "cloners": 9
+  },
+  "previous_day": {
     "date": "2026-05-26",
     "views": 0,
     "visitors": 0,
     "clones": 25,
     "cloners": 14
   },
-  "previous_day": {
-    "date": "2026-05-25",
+  "delta_since_previous_day": {
     "views": 1,
     "visitors": 1,
-    "clones": 27,
-    "cloners": 14
-  },
-  "delta_since_previous_day": {
-    "views": -1,
-    "visitors": -1,
-    "clones": -2,
-    "cloners": 0
+    "clones": -7,
+    "cloners": -5
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 14,
-      "uniques": 8
-    },
-    {
-      "referrer": "github.com",
-      "count": 2,
-      "uniques": 2
+      "count": 15,
+      "uniques": 9
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 11,
-      "uniques": 10
+      "count": 9,
+      "uniques": 8
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases",
+      "title": "/releases",
+      "count": 3,
+      "uniques": 3
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/1.0.0",
       "title": "/releases/tag/1.0.0",
       "count": 3,
       "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/releases",
-      "title": "/releases",
-      "count": 2,
-      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/blob/main/CLAUDE.md",
