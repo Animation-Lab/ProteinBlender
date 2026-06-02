@@ -311,27 +311,29 @@ class PuppetKeyframeSettings(PropertyGroup):
     # molecule object, keyframed directly — no controller, no domain poses).
     item_kind: StringProperty(name="Item Kind", default='PUPPET')
     
-    # Main checkbox to enable/disable this puppet
+    # Main checkbox to enable/disable this item (puppet OR DNA/RNA strand)
     use_puppet: BoolProperty(
-        name="Use Puppet",
-        description="Include this puppet in keyframing",
+        name="Include",
+        description="Include this item in keyframing",
         default=False
     )
-    
-    # Transform checkboxes - all default to True
+
+    # Transform checkboxes - all default to True. For a puppet these affect the
+    # controller Empty; for a DNA/RNA strand they keyframe the molecule object
+    # directly (and its bend curve + control nodes if a bend rig is attached).
     keyframe_location: BoolProperty(
         name="Location",
-        description="Keyframe puppet location (controller Empty)",
+        description="Keyframe location (puppet controller, or DNA/RNA object + bend rig)",
         default=True
     )
     keyframe_rotation: BoolProperty(
-        name="Rotation", 
-        description="Keyframe puppet rotation (controller Empty)",
+        name="Rotation",
+        description="Keyframe rotation (puppet controller, or DNA/RNA object + bend rig)",
         default=True
     )
     keyframe_scale: BoolProperty(
         name="Scale",
-        description="Keyframe puppet scale (controller Empty)",
+        description="Keyframe scale (puppet controller, or DNA/RNA object + bend rig)",
         default=True
     )
     keyframe_color: BoolProperty(
@@ -482,16 +484,16 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         box = layout.box()
         
         if not self.puppet_items:
-            box.label(text="No puppets available", icon='INFO')
-            box.label(text="Create puppets using the Puppet Maker first")
+            box.label(text="Nothing to keyframe", icon='INFO')
+            box.label(text="Create a puppet (Puppet Maker) or a DNA/RNA strand (DNA Builder) first")
         else:
             # Create a subtle header with icons
             header_row = box.row(align=False)
             header_row.scale_y = 0.8
             header_row.label(text="")  # Empty space for checkbox column
 
-            # Puppet name label - left aligned to match actual puppet names
-            header_row.label(text="Puppet Name")
+            # Header label — covers both puppets and DNA/RNA strands shown below
+            header_row.label(text="Item")
 
             # Spacer to push transform icons to the right
             header_row.separator(factor=2.0)

@@ -136,6 +136,36 @@ def get_bend_nodes(dna_obj):
     return [bpy.data.objects[n] for n in names if n in bpy.data.objects]
 
 
+def dna_has_keyframes(dna_obj):
+    """True iff the DNA mesh, its bend curve, or any of its bend control nodes
+    has at least one transform F-curve key.
+
+    Used by the Builders panel to lock structural changes (add/remove bend,
+    change node count) once the strand is animated — those operations rebuild
+    the rig from scratch, which orphans the F-curves keyed against the old
+    nodes/curve/origin and silently corrupts the animation.
+    """
+    if dna_obj is None:
+        return False
+    # Imported here to avoid a circular dependency at module import time
+    # (utils.animation can be imported by code that imports bender).
+    from ..utils.animation import get_fcurves_from_action
+
+    objs = [dna_obj]
+    curve = get_bend_curve(dna_obj)
+    if curve is not None:
+        objs.append(curve)
+    objs.extend(get_bend_nodes(dna_obj))
+    for o in objs:
+        ad = o.animation_data
+        if not ad or not ad.action:
+            continue
+        for fc in get_fcurves_from_action(ad.action, ad):
+            if len(fc.keyframe_points) > 0:
+                return True
+    return False
+
+
 def get_dna_for_curve(curve_obj):
     """Reverse lookup: which DNA molecule owns this bend curve?"""
     if curve_obj is None:

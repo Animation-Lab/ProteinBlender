@@ -246,6 +246,7 @@ class PROTEINBLENDER_PT_builders(Panel):
             RES_DEFAULT, RES_MIN, RES_MAX,
             get_bend_curve,
             get_bend_nodes,
+            dna_has_keyframes,
         )
 
         shape_box = parent_layout.box()
@@ -253,18 +254,30 @@ class PROTEINBLENDER_PT_builders(Panel):
 
         has_bend = bool(dna_obj.get(BEND_CURVE_PROP))
 
+        # Rig-structural changes (Add/Remove bend, change node count) rebuild
+        # the bend curve and nodes \u2014 if the strand is already animated this
+        # orphans every F-curve keyed against the old data and silently
+        # corrupts the animation. Lock those controls while keyframes exist;
+        # the user can delete keyframes from the Animate panel to unlock.
+        is_keyframed = dna_has_keyframes(dna_obj)
+        lock_msg = "Locked: remove this DNA's keyframes (Animate panel) to change the bend rig."
+
         if not has_bend:
             row = shape_box.row()
             row.scale_y = 1.2
+            row.enabled = not is_keyframed
             row.operator(
                 "proteinblender.dna_add_bend",
                 text="\u2795 Add Bend Control",
                 icon="OUTLINER_OB_CURVE",
             )
-            shape_box.label(
-                text="Adds a Bezier curve along the helix axis.",
-                icon="INFO",
-            )
+            if is_keyframed:
+                shape_box.label(text=lock_msg, icon="LOCKED")
+            else:
+                shape_box.label(
+                    text="Adds a Bezier curve along the helix axis.",
+                    icon="INFO",
+                )
             return
 
         # ---- Bend exists ---------------------------------------------------
@@ -272,11 +285,11 @@ class PROTEINBLENDER_PT_builders(Panel):
         n_nodes = len(nodes)
         has_nodes = n_nodes > 0
 
-        # PRIMARY: Move-the-whole-strand affordance. Goes first because
-        # moving the DNA object alone doesn't work once a bend is attached
-        # (the Curve modifier anchors the mesh to the curve's world path).
-        # Users must select all rig parts together to translate the strand.
-        # Edit / Remove row
+        # Edit / Remove row. Edit Bend just re-selects existing nodes (no
+        # structural change), so it stays enabled even when keyframed — the
+        # user still needs to grab nodes to set new keyframe values. Remove
+        # Bend rebuilds the strand's origin and would orphan the F-curves,
+        # so it's locked.
         row = shape_box.row(align=True)
         row.scale_y = 1.2
         edit_op = row.operator(
@@ -287,7 +300,9 @@ class PROTEINBLENDER_PT_builders(Panel):
         # When creating fresh, default the count to RES_DEFAULT; otherwise
         # the existing count (this property only matters on first place).
         edit_op.n_points = n_nodes if n_nodes >= RES_MIN else RES_DEFAULT
-        row.operator(
+        remove_sub = row.row(align=True)
+        remove_sub.enabled = not is_keyframed
+        remove_sub.operator(
             "proteinblender.dna_remove_bend",
             text="",
             icon="X",
@@ -297,6 +312,7 @@ class PROTEINBLENDER_PT_builders(Panel):
         if has_nodes:
             shape_box.separator(factor=0.3)
             res_row = shape_box.row(align=True)
+            res_row.enabled = not is_keyframed
             res_row.label(text="Nodes:")
             minus = res_row.operator(
                 "proteinblender.dna_set_bend_resolution",
@@ -310,10 +326,13 @@ class PROTEINBLENDER_PT_builders(Panel):
             )
             plus.n_points = min(RES_MAX, n_nodes + 1)
 
-            shape_box.label(
-                text="Click a node to grab it. Shift-click to multi-select.",
-                icon="INFO",
-            )
+            if is_keyframed:
+                shape_box.label(text=lock_msg, icon="LOCKED")
+            else:
+                shape_box.label(
+                    text="Click a node to grab it. Shift-click to multi-select.",
+                    icon="INFO",
+                )
 
         # Bend curve visibility toggle. The curve is a viewport-only guide
         # (hide_render is forced True in bender.py), so toggling viewport
