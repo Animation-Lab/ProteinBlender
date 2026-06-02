@@ -183,7 +183,21 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       get_or_build_membrane_gn_tree(scene) before pushing the
 #       new value, which grows the tree if needed and re-links
 #       every membrane modifier to it.
-GN_TREE_VERSION = 23
+#   v24: ITERATIONS back to 5. Each Jacobi pass already applies the
+#       *combined* squared-weight push of every active pusher (per-
+#       slot directions are weighted by p_i² and accumulated into a
+#       single resultant before the magnitude scales), so "compute
+#       combined force then apply" already happens per pass — what
+#       limits two-protein overlap quality is convergence, not
+#       combination. v22 capped iter at 3 because the 16-slot static
+#       tree of v21's 5-iter design hung Build; with v23's dynamic
+#       slot count the iter cost only applies when pushers are
+#       actually wired, so 5 passes against the typical 1-2 active
+#       slots is cheap (10 slot-evals/lipid vs v22's 48). 5 iter
+#       takes overlap-zone lipids from ~92% to ~99% of the union-
+#       boundary, removing the residual NS strip that called out as
+#       "confused" lipids when two proteins are close.
+GN_TREE_VERSION = 24
 
 
 # ===========================================================================
@@ -546,18 +560,15 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         # asymptote to the union boundary across iterations; the exact-
         # midline degenerate (equal pen, antiparallel dirs) still
         # cancels in every iteration.
-        # v21 went to 5 iter (~5,900 nodes) but reliably hangs Build
-        # Membrane even on an empty scene with no proteins enabled —
-        # the GN evaluator runs the full math at every gate regardless
-        # of whether the gate is closed, so per-frame cost scales with
-        # tree size, not active slot count. v22 settled at 3 iter
-        # (~3,600 nodes) as the practical upper bound for the iterative
-        # approach. The residual NS strip in two-FF overlap (lipids at
-        # ~92% of the lens edge instead of ~99%) is the open quality
-        # gap — next step is to pivot off iteration to a different
-        # multi-pusher combiner that doesn't have asymptotic
-        # convergence.
-        ITERATIONS = 3
+        # v24: back to 5 iterations. The hang that made v22 cap at 3
+        # came from the maximal 16-slot tree evaluating every gate
+        # regardless of whether it was active. v23's dynamic slot count
+        # only wires the active pushers into the tree, so 5 iter ×
+        # (typically 1-2 active slots) ≈ 10 slot-evals/lipid — well
+        # under v22's 48. The extra passes close the convergence gap
+        # in two-protein overlap zones (~92% → ~99% of the union
+        # boundary), which is what reads as the "combined" effect.
+        ITERATIONS = 5
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
