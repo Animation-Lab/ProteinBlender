@@ -280,8 +280,13 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
                    float(root_obj.get("pb_mem_bob_amplitude", 0.3)))
     _set_mod_input(mod, "Bob Speed",
                    float(root_obj.get("pb_mem_bob_speed", 0.6)))
-
-    _rebuild_hole_assignments(root_obj, defer_refresh=True)
+    # FF Smoothness (α). Blender preserves modifier input values across
+    # node_group reassignment by socket name, so a v25-built membrane
+    # rebuilding to v26 would keep α=5.0. Push the stored value (or the
+    # current v26 default of 2.0 if absent) so old membranes pick up the
+    # tighter cluster bridging without needing a manual edit.
+    _set_mod_input(mod, "FF Smoothness",
+                   float(root_obj.get("pb_mem_ff_smoothness", 2.0)))
     # Re-push protein force fields too — a GN tree upgrade clears the new
     # slots' identifiers along with everything else.
     try:

@@ -231,7 +231,19 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       3D Euclidean with tangent-plane direction) — _build_pusher
 #       still does that work; the combiner just consumes its outputs
 #       differently.
-GN_TREE_VERSION = 25
+#   v26: FF Smoothness default lowered 5.0 → 2.0. At α=5 the smin
+#       bulge between non-overlapping pusher spheres only extended
+#       ~0.28 BU past each individual boundary, so a cluster of
+#       proteins whose bounding spheres didn't quite touch still
+#       left lipids sitting in the gaps between them — visibly
+#       overlapping the proteins in the user's image. At α=2 the
+#       bulge extends ~0.69 BU per ln(N) slot, which is enough to
+#       merge a typical 4-protein cluster (centres ~1 BU apart,
+#       R ~ 0.35 BU) into one combined obstacle. Single-pusher
+#       case is unchanged (smin reduces to sdf when N=1). Bump
+#       forces a tree rebuild so existing membranes pick up the
+#       new default.
+GN_TREE_VERSION = 26
 
 
 # ===========================================================================
@@ -376,12 +388,18 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                default=0, min_val=0, max_val=2)
     _new_input(tree, "Sphere Radius (nm)", "NodeSocketFloat",
                default=15.0, min_val=1.0, max_val=200.0)
-    # SDF combine smoothness (v25). Larger = sharper combination
-    # (close to hard min), smaller = more bulge between close pushers.
-    # Default 5.0 gives a smooth-ish blend that reads as natural at
-    # the scale of a protein bounding sphere (~1 BU).
+    # SDF combine smoothness (v25). Smaller = more bulge between close
+    # pushers (the combined "obstacle" reaches further beyond each
+    # individual sphere); larger = closer to hard min (each pusher
+    # carves its own gap with little bridging). The smin bulge extent
+    # for N equal pushers is ln(N)/α below their individual sdf — so
+    # at α=2, four close pushers extend the combined inside region by
+    # ~0.69 BU past each individual boundary, which is what's needed
+    # to make a cluster act as one obstacle to the membrane.
+    # v26: default reduced 5.0 → 2.0 — at 5.0 the bulge between
+    # cluster proteins was too narrow and lipids settled in the gaps.
     _new_input(tree, "FF Smoothness", "NodeSocketFloat",
-               default=5.0, min_val=0.5, max_val=50.0)
+               default=2.0, min_val=0.5, max_val=50.0)
 
     # Hole controllers — up to ``num_holes`` slots. Each has an "Enabled"
     # bool that gates the slot so unassigned slots don't carve a phantom
