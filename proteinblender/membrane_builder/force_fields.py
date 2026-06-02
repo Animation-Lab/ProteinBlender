@@ -159,25 +159,41 @@ def _get_gn_modifier(root_obj: bpy.types.Object) -> Optional[bpy.types.Modifier]
 
 
 def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
-                                    scene: Optional[bpy.types.Scene] = None
+                                    scene: Optional[bpy.types.Scene] = None,
+                                    defer_refresh: bool = False,
                                     ) -> None:
     """Write the current scene's active force fields into one membrane.
 
-    Empty slots are cleared (object=None, enabled=False, radius=0) so an
+    Empty slots (up to the tree's current FF capacity) are cleared so an
     older membrane built before any proteins had FFs on doesn't carry stale
-    assignments.
+    assignments. The shared tree is grown via
+    ``get_or_build_membrane_gn_tree`` first when scene demand exceeds
+    capacity, and the modifier is re-pointed at the rebuilt tree if it had
+    been dropped during the rebuild.
+
+    ``defer_refresh=True`` skips the trailing modifier refresh — used by
+    Build Membrane to batch input writes into a single GN re-eval.
     """
     if root_obj is None or not root_obj.get("pb_is_membrane", False):
-        return
-    mod = _get_gn_modifier(root_obj)
-    if mod is None:
         return
 
     if scene is None:
         scene = bpy.context.scene if bpy.context else None
-    slots = collect_force_field_slots(scene) if scene is not None else []
 
-    for i in range(1, MAX_PROTEIN_FFS + 1):
+    # Local import — avoids a cycle with membrane_geometry / operators.
+    from .membrane_geometry import get_or_build_membrane_gn_tree
+    tree = get_or_build_membrane_gn_tree(scene)
+
+    mod = _get_gn_modifier(root_obj)
+    if mod is None:
+        return
+    if mod.node_group is not tree:
+        mod.node_group = tree
+
+    slots = collect_force_field_slots(scene) if scene is not None else []
+    tree_ffs = int(tree.get("pb_active_ffs", MAX_PROTEIN_FFS))
+
+    for i in range(1, tree_ffs + 1):
         if i <= len(slots):
             obj, radius_bu = slots[i - 1]
             _set_mod_input(mod, f"Protein FF {i}", obj)
@@ -188,7 +204,8 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
             _set_mod_input(mod, f"Protein FF {i} Enabled", False)
             _set_mod_input(mod, f"Protein FF {i} Radius", 0.0)
 
-    _refresh_modifier(mod)
+    if not defer_refresh:
+        _refresh_modifier(mod)
 
 
 def apply_to_all_membranes(scene: Optional[bpy.types.Scene] = None) -> None:

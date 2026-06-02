@@ -170,7 +170,20 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       the lipid moves outward) so further iter bumps don't
 #       help in proportion to their cost — next step is a
 #       different multi-pusher combiner.
-GN_TREE_VERSION = 22
+#   v23: dynamic slot count. The tree is now sized to the
+#       max(holes-per-membrane) + count(FF-enabled proteins)
+#       at build time, not the fixed MAX_HOLES + MAX_PROTEIN_FFS.
+#       Active counts are stamped on the tree as
+#       ``pb_active_holes`` / ``pb_active_ffs``; the get-or-build
+#       path rebuilds when scene demand exceeds those tags.
+#       Typical first build (0 holes, 0 FFs) skips the pusher
+#       graph entirely, dropping eval cost from ~3,600 nodes
+#       per lipid to ~500. Operators that grow a slot
+#       (Add Hole, force_field_enabled toggle) call into
+#       get_or_build_membrane_gn_tree(scene) before pushing the
+#       new value, which grows the tree if needed and re-links
+#       every membrane modifier to it.
+GN_TREE_VERSION = 23
 
 
 # ===========================================================================
@@ -257,11 +270,20 @@ def _new_input(tree, name, socket_type, default=None, min_val=None, max_val=None
     return sock
 
 
-def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
+def _build_membrane_gn_tree(num_holes: int = 0,
+                             num_ffs: int = 0) -> bpy.types.GeometryNodeTree:
     """Build the membrane Geometry Nodes tree, replacing any existing one.
 
-    Returns the tree.
+    ``num_holes`` and ``num_ffs`` determine how many hole / protein-FF pusher
+    slots are wired into the tree. The whole pusher subgraph (which evaluates
+    on every lipid every frame) is skipped entirely when both counts are 0 —
+    typical for a fresh Build with no proteins / holes. Each existing slot
+    still costs eval time even when its Enabled bool is False, so sizing the
+    tree to the scene's actual demand is the main perf lever.
     """
+    num_holes = max(0, min(int(num_holes), MAX_HOLES))
+    num_ffs = max(0, min(int(num_ffs), MAX_PROTEIN_FFS))
+
     # Drop the old tree if present — we rebuild fresh every Blender session.
     existing = bpy.data.node_groups.get(GN_TREE_NAME)
     if existing is not None:
@@ -307,9 +329,11 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     _new_input(tree, "Sphere Radius (nm)", "NodeSocketFloat",
                default=15.0, min_val=1.0, max_val=200.0)
 
-    # Hole controllers — 8 fixed slots. Each has an "Enabled" bool that gates
-    # the slot so unassigned slots don't carve a phantom hole at the origin.
-    for i in range(1, MAX_HOLES + 1):
+    # Hole controllers — up to ``num_holes`` slots. Each has an "Enabled"
+    # bool that gates the slot so unassigned slots don't carve a phantom
+    # hole at the origin. v23: count is dynamic; tree grows when a
+    # membrane adds a hole past current capacity.
+    for i in range(1, num_holes + 1):
         _new_input(tree, f"Hole {i} Enabled", "NodeSocketBool", default=False)
         _new_input(tree, f"Hole {i}", "NodeSocketObject")
 
@@ -317,8 +341,8 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     # is an explicit Float (BU). The object input is the protein itself
     # (whose own scale stays the user's to control). The owning operator
     # writes these whenever a protein's force_field_enabled / spacing
-    # changes, or when a new membrane is built.
-    for i in range(1, MAX_PROTEIN_FFS + 1):
+    # changes, or when a new membrane is built. v23: count is dynamic.
+    for i in range(1, num_ffs + 1):
         _new_input(tree, f"Protein FF {i} Enabled", "NodeSocketBool",
                    default=False)
         _new_input(tree, f"Protein FF {i}", "NodeSocketObject")
@@ -919,7 +943,7 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                 max_pen = max_acc.outputs[0]
 
             # ---- Hole slots ----------------------------------------------
-            for h in range(1, MAX_HOLES + 1):
+            for h in range(1, num_holes + 1):
                 _add_slot(
                     slot_label=f"H{h}_{iter_label}",
                     enabled_sock=get_in(f"Hole {h} Enabled"),
@@ -929,8 +953,8 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
                 )
 
             # ---- Protein force-field slots -------------------------------
-            ff_hy_base = hy_base - 600 - (MAX_HOLES + 1) * 260
-            for f in range(1, MAX_PROTEIN_FFS + 1):
+            ff_hy_base = hy_base - 600 - (num_holes + 1) * 260
+            for f in range(1, num_ffs + 1):
                 _add_slot(
                     slot_label=f"FF{f}_{iter_label}",
                     enabled_sock=get_in(f"Protein FF {f} Enabled"),
@@ -963,46 +987,60 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
             return final_disp.outputs[0]
 
         # ----------------------------------------------------------------
-        # Jacobi iteration: 3 passes (v20)
+        # Jacobi iteration: 3 passes (v20). Skipped entirely when no
+        # slots are wired — typical fresh Build pays a flat zero here.
         # ----------------------------------------------------------------
         # Each iteration's subgraph is laid out 6000 BU below the
         # previous one (irrelevant to evaluation; just keeps the node
         # editor readable). Position chains forward: pos_i = pos_(i-1)
         # + disp_(i-1). Final pusher_disp sums all three per-iter disps.
-        iter_disps = []
-        current_pos = pos.outputs[0]
-        for i in range(1, ITERATIONS + 1):
-            iter_label = f"I{i}"
-            iter_disp = _compute_pusher_displacement(
-                pos_socket=current_pos,
-                iter_label=iter_label,
-                hy_base=y_pos - (i - 1) * 6000,
-            )
-            iter_disps.append(iter_disp)
-            if i < ITERATIONS:
-                next_pos = new(
-                    "ShaderNodeVectorMath",
-                    name=f"IterPos {iter_label} L{leaflet_index}",
+        if num_holes + num_ffs == 0:
+            # No pushers in the tree → drop the entire iteration network
+            # and feed a constant zero vector into the motion sum. This
+            # is the dominant build-time win: it removes ~3,000 nodes
+            # per leaflet from the maximal tree, and that eval cost
+            # scales with lipid count.
+            zero_push = new("FunctionNodeInputVector",
+                            name=f"PusherZero {leaflet_index}")
+            zero_push.vector = (0.0, 0.0, 0.0)
+            zero_push.location = (1300, y_pos - 600)
+            pusher_disp = zero_push.outputs[0]
+            iter_disps = []  # for symmetry with the non-empty branch
+        else:
+            iter_disps = []
+            current_pos = pos.outputs[0]
+            for i in range(1, ITERATIONS + 1):
+                iter_label = f"I{i}"
+                iter_disp = _compute_pusher_displacement(
+                    pos_socket=current_pos,
+                    iter_label=iter_label,
+                    hy_base=y_pos - (i - 1) * 6000,
                 )
-                next_pos.operation = "ADD"
-                next_pos.location = (1100, y_pos - (i - 1) * 6000 - 300)
-                links.new(current_pos, next_pos.inputs[0])
-                links.new(iter_disp, next_pos.inputs[1])
-                current_pos = next_pos.outputs[0]
+                iter_disps.append(iter_disp)
+                if i < ITERATIONS:
+                    next_pos = new(
+                        "ShaderNodeVectorMath",
+                        name=f"IterPos {iter_label} L{leaflet_index}",
+                    )
+                    next_pos.operation = "ADD"
+                    next_pos.location = (1100, y_pos - (i - 1) * 6000 - 300)
+                    links.new(current_pos, next_pos.inputs[0])
+                    links.new(iter_disp, next_pos.inputs[1])
+                    current_pos = next_pos.outputs[0]
 
-        # Sum the per-iteration displacements into the final pusher_disp.
-        sum_acc = iter_disps[0]
-        for i, iter_disp in enumerate(iter_disps[1:], start=2):
-            disp_sum = new(
-                "ShaderNodeVectorMath",
-                name=f"DispSum I{i} L{leaflet_index}",
-            )
-            disp_sum.operation = "ADD"
-            disp_sum.location = (1300, y_pos - (i - 1) * 6000 - 600)
-            links.new(sum_acc, disp_sum.inputs[0])
-            links.new(iter_disp, disp_sum.inputs[1])
-            sum_acc = disp_sum.outputs[0]
-        pusher_disp = sum_acc
+            # Sum the per-iteration displacements into the final pusher_disp.
+            sum_acc = iter_disps[0]
+            for i, iter_disp in enumerate(iter_disps[1:], start=2):
+                disp_sum = new(
+                    "ShaderNodeVectorMath",
+                    name=f"DispSum I{i} L{leaflet_index}",
+                )
+                disp_sum.operation = "ADD"
+                disp_sum.location = (1300, y_pos - (i - 1) * 6000 - 600)
+                links.new(sum_acc, disp_sum.inputs[0])
+                links.new(iter_disp, disp_sum.inputs[1])
+                sum_acc = disp_sum.outputs[0]
+            pusher_disp = sum_acc
 
         # ==================================================================
         # MOSH-PIT MOTION
@@ -1427,23 +1465,75 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
     links.new(join.outputs[0], group_out.inputs["Geometry"])
 
     tree["pb_gn_version"] = GN_TREE_VERSION
+    tree["pb_active_holes"] = num_holes
+    tree["pb_active_ffs"] = num_ffs
     return tree
 
 
-def get_or_build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
-    """Return the membrane GN tree, building it if missing or out of date.
+def _required_slot_counts(scene: Optional[bpy.types.Scene] = None
+                           ) -> Tuple[int, int]:
+    """Return ``(num_holes, num_ffs)`` the tree must support to cover every
+    membrane + scene FF state.
 
-    When an out-of-date tree is found (a membrane built with an older addon
-    version), it is rebuilt and every existing membrane is re-linked to the
-    fresh tree and has its stored settings re-applied — so old membranes pick
-    up new motion features without the user having to recreate them.
+    Holes: the max ``len(pb_mem_holes)`` across all membrane roots — every
+    membrane writes to ``Hole 1 .. Hole N``, so capacity is per-membrane.
+
+    FFs: the count of FF-enabled molecules in the scene (each gets one slot).
+    Slots are shared across membranes; one enabled protein → one slot used
+    on every membrane.
     """
+    if scene is None:
+        scene = bpy.context.scene if bpy.context else None
+
+    num_holes = 0
+    for obj in bpy.data.objects:
+        if obj.get("pb_is_membrane", False):
+            raw = obj.get("pb_mem_holes", "")
+            count = sum(1 for n in (raw.split("|") if raw else []) if n)
+            if count > num_holes:
+                num_holes = count
+
+    num_ffs = 0
+    if scene is not None and hasattr(scene, "molecule_list_items"):
+        for item in scene.molecule_list_items:
+            if getattr(item, "force_field_enabled", False):
+                num_ffs += 1
+
+    return (min(num_holes, MAX_HOLES), min(num_ffs, MAX_PROTEIN_FFS))
+
+
+def get_or_build_membrane_gn_tree(
+        scene: Optional[bpy.types.Scene] = None
+) -> bpy.types.GeometryNodeTree:
+    """Return the membrane GN tree, building it if missing, version-stale, or
+    too small to fit the scene's required slot counts.
+
+    The tree is shared across all membranes; its hole / FF slot count is
+    sized to the scene's max demand (see ``_required_slot_counts``). When
+    that demand grows past current capacity — or shrinks well below it —
+    the tree is rebuilt, every existing membrane modifier is re-linked to
+    the fresh tree, and ``reapply_membrane_settings`` re-pushes the per-
+    membrane values that a fresh node_group loses.
+    """
+    required_holes, required_ffs = _required_slot_counts(scene)
+
     tree = bpy.data.node_groups.get(GN_TREE_NAME)
-    if tree is not None and tree.get("pb_gn_version", 0) == GN_TREE_VERSION:
-        return tree
+    if tree is not None:
+        version_ok = tree.get("pb_gn_version", 0) == GN_TREE_VERSION
+        cur_holes = int(tree.get("pb_active_holes", -1))
+        cur_ffs = int(tree.get("pb_active_ffs", -1))
+        # Grow on demand; only shrink when current capacity is meaningfully
+        # larger than needed (avoids thrash if the user toggles one FF off
+        # and back on repeatedly).
+        capacity_ok = (cur_holes >= required_holes
+                       and cur_ffs >= required_ffs
+                       and (cur_holes - required_holes) <= 4
+                       and (cur_ffs - required_ffs) <= 4)
+        if version_ok and capacity_ok:
+            return tree
 
     was_stale = tree is not None
-    tree = _build_membrane_gn_tree()  # removes the old datablock, builds fresh
+    tree = _build_membrane_gn_tree(required_holes, required_ffs)
     # Drop the v5 procedural single-lipid asset if it's still around.
     lipid_assets.cleanup_legacy_lipid_asset()
 

@@ -150,12 +150,17 @@ def _refresh_modifier(mod: bpy.types.Modifier) -> None:
         pass
 
 
-def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
+def apply_props_to_membrane(root_obj: bpy.types.Object, props,
+                              defer_refresh: bool = False) -> None:
     """Push every scene-level property value to the membrane's GN modifier
     inputs AND to the persistent custom-property store on the root.
 
     The custom-property store is what ``sync_props_from_object`` reads back
     when the user re-selects this membrane later.
+
+    ``defer_refresh=True`` skips the trailing modifier refresh — used by
+    Build Membrane so the three back-to-back input-write phases (props,
+    holes, FFs) only trigger one GN evaluation instead of three.
     """
     mod = _get_gn_modifier(root_obj)
     if mod is None:
@@ -216,7 +221,8 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props) -> None:
     root_obj["pb_mem_color_tail"] = list(props.color_tail)
     root_obj["pb_mem_color_surface"] = list(props.color_surface)
 
-    _refresh_modifier(mod)
+    if not defer_refresh:
+        _refresh_modifier(mod)
 
 
 def _rebuild_membrane_for_shape(root_obj: bpy.types.Object, props) -> None:
@@ -275,25 +281,38 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     _set_mod_input(mod, "Bob Speed",
                    float(root_obj.get("pb_mem_bob_speed", 0.6)))
 
-    _rebuild_hole_assignments(root_obj)
+    _rebuild_hole_assignments(root_obj, defer_refresh=True)
     # Re-push protein force fields too — a GN tree upgrade clears the new
     # slots' identifiers along with everything else.
     try:
-        force_fields.apply_force_fields_to_membrane(root_obj)
+        force_fields.apply_force_fields_to_membrane(root_obj,
+                                                    defer_refresh=True)
     except Exception:
         pass
     _refresh_modifier(mod)
 
 
-def _rebuild_hole_assignments(root_obj: bpy.types.Object) -> None:
+def _rebuild_hole_assignments(root_obj: bpy.types.Object,
+                                defer_refresh: bool = False) -> None:
     """Walk the root's tracked hole list and assign them to the GN modifier slots
     in order. Slots without a hole get cleared and disabled.
+
+    Ensures the shared GN tree has enough hole slots first — if this
+    membrane just gained a hole past current capacity, the tree is rebuilt
+    larger and every membrane's modifier is re-linked to it (see
+    ``get_or_build_membrane_gn_tree``). Slots are cleared only up to the
+    tree's current ``pb_active_holes`` count.
     """
+    scene = bpy.context.scene if bpy.context else None
+    tree = get_or_build_membrane_gn_tree(scene)
     mod = _get_gn_modifier(root_obj)
     if mod is None:
         return
+    if mod.node_group is not tree:
+        mod.node_group = tree
     hole_names = list(_iter_hole_names(root_obj))
-    for slot_i in range(1, MAX_HOLES + 1):
+    tree_holes = int(tree.get("pb_active_holes", MAX_HOLES))
+    for slot_i in range(1, tree_holes + 1):
         if slot_i <= len(hole_names):
             hole = bpy.data.objects.get(hole_names[slot_i - 1])
             _set_mod_input(mod, f"Hole {slot_i}", hole)
@@ -301,7 +320,8 @@ def _rebuild_hole_assignments(root_obj: bpy.types.Object) -> None:
         else:
             _set_mod_input(mod, f"Hole {slot_i}", None)
             _set_mod_input(mod, f"Hole {slot_i} Enabled", False)
-    _refresh_modifier(mod)
+    if not defer_refresh:
+        _refresh_modifier(mod)
 
 
 def _iter_hole_names(root_obj: bpy.types.Object):
@@ -365,17 +385,24 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         latt_mod = root.modifiers.new(LATTICE_MOD_NAME, "LATTICE")
         latt_mod.object = lattice
 
-        # 3. Add the GN modifier and assign the shared tree.
-        tree = get_or_build_membrane_gn_tree()
+        # 3. Add the GN modifier and assign the shared tree, sized to the
+        # scene's current FF demand (a brand-new membrane has no holes).
+        tree = get_or_build_membrane_gn_tree(context.scene)
         gn_mod = root.modifiers.new(GN_MOD_NAME, "NODES")
         gn_mod.node_group = tree
 
-        # 4. Push props (which also picks the right Lipid Collection for the
-        # selected render style) and wire the hole assignments.
-        apply_props_to_membrane(root, props)
-        _rebuild_hole_assignments(root)
+        # 4. Push props + FF assignments to the modifier. The intermediate
+        # writes defer their refresh — Blender would otherwise re-evaluate
+        # the full GN tree three times (props, holes, FFs) on a single
+        # Build. A fresh membrane has no holes, so we skip the hole-
+        # assignment pass entirely (interface defaults already give every
+        # slot None / Enabled=False). One refresh at the end commits the
+        # final state to the viewport.
+        apply_props_to_membrane(root, props, defer_refresh=True)
         # New membrane inherits the scene's current FF-enabled proteins.
-        force_fields.apply_force_fields_to_membrane(root, context.scene)
+        force_fields.apply_force_fields_to_membrane(
+            root, context.scene, defer_refresh=True)
+        _refresh_modifier(gn_mod)
 
         # 5. Make root the active object so the panel switches to edit mode.
         bpy.ops.object.select_all(action="DESELECT")
