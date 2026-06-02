@@ -24,9 +24,22 @@ from __future__ import annotations
 
 import bpy
 from bpy.app.handlers import persistent
+from mathutils import Vector
 from typing import Iterable, List, Optional, Tuple
 
 from .membrane_geometry import MAX_PROTEIN_FFS, NM_PER_BU
+
+
+# Anchors are hidden Empties — one per FF-enabled protein — whose
+# ``.location`` is set to the centroid of the protein's *rendered*
+# descendants (the parent's MN modifier is off once a molecule is split
+# into domains, so the parent itself doesn't move when the user grabs a
+# chain). The anchor is what gets wired into the GN modifier's FF slot
+# so Object Info reads a location that actually follows the rendered
+# geometry. Name pattern: ``{protein.name}.ff_anchor``.
+_FF_ANCHOR_SUFFIX = ".ff_anchor"
+_FF_ANCHOR_MARKER = "pb_is_ff_anchor"
+_FF_ANCHOR_OWNER_PROP = "pb_ff_anchor_owner"
 
 
 def _ff_protein_object(item) -> Optional[bpy.types.Object]:
@@ -41,31 +54,114 @@ def _ff_protein_object(item) -> Optional[bpy.types.Object]:
         return bpy.data.objects.get(name) if name else None
 
 
+def _render_objects_for(obj: bpy.types.Object) -> List[bpy.types.Object]:
+    """Return every mesh object whose vertices represent the molecule's
+    rendered atom cloud — the parent if it still has mesh data, plus
+    every descendant with a populated mesh.
+
+    When a molecule is split into domains, the parent's MN modifier is
+    disabled to avoid double-render and its mesh datablock is typically
+    empty; the live atom cloud lives on the domain children. Force-field
+    sizing and positioning have to walk the whole subtree to get the real
+    rendered footprint.
+    """
+    if obj is None:
+        return []
+    out: List[bpy.types.Object] = []
+    candidates = [obj] + list(getattr(obj, "children_recursive", []) or [])
+    for o in candidates:
+        if o is None or o.type != "MESH":
+            continue
+        # Skip our own bookkeeping objects.
+        if o.get(_FF_ANCHOR_MARKER, False):
+            continue
+        data = getattr(o, "data", None)
+        verts = getattr(data, "vertices", None) if data is not None else None
+        if verts and len(verts) > 0:
+            out.append(o)
+    return out
+
+
+def _world_bbox_extent(objs: List[bpy.types.Object]) -> float:
+    """Return the longest world-space bbox axis spanning all ``objs``.
+
+    Computes the union of every object's mesh-vertex AABB transformed
+    into world space. Returns 0 if no usable mesh data is found.
+    """
+    if not objs:
+        return 0.0
+    xs: List[float] = []
+    ys: List[float] = []
+    zs: List[float] = []
+    for o in objs:
+        mw = o.matrix_world
+        for v in o.data.vertices:
+            wp = mw @ v.co
+            xs.append(wp.x)
+            ys.append(wp.y)
+            zs.append(wp.z)
+    if not xs:
+        return 0.0
+    return float(max(max(xs) - min(xs),
+                      max(ys) - min(ys),
+                      max(zs) - min(zs)))
+
+
+def _world_centroid(objs: List[bpy.types.Object]) -> Optional[Vector]:
+    """Return the mean world-space vertex centroid across ``objs``, or
+    None if no vertex data is available.
+
+    Vertex-mean (not object-origin mean) so the centroid reflects what's
+    actually rendered: each domain object's origin is typically still at
+    the molecule's original centre, so an origin-mean would just return
+    the parent's location even after the user drags one chain aside.
+    """
+    if not objs:
+        return None
+    cx = cy = cz = 0.0
+    n = 0
+    for o in objs:
+        mw = o.matrix_world
+        for v in o.data.vertices:
+            wp = mw @ v.co
+            cx += wp.x
+            cy += wp.y
+            cz += wp.z
+            n += 1
+    if n == 0:
+        return None
+    return Vector((cx / n, cy / n, cz / n))
+
+
 def compute_force_field_radius_bu(obj: bpy.types.Object,
                                    spacing_nm: float) -> float:
     """Return the force-field radius in Blender Units.
 
     Half the protein's tallest extent (the bounding-cube radius along its
-    longest axis) plus the user's clearance. Uses the atom point cloud
-    rather than ``obj.dimensions`` because the MN modifier's output mesh
-    massively under-reports the rendered size — see ``_protein_tallest
-    _dim_bu`` for the gory details.
+    longest axis) plus the user's clearance. Spans every rendered
+    descendant: when a molecule is split into domains the parent's mesh
+    is empty so reading it alone would yield a zero radius.
     """
     if obj is None:
         return 0.0
-    half_extent_bu = _protein_tallest_dim_bu(obj) / 2.0
+    render_objs = _render_objects_for(obj)
+    if render_objs:
+        half_extent_bu = _world_bbox_extent(render_objs) / 2.0
+    else:
+        half_extent_bu = _protein_tallest_dim_bu(obj) / 2.0
     spacing_bu = max(0.0, float(spacing_nm)) / NM_PER_BU
     return half_extent_bu + spacing_bu
 
 
 def _protein_tallest_dim_bu(obj: bpy.types.Object) -> float:
-    """Return the protein's longest extent in BU, atom-cloud aware.
+    """Single-object fallback radius source.
 
-    For MN-rendered proteins ``obj.dimensions`` reflects whatever subset
-    the MolecularNodes modifier emits, not the real atom cloud — for a
-    typical actin import it reads ~20× smaller than the real size. Use
-    the raw vertex bbox of ``obj.data`` when available (that's the
-    persisted atom point cloud), and only fall back to ``obj.dimensions``
+    Kept for the rare case where the molecule has no rendered descendants
+    (loading mid-init, broken state). For MN-rendered proteins
+    ``obj.dimensions`` reflects whatever subset the MolecularNodes
+    modifier emits, not the real atom cloud — for a typical actin import
+    it reads ~20× smaller than the real size. Use the raw vertex bbox of
+    ``obj.data`` when available, and only fall back to ``obj.dimensions``
     for non-mesh objects or empty meshes.
     """
     if obj is None:
@@ -87,9 +183,113 @@ def _protein_tallest_dim_bu(obj: bpy.types.Object) -> float:
     return float(max(dim.x, dim.y, dim.z))
 
 
+# ---------------------------------------------------------------------------
+# FF anchor lifecycle
+# ---------------------------------------------------------------------------
+
+def _ensure_ff_anchor(protein_obj: bpy.types.Object) -> Optional[bpy.types.Object]:
+    """Get-or-create the hidden anchor Empty for an FF-enabled protein.
+
+    The anchor's ``.location`` is set to the world-space centroid of the
+    protein's rendered descendants; the GN FF slot is wired to the anchor
+    (not the protein itself), so a child move flows through anchor →
+    Object Info → carved gap. Returns None if the protein has no rendered
+    geometry yet.
+    """
+    if protein_obj is None:
+        return None
+    name = f"{protein_obj.name}{_FF_ANCHOR_SUFFIX}"
+    anchor = bpy.data.objects.get(name)
+    if anchor is None:
+        anchor = bpy.data.objects.new(name, None)
+        anchor.empty_display_type = "PLAIN_AXES"
+        anchor.empty_display_size = 0.05
+        anchor[_FF_ANCHOR_MARKER] = True
+        anchor[_FF_ANCHOR_OWNER_PROP] = protein_obj.name
+        try:
+            bpy.context.scene.collection.objects.link(anchor)
+        except Exception:
+            pass
+        anchor.hide_set(True)
+        anchor.hide_viewport = True
+        anchor.hide_render = True
+        anchor.hide_select = True
+    sync_ff_anchor_location(anchor, protein_obj)
+    return anchor
+
+
+def sync_ff_anchor_location(anchor: bpy.types.Object,
+                             protein_obj: bpy.types.Object) -> None:
+    """Set ``anchor.location`` to the current centroid of the protein's
+    rendered descendants. No-op if no vertex data is available."""
+    if anchor is None or protein_obj is None:
+        return
+    centroid = _world_centroid(_render_objects_for(protein_obj))
+    if centroid is None:
+        return
+    anchor.location = centroid
+
+
+def sync_all_ff_anchors(scene: Optional[bpy.types.Scene] = None) -> None:
+    """Refresh every active FF anchor's location from current scene state.
+
+    Called from the deferred refresh after a move, and before slot writes
+    so the modifier reads the up-to-date centroid on the next eval.
+    """
+    if scene is None:
+        scene = bpy.context.scene if bpy.context else None
+    if scene is None or not hasattr(scene, "molecule_list_items"):
+        return
+    for item in scene.molecule_list_items:
+        if not getattr(item, "force_field_enabled", False):
+            continue
+        protein = _ff_protein_object(item)
+        if protein is None:
+            continue
+        name = f"{protein.name}{_FF_ANCHOR_SUFFIX}"
+        anchor = bpy.data.objects.get(name)
+        if anchor is None:
+            anchor = _ensure_ff_anchor(protein)
+        else:
+            sync_ff_anchor_location(anchor, protein)
+
+
+def _remove_orphan_ff_anchors(scene: Optional[bpy.types.Scene] = None) -> None:
+    """Delete anchor Empties whose owning protein either no longer exists
+    or no longer has its force_field_enabled toggle on. Called from the
+    same deferred path that re-applies slots."""
+    if scene is None:
+        scene = bpy.context.scene if bpy.context else None
+    active_owners = set()
+    if scene is not None and hasattr(scene, "molecule_list_items"):
+        for item in scene.molecule_list_items:
+            if not getattr(item, "force_field_enabled", False):
+                continue
+            protein = _ff_protein_object(item)
+            if protein is not None:
+                active_owners.add(protein.name)
+    for obj in list(bpy.data.objects):
+        if not obj.get(_FF_ANCHOR_MARKER, False):
+            continue
+        owner = obj.get(_FF_ANCHOR_OWNER_PROP, "")
+        if owner in active_owners and bpy.data.objects.get(owner) is not None:
+            continue
+        try:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        except Exception:
+            pass
+
+
 def iter_active_force_fields(scene: bpy.types.Scene
                               ) -> Iterable[Tuple[bpy.types.Object, float]]:
-    """Yield ``(protein_object, radius_BU)`` for each FF-enabled protein.
+    """Yield ``(anchor_object, radius_BU)`` for each FF-enabled protein.
+
+    The yielded object is the protein's hidden FF anchor Empty, whose
+    location is set to the centroid of the protein's rendered descendants
+    (see ``_ensure_ff_anchor``). Wiring the anchor — not the protein
+    itself — into the GN modifier's Object Info input is what lets the
+    carved gap follow the user grabbing a chain even when the protein
+    parent's own ``.location`` stays put.
 
     Order matches the scene's molecule_list_items so membrane slots get a
     deterministic assignment across sessions.
@@ -99,15 +299,18 @@ def iter_active_force_fields(scene: bpy.types.Scene
     for item in scene.molecule_list_items:
         if not getattr(item, "force_field_enabled", False):
             continue
-        obj = _ff_protein_object(item)
-        if obj is None:
+        protein = _ff_protein_object(item)
+        if protein is None:
             continue
         radius_bu = compute_force_field_radius_bu(
-            obj, float(getattr(item, "force_field_spacing", 0.0))
+            protein, float(getattr(item, "force_field_spacing", 0.0))
         )
         if radius_bu <= 0.0:
             continue
-        yield obj, radius_bu
+        anchor = _ensure_ff_anchor(protein)
+        if anchor is None:
+            continue
+        yield anchor, radius_bu
 
 
 def collect_force_field_slots(scene: bpy.types.Scene
@@ -209,12 +412,17 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
 
 
 def apply_to_all_membranes(scene: Optional[bpy.types.Scene] = None) -> None:
-    """Push the current FF list to every membrane in the scene."""
+    """Push the current FF list to every membrane in the scene.
+
+    Also reaps anchor Empties whose protein no longer has FF on — toggling
+    the slider off is the natural moment to retire that protein's anchor.
+    """
     if scene is None:
         scene = bpy.context.scene if bpy.context else None
     for obj in bpy.data.objects:
         if obj.get("pb_is_membrane", False):
             apply_force_fields_to_membrane(obj, scene)
+    _remove_orphan_ff_anchors(scene)
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +450,7 @@ _object_count_cache = [-1]
 
 def _deferred_ff_reapply():
     try:
+        _remove_orphan_ff_anchors()
         apply_to_all_membranes()
     except Exception:
         pass
@@ -253,12 +462,19 @@ def _deferred_membrane_refresh():
     protein transforms. Runs outside the depsgraph handler so it can
     safely mutate modifier state (which inside the handler is racy).
 
+    Order matters: first re-sync every FF anchor to the current centroid
+    of its protein's rendered descendants, then dirty the membrane
+    modifiers. If the anchor write came after the modifier dirty, the GN
+    re-eval could fire before the anchor caught up and would still read
+    a stale location.
+
     Toggling ``show_viewport`` False -> True (with an explicit
     intermediate value, not ``not show_viewport`` twice) is what
     actually dirties the viewport-evaluated mesh. Without that, the
-    GN Object Info node keeps returning the protein's stale location.
+    GN Object Info node keeps returning the anchor's previous location.
     """
     try:
+        sync_all_ff_anchors()
         for obj in bpy.data.objects:
             if not obj.get("pb_is_membrane", False):
                 continue
@@ -277,14 +493,32 @@ def _deferred_membrane_refresh():
     return None  # one-shot
 
 
-def _ff_protein_names(scene) -> set:
-    """Names of the objects currently driving an enabled force field."""
-    out = set()
+def _ff_watched_names(scene) -> set:
+    """Names whose transform should kick a membrane refresh: the FF-
+    enabled protein parent AND every descendant of it.
+
+    Including descendants matters because once a molecule is split into
+    domains, the parent's MN modifier is off and the rendered geometry —
+    plus the user's grab handle — lives on the children. A move on any
+    child needs to refresh the anchor's centroid; only watching the
+    parent's name misses every child-only transform update.
+    """
+    out: set = set()
     if scene is None or not hasattr(scene, "molecule_list_items"):
         return out
     for item in scene.molecule_list_items:
-        if getattr(item, "force_field_enabled", False) and item.object_name:
-            out.add(item.object_name)
+        if not getattr(item, "force_field_enabled", False):
+            continue
+        protein = _ff_protein_object(item)
+        if protein is None:
+            name = getattr(item, "object_name", "") or ""
+            if name:
+                out.add(name)
+            continue
+        out.add(protein.name)
+        for child in getattr(protein, "children_recursive", []) or []:
+            if child is not None and not child.get(_FF_ANCHOR_MARKER, False):
+                out.add(child.name)
     return out
 
 
@@ -301,18 +535,19 @@ def _on_depsgraph_check(scene, depsgraph):
                                         first_interval=0.0)
 
         # --- Movement path ---
-        # If any FF-enabled protein transformed this update, schedule a
-        # deferred membrane refresh. We defer (rather than dirty inline)
-        # because mutating modifier state inside the depsgraph handler
-        # is unreliable — the toggles get coalesced and the modifier
-        # ends up reading the same stale Object Info value.
-        ff_names = _ff_protein_names(scene)
-        if not ff_names:
+        # If any FF-enabled protein OR any of its rendered descendants
+        # transformed this update, schedule a deferred membrane refresh.
+        # We defer (rather than dirty inline) because mutating modifier
+        # state inside the depsgraph handler is unreliable — the toggles
+        # get coalesced and the modifier ends up reading the same stale
+        # Object Info value.
+        watched = _ff_watched_names(scene)
+        if not watched:
             return
         moved = any(
             isinstance(upd.id, bpy.types.Object)
             and upd.is_updated_transform
-            and upd.id.name in ff_names
+            and upd.id.name in watched
             for upd in depsgraph.updates
         )
         if moved and not bpy.app.timers.is_registered(_deferred_membrane_refresh):
