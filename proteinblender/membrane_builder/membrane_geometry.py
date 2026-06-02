@@ -158,7 +158,19 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       passes lipids reach ~99% of the lens edge for typical
 #       D/R ratios. Tree node count scales linearly with the
 #       iteration count.
-GN_TREE_VERSION = 21
+#   v22: ITERATIONS reverted 5 → 3. v21 reliably hangs Build
+#       Membrane even on an empty scene with no proteins
+#       enabled — the GN evaluator runs the full per-iteration
+#       math regardless of whether the per-slot gates are
+#       closed, so eval cost scales with tree size not active-
+#       slot count. 3 iter is the practical upper bound for
+#       this design; the residual NS strip in two-FF overlap
+#       is the trade-off. The iterative-squared-weight approach
+#       converges asymptotically (push magnitude shrinks as
+#       the lipid moves outward) so further iter bumps don't
+#       help in proportion to their cost — next step is a
+#       different multi-pusher combiner.
+GN_TREE_VERSION = 22
 
 
 # ===========================================================================
@@ -510,14 +522,18 @@ def _build_membrane_gn_tree() -> bpy.types.GeometryNodeTree:
         # asymptote to the union boundary across iterations; the exact-
         # midline degenerate (equal pen, antiparallel dirs) still
         # cancels in every iteration.
-        # ITERATIONS=3 left a visible NS strip in two-FF overlap scenes
-        # (lipids stuck at ~92% of the way to the lens edge — pen
-        # shrinks as the lipid moves outward, so convergence is
-        # asymptotic). Bumped to 5: each extra pass closes the
-        # remaining gap geometrically; at i=5 lipids reach ~99% of
-        # the lens edge for typical D/R ratios. Tree budget grows
-        # linearly with iteration count.
-        ITERATIONS = 5
+        # v21 went to 5 iter (~5,900 nodes) but reliably hangs Build
+        # Membrane even on an empty scene with no proteins enabled —
+        # the GN evaluator runs the full math at every gate regardless
+        # of whether the gate is closed, so per-frame cost scales with
+        # tree size, not active slot count. v22 settled at 3 iter
+        # (~3,600 nodes) as the practical upper bound for the iterative
+        # approach. The residual NS strip in two-FF overlap (lipids at
+        # ~92% of the lens edge instead of ~99%) is the open quality
+        # gap — next step is to pivot off iteration to a different
+        # multi-pusher combiner that doesn't have asymptotic
+        # convergence.
+        ITERATIONS = 3
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and
