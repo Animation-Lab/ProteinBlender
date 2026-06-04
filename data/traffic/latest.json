@@ -1,69 +1,63 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-06-03T05:13:17+00:00",
+  "generated_at": "2026-06-04T05:02:39+00:00",
   "summary": {
-    "views": 13,
-    "visitors": 7,
-    "clones": 336,
-    "cloners": 145
+    "views": 10,
+    "visitors": 6,
+    "clones": 332,
+    "cloners": 142
   },
   "all_time": {
-    "views": 462,
-    "visitors": 219,
-    "clones": 1968,
-    "cloners": 914,
-    "days_tracked": 77
+    "views": 463,
+    "visitors": 220,
+    "clones": 1989,
+    "cloners": 925,
+    "days_tracked": 78
   },
   "current_day": {
+    "date": "2026-06-02",
+    "views": 1,
+    "visitors": 1,
+    "clones": 21,
+    "cloners": 11
+  },
+  "previous_day": {
     "date": "2026-06-01",
     "views": 0,
     "visitors": 0,
     "clones": 20,
     "cloners": 11
   },
-  "previous_day": {
-    "date": "2026-05-31",
-    "views": 0,
-    "visitors": 0,
-    "clones": 32,
-    "cloners": 17
-  },
   "delta_since_previous_day": {
-    "views": 0,
-    "visitors": 0,
-    "clones": -12,
-    "cloners": -6
+    "views": 1,
+    "visitors": 1,
+    "clones": 1,
+    "cloners": 0
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 11,
-      "uniques": 5
+      "count": 8,
+      "uniques": 4
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 5,
-      "uniques": 4
+      "count": 3,
+      "uniques": 3
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases",
+      "title": "/releases",
+      "count": 3,
+      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/1.0.0",
       "title": "/releases/tag/1.0.0",
       "count": 3,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/releases",
-      "title": "/releases",
-      "count": 2,
-      "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/blob/main/CLAUDE.md",
-      "title": "/blob/main/CLAUDE.md",
-      "count": 2,
       "uniques": 1
     },
     {
