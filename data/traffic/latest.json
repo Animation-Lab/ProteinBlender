@@ -1,63 +1,68 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-06-19T05:21:33+00:00",
+  "generated_at": "2026-06-20T04:38:49+00:00",
   "summary": {
-    "views": 10,
-    "visitors": 5,
+    "views": 11,
+    "visitors": 6,
     "clones": 357,
-    "cloners": 153
+    "cloners": 147
   },
   "all_time": {
-    "views": 476,
-    "visitors": 227,
-    "clones": 2366,
-    "cloners": 1106,
-    "days_tracked": 93
+    "views": 478,
+    "visitors": 229,
+    "clones": 2386,
+    "cloners": 1114,
+    "days_tracked": 94
   },
   "current_day": {
+    "date": "2026-06-18",
+    "views": 2,
+    "visitors": 2,
+    "clones": 20,
+    "cloners": 8
+  },
+  "previous_day": {
     "date": "2026-06-17",
     "views": 0,
     "visitors": 0,
     "clones": 32,
     "cloners": 15
   },
-  "previous_day": {
-    "date": "2026-06-16",
-    "views": 1,
-    "visitors": 1,
-    "clones": 26,
-    "cloners": 11
-  },
   "delta_since_previous_day": {
-    "views": -1,
-    "visitors": -1,
-    "clones": 6,
-    "cloners": 4
+    "views": 2,
+    "visitors": 2,
+    "clones": -12,
+    "cloners": -7
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 6,
-      "uniques": 2
+      "count": 7,
+      "uniques": 3
     },
     {
       "referrer": "github.com",
       "count": 2,
       "uniques": 2
+    },
+    {
+      "referrer": "Bing",
+      "count": 1,
+      "uniques": 1
     }
   ],
   "popular_paths": [
+    {
+      "path": "/Animation-Lab/ProteinBlender",
+      "title": "Overview",
+      "count": 5,
+      "uniques": 5
+    },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
       "count": 5,
       "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender",
-      "title": "Overview",
-      "count": 4,
-      "uniques": 4
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
