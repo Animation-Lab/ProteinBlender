@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-06-25T04:21:36+00:00",
+  "generated_at": "2026-06-26T04:37:30+00:00",
   "summary": {
-    "views": 8,
-    "visitors": 6,
-    "clones": 507,
-    "cloners": 180
+    "views": 19,
+    "visitors": 9,
+    "clones": 537,
+    "cloners": 187
   },
   "all_time": {
-    "views": 482,
-    "visitors": 231,
-    "clones": 2654,
-    "cloners": 1205,
-    "days_tracked": 99
+    "views": 493,
+    "visitors": 234,
+    "clones": 2696,
+    "cloners": 1220,
+    "days_tracked": 100
   },
   "current_day": {
+    "date": "2026-06-24",
+    "views": 11,
+    "visitors": 3,
+    "clones": 42,
+    "cloners": 15
+  },
+  "previous_day": {
     "date": "2026-06-23",
     "views": 0,
     "visitors": 0,
     "clones": 65,
     "cloners": 21
   },
-  "previous_day": {
-    "date": "2026-06-22",
-    "views": 3,
-    "visitors": 1,
-    "clones": 37,
-    "cloners": 13
-  },
   "delta_since_previous_day": {
-    "views": -3,
-    "visitors": -1,
-    "clones": 28,
-    "cloners": 8
+    "views": 11,
+    "visitors": 3,
+    "clones": -23,
+    "cloners": -6
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 4,
-      "uniques": 3
+      "count": 15,
+      "uniques": 6
     },
     {
       "referrer": "github.com",
@@ -55,12 +55,30 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 7,
-      "uniques": 6
+      "count": 10,
+      "uniques": 7
+    },
+    {
+      "path": "/Animation-Lab/proteinblender/issues",
+      "title": "/issues",
+      "count": 4,
+      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/proteinblender/issues/14",
+      "title": "/issues/14",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/blob/main/CLAUDE.md",
+      "title": "/blob/main/CLAUDE.md",
       "count": 1,
       "uniques": 1
     }
