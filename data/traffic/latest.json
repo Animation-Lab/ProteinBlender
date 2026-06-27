@@ -1,38 +1,38 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-06-26T04:37:30+00:00",
+  "generated_at": "2026-06-27T04:14:00+00:00",
   "summary": {
     "views": 19,
     "visitors": 9,
-    "clones": 537,
-    "cloners": 187
+    "clones": 564,
+    "cloners": 192
   },
   "all_time": {
     "views": 493,
     "visitors": 234,
-    "clones": 2696,
-    "cloners": 1220,
-    "days_tracked": 100
+    "clones": 2748,
+    "cloners": 1237,
+    "days_tracked": 101
   },
   "current_day": {
+    "date": "2026-06-25",
+    "views": 0,
+    "visitors": 0,
+    "clones": 52,
+    "cloners": 17
+  },
+  "previous_day": {
     "date": "2026-06-24",
     "views": 11,
     "visitors": 3,
     "clones": 42,
     "cloners": 15
   },
-  "previous_day": {
-    "date": "2026-06-23",
-    "views": 0,
-    "visitors": 0,
-    "clones": 65,
-    "cloners": 21
-  },
   "delta_since_previous_day": {
-    "views": 11,
-    "visitors": 3,
-    "clones": -23,
-    "cloners": -6
+    "views": -11,
+    "visitors": -3,
+    "clones": 10,
+    "cloners": 2
   },
   "referrers": [
     {
