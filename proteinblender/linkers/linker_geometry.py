@@ -1208,40 +1208,42 @@ def _remove_beads_geometry_nodes(curve_obj: bpy.types.Object,
 # ---------------------------------------------------------------------------
 
 def setup_detailed_mode(linker_def, curve_obj: bpy.types.Object) -> bool:
-    """Set up MolecularNodes 'Animate Peptide to Curve' for detailed rendering.
+    """Detailed rendering is **not yet implemented** — falls back to QUICK.
 
-    Appends the GN tree from the MN data file and creates a NODES modifier
-    on the linker curve object.
+    The MN ``Animate Peptide to Curve`` node tree this used to attach
+    requires a peptide-atom mesh as its ``Atoms`` input. The previous
+    implementation slapped the tree onto the linker's Bezier curve
+    object (which only has curve data — no atoms), so the modifier
+    evaluated to empty geometry and the linker visually disappeared
+    (reported by testers: "linker disappears or doesn't seem to be built"
+    after switching to Detailed).
 
-    Args:
-        linker_def: PB2_LinkerDefinition PropertyGroup
-        curve_obj: The linker curve object
-
-    Returns:
-        True if setup succeeded
+    Until we wire up a real peptide-mesh source (residue-template
+    backbone for ``length_residues`` residues, plus a target-curve
+    constraint), this function intentionally does nothing and returns
+    False so the QUICK styled-Bezier geometry stays visible. The enum
+    option is kept so old .blend files don't break on load.
     """
-    try:
-        from ..utils.molecularnodes.blender.nodes import append, get_mod
-
-        # Append the peptide-to-curve node tree
-        tree = bpy.data.node_groups.get("Animate Peptide to Curve")
-        if not tree:
-            tree = append("Animate Peptide to Curve")
-
-        if not tree:
-            logger.warning("Could not load 'Animate Peptide to Curve' node tree")
-            return False
-
-        # Create modifier
-        mod = get_mod(curve_obj, "LinkerPeptideToCurve")
-        mod.node_group = tree
-
-        logger.info(f"Set up detailed rendering for linker {linker_def.uid}")
-        return True
-
-    except Exception as e:
-        logger.warning(f"Failed to set up detailed rendering: {e}")
+    if curve_obj is None:
         return False
+    # Defensive: if a prior session left the broken LinkerPeptideToCurve
+    # modifier attached, strip it so the curve renders again.
+    legacy = curve_obj.modifiers.get("LinkerPeptideToCurve")
+    if legacy is not None:
+        try:
+            curve_obj.modifiers.remove(legacy)
+            logger.info(
+                f"Removed legacy LinkerPeptideToCurve modifier from "
+                f"{curve_obj.name} (detailed mode is not yet implemented)"
+            )
+        except Exception as e:
+            logger.warning(f"Could not strip legacy detailed modifier: {e}")
+    logger.warning(
+        "Linker 'Detailed' rendering mode is not yet implemented — "
+        "falling back to Quick (styled Bezier curve). "
+        "The linker will still render correctly."
+    )
+    return False
 
 
 def remove_detailed_mode(curve_obj: bpy.types.Object) -> None:

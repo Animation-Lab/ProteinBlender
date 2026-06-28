@@ -264,7 +264,10 @@ class PB2_OT_add_linker(Operator):
         name="Rendering",
         items=[
             ('QUICK', "Quick", "Styled Bezier curve with catenary physics"),
-            ('DETAILED', "Detailed", "MolecularNodes peptide geometry along curve"),
+            ('DETAILED', "Detailed (coming soon)",
+             "MolecularNodes peptide geometry along curve. Not yet "
+             "implemented — currently falls back to Quick so the linker "
+             "stays visible"),
         ],
         default='QUICK'
     )
@@ -643,7 +646,9 @@ class PB2_OT_edit_linker(Operator):
         name="Rendering",
         items=[
             ('QUICK', "Quick", "Styled Bezier curve"),
-            ('DETAILED', "Detailed", "MolecularNodes peptide geometry"),
+            ('DETAILED', "Detailed (coming soon)",
+             "MolecularNodes peptide geometry. Not yet implemented — "
+             "currently falls back to Quick so the linker stays visible"),
         ]
     )
     behavior: EnumProperty(

@@ -196,7 +196,10 @@ class PB2_LinkerDefinition(PropertyGroup):
         description="How the linker is rendered",
         items=[
             ('QUICK', "Quick", "Styled Bezier curve (tube) with catenary physics"),
-            ('DETAILED', "Detailed", "MolecularNodes peptide geometry along curve"),
+            ('DETAILED', "Detailed (coming soon)",
+             "MolecularNodes peptide geometry along the curve. Not yet "
+             "implemented — currently falls back to Quick so the linker "
+             "stays visible"),
         ],
         default='QUICK'
     )
