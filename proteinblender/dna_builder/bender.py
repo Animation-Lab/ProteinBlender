@@ -449,8 +449,13 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
         bp = spline.bezier_points[i]
         bp_world = curve_world @ bp.co
 
+        # User-facing name: "{dna} Bend Node N" (1-based, spaced).
+        # The previous "_BendNode00" scheme made it impossible to tell
+        # which node was which in the Keyframe Create dialog and the
+        # outliner. Tester report (Janet): "Maybe naming something like
+        # 'bend node 1' or something would be helpful."
         empty = bpy.data.objects.new(
-            f"{dna_obj.name}_BendNode{i:02d}", None,
+            f"{dna_obj.name} Bend Node {i + 1}", None,
         )
         empty.empty_display_type = _NODE_DISPLAY_TYPE
         empty.empty_display_size = _NODE_DISPLAY_SIZE
@@ -692,10 +697,12 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     # Sweep up any stale node Empties still parented to the curve. These
     # may exist as orphans (their old collection was deleted) or have been
     # re-homed to another collection — either way they're broken handles.
+    # Match both the old "_BendNode00" naming and the new "Bend Node 1"
+    # so legacy .blend files still get cleaned up.
     for ob in list(bpy.data.objects):
         if (ob.type == "EMPTY"
                 and ob.parent is curve_obj
-                and "_BendNode" in ob.name):
+                and ("_BendNode" in ob.name or "Bend Node " in ob.name)):
             try:
                 bpy.data.objects.remove(ob, do_unlink=True)
             except Exception:
@@ -1051,7 +1058,7 @@ def cleanup_orphaned_bend_objects():
         if o.type == "CURVE" and o.name.endswith("_BendCurve"):
             if o.name not in live_curves:
                 to_remove.append(o)
-        elif o.type == "EMPTY" and "_BendNode" in o.name:
+        elif o.type == "EMPTY" and ("_BendNode" in o.name or "Bend Node " in o.name):
             if o.name not in live_nodes:
                 to_remove.append(o)
 
