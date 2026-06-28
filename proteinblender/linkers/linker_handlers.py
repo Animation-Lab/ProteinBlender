@@ -294,23 +294,97 @@ def linker_redo_post_handler(scene):
     linker_undo_post_handler(scene)
 
 
+def _deferred_linker_rebuild():
+    """Re-validate every linker and re-snap its curve to the current
+    endpoint positions. Runs from a 0-second timer scheduled by
+    ``linker_load_post_handler`` so the depsgraph has had a chance to
+    evaluate world matrices after the file load completed.
+
+    Tester report (Janet, Windows): linker comes back "in a different
+    conformation and not attached to proteins after reopening file".
+    Root cause: the load_post handler used to run immediately on file
+    open, sometimes before the parent puppet's transform was fully
+    evaluated — every endpoint lookup multiplies the local atom
+    position by ``obj.matrix_world``, and a stale parent matrix puts
+    the curve at a stale world position. Deferring by a tick lets
+    Blender finish its first depsgraph evaluation before we snap the
+    curve.
+
+    Returns None so the timer doesn't reschedule itself."""
+    try:
+        scene = bpy.context.scene
+    except Exception:
+        return None
+    if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        return None
+
+    # Force a depsgraph update so any not-yet-evaluated transforms /
+    # modifiers are committed before we read world positions. This is
+    # belt-and-braces — the timer alone is usually enough — but on
+    # complex scenes (puppets parented to controllers, hidden
+    # collections being un-hidden on load, etc.) the explicit update
+    # eliminates the last race window.
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+
+    n_rebuilt = 0
+    for linker in scene.pb2_linkers:
+        linker.is_valid = _validate_linker_endpoints(linker)
+        if not linker.is_valid:
+            continue
+        if linker.curve_object_name and linker.curve_object_name in bpy.data.objects:
+            update_linker_curve(linker)
+        else:
+            _reconnect_linker_geometry(linker)
+        n_rebuilt += 1
+
+    if n_rebuilt:
+        logger.info(
+            f"Deferred linker rebuild: re-snapped {n_rebuilt} linker(s) "
+            f"to evaluated endpoint positions"
+        )
+    return None
+
+
 @persistent
 def linker_load_post_handler(dummy):
-    """Rebuild linker geometry from stored properties after file load."""
+    """Schedule a deferred linker rebuild after file load.
+
+    The immediate load_post moment runs before Blender's first
+    depsgraph evaluation in many .blend files — reading endpoint
+    world positions then can hand back stale transforms. Schedule
+    via a 0-second timer so the rebuild runs after the load has
+    fully settled.
+
+    A pass on the *current* state is still kept as a fast-path for
+    files where the depsgraph happens to already be ready (typically
+    small scenes with no controller parenting). The deferred pass
+    overwrites it if positions changed."""
     scene = bpy.context.scene
     if not hasattr(scene, 'pb2_linkers'):
         return
 
     logger.info(f"Rebuilding {len(scene.pb2_linkers)} linkers after file load")
 
+    # Best-effort immediate pass (may use stale positions on complex
+    # scenes — the deferred pass below cleans up)
     for linker in scene.pb2_linkers:
         linker.is_valid = _validate_linker_endpoints(linker)
-
         if linker.is_valid:
             if linker.curve_object_name and linker.curve_object_name in bpy.data.objects:
                 update_linker_curve(linker)
             else:
                 _reconnect_linker_geometry(linker)
+
+    # Deferred pass — runs after the load completes and after the
+    # first depsgraph evaluation, so endpoint world positions are
+    # current.
+    try:
+        bpy.app.timers.register(_deferred_linker_rebuild, first_interval=0.0)
+    except Exception as e:
+        logger.warning(f"Could not schedule deferred linker rebuild: {e}")
 
 
 # ---------------------------------------------------------------------------
