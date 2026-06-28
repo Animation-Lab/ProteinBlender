@@ -91,7 +91,14 @@ class PB2_PT_linkers(Panel):
         scene = context.scene
 
         main_box = layout.box()
-        main_box.label(text="Flexible Linkers", icon='LINK_BLEND')
+        # Tinted-box-style header: a colour swatch icon + bold label. Each
+        # builder panel uses a distinct COLORSET_*_VEC swatch so tools
+        # read as visually distinct sections at a glance. Linker = orange
+        # (COLORSET_02) to evoke a flexible rope.
+        _hdr = main_box.row(align=True)
+        _hdr.scale_y = 1.15
+        _hdr.label(text="", icon='COLORSET_02_VEC')
+        _hdr.label(text="Flexible Linkers", icon='LINK_BLEND')
         main_box.separator()
 
         # Check if any puppets exist

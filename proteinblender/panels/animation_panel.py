@@ -46,7 +46,14 @@ class PROTEINBLENDER_PT_animation(Panel):
         frames = get_keyframe_frames(context, targets=filtered_targets)
 
         main_box = layout.box()
-        main_box.label(text="Animate Scene", icon='PLAY')
+        # Tinted-box-style header: a colour swatch icon + bold label. Each
+        # builder panel uses a distinct COLORSET_*_VEC swatch so tools
+        # read as visually distinct sections at a glance. Animation =
+        # yellow (COLORSET_03) to evoke keyframe yellow.
+        _hdr = main_box.row(align=True)
+        _hdr.scale_y = 1.15
+        _hdr.label(text="", icon='COLORSET_03_VEC')
+        _hdr.label(text="Animate Scene", icon='PLAY')
         main_box.separator()
         col = main_box.column(align=True)
 

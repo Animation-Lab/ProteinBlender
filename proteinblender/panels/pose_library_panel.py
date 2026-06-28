@@ -1066,9 +1066,13 @@ class PROTEINBLENDER_PT_pose_library(Panel):
         
         # Create a box for the entire panel content (matching other panels)
         main_box = layout.box()
-        
-        # Add panel title inside the box
-        main_box.label(text="Protein Pose Library", icon='ARMATURE_DATA')
+
+        # Tinted-box-style header: a colour swatch icon + bold label.
+        # Pose Library = pink (COLORSET_08).
+        _hdr = main_box.row(align=True)
+        _hdr.scale_y = 1.15
+        _hdr.label(text="", icon='COLORSET_08_VEC')
+        _hdr.label(text="Protein Pose Library", icon='ARMATURE_DATA')
         main_box.separator()
         
         # ALWAYS SHOW THE CREATE BUTTON - NO CONDITIONS
