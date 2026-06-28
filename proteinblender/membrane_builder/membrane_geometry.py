@@ -243,7 +243,40 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #       case is unchanged (smin reduces to sdf when N=1). Bump
 #       forces a tree rebuild so existing membranes pick up the
 #       new default.
-GN_TREE_VERSION = 26
+#   v27: "Bilayer Thickness (nm)" is now outer-surface-to-outer-surface
+#        (visible thickness) rather than instance-origin-to-instance-origin.
+#        New "Lipid Outer Extent (nm)" input lets the operator push the
+#        per-style mesh extent above the instance origin; the leaflet
+#        builder subtracts 2·Extent·LipidScale from Thickness before
+#        halving, so the slider value equals what the user measures with
+#        a ruler. Default Thickness bumped 3.2 → 5.0 nm (real bilayer).
+#   v28: "Lipid Scale" input dropped — lipid size is fixed at 1×. The
+#        slider was UI noise: per-style outer-extent constants already
+#        calibrate the bilayer to spec; rescaling individual lipids
+#        threw that calibration off and was rarely useful. Inset block
+#        is now Thickness − 2·Extent (no scale multiply); IoP Scale
+#        left at its (1, 1, 1) default; ScaleVec combine nodes removed
+#        from both leaflets.
+#   v29: SURFACE lipid assets rebaked with VdW-sized metaballs (radii
+#        cut ~50%, stiffness 2.0 → 1.0). Surface now reads as fused
+#        atom-sized bumps, MN-Surface style, instead of smooth sausages.
+#        SURFACE outer extent recalibrated 0.89 → 0.75 nm to keep the
+#        Bilayer Thickness slider honest. No tree-structure changes —
+#        version bump exists only to force re-push of the new extent
+#        value into existing membranes' modifiers.
+#   v30: SURFACE radii bumped back up to SAS-style probes (≈ VdW + 1.4 Å,
+#        so ~80% of the original v6 values). Stiffness stays at 1.0 from
+#        v29. v29's raw-VdW radii made each 50-atom lipid look like a
+#        spindly wireframe next to a protein's chunky SAS surface;
+#        v30 restores enough volume to read as a packed bilayer while
+#        keeping the per-atom bump character. SURFACE outer extent
+#        rebumped to track the larger blob (recalibrated by MCP).
+#   v31: STYLIZED head sphere halved 0.04 → 0.02 BU. STYLIZED outer
+#        extent recalibrated 0.80 → 0.60 nm so the head halving doesn't
+#        push the bilayer thinner than the spec. No tree-structure
+#        change — version bump exists to force re-push of the new
+#        extent into existing membranes' modifiers when they upgrade.
+GN_TREE_VERSION = 31
 
 
 # ===========================================================================
@@ -370,9 +403,16 @@ def _build_membrane_gn_tree(num_holes: int = 0,
     _new_input(tree, "Density (per nm²)", "NodeSocketFloat",
                default=1.5, min_val=0.05, max_val=5.0)
     _new_input(tree, "Bilayer Thickness (nm)", "NodeSocketFloat",
-               default=3.2, min_val=1.0, max_val=15.0)
-    _new_input(tree, "Lipid Scale", "NodeSocketFloat",
-               default=1.0, min_val=0.3, max_val=3.0)
+               default=5.0, min_val=2.0, max_val=15.0)
+    # How far the rendered lipid extends above its instance origin (P side),
+    # in nm. The leaflet builder uses (Thickness - 2·Extent) as the effective
+    # head-to-head separation so the user's Thickness value matches the
+    # visible outer-surface-to-outer-surface thickness of the bilayer.
+    # Pushed by the operator on style change. Default tracks SURFACE.
+    _new_input(tree, "Lipid Outer Extent (nm)", "NodeSocketFloat",
+               default=lipid_assets.outer_extent_for_style(
+                   lipid_assets.DEFAULT_STYLE),
+               min_val=0.0, max_val=3.0)
     _new_input(tree, "Random Rotation", "NodeSocketBool", default=True)
     _new_input(tree, "Animate Bob", "NodeSocketBool", default=False)
     _new_input(tree, "Bob Amplitude (nm)", "NodeSocketFloat",
@@ -485,6 +525,43 @@ def _build_membrane_gn_tree(num_holes: int = 0,
     links.new(dmin_inv.outputs[0], dmin.inputs[0])
 
     # ------------------------------------------------------------------
+    # 1b. Inset half-thickness — shared by both leaflets.
+    #
+    # The user's "Bilayer Thickness" is the **outer-surface-to-outer-surface**
+    # visible thickness of the rendered bilayer (so the slider matches what
+    # they see). The lipid mesh extends some distance above its instance
+    # origin (≈0.85 nm for SURFACE, set per style via "Lipid Outer Extent").
+    # The effective head-to-head separation we hand to the leaflets is
+    # therefore  Thickness − 2 · Extent .  Clamped at zero so a too-thin
+    # slider value doesn't invert the leaflets.
+    # ------------------------------------------------------------------
+    double_extent = new("ShaderNodeMath", name="DoubleExtent")
+    double_extent.operation = "MULTIPLY"
+    double_extent.inputs[1].default_value = 2.0
+    double_extent.location = (-2500, 250)
+    links.new(get_in("Lipid Outer Extent (nm)"), double_extent.inputs[0])
+
+    inset_thick_nm = new("ShaderNodeMath", name="InsetThickness")
+    inset_thick_nm.operation = "SUBTRACT"
+    inset_thick_nm.location = (-2300, 250)
+    links.new(get_in("Bilayer Thickness (nm)"), inset_thick_nm.inputs[0])
+    links.new(double_extent.outputs[0], inset_thick_nm.inputs[1])
+
+    inset_clamped = new("ShaderNodeMath", name="InsetClamped")
+    inset_clamped.operation = "MAXIMUM"
+    inset_clamped.inputs[1].default_value = 0.0
+    inset_clamped.location = (-2100, 250)
+    links.new(inset_thick_nm.outputs[0], inset_clamped.inputs[0])
+
+    # Effective half-thickness in BU — fed into both leaflets' SignedHalf
+    # nodes (upper leaves it positive, lower negates it).
+    half_thick_shared = new("ShaderNodeMath", name="HalfThick (shared)")
+    half_thick_shared.operation = "MULTIPLY"
+    half_thick_shared.inputs[1].default_value = 1.0 / (NM_PER_BU * 2.0)
+    half_thick_shared.location = (-1900, 250)
+    links.new(inset_clamped.outputs[0], half_thick_shared.inputs[0])
+
+    # ------------------------------------------------------------------
     # 2. Distribute Points on Faces — produces one point per future lipid.
     #    Used twice: once for upper leaflet, once for lower leaflet, with
     #    different seeds so the two leaflets don't perfectly mirror.
@@ -546,20 +623,16 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                 self.outputs = [sock]
         normal = _NormalProxy(capture_n.outputs[1])
 
-        # Half thickness (in BU)
-        half_thick = new("ShaderNodeMath", name=f"HalfThick {leaflet_index}")
-        half_thick.operation = "MULTIPLY"
-        # convert nm → BU (÷10) and halve (÷2) → ÷20
-        half_thick.inputs[1].default_value = 1.0 / (NM_PER_BU * 2.0)
-        half_thick.location = (-2000, y_pos + 100)
-        links.new(get_in("Bilayer Thickness (nm)"), half_thick.inputs[0])
-
-        # If lower leaflet, negate offset
+        # Half thickness (in BU). The shared inset half-thickness sub-graph
+        # (see pre-leaflet block) accounts for the rendered lipid mesh
+        # extending above its instance origin, so this signed offset places
+        # the lipid origin where the visible head sphere meets the user's
+        # Bilayer Thickness value, not at the head itself.
         signed_half = new("ShaderNodeMath", name=f"SignedHalf {leaflet_index}")
         signed_half.operation = "MULTIPLY"
         signed_half.inputs[1].default_value = 1.0 if is_upper else -1.0
         signed_half.location = (-1800, y_pos + 100)
-        links.new(half_thick.outputs[0], signed_half.inputs[0])
+        links.new(half_thick_shared.outputs[0], signed_half.inputs[0])
 
         # Offset = normal * signed_half
         offset_vec = new("ShaderNodeVectorMath", name=f"OffsetVec {leaflet_index}")
@@ -1410,12 +1483,6 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         base_rot = align.outputs["Rotation"]
 
         # ---- Instance lipid on points ------------------------------------
-        scale_to_vec = new("ShaderNodeCombineXYZ", name=f"ScaleVec {leaflet_index}")
-        scale_to_vec.location = (3200, y_pos - 350)
-        links.new(get_in("Lipid Scale"), scale_to_vec.inputs[0])
-        links.new(get_in("Lipid Scale"), scale_to_vec.inputs[1])
-        links.new(get_in("Lipid Scale"), scale_to_vec.inputs[2])
-
         # ---- Lipid variants: 4 conformations picked randomly per point ---
         # Collection Info with Separate Children outputs each child of the
         # variant collection as its own top-level instance. Instance on
@@ -1464,7 +1531,7 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         # INT output of FunctionNodeRandomValue is at index 2.
         links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
         links.new(base_rot, iop.inputs["Rotation"])
-        links.new(scale_to_vec.outputs[0], iop.inputs["Scale"])
+        # IoP Scale left at its (1, 1, 1) default — lipid size is fixed.
 
         # ---- Per-instance spin about the lipid's long axis ---------------
         # Static random Y-rotation (gated by Random Rotation, so the top view

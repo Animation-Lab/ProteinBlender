@@ -108,6 +108,23 @@ RENDER_STYLE_VARIANT_COUNT: Dict[str, int] = {
     STYLE_BALL_AND_STICK: _TOTAL_VARIANT_SLOTS,
 }
 
+# Per-style "outer head extent" in nm — how far the rendered lipid mesh extends
+# above its instance origin (P atom side). The GN tree subtracts 2× this from
+# the Bilayer Thickness slider so the user's value equals the visible outer-
+# surface-to-outer-surface thickness of the rendered bilayer, regardless of
+# style. Calibrated by MCP measurement of the in-scene rendered z-extent at
+# spec = 5.0 nm; values land within ±0.1 nm of spec across all four bundled
+# lipid conformations (per-variant head height drifts by a few Å):
+#   STYLIZED — analytic head sphere, hits spec dead-on (0.80 nm)
+#   SURFACE — metaball blob, +0.08 nm slack from per-PDB head variance
+#   BALL_AND_STICK — bond cylinders + neighbour atoms above P drive the
+#     effective head top higher than the bare P icosphere predicted
+RENDER_STYLE_OUTER_EXTENT_NM: Dict[str, float] = {
+    STYLE_SURFACE: 0.81,
+    STYLE_STYLIZED: 0.60,
+    STYLE_BALL_AND_STICK: 0.95,
+}
+
 LIPID_COLLECTION_NAME = _COLLECTION_NAMES[STYLE_SURFACE]
 
 
@@ -131,7 +148,10 @@ _BS_BOND_RADIUS_BU = 0.011
 _BS_SUBDIV = 2
 
 # ---- Stylized sizing ----
-_STYLIZED_HEAD_RADIUS_BU = 0.04   # ~4 Å head sphere (matches v5 procedural)
+# Head halved 0.04 → 0.02 BU (~4 Å → ~2 Å) so the head sphere reads as a
+# proportional phosphate cap rather than overpowering the lipid silhouette.
+# Outer extent for STYLIZED tracks this in RENDER_STYLE_OUTER_EXTENT_NM.
+_STYLIZED_HEAD_RADIUS_BU = 0.02
 _STYLIZED_TAIL_RADIUS_BU = 0.012  # tube radius (bevel_depth on the Bezier)
 # Bezier tube resolution per control-point segment (samples along length)
 # and around the circumference. 6 / 4 keeps the per-lipid poly count modest
@@ -145,15 +165,20 @@ _STYLIZED_FALLBACK_TAIL_OFFSET_X_BU = 0.018
 _BOND_CUTOFF_ANG = 1.85
 
 # ---- Surface (metaball) sizing ----
-# Element radii (BU) for the metaball blob. Slightly larger than VDW so
-# bonded neighbours visibly fuse, while keeping per-atom bumps readable.
+# Element radii (BU) — solvent-accessible-style probes (≈ VdW + 1.4 Å), so
+# the bilayer reads as a chunky continuous surface like MN's protein /
+# DNA Style Surface (which is also a SAS-style probe), while stiffness=1.0
+# below keeps individual atom bumps visible instead of blurring into one
+# smooth sausage. Earlier attempt at raw VdW (≈0.018 BU) left lipids
+# looking like spindly wire next to a protein — too thin for a 50-atom
+# molecule to read as a packed bilayer.
 _SURFACE_RADIUS_BU = {
-    "P": 0.045,
-    "O": 0.038,
-    "N": 0.040,
-    "C": 0.035,
+    "P": 0.038,
+    "O": 0.032,
+    "N": 0.034,
+    "C": 0.030,
 }
-_SURFACE_DEFAULT_RADIUS_BU = 0.033
+_SURFACE_DEFAULT_RADIUS_BU = 0.028
 # Marching-cubes voxel size (smaller = finer mesh, slower bake). 0.006 BU
 # ≈ 0.6 Å — gives a smooth surface at this scale while keeping bake under
 # a couple of seconds per variant.
@@ -576,7 +601,10 @@ def _build_surface(pdb_path: Path, name: str) -> bpy.types.Object:
         elt = mb_data.elements.new(type="BALL")
         elt.co = pos_bu
         elt.radius = radius
-        elt.stiffness = 2.0
+        # Stiffness 1.0 (default) keeps each atom's contribution local — at
+        # 2.0 the fields overlap so heavily that bonded atoms blur into one
+        # smooth sausage. We want per-atom bumps to read, MN-Surface style.
+        elt.stiffness = 1.0
         placed += 1
 
     if placed == 0:
@@ -816,6 +844,13 @@ def variant_count_for_style(style: str) -> int:
     """Number of variants in ``style``'s collection — drives the random
     Instance Index max on the GN modifier."""
     return RENDER_STYLE_VARIANT_COUNT.get(style, 1)
+
+
+def outer_extent_for_style(style: str) -> float:
+    """How far the lipid mesh extends above its instance origin, in nm.
+    Pushed into the GN modifier so the Bilayer Thickness slider equals the
+    visible outer-surface-to-outer-surface thickness regardless of style."""
+    return RENDER_STYLE_OUTER_EXTENT_NM.get(style, 0.85)
 
 
 def set_surface_color(color) -> None:

@@ -288,7 +288,7 @@ class PROTEINBLENDER_OT_membrane_pore_lifecycle(Operator):
         x, y = hole.location.x, hole.location.y
 
         # Z clearance so the pore sphere sits fully outside the bilayer.
-        half_thick = float(root.get("pb_mem_bilayer_thickness", 4.0)) / (
+        half_thick = float(root.get("pb_mem_bilayer_thickness", 5.0)) / (
             2.0 * NM_PER_BU)
         z_clear = half_thick + open_r + 0.25
         punch = bool(props.anim_punch_through)

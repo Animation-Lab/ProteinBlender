@@ -1,3 +1,4 @@
+import gzip
 import io
 import os
 import time
@@ -145,13 +146,26 @@ def download(code, format="cif", cache=CACHE_DIR, database="rcsb"):
     for url in urls:
         print(f"Attempting to download {code}.{format} from {url}")
         success, result = _download_with_retry(url)
-        
+
         if success:
-            if _is_binary:
+            # Some fallback mirrors (notably PDBj's divided archive) only
+            # serve gzipped .ent.gz files. Detect that per URL and
+            # decompress before handing the bytes to the parser — otherwise
+            # the gzipped stream is read as text, the PDB parser sees zero
+            # ATOM records, and biotite blows up with a None-shape error.
+            is_gz = url.lower().endswith(".gz")
+            if is_gz:
+                try:
+                    raw = gzip.decompress(result.content)
+                except OSError as e:
+                    errors.append(f"gzip decode failed for {url}: {e}")
+                    continue
+                content = raw if _is_binary else raw.decode("utf-8", errors="replace")
+            elif _is_binary:
                 content = result.content
             else:
                 content = result.text
-                
+
             if file:
                 mode = "wb+" if _is_binary else "w+"
                 with open(file, mode) as f:

@@ -180,7 +180,6 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props,
     _set_mod_input(mod, "Sphere Radius (nm)", float(props.radius))
     _set_mod_input(mod, "Density (per nm²)", float(props.density))
     _set_mod_input(mod, "Bilayer Thickness (nm)", float(props.bilayer_thickness))
-    _set_mod_input(mod, "Lipid Scale", float(props.lipid_scale))
     _set_mod_input(mod, "Random Rotation", bool(props.random_rotation))
     _set_mod_input(mod, "Animate Bob", bool(props.animate_bob))
     _set_mod_input(mod, "Bob Amplitude (nm)", float(props.bob_amplitude))
@@ -188,19 +187,22 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props,
 
     # Render style — swap which collection feeds the GN modifier and push
     # the matching variant count so the per-point random Instance Index
-    # stays inside the collection's range.
+    # stays inside the collection's range. Also push the per-style outer
+    # extent so the Bilayer Thickness slider stays calibrated against the
+    # visible bilayer thickness regardless of style.
     style = str(props.render_style)
     _set_mod_input(mod, "Lipid Collection",
                    lipid_assets.get_or_build_lipid_collection(style))
     _set_mod_input(mod, "Lipid Variant Count",
                    lipid_assets.variant_count_for_style(style))
+    _set_mod_input(mod, "Lipid Outer Extent (nm)",
+                   lipid_assets.outer_extent_for_style(style))
 
     # Mirror onto the root as custom properties (so size-edit operator can
     # detect what's needed, and so we can re-sync to panel when reselected).
     root_obj["pb_mem_shape"] = new_shape
     root_obj["pb_mem_density"] = float(props.density)
     root_obj["pb_mem_bilayer_thickness"] = float(props.bilayer_thickness)
-    root_obj["pb_mem_lipid_scale"] = float(props.lipid_scale)
     root_obj["pb_mem_random_rotation"] = bool(props.random_rotation)
     root_obj["pb_mem_animate_bob"] = bool(props.animate_bob)
     root_obj["pb_mem_bob_amplitude"] = float(props.bob_amplitude)
@@ -262,6 +264,8 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
                    lipid_assets.get_or_build_lipid_collection(style))
     _set_mod_input(mod, "Lipid Variant Count",
                    lipid_assets.variant_count_for_style(style))
+    _set_mod_input(mod, "Lipid Outer Extent (nm)",
+                   lipid_assets.outer_extent_for_style(style))
     shape = str(root_obj.get("pb_mem_shape", SHAPE_FLAT))
     _set_mod_input(mod, "Shape Mode", int(SHAPE_MODE_INT.get(shape, 0)))
     _set_mod_input(mod, "Sphere Radius (nm)",
@@ -269,9 +273,7 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     _set_mod_input(mod, "Density (per nm²)",
                    float(root_obj.get("pb_mem_density", 1.5)))
     _set_mod_input(mod, "Bilayer Thickness (nm)",
-                   float(root_obj.get("pb_mem_bilayer_thickness", 3.2)))
-    _set_mod_input(mod, "Lipid Scale",
-                   float(root_obj.get("pb_mem_lipid_scale", 1.0)))
+                   float(root_obj.get("pb_mem_bilayer_thickness", 5.0)))
     _set_mod_input(mod, "Random Rotation",
                    bool(root_obj.get("pb_mem_random_rotation", True)))
     _set_mod_input(mod, "Animate Bob",
@@ -519,7 +521,7 @@ class PROTEINBLENDER_OT_add_hole(Operator):
         # cross-section with the membrane, so the default radius must reach
         # past both leaflets or it wouldn't carve anything. Half the bilayer
         # thickness (in BU) + a margin guarantees it spans the membrane.
-        half_thick_bu = float(root.get("pb_mem_bilayer_thickness", 4.0)) / (
+        half_thick_bu = float(root.get("pb_mem_bilayer_thickness", 5.0)) / (
             2.0 * NM_PER_BU)
         hole_radius = half_thick_bu + 0.15
         hole.scale = (hole_radius, hole_radius, hole_radius)

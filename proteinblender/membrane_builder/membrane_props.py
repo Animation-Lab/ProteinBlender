@@ -125,26 +125,17 @@ class MembraneBuilderProperties(PropertyGroup):
     bilayer_thickness: FloatProperty(
         name="Bilayer Thickness",
         description=(
-            "Distance between the two leaflets' head groups, in nm. The "
-            "default (3.2 nm) is tuned so an average lipid's acyl tails "
-            "meet the opposing leaflet at the midplane — deeper tails "
-            "interdigitate slightly, matching the closed-hydrophobic-"
-            "interior look of a real fluid bilayer with no empty space "
-            "between the leaflets"
+            "Visible thickness of the rendered bilayer, in nm — measured "
+            "from the top of the upper leaflet's head groups to the "
+            "bottom of the lower leaflet's head groups. Default 5.0 nm "
+            "matches a real fluid PC bilayer. Internally the leaflets are "
+            "inset by the per-style lipid mesh extent so the slider value "
+            "equals what you measure with a ruler"
         ),
-        default=3.2,
-        min=1.0,
+        default=5.0,
+        min=2.0,
         max=15.0,
         soft_max=8.0,
-        update=_sync_to_active_membrane,
-    )
-
-    lipid_scale: FloatProperty(
-        name="Lipid Size",
-        description="Overall scale of each lipid (head + tails)",
-        default=1.0,
-        min=0.3,
-        max=3.0,
         update=_sync_to_active_membrane,
     )
 
@@ -301,7 +292,6 @@ _PROP_KEYS = (
     "radius",
     "density",
     "bilayer_thickness",
-    "lipid_scale",
     "random_rotation",
     "animate_bob",
     "bob_amplitude",

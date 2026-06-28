@@ -107,7 +107,6 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
             col = lip_box.column(align=True)
             col.prop(props, "density")
             col.prop(props, "bilayer_thickness")
-            col.prop(props, "lipid_scale")
             lip_box.prop(props, "random_rotation")
 
         # ---- Animation section -------------------------------------------

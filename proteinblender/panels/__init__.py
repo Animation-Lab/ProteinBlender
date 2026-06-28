@@ -40,6 +40,8 @@ from .animation_panel import (
     PROTEINBLENDER_PT_animation,
     PROTEINBLENDER_OT_delete_keyframe as PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
+    PROTEINBLENDER_OT_edit_keyframe,
+    PROTEINBLENDER_OT_dismiss_dialogs,
 )
 # Direct panels - no container needed
 
@@ -96,6 +98,8 @@ CLASSES = [
     PROTEINBLENDER_OT_placeholder,
     PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
+    PROTEINBLENDER_OT_edit_keyframe,
+    PROTEINBLENDER_OT_dismiss_dialogs,
 
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer

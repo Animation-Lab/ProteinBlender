@@ -185,8 +185,9 @@ def validate_keyframe_metadata(controller_obj, domain_objects, frame, stored_set
 
 def get_keyframe_targets(context):
     """Return ``[(label, object, kind, item_id)]`` for everything ProteinBlender
-    can keyframe: puppet controllers (kind ``'PUPPET'``) and DNA/RNA molecule
-    objects (kind ``'MOLECULE'``, keyframed directly).
+    can keyframe: puppet controllers (kind ``'PUPPET'``), DNA/RNA molecule
+    objects (kind ``'MOLECULE'``, keyframed directly) and membrane roots
+    (kind ``'MEMBRANE'`` — root transform + holes + lattice deformation).
 
     Shared by the Create dialog, the keyframe list and keyframe deletion so all
     three agree on what is animatable.
@@ -208,7 +209,36 @@ def get_keyframe_targets(context):
             if obj and obj.name not in seen:
                 seen.add(obj.name)
                 targets.append((item.name, obj, 'MOLECULE', item.item_id))
+    for item in scene.outliner_items:
+        if item.item_type == 'MEMBRANE':
+            obj = bpy.data.objects.get(item.object_name)
+            if obj and obj.name not in seen and obj.get("pb_is_membrane", False):
+                seen.add(obj.name)
+                targets.append((item.name, obj, 'MEMBRANE', item.item_id))
     return targets
+
+
+def get_membrane_holes(mem_obj):
+    """Hole-controller empties belonging to a membrane (or [] if none). Each
+    hole's transform IS what shapes the hole — its world position is the hole
+    centre, its scale the radius — so all of them must be keyframed for a
+    membrane animation to capture hole movement."""
+    if mem_obj is None:
+        return []
+    return [c for c in mem_obj.children if c.get("pb_is_membrane_hole", False)]
+
+
+def get_membrane_lattice(mem_obj):
+    """Lattice deformer child of a membrane, or None if it has none. The
+    surface deformation lives in the lattice DATA's ``points[i].co_deform``,
+    NOT in the lattice OBJECT's transform — keyframes for deformation must
+    target the data block, not the object."""
+    if mem_obj is None:
+        return None
+    for c in mem_obj.children:
+        if c.type == "LATTICE":
+            return c
+    return None
 
 
 def get_dna_bend_nodes(dna_obj):
@@ -247,27 +277,160 @@ def get_dna_bend_objects(dna_obj):
 def get_keyframe_animated_objects(obj, kind):
     """Every object whose transform F-curves make up one keyframe target's
     animation. The target object itself, plus — for a DNA/RNA molecule (kind
-    'MOLECULE') — its bend curve and control nodes, so a single DNA keyframe
-    captures the strand's bend (position AND rotation) automatically through the
-    same Animate panel (no extra step)."""
+    'MOLECULE') — its bend curve and control nodes, and for a membrane (kind
+    'MEMBRANE') — its hole controllers. A single keyframe in the Animate panel
+    captures the full target (bend / holes) automatically, no extra step.
+
+    The membrane LATTICE is intentionally NOT in this list: its deformation
+    keys live on ``lattice.data.animation_data``, not on the object — see
+    :func:`get_keyframe_frames` and the create/delete operators, which handle
+    that separate data-block path explicitly.
+    """
     objs = [obj]
     if kind == 'MOLECULE':
         objs.extend(get_dna_bend_objects(obj))
+    elif kind == 'MEMBRANE':
+        objs.extend(get_membrane_holes(obj))
     return objs
 
 
-def get_keyframe_frames(context):
-    """Sorted unique integer frames with a transform keyframe on any keyframe
-    target (puppet controllers, DNA/RNA molecules, and DNA bend nodes)."""
+def _iter_lattice_data_fcurves(mem_obj):
+    """F-curves on a membrane's lattice DATA block (``points[i].co_deform``
+    channels), or an empty iterator if the membrane has no lattice / no keys.
+    Surface-deformation keys never appear on the lattice object itself, so
+    every place that scans for membrane keyframes must also visit this."""
+    lat = get_membrane_lattice(mem_obj)
+    if lat is None or lat.data is None:
+        return
+    ad = lat.data.animation_data
+    if not ad or not ad.action:
+        return
+    for fc in get_fcurves_from_action(ad.action, ad):
+        yield fc
+
+
+def _target_owned_object_names(context, obj, kind, item_id):
+    """Every Blender object a user could plausibly click in the viewport to
+    *mean* this keyframe target — the target itself plus the children whose
+    transforms the target's animation captures. Used by
+    ``get_filtered_keyframe_targets`` to decide whether the current selection
+    matches a given target."""
+    names = {obj.name}
+    if kind == 'PUPPET':
+        for o in _resolve_puppet_member_objects(context, item_id):
+            if o is not None:
+                names.add(o.name)
+    elif kind == 'MOLECULE':
+        for o in get_dna_bend_objects(obj):
+            if o is not None:
+                names.add(o.name)
+    elif kind == 'MEMBRANE':
+        for o in get_membrane_holes(obj):
+            if o is not None:
+                names.add(o.name)
+        lat = get_membrane_lattice(obj)
+        if lat is not None:
+            names.add(lat.name)
+    return names
+
+
+def get_filtered_keyframe_targets(context):
+    """Return ``(targets, n_selected)`` — the subset of keyframe targets that
+    the user's current selection implies, plus how many selected objects we
+    matched against. If nothing relevant is selected, return ALL targets
+    with ``n_selected = 0`` so the panel keeps showing every keyframe.
+
+    A target is included if any of its owned objects (target itself + its
+    members / holes / bend nodes / lattice) is in the selection — so a user
+    can click a puppet member chain, or a single membrane hole, to scope
+    the keyframe view to that target."""
+    all_targets = get_keyframe_targets(context)
+    selected_names = {o.name for o in context.selected_objects}
+    if not selected_names:
+        return all_targets, 0
+
+    filtered = []
+    matched_sel_names = set()
+    for tgt in all_targets:
+        label, obj, kind, item_id = tgt
+        owned = _target_owned_object_names(context, obj, kind, item_id)
+        hits = owned & selected_names
+        if hits:
+            filtered.append(tgt)
+            matched_sel_names |= hits
+
+    # If the selection didn't intersect ANY keyframe target, fall back to all
+    # — selecting an unrelated light/camera shouldn't blank the panel.
+    if not filtered:
+        return all_targets, 0
+    return filtered, len(matched_sel_names)
+
+
+def get_keyframe_frames(context, targets=None):
+    """Sorted unique integer frames with a keyframe on any keyframe target
+    (puppet controllers, DNA/RNA molecules + bend nodes, membrane roots +
+    holes + lattice-point deformation).
+
+    Pass ``targets`` to restrict the scan to a specific subset — e.g. the
+    selection-filtered list returned by
+    :func:`get_filtered_keyframe_targets`."""
+    if targets is None:
+        targets = get_keyframe_targets(context)
     frames = set()
-    for _label, obj, kind, _item_id in get_keyframe_targets(context):
+    for _label, obj, kind, _item_id in targets:
         for o in get_keyframe_animated_objects(obj, kind):
             ad = o.animation_data
             if ad and ad.action:
                 for fc in get_fcurves_from_action(ad.action, ad):
                     for kp in fc.keyframe_points:
                         frames.add(int(round(kp.co[0])))
+        if kind == 'MEMBRANE':
+            for fc in _iter_lattice_data_fcurves(obj):
+                for kp in fc.keyframe_points:
+                    frames.add(int(round(kp.co[0])))
     return sorted(frames)
+
+
+def keyframe_lattice_deformation(mem_obj, frame):
+    """Keyframe every lattice point's ``co_deform`` for a membrane at *frame*.
+    Returns the number of points keyed (0 if the membrane has no lattice).
+
+    The lattice itself is a single data block animated point-by-point — one
+    F-curve per point per axis — so even a small 5x5x5 lattice produces 375
+    F-curves. That's by design: every deformation handle needs its own
+    interpolation timeline."""
+    lat = get_membrane_lattice(mem_obj)
+    if lat is None or lat.data is None:
+        return 0
+    n = 0
+    for i in range(len(lat.data.points)):
+        try:
+            lat.data.keyframe_insert(
+                data_path=f"points[{i}].co_deform", frame=frame)
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
+def delete_lattice_deformation_keyframes(mem_obj, frame):
+    """Remove every lattice-point ``co_deform`` key for *mem_obj* at *frame*.
+    Inverse of :func:`keyframe_lattice_deformation`; called from the unified
+    Delete Keyframe operator so membrane deletion mirrors object transforms."""
+    lat = get_membrane_lattice(mem_obj)
+    if lat is None or lat.data is None:
+        return
+    ad = lat.data.animation_data
+    if not ad or not ad.action:
+        return
+    for fc in list(get_fcurves_from_action(ad.action, ad)):
+        # Walk a copy of keyframe_points so we can mutate while iterating.
+        for kp in list(fc.keyframe_points):
+            if abs(kp.co.x - frame) < 0.01:
+                try:
+                    fc.keyframe_points.remove(kp)
+                except Exception:
+                    pass
 
 
 def get_puppet_member_objects(context, puppet_id):
@@ -307,8 +470,11 @@ class PuppetKeyframeSettings(PropertyGroup):
     puppet_id: StringProperty(name="Puppet ID")
     puppet_name: StringProperty(name="Puppet Name")
     controller_object_name: StringProperty(name="Controller Object")
-    # 'PUPPET' (controller Empty + domain poses) or 'MOLECULE' (a DNA/RNA
-    # molecule object, keyframed directly — no controller, no domain poses).
+    # 'PUPPET'   – controller Empty + domain poses;
+    # 'MOLECULE' – a DNA/RNA molecule object, keyframed directly (no controller
+    #              or poses; its bend rig is captured automatically);
+    # 'MEMBRANE' – a lipid bilayer root: root transform + hole controllers
+    #              + lattice point deformation (each through its own path).
     item_kind: StringProperty(name="Item Kind", default='PUPPET')
     
     # Main checkbox to enable/disable this item (puppet OR DNA/RNA strand)
@@ -467,6 +633,30 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mol_item.keyframe_color = False   # per-base colour handled elsewhere
             mol_item.brownian_enabled = False
 
+        # Add membrane roots. Each membrane is one row; ticking it captures the
+        # root transform PLUS every hole controller (as full transforms) and
+        # every lattice-point co_deform — see execute(). The user gets one
+        # checkbox for the whole bilayer rather than one per sub-piece.
+        for item in scene.outliner_items:
+            if item.item_type != 'MEMBRANE':
+                continue
+            obj = bpy.data.objects.get(item.object_name)
+            if not obj or not obj.get("pb_is_membrane", False):
+                continue
+            mem_item = self.puppet_items.add()
+            mem_item.item_kind = 'MEMBRANE'
+            mem_item.puppet_id = item.item_id
+            mem_item.puppet_name = item.name
+            mem_item.controller_object_name = obj.name
+            existing = get_keyframe_metadata(obj, self.frame_number)
+            mem_item.use_puppet = existing.get('use_puppet', False) if existing else False
+            mem_item.keyframe_location = existing.get('location', True) if existing else True
+            mem_item.keyframe_rotation = existing.get('rotation', True) if existing else True
+            mem_item.keyframe_scale = existing.get('scale', True) if existing else True
+            mem_item.keyframe_pose = False
+            mem_item.keyframe_color = False
+            mem_item.brownian_enabled = False
+
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
     
@@ -513,22 +703,30 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 row = box.row(align=False)
                 row.scale_y = 1.2  # Make rows slightly taller for better readability
 
-                # Checkbox for selecting the puppet
+                # Checkbox for selecting the item
                 row.prop(item, "use_puppet", text="")
 
-                # Name with icon (puppet vs. directly-keyframed molecule)
+                # Name with kind-specific icon
                 is_puppet = item.item_kind == 'PUPPET'
+                is_membrane = item.item_kind == 'MEMBRANE'
+                if is_puppet:
+                    item_icon = 'GROUP'
+                elif is_membrane:
+                    item_icon = 'MOD_FLUIDSIM'
+                else:
+                    item_icon = 'RNA'
                 name_col = row.column()
                 name_col.alignment = 'LEFT'
                 name_row = name_col.row(align=True)
-                name_row.label(text=item.puppet_name,
-                               icon='GROUP' if is_puppet else 'RNA')
+                name_row.label(text=item.puppet_name, icon=item_icon)
 
                 # Add spacer to push transform checkboxes to the right
                 row.separator(factor=2.0)
 
                 # Transform checkboxes - enabled only when the row is selected.
-                # Pose is puppet-only (molecules have no domain poses).
+                # Pose is puppet-only (DNA/membrane have no domain poses; the
+                # membrane's per-hole / lattice keys are captured automatically
+                # alongside the root and don't get a separate column).
                 pose_row = row.row()
                 pose_row.enabled = item.use_puppet and is_puppet
                 pose_row.prop(item, "keyframe_pose", text="")
@@ -676,6 +874,28 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
 
                 if keyframed_properties:
                     print(f"  Controller: Keyframed {', '.join(keyframed_properties)}")
+                    total_keyframed += 1
+
+            # Membrane: capture every hole controller + every lattice point's
+            # ``co_deform``. Hole transforms shape the carving (position +
+            # scale), and lattice deformation lives on the lattice DATA, not
+            # the lattice object — see :func:`keyframe_lattice_deformation`.
+            # All of this is grouped under the single membrane row so one tick
+            # captures the whole bilayer.
+            if (puppet_item.item_kind == 'MEMBRANE' and puppet_item.use_puppet
+                    and controller_obj):
+                holes = get_membrane_holes(controller_obj)
+                for hole in holes:
+                    keyframe_transforms(hole, self.frame_number)
+                n_lattice = keyframe_lattice_deformation(
+                    controller_obj, self.frame_number)
+                if holes:
+                    print(f"  ✓ Keyframed {len(holes)} membrane hole(s)"
+                          f" at frame {self.frame_number}")
+                    total_keyframed += 1
+                if n_lattice:
+                    print(f"  ✓ Keyframed {n_lattice} lattice point(s)"
+                          f" at frame {self.frame_number}")
                     total_keyframed += 1
 
             # DNA/RNA: also capture the bend rig automatically. The bend is
