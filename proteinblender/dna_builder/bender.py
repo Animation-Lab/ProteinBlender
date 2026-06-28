@@ -536,34 +536,75 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
 
 
 def bake_evaluated_curve_shape(curve_obj):
-    """Copy the curve's evaluated bezier-point positions (i.e. with any
-    hook-modifier deformation applied) back into the underlying curve data.
+    """Write the user's hook-deformed bend back into the curve's static
+    ``bezier_points`` so subsequent operations (arc-length resampling,
+    rebuild-then-recreate flows) see the deformed shape instead of the
+    original straight line.
 
-    Hook modifiers deform the curve at *evaluation* time only — they don't
-    write to ``bp.co``. As a result, any user-driven bend (dragging a node
-    Empty) is invisible to operations that read the static curve, including
-    arc-length resampling and rebuild-then-recreate flows. Calling this
-    before destroying the hook empties materialises the user's bend so it
-    survives the rebuild.
+    **Why not just read ``evaluated_get(deps).data.splines[0].bezier_points``?**
+    Hook modifiers on a *curve* deform the final rendered geometry only —
+    they never write back to ``bp.co``. The evaluated curve datablock
+    exposes the SAME bezier points as the source; the hook delta lives in
+    the modifier stack, not in the data. So the obvious "copy eval bp.co
+    back to orig bp.co" approach is a silent no-op.
+
+    Instead we read each hook empty's current ``matrix_world.translation``,
+    transform into the curve's local space, and snap the corresponding
+    bezier point there. Handles are shifted by the same delta so the
+    curve's local tangent is preserved (otherwise the handles would point
+    at where the point USED to be, kinking the curve).
+
+    Bug fixed (tester report, Janet, Windows): adding a 4th bend node
+    after one of the original 3 had been moved made the DNA snap back to
+    origin. Root cause: this function silently no-op'd, so the rebuild
+    saw a straight curve, resampled it to a straight 4-point curve, and
+    the DNA followed the straight curve back to its original axis.
     """
     if curve_obj is None or curve_obj.data is None:
         return
-    deps = bpy.context.evaluated_depsgraph_get()
-    eval_curve = curve_obj.evaluated_get(deps)
-    eval_data = eval_curve.data
-    eval_spline = eval_data.splines[0] if eval_data.splines else None
-    if eval_spline is None:
+    splines = curve_obj.data.splines
+    if not splines:
         return
-    orig_spline = curve_obj.data.splines[0]
-    # Hook modifiers don't change topology, so the bezier-point counts
-    # should match. If they ever diverge, skip — copying point-by-point is
-    # the only safe operation here.
-    if len(eval_spline.bezier_points) != len(orig_spline.bezier_points):
+    spline = splines[0]
+    if spline.type != "BEZIER" or not spline.bezier_points:
         return
-    for ebp, obp in zip(eval_spline.bezier_points, orig_spline.bezier_points):
-        obp.co = ebp.co.copy()
-        obp.handle_left = ebp.handle_left.copy()
-        obp.handle_right = ebp.handle_right.copy()
+
+    # Map hook modifiers → bezier-point index. The hook setup in
+    # _create_bend_nodes uses vertex_indices_set([3*i, 3*i+1, 3*i+2]) per
+    # bezier point i, so the first index // 3 recovers the point index.
+    bp_to_empty = {}
+    for m in curve_obj.modifiers:
+        if m.type != "HOOK" or m.object is None:
+            continue
+        vi = list(m.vertex_indices)
+        if not vi:
+            continue
+        bp_index = vi[0] // 3
+        if 0 <= bp_index < len(spline.bezier_points):
+            bp_to_empty[bp_index] = m.object
+
+    if not bp_to_empty:
+        return
+
+    # Make sure each empty's matrix_world is current — the user might
+    # have moved a node moments before this call without a viewport tick.
+    bpy.context.view_layer.update()
+
+    inv_curve_world = curve_obj.matrix_world.inverted()
+    for bp_index, empty in bp_to_empty.items():
+        bp = spline.bezier_points[bp_index]
+        target_local = inv_curve_world @ empty.matrix_world.translation
+        delta = target_local - bp.co
+        if delta.length_squared < 1e-12:
+            continue
+        bp.co = target_local
+        # Shift handles by the same delta so local tangents are preserved.
+        # (Resetting handles to AUTO is left to the caller — the rebuild
+        # path calls _set_aligned_handles_along_path after resampling.)
+        bp.handle_left = bp.handle_left + delta
+        bp.handle_right = bp.handle_right + delta
+
+    curve_obj.data.update_tag()
 
 
 def _rebuild_bend_nodes(dna_obj, n_points):
