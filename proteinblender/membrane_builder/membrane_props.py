@@ -24,21 +24,42 @@ MAX_HOLES = 8
 
 
 def _sync_to_active_membrane(self, context):
-    """When a property changes, write it through to the active membrane object.
+    """When a property changes, write it through to the relevant membrane.
 
-    Only fires when there is a selected membrane — otherwise the value just
-    sits on the scene props for the next Build click.
+    Resolution order:
+      1. ``context.active_object`` if it is a membrane root or one of its
+         children (lattice / hole), via ``_get_membrane_root``.
+      2. If the active object isn't related to any membrane, fall back to
+         the single membrane in the scene — there's no ambiguity, so
+         changing the panel sliders should still drive it.
+      3. If there are multiple membranes and none is the active context,
+         we genuinely can't tell which one to edit. Stay silent so the
+         value still updates the scene panel for the next Build click.
+
+    Tester report (Janet, Windows): "Changing the number for lipid
+    density doesn't seem to work after you build a membrane". Root
+    cause: the user had clicked elsewhere after Build, the active
+    object was no longer the membrane, and the prop change went
+    nowhere. The single-membrane fallback (case 2 above) makes the
+    common case Just Work.
     """
-    obj = context.active_object
-    if obj is None or not obj.get("pb_is_membrane", False):
-        return
-    # Avoid recursive sync — guard via a class-level flag set in the
-    # object→props sync path.
     if getattr(MembraneBuilderProperties, "_syncing_from_object", False):
+        # Re-entrancy guard: this same prop change can be triggered by
+        # the object→props sync path, and we don't want to loop.
         return
-    from .membrane_operators import apply_props_to_membrane
+    from .membrane_operators import _get_membrane_root, apply_props_to_membrane
+
+    target = _get_membrane_root(context.active_object)
+    if target is None:
+        candidates = [o for o in context.scene.objects
+                      if o.get("pb_is_membrane", False)]
+        if len(candidates) == 1:
+            target = candidates[0]
+    if target is None:
+        return
+
     try:
-        apply_props_to_membrane(obj, self)
+        apply_props_to_membrane(target, self)
     except Exception:
         pass
 
