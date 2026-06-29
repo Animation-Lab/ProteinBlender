@@ -184,6 +184,122 @@ def get_residue_range_for_item(item_id: str, chain_id: str) -> tuple:
     return (1, 999)
 
 
+def _draw_linker_form(layout, op):
+    """Shared dialog body for Add Linker and Edit Linker.
+
+    Both operators declare the same set of properties (puppet_selector,
+    endpoint_a/b_item, endpoint_a/b_residue, linker_name, length_residues,
+    style, behavior, color, tube_radius, bead_*, binding_zone_residues),
+    so a single draw helper keeps the two dialogs guaranteed-identical.
+
+    Reads the operator's current properties as ``op.<name>`` and the
+    helper-callback context as ``self.puppet_selector`` from inside the
+    EnumProperty callbacks (those use ``self`` because they're bound to
+    the operator instance — same name on Add and Edit).
+    """
+    import math
+
+    layout.prop(op, "linker_name")
+
+    # Puppet selector
+    layout.prop(op, "puppet_selector")
+    layout.separator()
+
+    # Strip prefixes to get real item_ids for helper lookups
+    item_a = _strip_endpoint_prefix(op.endpoint_a_item)
+    item_b = _strip_endpoint_prefix(op.endpoint_b_item)
+
+    # Endpoint A
+    box = layout.box()
+    box.label(text="Start Endpoint", icon='TRACKING_BACKWARDS')
+    box.prop(op, "endpoint_a_item")
+    if item_a and item_a != 'NONE':
+        chain_a = get_chain_letter_for_item(item_a)
+        if chain_a:
+            box.label(text=f"Chain: {chain_a}", icon='INFO')
+        min_a, max_a = get_residue_range_for_item(item_a, chain_a)
+        box.prop(op, "endpoint_a_residue")
+        box.label(text=f"Valid range: {min_a} - {max_a}")
+
+    layout.separator()
+
+    # Endpoint B
+    box = layout.box()
+    box.label(text="End Endpoint", icon='TRACKING_FORWARDS')
+    box.prop(op, "endpoint_b_item")
+    if item_b and item_b != 'NONE':
+        chain_b = get_chain_letter_for_item(item_b)
+        if chain_b:
+            box.label(text=f"Chain: {chain_b}", icon='INFO')
+        min_b, max_b = get_residue_range_for_item(item_b, chain_b)
+        box.prop(op, "endpoint_b_residue")
+        box.label(text=f"Valid range: {min_b} - {max_b}")
+
+    layout.separator()
+
+    # Length / distance info
+    min_residues = 3
+    if (item_a and item_a != 'NONE'
+            and item_b and item_b != 'NONE'):
+        chain_a = get_chain_letter_for_item(item_a)
+        chain_b = get_chain_letter_for_item(item_b)
+        dist = compute_min_distance(
+            item_a, chain_a, op.endpoint_a_residue,
+            item_b, chain_b, op.endpoint_b_residue,
+        )
+        if dist >= 0:
+            min_residues = max(min_residues, math.ceil(dist / BU_PER_RESIDUE))
+            if op.length_residues < min_residues:
+                op.length_residues = min_residues
+
+    layout.prop(op, "length_residues")
+    if min_residues > 3:
+        layout.label(text=f"Minimum length: {min_residues} residues (current distance)")
+    max_reach = op.length_residues * BU_PER_RESIDUE
+    max_reach_angstrom = op.length_residues * 3.5
+    layout.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} Å)")
+
+    if (item_a and item_a != 'NONE'
+            and item_b and item_b != 'NONE'):
+        chain_a = get_chain_letter_for_item(item_a)
+        chain_b = get_chain_letter_for_item(item_b)
+        dist = compute_min_distance(
+            item_a, chain_a, op.endpoint_a_residue,
+            item_b, chain_b, op.endpoint_b_residue,
+        )
+        if dist >= 0:
+            dist_angstrom = dist / MN_SCALE if MN_SCALE > 0 else 0
+            layout.label(text=f"Current distance: {dist:.3f} BU ({dist_angstrom:.1f} Å)")
+
+    layout.separator()
+
+    # Appearance
+    box = layout.box()
+    box.label(text="Appearance", icon='MATERIAL')
+    box.prop(op, "style")
+    box.prop(op, "behavior")
+    box.prop(op, "color")
+    if op.style == 'TUBE':
+        box.prop(op, "tube_radius")
+    elif op.style == 'BEADS':
+        box.prop(op, "bead_radius")
+        box.prop(op, "bead_radius_variance")
+        box.prop(op, "bead_overlap")
+        box.prop(op, "bead_jitter")
+
+    bz_row = box.row(align=True)
+    bz_row.prop(op, "binding_zone_residues")
+    help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
+    help_op.title = "Binding Zone"
+    help_op.message = (
+        "The binding zone is the number of residues at each end of the "
+        "linker that stay rigid and align with the backbone direction "
+        "of the connected chain. This prevents the linker from bending "
+        "unnaturally right at the attachment point, mimicking how real "
+        "peptide linkers emerge from a protein surface."
+    )
+
+
 def get_puppet_controller(context, puppet_id: str):
     """Get the puppet controller Empty object."""
     if not hasattr(context.scene, 'outliner_items'):
@@ -345,114 +461,7 @@ class PB2_OT_add_linker(Operator):
         return context.window_manager.invoke_props_dialog(self, width=450)
 
     def draw(self, context):
-        layout = self.layout
-
-        layout.prop(self, "linker_name")
-
-        # Puppet selector
-        layout.prop(self, "puppet_selector")
-        layout.separator()
-
-        # Strip prefixes to get real item_ids for helper lookups
-        item_a = _strip_endpoint_prefix(self.endpoint_a_item)
-        item_b = _strip_endpoint_prefix(self.endpoint_b_item)
-
-        # Endpoint A
-        box = layout.box()
-        box.label(text="Start Endpoint", icon='TRACKING_BACKWARDS')
-        box.prop(self, "endpoint_a_item")
-
-        if item_a and item_a != 'NONE':
-            chain_a = get_chain_letter_for_item(item_a)
-            if chain_a:
-                box.label(text=f"Chain: {chain_a}", icon='INFO')
-            min_a, max_a = get_residue_range_for_item(item_a, chain_a)
-            box.prop(self, "endpoint_a_residue")
-            box.label(text=f"Valid range: {min_a} - {max_a}")
-
-        layout.separator()
-
-        # Endpoint B
-        box = layout.box()
-        box.label(text="End Endpoint", icon='TRACKING_FORWARDS')
-        box.prop(self, "endpoint_b_item")
-
-        if item_b and item_b != 'NONE':
-            chain_b = get_chain_letter_for_item(item_b)
-            if chain_b:
-                box.label(text=f"Chain: {chain_b}", icon='INFO')
-            min_b, max_b = get_residue_range_for_item(item_b, chain_b)
-            box.prop(self, "endpoint_b_residue")
-            box.label(text=f"Valid range: {min_b} - {max_b}")
-
-        layout.separator()
-
-        # Length and distance info
-        # Compute minimum residues needed to span current distance
-        import math
-        min_residues = 3  # absolute floor
-        if (item_a and item_a != 'NONE' and
-            item_b and item_b != 'NONE'):
-            chain_a = get_chain_letter_for_item(item_a)
-            chain_b = get_chain_letter_for_item(item_b)
-            dist = compute_min_distance(
-                item_a, chain_a, self.endpoint_a_residue,
-                item_b, chain_b, self.endpoint_b_residue
-            )
-            if dist >= 0:
-                min_residues = max(min_residues, math.ceil(dist / BU_PER_RESIDUE))
-                # Auto-clamp length upward if below minimum
-                if self.length_residues < min_residues:
-                    self.length_residues = min_residues
-
-        layout.prop(self, "length_residues")
-        if min_residues > 3:
-            layout.label(text=f"Minimum length: {min_residues} residues (current distance)")
-        max_reach = self.length_residues * BU_PER_RESIDUE
-        max_reach_angstrom = self.length_residues * 3.5
-        layout.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} \u00C5)")
-
-        # Show current distance
-        if (item_a and item_a != 'NONE' and
-            item_b and item_b != 'NONE'):
-            chain_a = get_chain_letter_for_item(item_a)
-            chain_b = get_chain_letter_for_item(item_b)
-            dist = compute_min_distance(
-                item_a, chain_a, self.endpoint_a_residue,
-                item_b, chain_b, self.endpoint_b_residue
-            )
-            if dist >= 0:
-                dist_angstrom = dist / MN_SCALE if MN_SCALE > 0 else 0
-                layout.label(text=f"Current distance: {dist:.3f} BU ({dist_angstrom:.1f} \u00C5)")
-
-        layout.separator()
-
-        # Appearance
-        box = layout.box()
-        box.label(text="Appearance", icon='MATERIAL')
-        box.prop(self, "style")
-        box.prop(self, "behavior")
-        box.prop(self, "color")
-
-        if self.style == 'TUBE':
-            box.prop(self, "tube_radius")
-        elif self.style == 'BEADS':
-            box.prop(self, "bead_radius")
-            box.prop(self, "bead_radius_variance")
-            box.prop(self, "bead_overlap")
-            box.prop(self, "bead_jitter")
-
-        bz_row = box.row(align=True)
-        bz_row.prop(self, "binding_zone_residues")
-        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
-        help_op.title = "Binding Zone"
-        help_op.message = (
-            "The binding zone is the number of residues at each end of the "
-            "linker that stay rigid and align with the backbone direction "
-            "of the connected chain. This prevents the linker from bending "
-            "unnaturally right at the attachment point, mimicking how real "
-            "peptide linkers emerge from a protein surface."
-        )
+        _draw_linker_form(self.layout, self)
 
     def execute(self, context):
         scene = context.scene
@@ -681,6 +690,34 @@ class PB2_OT_edit_linker(Operator):
 
     linker_uid: StringProperty(name="Linker UID")
 
+    # === Same property set as PB2_OT_add_linker (identical names so the
+    # shared draw helper + the puppet/chain Enum callbacks bind to both).
+    puppet_selector: EnumProperty(
+        name="Puppet",
+        description="Puppet the linker belongs to",
+        items=get_puppet_items,
+    )
+    endpoint_a_item: EnumProperty(
+        name="Start Chain",
+        description="Chain/domain for start endpoint",
+        items=get_chain_items_a,
+    )
+    endpoint_a_residue: IntProperty(
+        name="Residue A",
+        description="Residue number for start endpoint",
+        default=1, min=1,
+    )
+    endpoint_b_item: EnumProperty(
+        name="End Chain",
+        description="Chain/domain for end endpoint",
+        items=get_chain_items_b,
+    )
+    endpoint_b_residue: IntProperty(
+        name="Residue B",
+        description="Residue number for end endpoint",
+        default=1, min=1,
+    )
+
     linker_name: StringProperty(name="Name")
     length_residues: IntProperty(name="Length (residues)", min=3, max=100)
     style: EnumProperty(
@@ -723,6 +760,15 @@ class PB2_OT_edit_linker(Operator):
     def invoke(self, context, event):
         for linker in context.scene.pb2_linkers:
             if linker.uid == self.linker_uid:
+                # Endpoint props use A_/B_ prefixed enum identifiers (so
+                # the same outliner item_id can appear in both dropdowns
+                # without colliding) \u2014 prefix when seeding from the
+                # stored unprefixed values on the linker.
+                self.puppet_selector = linker.puppet_id
+                self.endpoint_a_item = f"A_{linker.endpoint_a_item_id}"
+                self.endpoint_a_residue = linker.endpoint_a_residue
+                self.endpoint_b_item = f"B_{linker.endpoint_b_item_id}"
+                self.endpoint_b_residue = linker.endpoint_b_residue
                 self.linker_name = linker.name
                 self.length_residues = linker.length_residues
                 self.style = linker.style
@@ -737,47 +783,42 @@ class PB2_OT_edit_linker(Operator):
                 self.binding_zone_residues = linker.binding_zone_residues
                 break
 
-        return context.window_manager.invoke_props_dialog(self)
+        # width=450 matches PB2_OT_add_linker so both dialogs are the
+        # same shape too.
+        return context.window_manager.invoke_props_dialog(self, width=450)
 
     def draw(self, context):
-        layout = self.layout
-
-        layout.prop(self, "linker_name")
-        layout.prop(self, "length_residues")
-
-        max_reach = self.length_residues * BU_PER_RESIDUE
-        layout.label(text=f"Max reach: {max_reach:.3f} BU ({self.length_residues * 3.5:.1f} \u00C5)")
-
-        layout.separator()
-        box = layout.box()
-        box.label(text="Appearance", icon='MATERIAL')
-        box.prop(self, "style")
-        box.prop(self, "behavior")
-        box.prop(self, "color")
-
-        if self.style == 'TUBE':
-            box.prop(self, "tube_radius")
-        elif self.style == 'BEADS':
-            box.prop(self, "bead_radius")
-            box.prop(self, "bead_radius_variance")
-            box.prop(self, "bead_overlap")
-            box.prop(self, "bead_jitter")
-
-        bz_row = box.row(align=True)
-        bz_row.prop(self, "binding_zone_residues")
-        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
-        help_op.title = "Binding Zone"
-        help_op.message = (
-            "The binding zone is the number of residues at each end of the "
-            "linker that stay rigid and align with the backbone direction "
-            "of the connected chain. This prevents the linker from bending "
-            "unnaturally right at the attachment point, mimicking how real "
-            "peptide linkers emerge from a protein surface."
-        )
+        # Shared body \u2014 guaranteed identical to PB2_OT_add_linker.
+        _draw_linker_form(self.layout, self)
 
     def execute(self, context):
         for linker in context.scene.pb2_linkers:
             if linker.uid == self.linker_uid:
+                # Resolve (possibly-changed) endpoints from the prefixed
+                # enum values and write them back to the linker. If the
+                # user re-routed via the dialog, the geometry rebuild
+                # below uses the new endpoints.
+                puppet_id = self.puppet_selector
+                item_a = _strip_endpoint_prefix(self.endpoint_a_item)
+                item_b = _strip_endpoint_prefix(self.endpoint_b_item)
+                if not puppet_id or puppet_id == 'NONE':
+                    self.report({'ERROR'}, "Please select a puppet")
+                    return {'CANCELLED'}
+                if item_a == 'NONE' or item_b == 'NONE':
+                    self.report({'ERROR'}, "Please select both endpoints")
+                    return {'CANCELLED'}
+                if item_a == item_b:
+                    self.report({'ERROR'}, "Start and end must be different chains")
+                    return {'CANCELLED'}
+
+                linker.puppet_id = puppet_id
+                linker.endpoint_a_item_id = item_a
+                linker.endpoint_a_chain = get_chain_letter_for_item(item_a)
+                linker.endpoint_a_residue = self.endpoint_a_residue
+                linker.endpoint_b_item_id = item_b
+                linker.endpoint_b_chain = get_chain_letter_for_item(item_b)
+                linker.endpoint_b_residue = self.endpoint_b_residue
+
                 linker.name = self.linker_name
                 linker.length_residues = self.length_residues
                 linker.style = self.style
