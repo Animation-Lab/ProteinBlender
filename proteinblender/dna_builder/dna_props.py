@@ -12,6 +12,21 @@ from bpy.props import (
 from bpy.types import PropertyGroup
 
 
+def _on_nucleic_type_changed(self, context):
+    """Flip biologically natural defaults when the user toggles DNA <-> RNA.
+
+    DNA is ~always double-stranded in nature; RNA is ~always single-stranded
+    (mRNA, tRNA, rRNA, lncRNA — dsRNA exists in viruses/siRNA but is rare).
+    Flip ``double_stranded`` accordingly, and rename ``name_prefix`` to
+    match the type — but only when it still looks like a default
+    ("DNA"/"RNA"), so a user's custom name isn't clobbered.
+    """
+    is_dna = self.nucleic_type == "DNA"
+    self.double_stranded = is_dna
+    if self.name_prefix in ("DNA", "RNA", ""):
+        self.name_prefix = "DNA" if is_dna else "RNA"
+
+
 class DNABuilderProperties(PropertyGroup):
     """Scene-level properties for the DNA/RNA Builder UI."""
 
@@ -22,6 +37,7 @@ class DNABuilderProperties(PropertyGroup):
             ("RNA", "RNA", "Ribonucleic acid"),
         ],
         default="DNA",
+        update=_on_nucleic_type_changed,
     )
 
     input_mode: EnumProperty(
