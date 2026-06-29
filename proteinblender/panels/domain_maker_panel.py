@@ -151,14 +151,8 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
         # Create a box for the entire panel content
         main_box = layout.box()
 
-        # Tinted-box-style header: a colour swatch icon + bold label. Each
-        # builder panel uses a distinct COLORSET_*_VEC swatch so tools
-        # read as visually distinct sections. Domain Maker = blue
-        # (COLORSET_06).
-        _hdr = main_box.row(align=True)
-        _hdr.scale_y = 1.15
-        _hdr.label(text="", icon='COLORSET_06_VEC')
-        _hdr.label(text="Domain Maker", icon='MESH_DATA')
+        # Add panel title inside the box
+        main_box.label(text="Domain Maker", icon='MESH_DATA')
         main_box.separator()
         scene_manager = ProteinBlenderScene.get_instance()
 

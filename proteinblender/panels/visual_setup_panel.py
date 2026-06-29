@@ -97,12 +97,8 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
         # Create a box for the entire panel content
         box = layout.box()
 
-        # Tinted-box-style header: a colour swatch icon + bold label.
-        # Visual Set-up = red (COLORSET_01).
-        _hdr = box.row(align=True)
-        _hdr.scale_y = 1.15
-        _hdr.label(text="", icon='COLORSET_01_VEC')
-        _hdr.label(text="Visual Set-up", icon='SHADING_RENDERED')
+        # Add panel title inside the box
+        box.label(text="Visual Set-up", icon='SHADING_RENDERED')
         box.separator()
         
         # Check if anything is selected

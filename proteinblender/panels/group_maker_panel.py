@@ -648,12 +648,8 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         # Create a box for the entire panel content
         box = layout.box()
 
-        # Tinted-box-style header: a colour swatch icon + bold label.
-        # Puppet Maker = purple (COLORSET_07).
-        _hdr = box.row(align=True)
-        _hdr.scale_y = 1.15
-        _hdr.label(text="", icon='COLORSET_07_VEC')
-        _hdr.label(text="Protein Puppet Maker", icon='ARMATURE_DATA')
+        # Add panel title inside the box
+        box.label(text="Protein Puppet Maker", icon='ARMATURE_DATA')
         box.separator()
         
         # Get selected items and check their puppet memberships

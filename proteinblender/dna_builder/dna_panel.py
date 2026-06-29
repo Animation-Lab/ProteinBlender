@@ -71,14 +71,7 @@ class PROTEINBLENDER_PT_builders(Panel):
 
         # ---- DNA / RNA builder section -----------------------------------
         main_box = layout.box()
-        # Tinted-box-style header: a colour swatch icon + bold label. Each
-        # builder panel uses a distinct COLORSET_*_VEC swatch so tools
-        # read as visually distinct sections at a glance. DNA = green
-        # (COLORSET_04) to evoke life / strands.
-        _hdr = main_box.row(align=True)
-        _hdr.scale_y = 1.15
-        _hdr.label(text="", icon="COLORSET_04_VEC")
-        _hdr.label(text="DNA / RNA Builder", icon="CURVE_DATA")
+        main_box.label(text="Builders", icon="CURVE_DATA")
         main_box.separator()
 
         # Sub-header — switches based on edit/build mode

@@ -42,14 +42,7 @@ class PROTEINBLENDER_PT_membrane_builder(Panel):
         editing = root is not None
 
         main_box = layout.box()
-        # Tinted-box-style header: a colour swatch icon + bold label.
-        # Each builder panel uses a distinct COLORSET_*_VEC swatch so the
-        # tools read as visually distinct sections at a glance. Membrane
-        # = cyan (COLORSET_05) to evoke water / lipid.
-        _hdr = main_box.row(align=True)
-        _hdr.scale_y = 1.15
-        _hdr.label(text="", icon="COLORSET_05_VEC")
-        _hdr.label(text="Membrane Builder", icon="MOD_FLUIDSIM")
+        main_box.label(text="Membrane Builder", icon="MOD_FLUIDSIM")
         main_box.separator()
 
         # ---- Edit header --------------------------------------------------
