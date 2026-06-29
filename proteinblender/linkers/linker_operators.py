@@ -288,6 +288,36 @@ class PB2_OT_add_linker(Operator):
         step=0.1
     )
 
+    # Bead-style appearance — only drawn when style == 'BEADS'.
+    bead_radius: FloatProperty(
+        name="Bead Radius",
+        description="Base radius of each bead",
+        default=0.020,
+        min=0.001, max=0.1,
+        unit='LENGTH',
+    )
+    bead_radius_variance: FloatProperty(
+        name="Radius Variance",
+        description="How much bead sizes vary (0 = all same size, 1 = max variation)",
+        default=0.5,
+        min=0.0, max=1.0,
+        subtype='FACTOR',
+    )
+    bead_overlap: FloatProperty(
+        name="Bead Overlap",
+        description="Fraction of overlap between adjacent beads (0 = touching, no overlap)",
+        default=0.3,
+        min=0.0, max=0.95,
+        subtype='FACTOR',
+    )
+    bead_jitter: FloatProperty(
+        name="Bead Jitter",
+        description="Random positional offset perpendicular to the curve",
+        default=0.3,
+        min=0.0, max=1.0,
+        subtype='FACTOR',
+    )
+
     behavior: EnumProperty(
         name="Behavior",
         description="How the linker responds to slack",
@@ -406,8 +436,23 @@ class PB2_OT_add_linker(Operator):
 
         if self.style == 'TUBE':
             box.prop(self, "tube_radius")
+        elif self.style == 'BEADS':
+            box.prop(self, "bead_radius")
+            box.prop(self, "bead_radius_variance")
+            box.prop(self, "bead_overlap")
+            box.prop(self, "bead_jitter")
 
-        box.prop(self, "binding_zone_residues")
+        bz_row = box.row(align=True)
+        bz_row.prop(self, "binding_zone_residues")
+        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
+        help_op.title = "Binding Zone"
+        help_op.message = (
+            "The binding zone is the number of residues at each end of the "
+            "linker that stay rigid and align with the backbone direction "
+            "of the connected chain. This prevents the linker from bending "
+            "unnaturally right at the attachment point, mimicking how real "
+            "peptide linkers emerge from a protein surface."
+        )
 
     def execute(self, context):
         scene = context.scene
@@ -501,6 +546,10 @@ class PB2_OT_add_linker(Operator):
         linker.behavior = self.behavior
         linker.color = self.color
         linker.tube_radius = self.tube_radius
+        linker.bead_radius = self.bead_radius
+        linker.bead_radius_variance = self.bead_radius_variance
+        linker.bead_overlap = self.bead_overlap
+        linker.bead_jitter = self.bead_jitter
         linker.binding_zone_residues = self.binding_zone_residues
 
         # Parent to puppet controller
@@ -660,6 +709,15 @@ class PB2_OT_edit_linker(Operator):
     )
     color: FloatVectorProperty(name="Color", subtype='COLOR', size=4, min=0.0, max=1.0)
     tube_radius: FloatProperty(name="Radius", default=0.015, min=0.001, soft_max=0.03, max=0.1, step=0.1)
+    # Bead-style appearance — only drawn when style == 'BEADS'.
+    bead_radius: FloatProperty(
+        name="Bead Radius", default=0.020, min=0.001, max=0.1, unit='LENGTH')
+    bead_radius_variance: FloatProperty(
+        name="Radius Variance", default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    bead_overlap: FloatProperty(
+        name="Bead Overlap", default=0.3, min=0.0, max=0.95, subtype='FACTOR')
+    bead_jitter: FloatProperty(
+        name="Bead Jitter", default=0.3, min=0.0, max=1.0, subtype='FACTOR')
     binding_zone_residues: IntProperty(name="Binding Zone", min=1, max=10)
 
     def invoke(self, context, event):
@@ -672,6 +730,10 @@ class PB2_OT_edit_linker(Operator):
                 self.behavior = linker.behavior
                 self.color = linker.color
                 self.tube_radius = linker.tube_radius
+                self.bead_radius = linker.bead_radius
+                self.bead_radius_variance = linker.bead_radius_variance
+                self.bead_overlap = linker.bead_overlap
+                self.bead_jitter = linker.bead_jitter
                 self.binding_zone_residues = linker.binding_zone_residues
                 break
 
@@ -695,8 +757,23 @@ class PB2_OT_edit_linker(Operator):
 
         if self.style == 'TUBE':
             box.prop(self, "tube_radius")
+        elif self.style == 'BEADS':
+            box.prop(self, "bead_radius")
+            box.prop(self, "bead_radius_variance")
+            box.prop(self, "bead_overlap")
+            box.prop(self, "bead_jitter")
 
-        box.prop(self, "binding_zone_residues")
+        bz_row = box.row(align=True)
+        bz_row.prop(self, "binding_zone_residues")
+        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
+        help_op.title = "Binding Zone"
+        help_op.message = (
+            "The binding zone is the number of residues at each end of the "
+            "linker that stay rigid and align with the backbone direction "
+            "of the connected chain. This prevents the linker from bending "
+            "unnaturally right at the attachment point, mimicking how real "
+            "peptide linkers emerge from a protein surface."
+        )
 
     def execute(self, context):
         for linker in context.scene.pb2_linkers:
@@ -708,6 +785,10 @@ class PB2_OT_edit_linker(Operator):
                 linker.behavior = self.behavior
                 linker.color = self.color
                 linker.tube_radius = self.tube_radius
+                linker.bead_radius = self.bead_radius
+                linker.bead_radius_variance = self.bead_radius_variance
+                linker.bead_overlap = self.bead_overlap
+                linker.bead_jitter = self.bead_jitter
                 linker.binding_zone_residues = self.binding_zone_residues
 
                 # Rebuild geometry with new settings

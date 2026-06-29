@@ -4,8 +4,6 @@ import bpy
 from bpy.types import Operator, Panel, UIList
 from bpy.props import StringProperty
 
-from .linker_geometry import BU_PER_RESIDUE
-
 
 class PB2_OT_show_help_popup(Operator):
     """Show a help popup with an explanation"""
@@ -48,9 +46,12 @@ class PB2_UL_linkers(UIList):
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             row = layout.row(align=True)
 
-            # Expand/collapse toggle
-            expand_icon = 'TRIA_DOWN' if linker.is_expanded else 'TRIA_RIGHT'
-            row.prop(linker, "is_expanded", text="", icon=expand_icon, emboss=False)
+            # Edit button — opens the same pop-up dialog as Create Linker,
+            # pre-populated from this linker's current settings. Replaces
+            # the prior expand-toggle + inline editor so the create/edit
+            # flows are consistent (always a pop-up).
+            op = row.operator("pb2.edit_linker", text="", icon='GREASEPENCIL', emboss=False)
+            op.linker_uid = linker.uid
 
             # Visibility toggle
             vis_icon = 'HIDE_OFF' if linker.is_visible else 'HIDE_ON'
@@ -138,109 +139,6 @@ class PB2_PT_linkers(Panel):
 
         col.separator()
         col.operator("pb2.update_all_linkers", icon='FILE_REFRESH', text="")
-
-        # Expanded details for selected linker
-        if 0 <= scene.pb2_linkers_index < len(scene.pb2_linkers):
-            linker = scene.pb2_linkers[scene.pb2_linkers_index]
-            if linker.is_expanded:
-                self._draw_linker_details(main_box, linker)
-
-    def _draw_linker_details(self, main_box, linker):
-        """Draw detailed settings for the selected linker.
-
-        Renders directly into main_box (the same outer box that holds the
-        Create button and the linker list) so the editor reads as part of
-        the panel rather than as a separate floating section below it.
-        No inner box wrapper \u2014 just labelled section columns with thin
-        separators between them.
-        """
-        # Slim separator to mark the boundary between the list and the
-        # editor without inserting a visible nested box.
-        main_box.separator(factor=0.4)
-
-        # Editor header \u2014 a plain row, no box. The icons mirror the style
-        # + rendering-mode icons shown on the linker's list row so the
-        # editor visually echoes the row it belongs to.
-        header = main_box.row(align=True)
-        header.label(text=f"Editing: {linker.name}", icon='LINK_BLEND')
-        style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
-        header.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
-
-        # ---- Connection (puppet + endpoints) ---------------------------
-        section = main_box.column(align=True)
-        puppet_name = self._get_puppet_name(linker.puppet_id)
-        row = section.row(align=True)
-        row.label(text="Puppet:", icon='ARMATURE_DATA')
-        row.label(text=puppet_name)
-
-        row = section.row(align=True)
-        row.label(text="Start:", icon='TRACKING_BACKWARDS')
-        row.label(text=linker.get_endpoint_a_display())
-
-        row = section.row(align=True)
-        row.label(text="End:", icon='TRACKING_FORWARDS')
-        row.label(text=linker.get_endpoint_b_display())
-
-        # ---- Physics --------------------------------------------------
-        main_box.separator(factor=0.6)
-        section = main_box.column(align=True)
-        section.label(text="Physics", icon='PHYSICS')
-        section.prop(linker, "length_residues")
-        max_reach = linker.get_max_reach_bu()
-        max_reach_angstrom = linker.length_residues * 3.5
-        section.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} \u00C5)")
-        section.prop(linker, "behavior")
-        bz_row = section.row(align=True)
-        bz_row.prop(linker, "binding_zone_residues")
-        help_op = bz_row.operator("pb2.show_help_popup", text="", icon='QUESTION')
-        help_op.title = "Binding Zone"
-        help_op.message = (
-            "The binding zone is the number of residues at each end of the linker "
-            "that stay rigid and align with the backbone direction of the connected chain. "
-            "This prevents the linker from bending unnaturally right at the attachment point, "
-            "mimicking how real peptide linkers emerge from a protein surface."
-        )
-
-        # ---- Appearance -----------------------------------------------
-        main_box.separator(factor=0.6)
-        section = main_box.column(align=True)
-        section.label(text="Appearance", icon='MATERIAL')
-        section.prop(linker, "style")
-        section.prop(linker, "color")
-        if linker.style == 'TUBE':
-            section.prop(linker, "tube_radius")
-        elif linker.style == 'BEADS':
-            section.prop(linker, "bead_radius")
-            section.prop(linker, "bead_radius_variance")
-            section.prop(linker, "bead_overlap")
-            section.prop(linker, "bead_jitter")
-
-        # ---- Actions: Edit / Select / Apply ---------------------------
-        # Apply rebuilds the geometry from the current property values \u2014
-        # used to be labelled "Refresh" but "Apply" is clearer about
-        # what the button does.
-        main_box.separator(factor=0.6)
-        action_row = main_box.row(align=True)
-        action_row.scale_y = 1.15
-
-        op = action_row.operator("pb2.edit_linker", text="Edit", icon='GREASEPENCIL')
-        op.linker_uid = linker.uid
-
-        op = action_row.operator("pb2.select_linker_object", text="Select", icon='RESTRICT_SELECT_OFF')
-        op.linker_uid = linker.uid
-
-        op = action_row.operator("pb2.update_linker", text="Apply", icon='CHECKMARK')
-        op.linker_uid = linker.uid
-
-    @staticmethod
-    def _get_puppet_name(puppet_id: str) -> str:
-        """Get display name for a puppet by its ID."""
-        scene = bpy.context.scene
-        if hasattr(scene, 'outliner_items'):
-            for item in scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    return item.name
-        return puppet_id or "Unknown"
 
 
 # Registration
