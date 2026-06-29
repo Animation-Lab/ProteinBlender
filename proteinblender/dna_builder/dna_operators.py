@@ -201,6 +201,17 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
                 icon="CHECKMARK",
             )
 
+    # ---- Collapsible shape (bend) section — edit mode only -----------
+    # Bending only makes sense on an existing strand, so create mode
+    # never shows this. The buttons fire the same `dna_*_bend` operators
+    # the Builders panel used to host — once the user clicks one, the
+    # operator runs against the active object (which the parent
+    # operator's invoke() set to the target DNA, so resolution works).
+    # After Edit Bend the empties are placed but invisible behind the
+    # modal dialog; close the dialog to grab them in the viewport.
+    if dna_obj is not None:
+        _draw_shape_section(layout, props, dna_obj)
+
     # ---- Helix info readout ------------------------------------------
     if len(seq) >= 2:
         info = _helix_info_preview(len(seq), nt, winding_mode=props.winding_mode)
@@ -211,6 +222,121 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
         r = info_box.row()
         r.label(text="Turns")
         r.label(text=f"{info['turns']:.2f}")
+
+
+def _draw_shape_section(layout, props, dna_obj):
+    """Bending controls — only rendered in edit mode (dna_obj is not None).
+
+    Same control surface the Builders panel used to host: Add / Edit /
+    Remove bend, node-count +/-, hide-curve toggle. Add/Remove/resolution
+    are locked while the strand is keyframed (would orphan F-curves).
+    """
+    from .bender import (
+        BEND_CURVE_PROP,
+        RES_DEFAULT, RES_MIN, RES_MAX,
+        get_bend_curve,
+        get_bend_nodes,
+        dna_has_keyframes,
+    )
+
+    shape_box = layout.box()
+    shape_header = shape_box.row()
+    shape_header.prop(
+        props, "show_shape",
+        text="Shape",
+        icon="TRIA_DOWN" if props.show_shape else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if not props.show_shape:
+        return
+
+    has_bend = bool(dna_obj.get(BEND_CURVE_PROP))
+    is_keyframed = dna_has_keyframes(dna_obj)
+    lock_msg = "Locked: remove this DNA's keyframes (Animate panel) to change the bend rig."
+
+    if not has_bend:
+        row = shape_box.row()
+        row.scale_y = 1.2
+        row.enabled = not is_keyframed
+        row.operator(
+            "proteinblender.dna_add_bend",
+            text="✚ Add Bend Control",
+            icon="OUTLINER_OB_CURVE",
+        )
+        if is_keyframed:
+            shape_box.label(text=lock_msg, icon="LOCKED")
+        else:
+            shape_box.label(
+                text="Adds a Bezier curve along the helix axis.",
+                icon="INFO",
+            )
+        return
+
+    # ---- Bend exists ---------------------------------------------------
+    nodes = get_bend_nodes(dna_obj)
+    n_nodes = len(nodes)
+    has_nodes = n_nodes > 0
+
+    # Edit / Remove row. Edit Bend just re-selects existing nodes, so it
+    # stays enabled even when keyframed. Remove Bend rebuilds the strand's
+    # origin and would orphan F-curves, so it's locked.
+    row = shape_box.row(align=True)
+    row.scale_y = 1.2
+    edit_op = row.operator(
+        "proteinblender.dna_edit_bend",
+        text="Edit Bend" if has_nodes else "Place Control Nodes",
+        icon="EMPTY_AXIS",
+    )
+    edit_op.n_points = n_nodes if n_nodes >= RES_MIN else RES_DEFAULT
+    remove_sub = row.row(align=True)
+    remove_sub.enabled = not is_keyframed
+    remove_sub.operator(
+        "proteinblender.dna_remove_bend",
+        text="",
+        icon="X",
+    )
+
+    # Node count +/-
+    if has_nodes:
+        shape_box.separator(factor=0.3)
+        res_row = shape_box.row(align=True)
+        res_row.enabled = not is_keyframed
+        res_row.label(text="Nodes:")
+        minus = res_row.operator(
+            "proteinblender.dna_set_bend_resolution",
+            text="", icon="REMOVE",
+        )
+        minus.n_points = max(RES_MIN, n_nodes - 1)
+        res_row.label(text=str(n_nodes))
+        plus = res_row.operator(
+            "proteinblender.dna_set_bend_resolution",
+            text="", icon="ADD",
+        )
+        plus.n_points = min(RES_MAX, n_nodes + 1)
+
+        if is_keyframed:
+            shape_box.label(text=lock_msg, icon="LOCKED")
+        else:
+            shape_box.label(
+                text="Close this dialog to grab nodes in the viewport.",
+                icon="INFO",
+            )
+
+    # Hide bend curve (viewport-only, never affects renders)
+    curve_obj = get_bend_curve(dna_obj)
+    if curve_obj is not None:
+        shape_box.separator(factor=0.3)
+        vis_row = shape_box.row(align=True)
+        vis_row.prop(
+            curve_obj,
+            "hide_viewport",
+            text="Hide Bend Curve",
+            icon="HIDE_ON" if curve_obj.hide_viewport else "HIDE_OFF",
+        )
+        shape_box.label(
+            text="Bend curve is a guide only — never appears in renders.",
+            icon="INFO",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -354,17 +480,29 @@ class PROTEINBLENDER_OT_build_dna(Operator):
         # current settings. The msgbus auto-sync already does this
         # when the user clicks the strand in the viewport — but the
         # edit-pencil in the outliner doesn't change the active
-        # object, so we have to seed explicitly here.
+        # object, so we have to seed explicitly here. Also make the
+        # target DNA the active object so the in-dialog bend operators
+        # (dna_add_bend / dna_edit_bend / etc.) resolve to the right
+        # strand — they look at context.active_object.
         if self.molecule_id_to_update:
             from ..utils.scene_manager import ProteinBlenderScene
             from .dna_props import sync_props_from_object
             sm = ProteinBlenderScene.get_instance()
             wrapper = sm.molecules.get(self.molecule_id_to_update)
             if wrapper and wrapper.molecule and wrapper.molecule.object:
+                dna_obj = wrapper.molecule.object
                 sync_props_from_object(
                     context.scene.dna_builder_props,
-                    wrapper.molecule.object,
+                    dna_obj,
                 )
+                try:
+                    if context.mode != "OBJECT":
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                    bpy.ops.object.select_all(action="DESELECT")
+                    dna_obj.select_set(True)
+                    context.view_layer.objects.active = dna_obj
+                except Exception:
+                    pass
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):

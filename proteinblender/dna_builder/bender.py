@@ -830,12 +830,20 @@ class PROTEINBLENDER_OT_dna_edit_bend(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return (obj is not None
-                and obj.get("pb_is_nucleic_acid", False)
-                and obj.get(BEND_CURVE_PROP))
+        if obj is None:
+            return False
+        if obj.get("pb_is_nucleic_acid", False) and obj.get(BEND_CURVE_PROP):
+            return True
+        # Allow when a control node is active (re-select after just placing).
+        if get_dna_for_node(obj) is not None:
+            return True
+        return False
 
     def execute(self, context):
-        dna = context.active_object
+        dna = _resolve_dna(context.active_object)
+        if dna is None:
+            self.report({"ERROR"}, "Could not resolve DNA molecule.")
+            return {"CANCELLED"}
         curve_obj = get_bend_curve(dna)
         if curve_obj is None:
             self.report({"ERROR"}, "Bend curve not found.")

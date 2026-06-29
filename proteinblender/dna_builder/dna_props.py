@@ -171,6 +171,7 @@ class DNABuilderProperties(PropertyGroup):
     # Collapsible sections
     show_colors: BoolProperty(name="Show Colors", default=False)
     show_winding: BoolProperty(name="Show Winding", default=False)
+    show_shape: BoolProperty(name="Show Shape", default=False)
 
 
 CLASSES = (DNABuilderProperties,)
