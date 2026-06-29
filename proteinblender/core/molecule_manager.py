@@ -121,12 +121,60 @@ class MoleculeManager:
         return self.molecules.get(identifier)
 
     def delete_molecule(self, identifier: str):
-        """Deletes a molecule and all its associated Blender objects and data."""
+        """Deletes a molecule and all its associated Blender objects and data.
+
+        Removes the parent object, its mesh, its MN GN tree and every
+        nested node group referenced by that tree (selection iswitch,
+        Multi_Boolean_OR helper, etc.), plus per-domain wrappers via
+        MoleculeWrapper.cleanup(). After this returns, no datablock that
+        was added by the original import should remain in bpy.data — a
+        clean import → delete round-trip leaves zero orphans.
+
+        Without explicit cascading-removal, ``bpy.data.objects.remove``
+        only decrements the user count of the referenced datablocks
+        (mesh, node groups) — they survive as orphans, accumulating
+        with every import → delete cycle.
+        """
         print(f"Attempting to delete molecule: {identifier}")
         molecule_wrapper = self.get_molecule(identifier)
         if not molecule_wrapper:
             print(f"Molecule {identifier} not found in manager.")
             return
+
+        # 0. Capture every Blender datablock the molecule references BEFORE
+        # any cleanup runs. Walks the parent's modifiers *and* every
+        # domain/chain's modifiers — selection iswitches, multi-boolean
+        # helpers, and per-chain MN trees only show up from chain
+        # modifiers, and ``molecule_wrapper.cleanup()`` below removes
+        # those chain objects (so the references vanish before we get a
+        # chance to record them). Recording up front + purging
+        # 0-user survivors at the end is the only way to guarantee a
+        # clean import → delete round trip.
+        owned_node_groups = set()
+        owned_meshes = set()
+
+        def _collect_subtrees(tree):
+            if tree is None or tree in owned_node_groups:
+                return
+            owned_node_groups.add(tree)
+            for node in tree.nodes:
+                sub = getattr(node, "node_tree", None)
+                if sub is not None:
+                    _collect_subtrees(sub)
+
+        def _collect_object(obj):
+            if obj is None:
+                return
+            if obj.type == "MESH" and obj.data is not None:
+                owned_meshes.add(obj.data)
+            for mod in obj.modifiers:
+                if mod.type == "NODES" and mod.node_group is not None:
+                    _collect_subtrees(mod.node_group)
+
+        if molecule_wrapper.molecule and molecule_wrapper.molecule.object:
+            _collect_object(molecule_wrapper.molecule.object)
+        for domain in getattr(molecule_wrapper, "domains", {}).values():
+            _collect_object(getattr(domain, "object", None))
 
         # 1. Call cleanup on the MoleculeWrapper to remove domains and their objects/nodes
         print(f"Cleaning up domains for molecule {identifier}...")
@@ -137,11 +185,41 @@ class MoleculeManager:
             main_mol_object = molecule_wrapper.molecule.object
             object_name = main_mol_object.name
             collection_name = main_mol_object.users_collection[0].name if main_mol_object.users_collection else None
+
             print(f"Deleting main molecule object: {object_name}")
             try:
                 bpy.data.objects.remove(main_mol_object, do_unlink=True)
             except Exception as e:
                 print(f"Error removing main molecule object {object_name}: {e}")
+
+            # Purge orphaned meshes + node trees we captured above.
+            # Iterate the node-group set until no more removals happen —
+            # removing a parent tree drops references in its children's
+            # user count, which may bring them to zero on a later pass.
+            for mesh in list(owned_meshes):
+                try:
+                    if mesh.users == 0:
+                        bpy.data.meshes.remove(mesh)
+                        owned_meshes.discard(mesh)
+                except ReferenceError:
+                    owned_meshes.discard(mesh)
+                except Exception as e:
+                    name = getattr(mesh, "name", "<gone>")
+                    print(f"Error removing mesh {name}: {e}")
+
+            removed_any = True
+            while removed_any:
+                removed_any = False
+                for ng in list(owned_node_groups):
+                    try:
+                        if ng.users == 0:
+                            print(f"  Purging orphan node group: {ng.name}")
+                            bpy.data.node_groups.remove(ng)
+                            owned_node_groups.discard(ng)
+                            removed_any = True
+                    except ReferenceError:
+                        # Already removed in a prior iteration
+                        owned_node_groups.discard(ng)
 
             # 3. Attempt to remove the collection if it was specific to this molecule and is now empty
             if collection_name:
@@ -161,4 +239,4 @@ class MoleculeManager:
         # 4. Remove the molecule from the manager's dictionary
         if identifier in self.molecules:
             del self.molecules[identifier]
-            print(f"Molecule {identifier} removed from manager.") 
+            print(f"Molecule {identifier} removed from manager.")
