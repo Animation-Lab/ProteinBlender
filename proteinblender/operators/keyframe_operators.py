@@ -317,7 +317,10 @@ def _target_owned_object_names(context, obj, kind, item_id):
     matches a given target."""
     names = {obj.name}
     if kind == 'PUPPET':
-        for o in _resolve_puppet_member_objects(context, item_id):
+        # Use the local wrapper (context, item_id), NOT the raw chain_utils
+        # function — that one has signature (scene, scene_manager, puppet_item)
+        # and a wrong-arity call breaks the panel as soon as a puppet exists.
+        for o in get_puppet_member_objects(context, item_id):
             if o is not None:
                 names.add(o.name)
     elif kind == 'MOLECULE':
