@@ -401,7 +401,6 @@ class PB2_OT_add_linker(Operator):
         box = layout.box()
         box.label(text="Appearance", icon='MATERIAL')
         box.prop(self, "style")
-        box.prop(self, "rendering_mode")
         box.prop(self, "behavior")
         box.prop(self, "color")
 
@@ -691,7 +690,6 @@ class PB2_OT_edit_linker(Operator):
         box = layout.box()
         box.label(text="Appearance", icon='MATERIAL')
         box.prop(self, "style")
-        box.prop(self, "rendering_mode")
         box.prop(self, "behavior")
         box.prop(self, "color")
 

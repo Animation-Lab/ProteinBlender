@@ -67,10 +67,6 @@ class PB2_UL_linkers(UIList):
             style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
             row.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
 
-            # Rendering mode indicator
-            if linker.rendering_mode == 'DETAILED':
-                row.label(text="", icon='MESH_DATA')
-
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text=linker.name, icon='LINK_BLEND')
@@ -169,8 +165,6 @@ class PB2_PT_linkers(Panel):
         header.label(text=f"Editing: {linker.name}", icon='LINK_BLEND')
         style_icons = {'TUBE': 'CURVE_BEZCIRCLE', 'BEADS': 'MESH_UVSPHERE'}
         header.label(text="", icon=style_icons.get(linker.style, 'CURVE_DATA'))
-        if linker.rendering_mode == 'DETAILED':
-            header.label(text="", icon='MESH_DATA')
 
         # ---- Connection (puppet + endpoints) ---------------------------
         section = main_box.column(align=True)
@@ -212,7 +206,6 @@ class PB2_PT_linkers(Panel):
         section = main_box.column(align=True)
         section.label(text="Appearance", icon='MATERIAL')
         section.prop(linker, "style")
-        section.prop(linker, "rendering_mode")
         section.prop(linker, "color")
         if linker.style == 'TUBE':
             section.prop(linker, "tube_radius")
