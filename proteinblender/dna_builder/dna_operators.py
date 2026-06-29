@@ -73,6 +73,150 @@ def _override_res_name_uniform(obj, value):
     mesh.update()
 
 
+# ---------------------------------------------------------------------------
+# Shared dialog form
+# ---------------------------------------------------------------------------
+
+def _validate_seq_preview(seq, nt):
+    """Lightweight validation for dialog preview labels — keeps only the
+    valid characters for the chosen nucleic-acid type."""
+    valid = set("ATGC") if nt == "DNA" else set("AUGC")
+    return "".join(c for c in seq.upper() if c in valid)
+
+
+def _helix_info_preview(length, nt, winding_mode="HELIX"):
+    """Lightweight helix-length / turns preview for dialog labels."""
+    rise = 2.6 if nt == "RNA" else 3.38
+    twist = 32.7 if nt == "RNA" else 36.0
+    wound_transitions = 0 if winding_mode == "LADDER" else max(0, length - 1)
+    return {
+        "helix_length_angstrom": length * rise,
+        "turns": wound_transitions * twist / 360.0,
+    }
+
+
+def _draw_dna_form(layout, props, *, dna_obj=None):
+    """Shared dialog body for Create-DNA / Edit-DNA.
+
+    Both ``PROTEINBLENDER_OT_build_dna`` (in create mode) and the same
+    operator (in edit mode, when ``molecule_id_to_update`` is set) call
+    this from their ``draw`` method. Binds directly to
+    ``scene.dna_builder_props`` (passed in as ``props``) so the
+    randomise / swap-to-complement sub-operators can keep mutating the
+    same scene props they always have. If ``dna_obj`` is passed (edit
+    mode), the "Apply to Selected" button at the bottom of the colour
+    section is shown.
+    """
+    # Type toggle
+    row = layout.row(align=True)
+    row.prop(props, "nucleic_type", expand=True)
+
+    layout.separator(factor=0.3)
+
+    # Input mode toggle
+    row = layout.row(align=True)
+    row.prop(props, "input_mode", expand=True)
+
+    if props.input_mode == "RANDOM":
+        row = layout.row(align=True)
+        row.prop(props, "sequence_length", text="Length")
+        row.operator(
+            "proteinblender.randomize_sequence", text="", icon="FILE_REFRESH"
+        )
+
+    # Sequence text area
+    layout.prop(props, "sequence", text="")
+
+    # Validation feedback
+    nt = props.nucleic_type
+    seq = _validate_seq_preview(props.sequence, nt)
+    valid_chars = "A T G C" if nt == "DNA" else "A U G C"
+    status = "✓ valid" if len(seq) >= 2 else "✗ too short"
+    layout.label(
+        text=f"{valid_chars} only · {len(seq)} / 500 · {status}"
+    )
+
+    layout.separator(factor=0.3)
+
+    # Double / single stranded
+    layout.prop(props, "double_stranded")
+
+    # Single-strand: offer swap-to-complement helper
+    if not props.double_stranded:
+        row = layout.row()
+        row.operator(
+            "proteinblender.swap_to_complement",
+            text="⇄ Swap to Complement",
+            icon="ARROW_LEFTRIGHT",
+        )
+
+    # Style + name
+    layout.prop(props, "style")
+    layout.prop(props, "name_prefix", text="Name")
+
+    # ---- Collapsible winding section ---------------------------------
+    wind_box = layout.box()
+    wind_header = wind_box.row()
+    wind_header.prop(
+        props, "show_winding",
+        text="Winding",
+        icon="TRIA_DOWN" if props.show_winding else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if props.show_winding:
+        wind_box.prop(props, "winding_mode", expand=True)
+        if props.winding_mode == "LADDER":
+            wind_box.label(
+                text="Stylised flat ladder. Backbone is not atomically valid here.",
+                icon="INFO",
+            )
+
+    # ---- Collapsible colour section ----------------------------------
+    color_box = layout.box()
+    color_header = color_box.row()
+    color_header.prop(
+        props, "show_colors",
+        text="Base Colors",
+        icon="TRIA_DOWN" if props.show_colors else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if props.show_colors:
+        col = color_box.column(align=True)
+        col.prop(props, "color_a")
+        if nt == "DNA":
+            col.prop(props, "color_t")
+        else:
+            col.prop(props, "color_u")
+        col.prop(props, "color_g")
+        col.prop(props, "color_c")
+        col.separator(factor=0.3)
+        col.prop(props, "color_backbone")
+        # Edit-mode: live "Apply to Selected" button to update colours
+        # without rebuilding the strand.
+        if dna_obj is not None:
+            col.separator(factor=0.3)
+            col.operator(
+                "proteinblender.update_dna_colors",
+                text="Apply to Selected",
+                icon="CHECKMARK",
+            )
+
+    # ---- Helix info readout ------------------------------------------
+    if len(seq) >= 2:
+        info = _helix_info_preview(len(seq), nt, winding_mode=props.winding_mode)
+        info_box = layout.box()
+        r = info_box.row()
+        r.label(text="Helix length")
+        r.label(text=f"{info['helix_length_angstrom']:.1f} Å")
+        r = info_box.row()
+        r.label(text="Turns")
+        r.label(text=f"{info['turns']:.2f}")
+
+
+# ---------------------------------------------------------------------------
+# Build / update path
+# ---------------------------------------------------------------------------
+
 def _build_dna_from_props(operator, context, identifier):
     """Shared build path: read scene props, build the AtomArray, create the
     Blender object via MN pipeline, apply colours and finalize.
@@ -160,20 +304,100 @@ def _build_dna_from_props(operator, context, identifier):
     return wrapper, calculate_helix_info(len(seq), nucleic_type, primary_mask)
 
 
+# ---------------------------------------------------------------------------
+# Operators
+# ---------------------------------------------------------------------------
+
 class PROTEINBLENDER_OT_build_dna(Operator):
-    """Build a DNA or RNA molecule from a nucleotide sequence"""
+    """Open the DNA / RNA builder dialog.
+
+    Two modes, controlled by the ``molecule_id_to_update`` operator
+    property:
+
+    * **Create (empty)** — opens the dialog seeded from the current
+      ``scene.dna_builder_props`` (which the msgbus sync keeps
+      reasonable). Clicking OK creates a new molecule registered in
+      the PB Outliner.
+
+    * **Update (``molecule_id_to_update`` set)** — the PB Outliner's
+      edit pencil invokes us with this set to a molecule's identifier.
+      ``invoke`` syncs ``scene.dna_builder_props`` from the target
+      molecule's ``pb_*`` custom properties so the dialog opens pre-
+      populated. ``execute`` deletes the old molecule and rebuilds
+      with the *same* identifier so the outliner slot stays put, and
+      the molecule's transform + bend rig are preserved.
+
+    Identical dialog body for both modes (see ``_draw_dna_form``) — the
+    user sees the same controls whether they're creating fresh or
+    editing an existing strand.
+    """
 
     bl_idname = "proteinblender.build_dna"
     bl_label = "Build DNA/RNA"
     bl_options = {"REGISTER", "UNDO"}
 
+    molecule_id_to_update: StringProperty(
+        name="Molecule to update",
+        description=(
+            "If set, edit this DNA molecule's identifier instead of "
+            "creating a new one (the existing molecule is deleted and "
+            "rebuilt with the same identifier so the outliner slot "
+            "stays put)"
+        ),
+        default="",
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+
+    def invoke(self, context, event):
+        # Edit mode: seed scene.dna_builder_props from the target's
+        # pb_* custom props so the dialog opens with the molecule's
+        # current settings. The msgbus auto-sync already does this
+        # when the user clicks the strand in the viewport — but the
+        # edit-pencil in the outliner doesn't change the active
+        # object, so we have to seed explicitly here.
+        if self.molecule_id_to_update:
+            from ..utils.scene_manager import ProteinBlenderScene
+            from .dna_props import sync_props_from_object
+            sm = ProteinBlenderScene.get_instance()
+            wrapper = sm.molecules.get(self.molecule_id_to_update)
+            if wrapper and wrapper.molecule and wrapper.molecule.object:
+                sync_props_from_object(
+                    context.scene.dna_builder_props,
+                    wrapper.molecule.object,
+                )
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        _draw_dna_form(
+            self.layout,
+            context.scene.dna_builder_props,
+            dna_obj=self._target_object(context),
+        )
+
+    def _target_object(self, context):
+        """The DNA object the dialog is editing, or None for Create mode."""
+        if not self.molecule_id_to_update:
+            return None
+        from ..utils.scene_manager import ProteinBlenderScene
+        sm = ProteinBlenderScene.get_instance()
+        wrapper = sm.molecules.get(self.molecule_id_to_update)
+        return wrapper.molecule.object if (wrapper and wrapper.molecule) else None
+
     def execute(self, context):
         from ..utils.scene_manager import ProteinBlenderScene
 
-        props = context.scene.dna_builder_props
         scene_mgr = ProteinBlenderScene.get_instance()
-        identifier = self._next_id(props, scene_mgr)
+        props = context.scene.dna_builder_props
 
+        if self.molecule_id_to_update:
+            # Update path — preserve identifier, transform, and bend rig
+            # across the rebuild. Logic merged from the former
+            # PROTEINBLENDER_OT_update_dna operator (now removed).
+            return self._update_existing(context, scene_mgr,
+                                         self.molecule_id_to_update)
+
+        # Create path — pick a fresh identifier and build
+        identifier = self._next_id(props, scene_mgr)
         wrapper, info = _build_dna_from_props(self, context, identifier)
         if wrapper is None:
             return {"CANCELLED"}
@@ -181,7 +405,113 @@ class PROTEINBLENDER_OT_build_dna(Operator):
         self.report(
             {"INFO"},
             f"Created {identifier}: {info['base_pairs']} nt, "
-            f"{info['helix_length_angstrom']:.1f} \u00c5, "
+            f"{info['helix_length_angstrom']:.1f} Å, "
+            f"{info['turns']:.1f} turns",
+        )
+        return {"FINISHED"}
+
+    def _update_existing(self, context, scene_mgr, identifier):
+        """Rebuild the existing DNA at the given identifier. Preserves
+        the molecule's transform and bend rig the same way the former
+        update_dna operator did."""
+        from . import bender as _bender
+        from mathutils import Vector
+
+        wrapper = scene_mgr.molecules.get(identifier)
+        if wrapper is None or wrapper.molecule is None:
+            self.report({"ERROR"}, f"Molecule '{identifier}' not found.")
+            return {"CANCELLED"}
+
+        old_obj = wrapper.molecule.object
+        if old_obj is None or not old_obj.get("pb_is_nucleic_acid", False):
+            self.report({"ERROR"}, f"'{identifier}' is not a DNA/RNA molecule.")
+            return {"CANCELLED"}
+
+        # Make sure we're in OBJECT mode + the DNA is active (origin_set
+        # and select_all in the rebuild path require it).
+        try:
+            if context.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.object.select_all(action="DESELECT")
+            old_obj.select_set(True)
+            context.view_layer.objects.active = old_obj
+        except Exception:
+            pass
+
+        # Save the world-space bounding-box centre (not obj.location —
+        # obj.location includes the pivot-shift offset added by
+        # shift_origin_to_bottom, which would accumulate on each rebuild).
+        bbox = [old_obj.matrix_world @ Vector(c) for c in old_obj.bound_box]
+        old_visual_center = sum(bbox, Vector()) / 8
+
+        old_rot_mode = old_obj.rotation_mode
+        old_rot_euler = old_obj.rotation_euler.copy()
+        old_rot_quat = old_obj.rotation_quaternion.copy()
+        bend_curve_name = old_obj.get(_bender.BEND_CURVE_PROP)
+        bend_curve_obj = bpy.data.objects.get(bend_curve_name) if bend_curve_name else None
+
+        # Bake any user-driven bend into the curve's bezier data before
+        # we destroy the hook empties — hooks only deform at eval time.
+        if bend_curve_obj is not None:
+            try:
+                _bender.bake_evaluated_curve_shape(bend_curve_obj)
+            except Exception as e:
+                self.report({"WARNING"}, f"Could not bake bend shape: {e}")
+
+        # Delete the old molecule (object + collection + registry).
+        # The bend curve survives because it's a separate object.
+        scene_mgr.delete_molecule(identifier)
+
+        # Purge the cached MN_<id> node tree so create_starting_node_tree
+        # doesn't early-return and silently ignore a style change.
+        ng_name = f"MN_{identifier}"
+        old_tree = bpy.data.node_groups.get(ng_name)
+        if old_tree is not None:
+            try:
+                bpy.data.node_groups.remove(old_tree, do_unlink=True)
+            except Exception:
+                pass
+
+        # Build new with the SAME identifier so the outliner slot is preserved.
+        wrapper, info = _build_dna_from_props(self, context, identifier)
+        if wrapper is None:
+            return {"CANCELLED"}
+        new_obj = wrapper.molecule.object
+
+        # Restore rotation (not location yet — reattach_after_rebuild
+        # below modifies location via shift_origin_to_bottom).
+        if new_obj is not None:
+            new_obj.rotation_mode = old_rot_mode
+            new_obj.rotation_euler = old_rot_euler
+            new_obj.rotation_quaternion = old_rot_quat
+
+        # Re-establish the bend if there was one.
+        if bend_curve_obj is not None and new_obj is not None:
+            try:
+                _bender.reattach_after_rebuild(new_obj, bend_curve_obj)
+            except Exception as e:
+                self.report({"WARNING"}, f"Could not reattach bend: {e}")
+
+        # Restore visual position: align the new bbox centre with the
+        # saved centre so the strand stays where the user put it.
+        if new_obj is not None:
+            context.view_layer.update()
+            bbox = [new_obj.matrix_world @ Vector(c) for c in new_obj.bound_box]
+            new_visual_center = sum(bbox, Vector()) / 8
+            new_obj.location += old_visual_center - new_visual_center
+
+        # Re-select the new object
+        if new_obj:
+            try:
+                bpy.ops.object.select_all(action="DESELECT")
+                new_obj.select_set(True)
+                context.view_layer.objects.active = new_obj
+            except Exception:
+                pass
+
+        self.report(
+            {"INFO"},
+            f"Updated {identifier}: {info['helix_length_angstrom']:.1f} Å, "
             f"{info['turns']:.1f} turns",
         )
         return {"FINISHED"}
@@ -195,180 +525,6 @@ class PROTEINBLENDER_OT_build_dna(Operator):
             if name not in scene_mgr.molecules:
                 return name
             counter += 1
-
-
-class PROTEINBLENDER_OT_update_dna(Operator):
-    """Rebuild the selected DNA/RNA molecule with the current builder settings.
-
-    Preserves the molecule's identifier so it stays in the same outliner slot.
-    """
-
-    bl_idname = "proteinblender.update_dna"
-    bl_label = "Update Selected DNA/RNA"
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context):
-        # Allow the operator while a DNA molecule is active OR while the
-        # active object is a related bend curve / bend node.
-        from . import bender as _bender
-        obj = context.active_object
-        if obj is None:
-            return False
-        if obj.get("pb_is_nucleic_acid", False):
-            return True
-        if obj.type == "CURVE" and _bender.get_dna_for_curve(obj) is not None:
-            return True
-        if obj.type == "EMPTY" and _bender.get_dna_for_node(obj) is not None:
-            return True
-        return False
-
-    def execute(self, context):
-        from ..utils.scene_manager import ProteinBlenderScene
-        from . import bender as _bender
-
-        # ---- Step 1: ensure OBJECT mode and that the DNA is the active obj.
-        # The rebuild path uses ops that require OBJECT mode (origin_set,
-        # select_all in set_protein_pivot_to_center_of_mass).
-        try:
-            if context.mode != "OBJECT":
-                bpy.ops.object.mode_set(mode="OBJECT")
-        except Exception:
-            pass
-
-        old_obj = context.active_object
-
-        # If the active object is the bend curve or one of the bend nodes,
-        # resolve to the owning DNA.
-        if old_obj is not None and not old_obj.get("pb_is_nucleic_acid", False):
-            if old_obj.type == "CURVE":
-                resolved = _bender.get_dna_for_curve(old_obj)
-                if resolved is not None:
-                    old_obj = resolved
-            elif old_obj.type == "EMPTY":
-                resolved = _bender.get_dna_for_node(old_obj)
-                if resolved is not None:
-                    old_obj = resolved
-
-        if not old_obj or not old_obj.get("pb_is_nucleic_acid", False):
-            self.report({"ERROR"}, "No DNA/RNA molecule selected.")
-            return {"CANCELLED"}
-
-        try:
-            bpy.ops.object.select_all(action="DESELECT")
-            old_obj.select_set(True)
-            context.view_layer.objects.active = old_obj
-        except Exception:
-            pass
-
-        scene_mgr = ProteinBlenderScene.get_instance()
-
-        # Find the identifier this molecule is registered under
-        identifier = None
-        for ident, wrapper in scene_mgr.molecules.items():
-            try:
-                if wrapper.molecule.object == old_obj:
-                    identifier = ident
-                    break
-            except Exception:
-                continue
-
-        if identifier is None:
-            self.report({"ERROR"}, "Selected molecule is not registered with the manager.")
-            return {"CANCELLED"}
-
-        # Preserve the user's transform and bend curve across the rebuild.
-        from . import bender as _bender
-        from mathutils import Vector
-
-        # Save the world-space bounding-box centre rather than obj.location.
-        # obj.location includes the pivot-shift offset added by
-        # shift_origin_to_bottom (bend system); restoring it and then
-        # applying a *new* pivot shift would accumulate downward drift on
-        # every rebuild.
-        bbox = [old_obj.matrix_world @ Vector(c) for c in old_obj.bound_box]
-        old_visual_center = sum(bbox, Vector()) / 8
-
-        old_rot_mode = old_obj.rotation_mode
-        old_rot_euler = old_obj.rotation_euler.copy()
-        old_rot_quat = old_obj.rotation_quaternion.copy()
-        bend_curve_name = old_obj.get(_bender.BEND_CURVE_PROP)
-        bend_curve_obj = bpy.data.objects.get(bend_curve_name) if bend_curve_name else None
-
-        # Materialise any user-driven bend into the curve's bezier data
-        # before we destroy the hook empties. Hook modifiers only deform at
-        # evaluation time, so without this bake the user's nudges live
-        # solely in the empties' positions and would be lost when the
-        # empties get purged with the old molecule's collection.
-        if bend_curve_obj is not None:
-            try:
-                _bender.bake_evaluated_curve_shape(bend_curve_obj)
-            except Exception as e:
-                self.report({"WARNING"}, f"Could not bake bend shape: {e}")
-
-        # Delete the old molecule (object, collection, registry, list item).
-        # The bend curve is a separate object and survives this deletion.
-        scene_mgr.delete_molecule(identifier)
-
-        # Purge the cached node tree from the previous build — otherwise
-        # create_starting_node_tree finds it by name (MN_<identifier>) and
-        # early-returns, silently ignoring any style change on rebuild.
-        ng_name = f"MN_{identifier}"
-        old_tree = bpy.data.node_groups.get(ng_name)
-        if old_tree is not None:
-            try:
-                bpy.data.node_groups.remove(old_tree, do_unlink=True)
-            except Exception:
-                pass
-
-        # Build new with the same identifier
-        wrapper, info = _build_dna_from_props(self, context, identifier)
-        if wrapper is None:
-            return {"CANCELLED"}
-
-        new_obj = wrapper.molecule.object
-
-        # Restore rotation (but NOT location yet — shift_origin_to_bottom
-        # in reattach_after_rebuild will modify location, so we restore
-        # visual position after all origin shifts are done).
-        if new_obj is not None:
-            new_obj.rotation_mode = old_rot_mode
-            new_obj.rotation_euler = old_rot_euler
-            new_obj.rotation_quaternion = old_rot_quat
-
-        # Restore the bend if there was one. The curve object survived;
-        # reattach a fresh Curve modifier and re-shift the new mesh's pivot
-        # to its bottom so the deformation lines up.
-        if bend_curve_obj is not None and new_obj is not None:
-            try:
-                _bender.reattach_after_rebuild(new_obj, bend_curve_obj)
-            except Exception as e:
-                self.report({"WARNING"}, f"Could not reattach bend: {e}")
-
-        # Restore visual position: compare where the new object's bbox
-        # centre ended up (after any pivot shift) with the saved centre
-        # and translate by the difference.
-        if new_obj is not None:
-            context.view_layer.update()
-            bbox = [new_obj.matrix_world @ Vector(c) for c in new_obj.bound_box]
-            new_visual_center = sum(bbox, Vector()) / 8
-            new_obj.location += old_visual_center - new_visual_center
-
-        # Re-select the new object so the panel stays in edit mode for it
-        if new_obj:
-            try:
-                bpy.ops.object.select_all(action="DESELECT")
-                new_obj.select_set(True)
-                context.view_layer.objects.active = new_obj
-            except Exception:
-                pass
-
-        self.report(
-            {"INFO"},
-            f"Updated {identifier}: {info['helix_length_angstrom']:.1f} \u00c5, "
-            f"{info['turns']:.1f} turns",
-        )
-        return {"FINISHED"}
 
 
 class PROTEINBLENDER_OT_randomize_sequence(Operator):
@@ -463,7 +619,6 @@ class PROTEINBLENDER_OT_update_dna_style(Operator):
 
 CLASSES = (
     PROTEINBLENDER_OT_build_dna,
-    PROTEINBLENDER_OT_update_dna,
     PROTEINBLENDER_OT_randomize_sequence,
     PROTEINBLENDER_OT_swap_to_complement,
     PROTEINBLENDER_OT_update_dna_colors,

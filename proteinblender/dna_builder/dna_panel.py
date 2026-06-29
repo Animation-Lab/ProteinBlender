@@ -1,34 +1,23 @@
-"""Builder panel for DNA/RNA creation."""
+"""Builder panel for DNA/RNA creation.
+
+The panel is intentionally minimal: a single "Create New DNA / RNA"
+button that pops the build dialog (``proteinblender.build_dna``). All
+of the build form lives inside that dialog so create and edit (the
+PB Outliner's edit pencil also fires the same operator with
+``molecule_id_to_update`` set) look pixel-identical.
+
+The Shape / bend-rig controls remain in the panel because they're
+live viewport editing tools (drag node empties, toggle curve
+visibility), not one-shot dialog inputs.
+"""
 
 import bpy
 from bpy.types import Panel
 
 
-def _validate_seq(seq, nt):
-    """Lightweight validation without importing heavy deps."""
-    valid = set("ATGC") if nt == "DNA" else set("AUGC")
-    return "".join(c for c in seq.upper() if c in valid)
-
-
-def _helix_info(length, nt, winding_mode="HELIX"):
-    """Lightweight helix info without importing heavy deps.
-
-    LADDER zeroes out the twist accumulation. Length along the helix
-    axis is unchanged (rise per bp is constant).
-    """
-    rise = 2.6 if nt == "RNA" else 3.38
-    twist = 32.7 if nt == "RNA" else 36.0
-
-    wound_transitions = 0 if winding_mode == "LADDER" else max(0, length - 1)
-
-    return {
-        "helix_length_angstrom": length * rise,
-        "turns": wound_transitions * twist / 360.0,
-    }
-
-
 class PROTEINBLENDER_PT_builders(Panel):
-    """Builders panel (DNA/RNA, future: membranes)."""
+    """Builders panel — entry point for the DNA / RNA dialog and the
+    bend-rig controls for the currently active strand."""
 
     bl_label = "Builders"
     bl_idname = "PROTEINBLENDER_PT_builders"
@@ -40,7 +29,6 @@ class PROTEINBLENDER_PT_builders(Panel):
 
     def draw(self, context):
         layout = self.layout
-        props = context.scene.dna_builder_props
 
         # ---- Edit mode detection -----------------------------------------
         # The user is "editing a DNA" if either:
@@ -48,11 +36,7 @@ class PROTEINBLENDER_PT_builders(Panel):
         #   (b) the active object is its bend curve, or
         #   (c) the active object is one of its bend control nodes (the
         #       Empties placed by "Edit Bend").
-        from .bender import (
-            BEND_CURVE_PROP,
-            get_dna_for_curve,
-            get_dna_for_node,
-        )
+        from .bender import get_dna_for_curve, get_dna_for_node
         active_obj = context.active_object
         dna_obj = None
 
@@ -69,18 +53,44 @@ class PROTEINBLENDER_PT_builders(Panel):
                         and active_obj is not dna_obj
                         and active_obj.type == "EMPTY")
 
-        # ---- DNA / RNA builder section -----------------------------------
+        # ---- Panel body --------------------------------------------------
         main_box = layout.box()
         main_box.label(text="Builders", icon="CURVE_DATA")
         main_box.separator()
 
-        # Sub-header — switches based on edit/build mode
+        # ---- Create button — fires the build dialog (Create mode) -------
+        create_row = main_box.row()
+        create_row.scale_y = 1.4
+        create_row.operator(
+            "proteinblender.build_dna",
+            text="Create New DNA / RNA",
+            icon="ADD",
+        )
+
         if editing:
+            main_box.separator(factor=0.5)
+
+            # Editing-context header
             row = main_box.row()
             row.label(
                 text=f"Editing: {dna_obj.name}",
                 icon="GREASEPENCIL",
             )
+
+            # Edit-this-strand shortcut — same dialog, pre-populated.
+            edit_row = main_box.row()
+            edit_row.scale_y = 1.2
+            # Look up the molecule's identifier in the scene manager so
+            # the operator knows which one to rebuild.
+            mol_id = self._find_molecule_id_for_object(dna_obj)
+            if mol_id:
+                op = edit_row.operator(
+                    "proteinblender.build_dna",
+                    text=f"Edit {dna_obj.name}…",
+                    icon="GREASEPENCIL",
+                )
+                op.molecule_id_to_update = mol_id
+
             if editing_node:
                 # User is dragging a control node — offer a fast way to
                 # bounce back to the DNA when they're done.
@@ -88,161 +98,31 @@ class PROTEINBLENDER_PT_builders(Panel):
                 done_row.scale_y = 1.1
                 done_row.operator(
                     "proteinblender.dna_finish_bend_edit",
-                    text="\u2713 Done Editing Bend",
+                    text="✓ Done Editing Bend",
                     icon="LOOP_BACK",
                 )
-                main_box.separator(factor=0.5)
-        else:
-            main_box.label(text="DNA / RNA builder")
 
-        # Type toggle
-        row = main_box.row(align=True)
-        row.prop(props, "nucleic_type", expand=True)
-
-        main_box.separator(factor=0.3)
-
-        # Input mode toggle
-        row = main_box.row(align=True)
-        row.prop(props, "input_mode", expand=True)
-
-        if props.input_mode == "RANDOM":
-            row = main_box.row(align=True)
-            row.prop(props, "sequence_length", text="Length")
-            row.operator(
-                "proteinblender.randomize_sequence", text="", icon="FILE_REFRESH"
-            )
-
-        # Sequence text area
-        main_box.prop(props, "sequence", text="")
-
-        # Validation feedback
-        nt = props.nucleic_type
-        seq = _validate_seq(props.sequence, nt)
-        valid_chars = "A T G C" if nt == "DNA" else "A U G C"
-        status = "\u2713 valid" if len(seq) >= 2 else "\u2717 too short"
-        main_box.label(
-            text=f"{valid_chars} only \u00b7 {len(seq)} / 500 \u00b7 {status}"
-        )
-
-        main_box.separator(factor=0.3)
-
-        # Double / single stranded
-        main_box.prop(props, "double_stranded")
-
-        # Single-strand mode: offer a quick way to flip to the antisense
-        # strand (reverse complement) so the user can build both strands
-        # back-to-back without retyping the sequence.
-        if not props.double_stranded:
-            row = main_box.row()
-            row.operator(
-                "proteinblender.swap_to_complement",
-                text="⇄ Swap to Complement",
-                icon="ARROW_LEFTRIGHT",
-            )
-
-        # Style
-        main_box.prop(props, "style")
-
-        # Name
-        main_box.prop(props, "name_prefix", text="Name")
-
-        # ---- Collapsible winding section ---------------------------------
-        wind_box = main_box.box()
-        wind_header = wind_box.row()
-        wind_header.prop(
-            props,
-            "show_winding",
-            text="Winding",
-            icon="TRIA_DOWN" if props.show_winding else "TRIA_RIGHT",
-            emboss=False,
-        )
-
-        if props.show_winding:
-            wind_box.prop(props, "winding_mode", expand=True)
-
-            if props.winding_mode == "LADDER":
-                wind_box.label(
-                    text="Stylised flat ladder. Backbone is not atomically valid here.",
-                    icon="INFO",
-                )
-
-        # ---- Collapsible colour section ----------------------------------
-        color_box = main_box.box()
-        color_header = color_box.row()
-        color_header.prop(
-            props,
-            "show_colors",
-            text="Base Colors",
-            icon="TRIA_DOWN" if props.show_colors else "TRIA_RIGHT",
-            emboss=False,
-        )
-
-        if props.show_colors:
-            col = color_box.column(align=True)
-            col.prop(props, "color_a")
-            if nt == "DNA":
-                col.prop(props, "color_t")
-            else:
-                col.prop(props, "color_u")
-            col.prop(props, "color_g")
-            col.prop(props, "color_c")
-            col.separator(factor=0.3)
-            col.prop(props, "color_backbone")
-
-            # Update existing button (only if a DNA object is selected)
-            if dna_obj is not None:
-                col.separator(factor=0.3)
-                col.operator(
-                    "proteinblender.update_dna_colors",
-                    text="Apply to Selected",
-                    icon="CHECKMARK",
-                )
-
-        # ---- Info readout ------------------------------------------------
-        if len(seq) >= 2:
-            info = _helix_info(len(seq), nt, winding_mode=props.winding_mode)
-            info_box = main_box.box()
-            row = info_box.row()
-            row.label(text="Helix length")
-            row.label(text=f"{info['helix_length_angstrom']:.1f} \u00c5")
-            row = info_box.row()
-            row.label(text="Turns")
-            row.label(text=f"{info['turns']:.2f}")
-
-        # ---- Shape (bending) section — only when editing a DNA ----------
-        if editing:
+            # Shape / bend-rig controls (live viewport editing — kept in
+            # the panel because they're not one-shot dialog inputs)
             self._draw_shape_section(main_box, dna_obj)
 
-        # ---- Action button(s) -------------------------------------------
-        main_box.separator(factor=0.5)
-        if editing:
-            update_row = main_box.row()
-            update_row.scale_y = 1.4
-            update_row.operator(
-                "proteinblender.update_dna",
-                text=f"\u21bb Update {nt}",
-                icon="FILE_REFRESH",
-            )
-            new_row = main_box.row()
-            new_row.operator(
-                "proteinblender.build_dna",
-                text="Build New Instead",
-                icon="ADD",
-            )
-        else:
-            build_row = main_box.row()
-            build_row.scale_y = 1.4
-            build_row.operator(
-                "proteinblender.build_dna",
-                text=f"\u25b6 Build {nt}",
-                icon="MESH_CYLINDER",
-            )
+    @staticmethod
+    def _find_molecule_id_for_object(dna_obj):
+        """Look up the molecule manager identifier for a DNA object."""
+        from ..utils.scene_manager import ProteinBlenderScene
+        sm = ProteinBlenderScene.get_instance()
+        for ident, wrapper in sm.molecules.items():
+            try:
+                if wrapper.molecule and wrapper.molecule.object is dna_obj:
+                    return ident
+            except Exception:
+                continue
+        return None
 
     def _draw_shape_section(self, parent_layout, dna_obj):
         """Bending controls — visible only when a DNA molecule is active."""
         from .bender import (
             BEND_CURVE_PROP,
-            BEND_NODES_PROP,
             RES_DEFAULT, RES_MIN, RES_MAX,
             get_bend_curve,
             get_bend_nodes,
@@ -255,7 +135,7 @@ class PROTEINBLENDER_PT_builders(Panel):
         has_bend = bool(dna_obj.get(BEND_CURVE_PROP))
 
         # Rig-structural changes (Add/Remove bend, change node count) rebuild
-        # the bend curve and nodes \u2014 if the strand is already animated this
+        # the bend curve and nodes — if the strand is already animated this
         # orphans every F-curve keyed against the old data and silently
         # corrupts the animation. Lock those controls while keyframes exist;
         # the user can delete keyframes from the Animate panel to unlock.
@@ -268,7 +148,7 @@ class PROTEINBLENDER_PT_builders(Panel):
             row.enabled = not is_keyframed
             row.operator(
                 "proteinblender.dna_add_bend",
-                text="\u2795 Add Bend Control",
+                text="✚ Add Bend Control",
                 icon="OUTLINER_OB_CURVE",
             )
             if is_keyframed:
@@ -352,6 +232,7 @@ class PROTEINBLENDER_PT_builders(Panel):
                 text="Bend curve is a guide only — never appears in renders.",
                 icon="INFO",
             )
+
 
 CLASSES = (PROTEINBLENDER_PT_builders,)
 

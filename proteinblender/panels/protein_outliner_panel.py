@@ -330,6 +330,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 if duplicate_op:
                     duplicate_op.molecule_id = item.item_id
 
+            if item.item_type == 'DNA_RNA':
+                # Edit pencil — opens the build_dna dialog pre-populated for
+                # this strand (same dialog as Create, but in update mode).
+                edit_op = row.operator(
+                    "proteinblender.build_dna",
+                    text="", icon='GREASEPENCIL', emboss=False,
+                )
+                if edit_op:
+                    edit_op.molecule_id_to_update = item.item_id
+
             # Delete button (trash can) - use the existing molecule.delete operator
             delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
             if delete_op:
