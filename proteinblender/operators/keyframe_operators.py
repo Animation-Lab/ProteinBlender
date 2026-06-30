@@ -19,6 +19,7 @@ from ..utils.brownian import (
     get_brownian_metadata,
     save_brownian_metadata,
     find_previous_keyframe,
+    remove_brownian_segments_touching,
 )
 
 
@@ -376,7 +377,13 @@ def get_keyframe_frames(context, targets=None):
 
     Pass ``targets`` to restrict the scan to a specific subset — e.g. the
     selection-filtered list returned by
-    :func:`get_filtered_keyframe_targets`."""
+    :func:`get_filtered_keyframe_targets`.
+
+    Brownian-baked keyframes (type ``'JITTER'``) are excluded — they're an
+    internal effect, not user keyframes, and would otherwise flood the
+    Keyframes list with the dozens of jitter steps per segment. The bake
+    intentionally skips a segment's start/end frames (those stay user
+    keyframes), so dropping JITTER never hides a frame the user created."""
     if targets is None:
         targets = get_keyframe_targets(context)
     frames = set()
@@ -386,10 +393,14 @@ def get_keyframe_frames(context, targets=None):
             if ad and ad.action:
                 for fc in get_fcurves_from_action(ad.action, ad):
                     for kp in fc.keyframe_points:
+                        if kp.type == 'JITTER':
+                            continue
                         frames.add(int(round(kp.co[0])))
         if kind == 'MEMBRANE':
             for fc in _iter_lattice_data_fcurves(obj):
                 for kp in fc.keyframe_points:
+                    if kp.type == 'JITTER':
+                        continue
                     frames.add(int(round(kp.co[0])))
     return sorted(frames)
 

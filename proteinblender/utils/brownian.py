@@ -692,6 +692,46 @@ def remove_brownian_metadata(controller_obj, frame):
         controller_obj['pb_brownian_metadata'] = json.dumps(metadata)
 
 
+def remove_brownian_segments_touching(controller_obj, frame):
+    """Tear down every Brownian segment that uses *frame* as an endpoint.
+
+    A segment is anchored by a start AND end user keyframe — the bake reads
+    both transforms to build its interpolation base, so deleting either
+    endpoint leaves the JITTER keys pointing at nothing meaningful. This
+    clears the metadata entry AND the JITTER keys for any segment where
+    ``start_frame == frame`` or ``end_frame == frame`` (the metadata key).
+    Other Brownian segments on the same controller stay intact.
+
+    Returns the number of segments removed (0 if the object isn't a puppet
+    controller or has no Brownian motion at all).
+    """
+    if not controller_obj:
+        return 0
+
+    metadata = get_brownian_metadata(controller_obj)
+    if not metadata:
+        return 0
+
+    to_remove = []
+    for end_key, settings in metadata.items():
+        try:
+            end_frame = int(end_key)
+        except (TypeError, ValueError):
+            continue
+        start_frame = settings.get('start_frame', 1)
+        if end_frame == frame or start_frame == frame:
+            clear_baked_brownian_keyframes(controller_obj, start_frame, end_frame)
+            to_remove.append(end_key)
+
+    if not to_remove:
+        return 0
+
+    for k in to_remove:
+        del metadata[k]
+    controller_obj['pb_brownian_metadata'] = json.dumps(metadata)
+    return len(to_remove)
+
+
 def get_brownian_settings_for_frame(controller_obj, frame):
     """Get Brownian settings that apply to a given frame.
 

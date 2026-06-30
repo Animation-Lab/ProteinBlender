@@ -22,6 +22,7 @@ from ..operators.keyframe_operators import (
     get_puppet_member_objects,
     delete_keyframe_metadata,
     delete_lattice_deformation_keyframes,
+    remove_brownian_segments_touching,
 )
 
 
@@ -345,6 +346,16 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
             objs = list(get_keyframe_animated_objects(obj, kind))  # molecule + DNA bend nodes, or membrane + holes
             if kind == 'PUPPET':
                 objs += get_puppet_member_objects(context, item_id)
+            # Tear down any Brownian segment anchored at this frame BEFORE
+            # the transform-key sweep below: the user keyframe being deleted
+            # is either a segment's start or its end, so the segment's bake
+            # reference disappears either way. Without this the JITTER keys
+            # would survive (the transform sweep skips them because they
+            # don't sit on self.frame — JITTER keys are baked between the
+            # endpoints, not on them). Brownian is puppet-only, so we only
+            # call this for PUPPET targets.
+            if kind == 'PUPPET':
+                remove_brownian_segments_touching(obj, self.frame)
             for o in objs:
                 delete_transform_keyframes(o, self.frame)
                 remove_color_keyframes(o, self.frame)
