@@ -23,14 +23,17 @@ class PROTEINBLENDER_PT_builders(Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "scene"
-    bl_order = 8  # After Flexible Linkers (7)
+    # Sits above Domain Maker (3, conditional) and Puppet Maker (4) — the
+    # builders create the molecules everything downstream depends on, so
+    # they belong near the top of the panel stack.
+    bl_order = 3
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
 
     def draw(self, context):
         layout = self.layout
 
         main_box = layout.box()
-        main_box.label(text="Builders", icon="CURVE_DATA")
+        main_box.label(text="Builders", icon="MOD_BUILD")
         main_box.separator()
 
         dna_row = main_box.row()

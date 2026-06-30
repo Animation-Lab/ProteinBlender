@@ -33,7 +33,7 @@ class PROTEINBLENDER_PT_animation(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 10  # After all Builder panels (DNA = 8, Membrane = 9)
+    bl_order = 10  # Last of the addon's panels
 
     def draw(self, context):
         layout = self.layout
