@@ -7,6 +7,43 @@ from mathutils import Vector
 from ..utils.scene_manager import build_outliner_hierarchy, ProteinBlenderScene
 
 
+def _strip_puppet_from_pose_library(scene, puppet_id):
+    """Remove every trace of *puppet_id* from ``scene.pose_library`` in place.
+
+    A ScenePose tracks its puppets in two places — `puppet_ids` /
+    `puppet_names` (comma-separated, for display + iteration) and the
+    `transforms` collection (one entry per member object, plus an
+    is_controller entry, all tagged with the puppet's id). Delete from both
+    or Apply Pose will keep operating on the deleted puppet's stale entries.
+    Pose entries that end up empty are intentionally left in place — the
+    user explicitly creates and deletes poses themselves.
+    """
+    if not hasattr(scene, 'pose_library'):
+        return
+    for pose in scene.pose_library:
+        # Drop matching transforms in reverse (collection mutation safety).
+        for i in range(len(pose.transforms) - 1, -1, -1):
+            if pose.transforms[i].puppet_id == puppet_id:
+                pose.transforms.remove(i)
+
+        if pose.puppet_ids:
+            ids = [pid for pid in pose.puppet_ids.split(',') if pid and pid != puppet_id]
+            pose.puppet_ids = ','.join(ids)
+        # puppet_names is parallel to puppet_ids by index at save time, but
+        # it's display-only and the two can drift if older poses were captured
+        # by a different code path. Rebuild names from the surviving transform
+        # entries instead of trying to align by index.
+        surviving_names = []
+        seen = set()
+        for t in pose.transforms:
+            if t.puppet_id in seen:
+                continue
+            seen.add(t.puppet_id)
+            if t.puppet_name:
+                surviving_names.append(t.puppet_name)
+        pose.puppet_names = ', '.join(surviving_names)
+
+
 class PROTEINBLENDER_OT_create_puppet(Operator):
     """Create a new protein puppet from selected items"""
     bl_idname = "proteinblender.create_puppet"
@@ -360,10 +397,19 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
                 if self.puppet_id in puppets:
                     puppets.remove(self.puppet_id)
                     item.puppet_memberships = ','.join(puppets)
-        
+
+        # Scrub references to this puppet out of the scene pose library.
+        # Each ScenePose stores `puppet_ids`/`puppet_names` (comma-separated)
+        # and a `transforms` collection keyed by `puppet_id`. Leaving these
+        # behind after a puppet is deleted causes Apply Pose to either
+        # re-position now-orphan domain objects with controller-relative
+        # transforms applied as absolute world coords, or to silently match
+        # an unrelated future puppet that reuses the id. Strip both.
+        _strip_puppet_from_pose_library(scene, self.puppet_id)
+
         # Remove the puppet item
         scene.outliner_items.remove(puppet_index)
-        
+
         # Rebuild outliner
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
@@ -567,34 +613,13 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             self.report({'INFO'}, f"Updated puppet: {self.new_name}")
             
         elif self.action == 'DELETE':
-            # Fallback implementation for when dedicated delete operator isn't available
-            # Find and remove the puppet
-            puppet_item = None
-            puppet_index = -1
-            for i, item in enumerate(scene.outliner_items):
-                if item.item_id == self.puppet_id and item.item_type == 'PUPPET':
-                    puppet_item = item
-                    puppet_index = i
-                    break
-            
-            if not puppet_item:
-                self.report({'ERROR'}, "Puppet not found")
-                return {'CANCELLED'}
-            
-            # Remove puppet membership from all items
-            for item in scene.outliner_items:
-                if item.puppet_memberships:
-                    puppets = item.puppet_memberships.split(',')
-                    if self.puppet_id in puppets:
-                        puppets.remove(self.puppet_id)
-                        item.puppet_memberships = ','.join(puppets)
-            
-            # Remove the puppet item
-            scene.outliner_items.remove(puppet_index)
-            
-            # Rebuild outliner
-            build_outliner_hierarchy(context)
-            self.report({'INFO'}, f"Deleted puppet: {puppet_item.name}")
+            # Delegate to the dedicated delete operator — it deletes the
+            # controller Empty, unparents domain children with keep-transform,
+            # removes linkers tied to this puppet, and strips pose-library
+            # references. The previous inline path did NONE of that and left
+            # orphan controllers, parented chains, and broken poses behind.
+            return bpy.ops.proteinblender.delete_puppet('EXEC_DEFAULT',
+                                                       puppet_id=self.puppet_id)
             
         elif self.action == 'RENAME':
             # Prefer an explicit puppet_id when caller supplies it; fall

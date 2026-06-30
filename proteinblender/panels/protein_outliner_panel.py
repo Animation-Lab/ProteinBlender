@@ -363,10 +363,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.membrane_name = item.object_name
         elif item.item_type == 'PUPPET':
-            # Delete button (trash can) - use the edit_puppet operator with DELETE action
-            op = row.operator("proteinblender.edit_puppet", text="", icon='TRASH', emboss=False)
+            # Delete button (trash can) — route through the dedicated delete
+            # operator, NOT edit_puppet's DELETE branch. The latter is a fallback
+            # that doesn't remove the controller Empty, unparent its children, or
+            # clean up linkers / pose-library references for the deleted puppet.
+            op = row.operator("proteinblender.delete_puppet", text="", icon='TRASH', emboss=False)
             if op:
-                op.action = 'DELETE'
                 op.puppet_id = item.item_id
         
         # Second: Selection checkbox for all items
