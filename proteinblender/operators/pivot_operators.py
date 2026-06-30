@@ -8,6 +8,69 @@ from ..utils.scene_manager import ProteinBlenderScene
 from bpy.app.handlers import persistent
 
 
+def _apply_origin_to_cursor(obj, world_pos):
+    """Move ``obj``'s origin to ``world_pos`` (world space) without
+    touching any other object's origin.
+
+    Why: ``bpy.ops.object.origin_set`` operates on every selected
+    object, so the "First/Center/Last" pivot buttons used to also move
+    the parent protein's (and sibling domains') origins whenever they
+    happened to be selected — exactly the case after the user toggles
+    a PROTEIN row in the outliner, which selects the protein plus all
+    its domains. We snapshot selection/active/mode + cursor, isolate
+    just ``obj``, run origin_set, then restore everything. Also stamps
+    ``initial_matrix_local`` so Reset Transform respects the new pivot.
+    """
+    context = bpy.context
+    scene = context.scene
+    view_layer = context.view_layer
+
+    # Snapshot state we're about to clobber.
+    original_mode = context.mode
+    original_active = view_layer.objects.active
+    original_selected = [o for o in context.selected_objects]
+    original_cursor = scene.cursor.location.copy()
+
+    needs_mode_restore = original_mode != 'OBJECT'
+    if needs_mode_restore:
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    try:
+        # Isolate obj as the sole selected + active target so origin_set
+        # only operates on it.
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        view_layer.objects.active = obj
+
+        scene.cursor.location = world_pos
+        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+
+        # Refresh the Reset-Transform baseline to the new origin.
+        obj["initial_matrix_local"] = [list(row) for row in obj.matrix_local]
+    finally:
+        # Restore selection set, active, cursor, and mode.
+        bpy.ops.object.select_all(action='DESELECT')
+        for prev_obj in original_selected:
+            try:
+                prev_obj.select_set(True)
+            except (ReferenceError, RuntimeError):
+                # Object may have been deleted mid-operation; skip.
+                pass
+        if original_active is not None:
+            try:
+                view_layer.objects.active = original_active
+            except (ReferenceError, RuntimeError):
+                pass
+
+        scene.cursor.location = original_cursor
+
+        if needs_mode_restore and context.mode != original_mode:
+            try:
+                bpy.ops.object.mode_set(mode=original_mode)
+            except RuntimeError:
+                pass
+
+
 def extract_chain_id_from_object_name(obj_name):
     """Extract chain ID from object name.
 
@@ -77,14 +140,14 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
         if first_ca_pos:
             # Set the same pivot position for all selected objects
             for obj in valid_objects:
-                self.set_object_origin(obj, first_ca_pos)
-            
+                _apply_origin_to_cursor(obj, first_ca_pos)
+
             self.report({'INFO'}, f"Set pivot to first residue for {len(valid_objects)} item(s)")
         else:
             self.report({'WARNING'}, "Could not find alpha carbons")
-        
+
         return {'FINISHED'}
-    
+
     def get_first_alpha_carbon_combined(self, objects):
         """Find the position of the first alpha carbon across all selected domain objects"""
         if not objects:
@@ -186,45 +249,8 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
             return all_alpha_positions[min_res_idx]
         elif fallback_position:
             return fallback_position
-        
+
         return None
-    
-    def set_object_origin(self, obj, new_origin):
-        """Set the object's origin to a new position"""
-        # Store current state
-        current_mode = bpy.context.mode
-        original_active = bpy.context.view_layer.objects.active
-        original_selection = [o for o in bpy.context.selected_objects]
-        
-        # Switch to object mode if needed
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # Temporarily make this object active without changing selection
-        bpy.context.view_layer.objects.active = obj
-        
-        # Ensure the object is selected for the operation
-        was_selected = obj.select_get()
-        if not was_selected:
-            obj.select_set(True)
-        
-        # Set 3D cursor to new position
-        bpy.context.scene.cursor.location = new_origin
-        
-        # Set origin to cursor (operates on active object)
-        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-        
-        # Restore selection if object wasn't originally selected
-        if not was_selected:
-            obj.select_set(False)
-        
-        # Restore original active object
-        if original_active:
-            bpy.context.view_layer.objects.active = original_active
-        
-        # Restore original mode
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode=current_mode)
 
 
 class PROTEINBLENDER_OT_set_pivot_last(Operator):
@@ -265,8 +291,8 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
         if last_ca_pos:
             # Set the same pivot position for all selected objects
             for obj in valid_objects:
-                self.set_object_origin(obj, last_ca_pos)
-            
+                _apply_origin_to_cursor(obj, last_ca_pos)
+
             self.report({'INFO'}, f"Set pivot to last residue for {len(valid_objects)} item(s)")
         else:
             self.report({'WARNING'}, "Could not find alpha carbons")
@@ -374,45 +400,8 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
             return all_alpha_positions[max_res_idx]
         elif fallback_position:
             return fallback_position
-        
+
         return None
-    
-    def set_object_origin(self, obj, new_origin):
-        """Set the object's origin to a new position"""
-        # Store current state
-        current_mode = bpy.context.mode
-        original_active = bpy.context.view_layer.objects.active
-        original_selection = [o for o in bpy.context.selected_objects]
-        
-        # Switch to object mode if needed
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # Temporarily make this object active without changing selection
-        bpy.context.view_layer.objects.active = obj
-        
-        # Ensure the object is selected for the operation
-        was_selected = obj.select_get()
-        if not was_selected:
-            obj.select_set(True)
-        
-        # Set 3D cursor to new position
-        bpy.context.scene.cursor.location = new_origin
-        
-        # Set origin to cursor (operates on active object)
-        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-        
-        # Restore selection if object wasn't originally selected
-        if not was_selected:
-            obj.select_set(False)
-        
-        # Restore original active object
-        if original_active:
-            bpy.context.view_layer.objects.active = original_active
-        
-        # Restore original mode
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode=current_mode)
 
 
 class PROTEINBLENDER_OT_set_pivot_center(Operator):
@@ -453,8 +442,8 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
         if center:
             # Set the same pivot position for all selected objects
             for obj in valid_objects:
-                self.set_object_origin(obj, center)
-            
+                _apply_origin_to_cursor(obj, center)
+
             self.report({'INFO'}, f"Set pivot to center for {len(valid_objects)} item(s)")
         else:
             self.report({'WARNING'}, "Could not calculate center")
@@ -567,43 +556,6 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
                 return sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
 
         return None
-    
-    def set_object_origin(self, obj, new_origin):
-        """Set the object's origin to a new position"""
-        # Store current state
-        current_mode = bpy.context.mode
-        original_active = bpy.context.view_layer.objects.active
-        original_selection = [o for o in bpy.context.selected_objects]
-        
-        # Switch to object mode if needed
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # Temporarily make this object active without changing selection
-        bpy.context.view_layer.objects.active = obj
-        
-        # Ensure the object is selected for the operation
-        was_selected = obj.select_get()
-        if not was_selected:
-            obj.select_set(True)
-        
-        # Set 3D cursor to new position
-        bpy.context.scene.cursor.location = new_origin
-        
-        # Set origin to cursor (operates on active object)
-        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-        
-        # Restore selection if object wasn't originally selected
-        if not was_selected:
-            obj.select_set(False)
-        
-        # Restore original active object
-        if original_active:
-            bpy.context.view_layer.objects.active = original_active
-        
-        # Restore original mode
-        if current_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode=current_mode)
 
 
 # Global flag to prevent recursive handler calls
@@ -719,41 +671,9 @@ def finalize_custom_pivot():
 
 
 def set_object_origin_static(obj, new_origin):
-    """Static version of set_object_origin for use in handlers"""
-    # Store current state
-    current_mode = bpy.context.mode
-    original_active = bpy.context.view_layer.objects.active
-    original_selection = [o for o in bpy.context.selected_objects]
-    
-    # Switch to object mode if needed
-    if current_mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    
-    # Temporarily make this object active without changing selection
-    bpy.context.view_layer.objects.active = obj
-    
-    # Ensure the object is selected for the operation
-    was_selected = obj.select_get()
-    if not was_selected:
-        obj.select_set(True)
-    
-    # Set 3D cursor to new position
-    bpy.context.scene.cursor.location = new_origin
-    
-    # Set origin to cursor (operates on active object)
-    bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-    
-    # Restore selection if object wasn't originally selected
-    if not was_selected:
-        obj.select_set(False)
-    
-    # Restore original active object
-    if original_active:
-        bpy.context.view_layer.objects.active = original_active
-    
-    # Restore original mode
-    if current_mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode=current_mode)
+    """Module-level wrapper retained for external callers; delegates to
+    the shared isolation-safe helper."""
+    _apply_origin_to_cursor(obj, new_origin)
 
 
 class PROTEINBLENDER_OT_set_pivot_custom(Operator):
@@ -885,10 +805,6 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
                 area.tag_redraw()
         
         return {'FINISHED'}
-    
-    def set_object_origin(self, obj, new_origin):
-        """Set the object's origin to a new position"""
-        set_object_origin_static(obj, new_origin)
 
 
 # Classes to register
