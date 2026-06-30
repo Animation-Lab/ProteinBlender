@@ -71,35 +71,120 @@ def _apply_origin_to_cursor(obj, world_pos):
                 pass
 
 
-def extract_chain_id_from_object_name(obj_name):
-    """Extract chain ID from object name.
+def _chain_index_for_item(scene, item):
+    """Return the int chain index a CHAIN or DOMAIN outliner row belongs to.
 
-    Handles multiple naming patterns:
-    - "Chain A_0_1_197" -> chain_id = 0
-    - "3b75_001_0_1_197_Chain_A" -> chain_id = 0
-    - "Domain_A_5_50" -> chain_id = 0 (if A maps to 0)
-
-    Returns:
-        int or None: The chain ID if found, None otherwise
+    The protein outliner identifies chains by their numeric index in
+    item_ids of the form ``<mol>_chain_<idx>``; DOMAIN rows carry the
+    chain LETTER on their object name but their ``parent_id`` points at
+    the chain row, so we resolve through the hierarchy rather than
+    parsing names. This sidesteps two trap doors: (1) author chain IDs
+    are letters that don't map to indices via alphabet math when the
+    chain set is gapped (chain T is index 9 in a 10-chain assembly, not
+    19), and (2) MN copies the full protein mesh into every domain
+    object, so every chain's atoms are present in a domain's mesh and
+    must be filtered by index — not by name.
+    Returns None if the hierarchy doesn't fit the convention.
     """
-    import re
-
-    # Pattern 1: Standard chain/domain pattern with numeric chain ID
-    # Matches: "Chain A_0_1_197" or "3b75_001_0_1_197_anything"
-    match = re.search(r'_(\d+)_\d+_\d+', obj_name)
-    if match:
-        return int(match.group(1))
-
-    # Pattern 2: Try to find any numeric ID after underscore
-    # This is a more general fallback
-    parts = obj_name.split('_')
-    for i, part in enumerate(parts):
-        if part.isdigit() and i + 2 < len(parts):
-            # Check if next two parts are also digits (residue range pattern)
-            if parts[i+1].isdigit() and parts[i+2].isdigit():
-                return int(part)
-
+    if item.item_type == 'DOMAIN':
+        parent_id = item.parent_id or ""
+        item = next((it for it in scene.outliner_items
+                     if it.item_id == parent_id), None)
+        if item is None:
+            return None
+    if item.item_type != 'CHAIN':
+        return None
+    item_id = item.item_id or ""
+    if "_chain_" in item_id:
+        try:
+            return int(item_id.rsplit("_chain_", 1)[-1])
+        except ValueError:
+            return None
     return None
+
+
+def _collect_chain_filtered_alphas(targets):
+    """Return ``[(world_pos, res_id), ...]`` for every alpha carbon
+    across ``targets``, optionally filtered to one chain per target.
+
+    ``targets``: iterable of ``(obj, chain_idx)``. When chain_idx is set
+    we restrict to atoms whose ``chain_id`` attribute equals chain_idx —
+    essential because MN copies the full protein mesh into every domain
+    object, so every chain's atoms live in a domain's mesh. Without
+    filtering, an "any alpha carbon" pick would always land on chain 0
+    residue 1, which is at mesh-local (0,0,0) → in world space that
+    collapses to the domain's current origin and First/Last become
+    silent no-ops.
+
+    Skips objects without ``is_alpha_carbon``. If ``res_id`` is missing,
+    falls back to a per-position running counter so first/last still
+    have a stable ordering.
+    """
+    import numpy as np
+
+    results = []
+    counter = 0
+    for obj, chain_idx in targets:
+        if obj is None:
+            continue
+        mesh = getattr(obj, "data", None)
+        if mesh is None or not hasattr(mesh, "attributes"):
+            continue
+        if "is_alpha_carbon" not in mesh.attributes:
+            continue
+        try:
+            n = len(mesh.vertices)
+            is_alpha = np.zeros(n, dtype=bool)
+            mesh.attributes["is_alpha_carbon"].data.foreach_get("value", is_alpha)
+
+            mask = is_alpha
+            if chain_idx is not None and "chain_id" in mesh.attributes:
+                chain_ids = np.zeros(n, dtype=np.int32)
+                mesh.attributes["chain_id"].data.foreach_get("value", chain_ids)
+                mask = is_alpha & (chain_ids == chain_idx)
+
+            positions = np.zeros(n * 3)
+            mesh.vertices.foreach_get("co", positions)
+            positions = positions.reshape(-1, 3)
+            alpha_positions = positions[mask]
+            if len(alpha_positions) == 0:
+                continue
+
+            if "res_id" in mesh.attributes:
+                res_ids_arr = np.zeros(n, dtype=np.int32)
+                mesh.attributes["res_id"].data.foreach_get("value", res_ids_arr)
+                alpha_res_ids = res_ids_arr[mask]
+                for pos, rid in zip(alpha_positions, alpha_res_ids):
+                    results.append((obj.matrix_world @ Vector(pos.tolist()),
+                                    int(rid)))
+            else:
+                for pos in alpha_positions:
+                    counter += 1
+                    results.append((obj.matrix_world @ Vector(pos.tolist()),
+                                    counter))
+        except Exception as e:
+            print(f"Error collecting alpha carbons for {obj.name}: {e}")
+
+    return results
+
+
+def _resolve_pivot_targets(scene, selected_items):
+    """Map outliner rows to ``[(obj, chain_idx), ...]`` for pivot ops.
+
+    Skips rows that aren't CHAIN/DOMAIN, lack an ``object_name``, or
+    whose object no longer exists in bpy.data.
+    """
+    targets = []
+    for item in selected_items:
+        if item.item_type not in ('DOMAIN', 'CHAIN'):
+            continue
+        if not item.object_name:
+            continue
+        obj = bpy.data.objects.get(item.object_name)
+        if obj is None:
+            continue
+        targets.append((obj, _chain_index_for_item(scene, item)))
+    return targets
 
 
 class PROTEINBLENDER_OT_set_pivot_first(Operator):
@@ -107,455 +192,107 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
     bl_idname = "proteinblender.set_pivot_first"
     bl_label = "Set Pivot to First Residue"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Get selected items
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
+        selected_items = [it for it in scene.outliner_items if it.is_selected]
         if not selected_items:
             self.report({'WARNING'}, "No items selected")
             return {'CANCELLED'}
-        
-        # Collect all valid objects
-        valid_objects = []
-        for item in selected_items:
-            if item.item_type == 'DOMAIN' or item.item_type == 'CHAIN':
-                obj = bpy.data.objects.get(item.object_name) if item.object_name else None
-                if obj:
-                    # Store original pivot if not already stored
-                    if "original_pivot" not in obj:
-                        obj["original_pivot"] = list(obj.location)
-                    valid_objects.append(obj)
-        
-        if not valid_objects:
+
+        targets = _resolve_pivot_targets(scene, selected_items)
+        if not targets:
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
-        
-        # Find the first alpha carbon position across ALL selected objects
-        first_ca_pos = self.get_first_alpha_carbon_combined(valid_objects)
-        
-        if first_ca_pos:
-            # Set the same pivot position for all selected objects
-            for obj in valid_objects:
-                _apply_origin_to_cursor(obj, first_ca_pos)
 
-            self.report({'INFO'}, f"Set pivot to first residue for {len(valid_objects)} item(s)")
-        else:
+        alphas = _collect_chain_filtered_alphas(targets)
+        if not alphas:
             self.report({'WARNING'}, "Could not find alpha carbons")
+            return {'CANCELLED'}
 
+        # min() returns the first occurrence on ties — matches np.argmin.
+        pivot_pos = min(alphas, key=lambda pr: pr[1])[0]
+
+        for obj, _ in targets:
+            _apply_origin_to_cursor(obj, pivot_pos)
+
+        self.report({'INFO'},
+                    f"Set pivot to first residue for {len(targets)} item(s)")
         return {'FINISHED'}
-
-    def get_first_alpha_carbon_combined(self, objects):
-        """Find the position of the first alpha carbon across all selected domain objects"""
-        if not objects:
-            return None
-        
-        import numpy as np
-        
-        # Collect ALL alpha carbons from ALL domains
-        all_alpha_positions = []
-        all_alpha_res_ids = []
-        fallback_position = None
-        
-        for obj in objects:
-            # Check if this is a molecular object with attributes
-            if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
-                # Fallback to object origin if not a proper molecular object
-                if fallback_position is None:
-                    fallback_position = obj.location
-                continue
-            
-            try:
-                # Check if alpha carbon attribute exists
-                if "is_alpha_carbon" not in obj.data.attributes:
-                    # No alpha carbon data, use object origin as fallback
-                    if fallback_position is None:
-                        fallback_position = obj.location
-                    continue
-
-                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
-                # This ensures alpha carbon positions are consistent regardless of style
-                mesh = obj.data
-
-                # Get alpha carbon mask
-                is_alpha_attr = mesh.attributes["is_alpha_carbon"]
-                is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
-                is_alpha_attr.data.foreach_get("value", is_alpha)
-
-                # Check if we need to filter by chain_id
-                # The mesh might contain all chains, so we need to filter to this object's chain
-                chain_mask = None
-                if "chain_id" in mesh.attributes:
-                    # Extract chain ID from object name
-                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
-                    if obj_chain_id is not None:
-                        # Get chain_id attribute
-                        chain_id_attr = mesh.attributes["chain_id"]
-                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                        chain_id_attr.data.foreach_get("value", chain_ids)
-
-                        # Create mask for this chain only
-                        chain_mask = (chain_ids == obj_chain_id)
-
-                # Get vertex positions
-                positions = np.zeros(len(mesh.vertices) * 3)
-                mesh.vertices.foreach_get("co", positions)
-                positions = positions.reshape(-1, 3)
-
-                # Combine alpha carbon mask with chain mask if needed
-                if chain_mask is not None:
-                    combined_mask = is_alpha & chain_mask
-                else:
-                    combined_mask = is_alpha
-
-                # Filter for alpha carbons (optionally filtered by chain)
-                alpha_positions = positions[combined_mask]
-
-                if len(alpha_positions) > 0:
-                    # Check for residue IDs
-                    if "res_id" in mesh.attributes:
-                        res_id_attr = mesh.attributes["res_id"]
-                        res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                        res_id_attr.data.foreach_get("value", res_ids)
-                        # Apply the same mask to residue IDs
-                        alpha_res_ids = res_ids[combined_mask]
-
-                        # Convert to world space and add to our collection
-                        for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
-                            world_pos = obj.matrix_world @ Vector(ca_pos)
-                            all_alpha_positions.append(world_pos)
-                            all_alpha_res_ids.append(res_id)
-                    else:
-                        # No residue data, just add positions
-                        for ca_pos in alpha_positions:
-                            world_pos = obj.matrix_world @ Vector(ca_pos)
-                            all_alpha_positions.append(world_pos)
-                            # Use index as pseudo res_id (will still find minimum)
-                            all_alpha_res_ids.append(len(all_alpha_positions))
-                    
-            except Exception as e:
-                # If any error occurs, store fallback
-                print(f"Error getting alpha carbon for {obj.name}: {e}")
-                if fallback_position is None:
-                    fallback_position = obj.location
-        
-        # Now find the global first alpha carbon
-        if all_alpha_positions and all_alpha_res_ids:
-            # Find the alpha carbon with the minimum residue ID across ALL domains
-            min_res_idx = np.argmin(all_alpha_res_ids)
-            return all_alpha_positions[min_res_idx]
-        elif fallback_position:
-            return fallback_position
-
-        return None
-
 
 class PROTEINBLENDER_OT_set_pivot_last(Operator):
     """Set pivot point to last residue (C-terminal)"""
     bl_idname = "proteinblender.set_pivot_last"
     bl_label = "Set Pivot to Last Residue"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Get selected items
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
+        selected_items = [it for it in scene.outliner_items if it.is_selected]
         if not selected_items:
             self.report({'WARNING'}, "No items selected")
             return {'CANCELLED'}
-        
-        # Collect all valid objects
-        valid_objects = []
-        for item in selected_items:
-            if item.item_type == 'DOMAIN' or item.item_type == 'CHAIN':
-                obj = bpy.data.objects.get(item.object_name) if item.object_name else None
-                if obj:
-                    # Store original pivot if not already stored
-                    if "original_pivot" not in obj:
-                        obj["original_pivot"] = list(obj.location)
-                    valid_objects.append(obj)
-        
-        if not valid_objects:
+
+        targets = _resolve_pivot_targets(scene, selected_items)
+        if not targets:
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
-        
-        # Find the last alpha carbon position across ALL selected objects
-        last_ca_pos = self.get_last_alpha_carbon_combined(valid_objects)
-        
-        if last_ca_pos:
-            # Set the same pivot position for all selected objects
-            for obj in valid_objects:
-                _apply_origin_to_cursor(obj, last_ca_pos)
 
-            self.report({'INFO'}, f"Set pivot to last residue for {len(valid_objects)} item(s)")
-        else:
+        alphas = _collect_chain_filtered_alphas(targets)
+        if not alphas:
             self.report({'WARNING'}, "Could not find alpha carbons")
-        
+            return {'CANCELLED'}
+
+        pivot_pos = max(alphas, key=lambda pr: pr[1])[0]
+
+        for obj, _ in targets:
+            _apply_origin_to_cursor(obj, pivot_pos)
+
+        self.report({'INFO'},
+                    f"Set pivot to last residue for {len(targets)} item(s)")
         return {'FINISHED'}
-    
-    def get_last_alpha_carbon_combined(self, objects):
-        """Find the position of the last alpha carbon across all selected domain objects"""
-        if not objects:
-            return None
-        
-        import numpy as np
-        
-        # Collect ALL alpha carbons from ALL domains
-        all_alpha_positions = []
-        all_alpha_res_ids = []
-        fallback_position = None
-        
-        for obj in objects:
-            # Check if this is a molecular object with attributes
-            if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
-                # Fallback to object origin if not a proper molecular object
-                if fallback_position is None:
-                    fallback_position = obj.location
-                continue
-            
-            try:
-                # Check if alpha carbon attribute exists
-                if "is_alpha_carbon" not in obj.data.attributes:
-                    # No alpha carbon data, use object origin as fallback
-                    if fallback_position is None:
-                        fallback_position = obj.location
-                    continue
-
-                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
-                # This ensures alpha carbon positions are consistent regardless of style
-                mesh = obj.data
-
-                # Get alpha carbon mask
-                is_alpha_attr = mesh.attributes["is_alpha_carbon"]
-                is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
-                is_alpha_attr.data.foreach_get("value", is_alpha)
-
-                # Check if we need to filter by chain_id
-                # The mesh might contain all chains, so we need to filter to this object's chain
-                chain_mask = None
-                if "chain_id" in mesh.attributes:
-                    # Extract chain ID from object name
-                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
-                    if obj_chain_id is not None:
-                        # Get chain_id attribute
-                        chain_id_attr = mesh.attributes["chain_id"]
-                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                        chain_id_attr.data.foreach_get("value", chain_ids)
-
-                        # Create mask for this chain only
-                        chain_mask = (chain_ids == obj_chain_id)
-
-                # Get vertex positions
-                positions = np.zeros(len(mesh.vertices) * 3)
-                mesh.vertices.foreach_get("co", positions)
-                positions = positions.reshape(-1, 3)
-
-                # Combine alpha carbon mask with chain mask if needed
-                if chain_mask is not None:
-                    combined_mask = is_alpha & chain_mask
-                else:
-                    combined_mask = is_alpha
-
-                # Filter for alpha carbons (optionally filtered by chain)
-                alpha_positions = positions[combined_mask]
-
-                if len(alpha_positions) > 0:
-                    # Check for residue IDs
-                    if "res_id" in mesh.attributes:
-                        res_id_attr = mesh.attributes["res_id"]
-                        res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                        res_id_attr.data.foreach_get("value", res_ids)
-                        # Apply the same mask to residue IDs
-                        alpha_res_ids = res_ids[combined_mask]
-
-                        # Convert to world space and add to our collection
-                        for ca_pos, res_id in zip(alpha_positions, alpha_res_ids):
-                            world_pos = obj.matrix_world @ Vector(ca_pos)
-                            all_alpha_positions.append(world_pos)
-                            all_alpha_res_ids.append(res_id)
-                    else:
-                        # No residue data, just add positions
-                        for ca_pos in alpha_positions:
-                            world_pos = obj.matrix_world @ Vector(ca_pos)
-                            all_alpha_positions.append(world_pos)
-                            # Use index as pseudo res_id (will still find maximum)
-                            all_alpha_res_ids.append(len(all_alpha_positions))
-                    
-            except Exception as e:
-                # If any error occurs, store fallback
-                print(f"Error getting alpha carbon for {obj.name}: {e}")
-                if fallback_position is None:
-                    fallback_position = obj.location
-        
-        # Now find the global last alpha carbon
-        if all_alpha_positions and all_alpha_res_ids:
-            # Find the alpha carbon with the maximum residue ID across ALL domains
-            max_res_idx = np.argmax(all_alpha_res_ids)
-            return all_alpha_positions[max_res_idx]
-        elif fallback_position:
-            return fallback_position
-
-        return None
-
 
 class PROTEINBLENDER_OT_set_pivot_center(Operator):
     """Set pivot point to geometric center"""
     bl_idname = "proteinblender.set_pivot_center"
     bl_label = "Set Pivot to Center"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     def execute(self, context):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Get selected items
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
+        selected_items = [it for it in scene.outliner_items if it.is_selected]
         if not selected_items:
             self.report({'WARNING'}, "No items selected")
             return {'CANCELLED'}
-        
-        # Collect all valid objects
-        valid_objects = []
-        for item in selected_items:
-            if item.item_type == 'DOMAIN' or item.item_type == 'CHAIN':
-                obj = bpy.data.objects.get(item.object_name) if item.object_name else None
-                if obj:
-                    # Store original pivot if not already stored
-                    if "original_pivot" not in obj:
-                        obj["original_pivot"] = list(obj.location)
-                    valid_objects.append(obj)
-        
-        if not valid_objects:
+
+        targets = _resolve_pivot_targets(scene, selected_items)
+        if not targets:
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
-        
-        # Calculate geometric center across ALL selected objects
-        center = self.get_geometric_center_combined(valid_objects)
-        
-        if center:
-            # Set the same pivot position for all selected objects
-            for obj in valid_objects:
-                _apply_origin_to_cursor(obj, center)
 
-            self.report({'INFO'}, f"Set pivot to center for {len(valid_objects)} item(s)")
+        alphas = _collect_chain_filtered_alphas(targets)
+        if alphas:
+            # All alpha carbons have the same atomic mass (12.01), so a
+            # mass-weighted centroid collapses to a simple mean.
+            pivot_pos = sum((pos for pos, _ in alphas), Vector()) / len(alphas)
         else:
-            self.report({'WARNING'}, "Could not calculate center")
-        
+            # No alpha carbons in any target — fall back to the combined
+            # bounding-box center.
+            bbox_pts = []
+            for obj, _ in targets:
+                bbox_pts.extend(obj.matrix_world @ Vector(c)
+                                for c in obj.bound_box)
+            if not bbox_pts:
+                self.report({'WARNING'}, "Could not calculate center")
+                return {'CANCELLED'}
+            pivot_pos = sum(bbox_pts, Vector()) / len(bbox_pts)
+
+        for obj, _ in targets:
+            _apply_origin_to_cursor(obj, pivot_pos)
+
+        self.report({'INFO'},
+                    f"Set pivot to center for {len(targets)} item(s)")
         return {'FINISHED'}
-    
-    def get_geometric_center_combined(self, objects):
-        """Calculate the center of mass of alpha carbons across all selected domain objects"""
-        if not objects:
-            return None
-
-        import numpy as np
-
-        all_alpha_positions = []
-        all_masses = []
-
-        for obj in objects:
-            # Check if this is a molecular object with attributes
-            if not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
-                # Fallback to bounding box center if not a proper molecular object
-                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                if bbox:
-                    center = sum(bbox, Vector()) / len(bbox)
-                    all_alpha_positions.append(center)
-                    all_masses.append(1.0)  # Default mass
-                continue
-            
-            try:
-                # Check if alpha carbon attribute exists
-                if "is_alpha_carbon" not in obj.data.attributes:
-                    # No alpha carbon data, use bounding box center
-                    bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                    if bbox:
-                        center = sum(bbox, Vector()) / len(bbox)
-                        all_alpha_positions.append(center)
-                        all_masses.append(1.0)
-                    continue
-
-                # Use the ORIGINAL mesh data (before geometry nodes evaluation)
-                # This ensures alpha carbon positions are consistent regardless of style
-                mesh = obj.data
-
-                # Get alpha carbon mask
-                is_alpha_attr = mesh.attributes["is_alpha_carbon"]
-                is_alpha = np.zeros(len(mesh.vertices), dtype=bool)
-                is_alpha_attr.data.foreach_get("value", is_alpha)
-
-                # Check if we need to filter by chain_id
-                # The mesh might contain all chains, so we need to filter to this object's chain
-                chain_mask = None
-                if "chain_id" in mesh.attributes:
-                    # Extract chain ID from object name
-                    obj_chain_id = extract_chain_id_from_object_name(obj.name)
-                    if obj_chain_id is not None:
-                        # Get chain_id attribute
-                        chain_id_attr = mesh.attributes["chain_id"]
-                        chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
-                        chain_id_attr.data.foreach_get("value", chain_ids)
-
-                        # Create mask for this chain only
-                        chain_mask = (chain_ids == obj_chain_id)
-
-                # Get vertex positions
-                positions = np.zeros(len(mesh.vertices) * 3)
-                mesh.vertices.foreach_get("co", positions)
-                positions = positions.reshape(-1, 3)
-
-                # Combine alpha carbon mask with chain mask if needed
-                if chain_mask is not None:
-                    combined_mask = is_alpha & chain_mask
-                else:
-                    combined_mask = is_alpha
-
-                # Filter for alpha carbons (optionally filtered by chain)
-                alpha_positions = positions[combined_mask]
-
-                if len(alpha_positions) > 0:
-                    # Convert to world space and add to list
-                    for ca_pos in alpha_positions:
-                        world_pos = obj.matrix_world @ Vector(ca_pos)
-                        all_alpha_positions.append(world_pos)
-                        all_masses.append(12.01)  # Carbon mass
-                else:
-                    # No alpha carbons, use bounding box center
-                    bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                    if bbox:
-                        center = sum(bbox, Vector()) / len(bbox)
-                        all_alpha_positions.append(center)
-                        all_masses.append(1.0)
-
-            except Exception as e:
-                # If any error occurs, fallback to bounding box
-                print(f"Error getting alpha carbons for {obj.name}: {e}")
-                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                if bbox:
-                    center = sum(bbox, Vector()) / len(bbox)
-                    all_alpha_positions.append(center)
-                    all_masses.append(1.0)
-
-        if all_alpha_positions:
-            # Calculate center of mass
-            total_mass = sum(all_masses)
-            if total_mass > 0:
-                weighted_sum = Vector((0, 0, 0))
-                for pos, mass in zip(all_alpha_positions, all_masses):
-                    weighted_sum += pos * mass
-                return weighted_sum / total_mass
-            else:
-                # Simple average if mass calculation fails
-                return sum(all_alpha_positions, Vector()) / len(all_alpha_positions)
-
-        return None
 
 
 # Global flag to prevent recursive handler calls
