@@ -345,6 +345,14 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.molecule_id = item.item_id
         elif item.item_type == 'MEMBRANE':
+            # Edit pencil — opens the build_membrane dialog pre-populated
+            # for this membrane (same dialog as Create, but in update mode).
+            edit_op = row.operator(
+                "proteinblender.build_membrane",
+                text="", icon='GREASEPENCIL', emboss=False,
+            )
+            if edit_op:
+                edit_op.membrane_root_to_update = item.object_name
             # Delete button — routes through the addon's own membrane
             # deleter (which also tears down lattice + hole children + the
             # per-membrane collection).

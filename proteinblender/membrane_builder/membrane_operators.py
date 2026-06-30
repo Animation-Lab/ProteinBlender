@@ -331,105 +331,419 @@ def _rebuild_hole_assignments(root_obj: bpy.types.Object,
         _refresh_modifier(mod)
 
 
-def _iter_hole_names(root_obj: bpy.types.Object):
-    """Yield the hole object names stored on the root, in order."""
-    raw = root_obj.get("pb_mem_holes", "")
-    if not raw:
+def _iter_holes(root_obj: bpy.types.Object):
+    """Yield the hole Empty objects parented to *root_obj*, ordered.
+
+    Children are filtered by ``pb_is_membrane_hole`` and sorted by their
+    ``pb_hole_order`` integer custom property (assigned at create time).
+    This is the authoritative source — walking children means the list
+    survives hole renames done in the Outliner or by the user editing
+    the name field in the dialog (the cached ``pb_mem_holes`` string
+    would go stale).
+
+    Old membranes built before ``pb_hole_order`` existed have it
+    backfilled from their ``pb_mem_holes`` position on first read.
+    """
+    children = [c for c in root_obj.children
+                if c.get("pb_is_membrane_hole", False)]
+    if not children:
         return
-    for name in raw.split("|"):
-        if name:
-            yield name
+
+    if any(c.get("pb_hole_order") is None for c in children):
+        raw = root_obj.get("pb_mem_holes", "")
+        legacy_order = [n for n in (raw.split("|") if raw else []) if n]
+        legacy_index = {n: i for i, n in enumerate(legacy_order)}
+        max_seen = max((c.get("pb_hole_order") or -1) for c in children) + 1
+        for c in children:
+            if c.get("pb_hole_order") is None:
+                c["pb_hole_order"] = legacy_index.get(c.name, max_seen)
+                max_seen += 1
+
+    children.sort(key=lambda c: int(c.get("pb_hole_order", 0)))
+    for c in children:
+        yield c
 
 
-def _set_hole_names(root_obj: bpy.types.Object, names) -> None:
+def _iter_hole_names(root_obj: bpy.types.Object):
+    """Yield the current hole object names, in order. See _iter_holes."""
+    for h in _iter_holes(root_obj):
+        yield h.name
+
+
+def _resync_hole_cache(root_obj: bpy.types.Object) -> None:
+    """Refresh the ``pb_mem_holes`` pipe-delimited cache from the current
+    child list. ``_iter_holes`` walks children directly, but the GN-tree
+    sizer in ``membrane_geometry._required_slot_counts`` reads the
+    cache — call this after add/remove so the cache stays in sync."""
+    names = [h.name for h in _iter_holes(root_obj)]
     root_obj["pb_mem_holes"] = "|".join(names)
+
+
+def _next_hole_order(root_obj: bpy.types.Object) -> int:
+    """Next free ``pb_hole_order`` integer for a new hole on *root_obj*."""
+    max_order = -1
+    for c in root_obj.children:
+        if c.get("pb_is_membrane_hole", False):
+            order = c.get("pb_hole_order")
+            if order is not None and int(order) > max_order:
+                max_order = int(order)
+    return max_order + 1
 
 
 # ---------------------------------------------------------------------------
 # Build Membrane
 # ---------------------------------------------------------------------------
 
+def _build_new_membrane(context, props):
+    """Create a brand-new membrane root + lattice + GN modifier, push props."""
+    prefix = props.name_prefix or "Membrane"
+    name = _next_membrane_name(prefix)
+
+    shape = str(props.shape)
+
+    mesh = build_membrane_base_mesh(shape, props.width, props.height,
+                                     props.radius)
+    mesh.name = f"{name}_mesh"
+    root = bpy.data.objects.new(name, mesh)
+    root["pb_is_membrane"] = True
+    # Seed the shape custom prop so apply_props_to_membrane below sees
+    # a matching old_shape and doesn't trigger a redundant rebuild.
+    root["pb_mem_shape"] = shape
+
+    coll = _ensure_membrane_collection(context.scene, name)
+    _link_to_coll(coll, root)
+
+    lattice = build_membrane_lattice(
+        shape, props.width, props.height, props.radius,
+        resolution=int(props.lattice_resolution),
+    )
+    lattice.name = f"{name}.lattice"
+    lattice["pb_membrane_owner"] = name
+    _link_to_coll(coll, lattice)
+    lattice.parent = root
+
+    latt_mod = root.modifiers.new(LATTICE_MOD_NAME, "LATTICE")
+    latt_mod.object = lattice
+
+    tree = get_or_build_membrane_gn_tree(context.scene)
+    gn_mod = root.modifiers.new(GN_MOD_NAME, "NODES")
+    gn_mod.node_group = tree
+
+    # Three back-to-back input writes (props, holes, FFs) only trigger
+    # one GN evaluation instead of three.
+    apply_props_to_membrane(root, props, defer_refresh=True)
+    force_fields.apply_force_fields_to_membrane(
+        root, context.scene, defer_refresh=True)
+    _refresh_modifier(gn_mod)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    root.select_set(True)
+    context.view_layer.objects.active = root
+
+    try:
+        from ..utils.scene_manager import build_outliner_hierarchy
+        build_outliner_hierarchy(context)
+    except Exception:
+        pass
+
+    return root
+
+
+def _update_existing_membrane(context, root, props):
+    """Apply scene props to an existing membrane root, rebuilding size if
+    width/height/radius changed. Used by build_membrane's update path."""
+    new_shape = str(props.shape)
+    old_w = float(root.get("pb_mem_width", props.width))
+    old_h = float(root.get("pb_mem_height", props.height))
+    old_r = float(root.get("pb_mem_radius", props.radius))
+    needs_resize = (
+        abs(old_w - float(props.width)) > 1e-6
+        or abs(old_h - float(props.height)) > 1e-6
+        or abs(old_r - float(props.radius)) > 1e-6
+    )
+
+    apply_props_to_membrane(root, props)
+
+    if needs_resize:
+        update_base_mesh(root.data, new_shape,
+                         float(props.width), float(props.height),
+                         float(props.radius))
+        for child in root.children:
+            if child.type == "LATTICE":
+                update_lattice_for_shape(child, new_shape,
+                                         float(props.width),
+                                         float(props.height),
+                                         float(props.radius))
+                break
+        root["pb_mem_width"] = float(props.width)
+        root["pb_mem_height"] = float(props.height)
+        root["pb_mem_radius"] = float(props.radius)
+        mod = _get_gn_modifier(root)
+        if mod is not None:
+            _refresh_modifier(mod)
+
+
 class PROTEINBLENDER_OT_build_membrane(Operator):
-    """Build a new lipid bilayer membrane"""
+    """Open the Membrane Builder dialog.
+
+    Two modes, controlled by ``membrane_root_to_update``:
+
+    * **Create (empty)** — opens the dialog seeded from
+      ``scene.membrane_builder_props``. Clicking OK creates a new
+      membrane and adds it to the PB Outliner.
+    * **Update (set to a membrane root name)** — the PB Outliner's
+      edit pencil invokes us with this set. ``invoke`` syncs the
+      scene props from the target root's ``pb_mem_*`` custom props
+      so the dialog opens pre-populated; ``execute`` pushes the
+      props back, rebuilding mesh + lattice only if size changed.
+
+    The dialog body (see ``_draw_membrane_form``) is identical for
+    create and edit — only the Holes / Deformation sections are
+    hidden in create mode since they don't exist yet.
+    """
 
     bl_idname = "proteinblender.build_membrane"
     bl_label = "Build Membrane"
     bl_options = {"REGISTER", "UNDO"}
 
+    membrane_root_to_update: StringProperty(
+        name="Membrane to update",
+        description=(
+            "If set, edit this membrane's root object name instead of "
+            "creating a new one. Settings are applied in-place; size "
+            "changes rebuild the mesh + lattice"
+        ),
+        default="",
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+
+    def invoke(self, context, event):
+        if self.membrane_root_to_update:
+            from .membrane_props import sync_props_from_object
+            root = bpy.data.objects.get(self.membrane_root_to_update)
+            if root is not None and root.get("pb_is_membrane", False):
+                sync_props_from_object(
+                    context.scene.membrane_builder_props, root,
+                )
+                # Set the membrane as active so in-dialog hole/deform
+                # operators resolve to the right membrane.
+                try:
+                    if context.mode != "OBJECT":
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                    bpy.ops.object.select_all(action="DESELECT")
+                    root.select_set(True)
+                    context.view_layer.objects.active = root
+                except Exception:
+                    pass
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        _draw_membrane_form(
+            self.layout,
+            context.scene.membrane_builder_props,
+            root=self._target_root(),
+        )
+
+    def _target_root(self):
+        if not self.membrane_root_to_update:
+            return None
+        root = bpy.data.objects.get(self.membrane_root_to_update)
+        if root is None or not root.get("pb_is_membrane", False):
+            # The user may have just renamed the membrane in the dialog's
+            # Name field. The stored name is stale — fall back to the
+            # currently active object's membrane root (invoke() made the
+            # target the active obj, and it stays active through rename).
+            root = _get_membrane_root(bpy.context.active_object)
+            if root is not None and root.get("pb_is_membrane", False):
+                # Cache the new name so future lookups hit the fast path.
+                self.membrane_root_to_update = root.name
+            else:
+                return None
+        return root
+
     def execute(self, context):
         props = context.scene.membrane_builder_props
-        prefix = props.name_prefix or "Membrane"
-        name = _next_membrane_name(prefix)
 
+        if self.membrane_root_to_update:
+            root = self._target_root()
+            if root is None:
+                self.report({"ERROR"},
+                            f"Membrane '{self.membrane_root_to_update}' not found.")
+                return {"CANCELLED"}
+            _update_existing_membrane(context, root, props)
+            shape = str(props.shape)
+            if shape == SHAPE_FLAT:
+                msg = f"Updated {root.name}: {props.width:.1f} × {props.height:.1f} nm"
+            else:
+                msg = f"Updated {root.name}: {shape.lower()} r={props.radius:.1f} nm"
+            self.report({"INFO"}, msg)
+            return {"FINISHED"}
+
+        root = _build_new_membrane(context, props)
         shape = str(props.shape)
-
-        # 1. Build the base mesh for the requested shape and the root object.
-        mesh = build_membrane_base_mesh(shape, props.width, props.height,
-                                         props.radius)
-        mesh.name = f"{name}_mesh"
-        root = bpy.data.objects.new(name, mesh)
-        root["pb_is_membrane"] = True
-        # Seed the shape custom prop so apply_props_to_membrane below sees
-        # a matching old_shape and doesn't trigger a redundant rebuild.
-        root["pb_mem_shape"] = shape
-
-        coll = _ensure_membrane_collection(context.scene, name)
-        _link_to_coll(coll, root)
-
-        # 2. Build the Lattice deformer (sized for the shape) and parent
-        # it to the root.
-        lattice = build_membrane_lattice(
-            shape, props.width, props.height, props.radius,
-            resolution=int(props.lattice_resolution),
-        )
-        lattice.name = f"{name}.lattice"
-        lattice["pb_membrane_owner"] = name
-        _link_to_coll(coll, lattice)
-        # Parent (keep transform false — the lattice should sit at root's origin).
-        lattice.parent = root
-
-        # Add Lattice modifier to root (before GN).
-        latt_mod = root.modifiers.new(LATTICE_MOD_NAME, "LATTICE")
-        latt_mod.object = lattice
-
-        # 3. Add the GN modifier and assign the shared tree, sized to the
-        # scene's current FF demand (a brand-new membrane has no holes).
-        tree = get_or_build_membrane_gn_tree(context.scene)
-        gn_mod = root.modifiers.new(GN_MOD_NAME, "NODES")
-        gn_mod.node_group = tree
-
-        # 4. Push props + FF assignments to the modifier. The intermediate
-        # writes defer their refresh — Blender would otherwise re-evaluate
-        # the full GN tree three times (props, holes, FFs) on a single
-        # Build. A fresh membrane has no holes, so we skip the hole-
-        # assignment pass entirely (interface defaults already give every
-        # slot None / Enabled=False). One refresh at the end commits the
-        # final state to the viewport.
-        apply_props_to_membrane(root, props, defer_refresh=True)
-        # New membrane inherits the scene's current FF-enabled proteins.
-        force_fields.apply_force_fields_to_membrane(
-            root, context.scene, defer_refresh=True)
-        _refresh_modifier(gn_mod)
-
-        # 5. Make root the active object so the panel switches to edit mode.
-        bpy.ops.object.select_all(action="DESELECT")
-        root.select_set(True)
-        context.view_layer.objects.active = root
-
         if shape == SHAPE_FLAT:
-            msg = f"Created {name}: {props.width:.1f} × {props.height:.1f} nm"
+            msg = f"Created {root.name}: {props.width:.1f} × {props.height:.1f} nm"
         else:
-            msg = f"Created {name}: {shape.lower()} r={props.radius:.1f} nm"
+            msg = f"Created {root.name}: {shape.lower()} r={props.radius:.1f} nm"
         self.report({"INFO"}, msg)
-
-        # Surface the new membrane in the PB Outliner.
-        try:
-            from ..utils.scene_manager import build_outliner_hierarchy
-            build_outliner_hierarchy(context)
-        except Exception:
-            pass
-
         return {"FINISHED"}
+
+
+def _draw_membrane_form(layout, props, *, root=None):
+    """Shared dialog body for Create-Membrane / Edit-Membrane.
+
+    The Deformation and Holes sections only appear when ``root`` is
+    set (edit mode) — they don't exist on a not-yet-built membrane.
+    """
+    from . import lipid_assets as _la
+
+    # ---- Shape + size -------------------------------------------------
+    layout.prop(props, "shape", text="Shape")
+    if props.shape == "FLAT":
+        size_row = layout.row(align=True)
+        size_row.prop(props, "width", text="Width (nm)")
+        size_row.prop(props, "height", text="Height (nm)")
+    else:
+        layout.prop(props, "radius", text="Radius (nm)")
+
+    # ---- Name ---------------------------------------------------------
+    # Edit mode: bind the name field to the root object's name so the
+    # user can rename the membrane in-place. Create mode: bind to the
+    # scene's name_prefix.
+    if root is not None:
+        layout.prop(root, "name", text="Name")
+    else:
+        layout.prop(props, "name_prefix", text="Name")
+        layout.prop(props, "lattice_resolution", text="Deform Res")
+
+    # ---- Lipids -------------------------------------------------------
+    lip_box = layout.box()
+    lip_header = lip_box.row()
+    lip_header.prop(
+        props, "show_lipid_section",
+        text="Lipids",
+        icon="TRIA_DOWN" if props.show_lipid_section else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if props.show_lipid_section:
+        lip_box.prop(props, "render_style", text="Style")
+        col = lip_box.column(align=True)
+        col.prop(props, "density")
+        col.prop(props, "bilayer_thickness")
+        lip_box.prop(props, "random_rotation")
+
+    # ---- Animation ----------------------------------------------------
+    anim_box = layout.box()
+    anim_header = anim_box.row()
+    anim_header.prop(
+        props, "show_animation_section",
+        text="Bobbing Animation",
+        icon="TRIA_DOWN" if props.show_animation_section else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if props.show_animation_section:
+        anim_box.prop(props, "animate_bob")
+        col = anim_box.column(align=True)
+        col.enabled = props.animate_bob
+        col.prop(props, "bob_amplitude")
+        col.prop(props, "bob_speed")
+
+    # ---- Colors -------------------------------------------------------
+    col_box = layout.box()
+    col_header = col_box.row()
+    col_header.prop(
+        props, "show_colors_section",
+        text="Colors",
+        icon="TRIA_DOWN" if props.show_colors_section else "TRIA_RIGHT",
+        emboss=False,
+    )
+    if props.show_colors_section:
+        c = col_box.column(align=True)
+        if props.render_style == _la.STYLE_SURFACE:
+            c.prop(props, "color_surface")
+        else:
+            c.prop(props, "color_head")
+            c.prop(props, "color_tail")
+        col_box.label(
+            text="Colors are shared across all membranes.",
+            icon="INFO",
+        )
+
+    # ---- Deformation (edit mode only) ---------------------------------
+    if root is not None:
+        deform_box = layout.box()
+        deform_header = deform_box.row()
+        deform_header.prop(
+            props, "show_deform_section",
+            text="Deformation",
+            icon="TRIA_DOWN" if props.show_deform_section else "TRIA_RIGHT",
+            emboss=False,
+        )
+        if props.show_deform_section:
+            row = deform_box.row(align=True)
+            row.scale_y = 1.2
+            row.operator(
+                "proteinblender.membrane_edit_deform",
+                text="Edit Deformation",
+                icon="MOD_LATTICE",
+            )
+            row.operator(
+                "proteinblender.membrane_reset_deform",
+                text="",
+                icon="LOOP_BACK",
+            )
+            deform_box.label(
+                text="Close dialog to grab lattice points; right-click → Insert Keyframe.",
+                icon="INFO",
+            )
+
+    # ---- Holes (edit mode only) ---------------------------------------
+    if root is not None:
+        hole_box = layout.box()
+        hole_header = hole_box.row()
+        hole_header.prop(
+            props, "show_holes_section",
+            text="Holes",
+            icon="TRIA_DOWN" if props.show_holes_section else "TRIA_RIGHT",
+            emboss=False,
+        )
+        if props.show_holes_section:
+            holes = list(_iter_holes(root))
+            count_row = hole_box.row()
+            count_row.label(text=f"Holes: {len(holes)} / {MAX_HOLES}")
+            add_row = hole_box.row()
+            add_row.scale_y = 1.2
+            add_row.enabled = len(holes) < MAX_HOLES
+            add_row.operator(
+                "proteinblender.membrane_add_hole",
+                text="➕ Add Hole",
+                icon="MESH_TORUS",
+            )
+
+            if holes:
+                hole_box.separator(factor=0.3)
+                # One row per hole: editable name field + radius slider + delete.
+                # The name field binds directly to the Empty's own name —
+                # renaming here renames the object, which is exactly what
+                # makes keyframes legible in the F-curve editor.
+                for hole in holes:
+                    row = hole_box.row(align=True)
+                    row.prop(hole, "name", text="")
+                    row.prop(hole, "scale", index=0, text="r")
+                    rem = row.operator(
+                        "proteinblender.membrane_remove_hole",
+                        text="", icon="X",
+                    )
+                    rem.hole_name = hole.name
+                hole_box.separator(factor=0.3)
+                hole_box.label(
+                    text="Rename to taste — keyframes follow the new name.",
+                    icon="INFO",
+                )
+                hole_box.label(
+                    text="Close dialog to grab a hole in the viewport, then keyframe r or location.",
+                    icon="BLANK1",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +845,7 @@ class PROTEINBLENDER_OT_add_hole(Operator):
         hole.location = (offset, offset, 0.0)
         hole["pb_membrane_owner"] = root.name
         hole["pb_is_membrane_hole"] = True
+        hole["pb_hole_order"] = _next_hole_order(root)
 
         coll_name = f"{root.name}_Group"
         coll = bpy.data.collections.get(coll_name)
@@ -539,8 +854,7 @@ class PROTEINBLENDER_OT_add_hole(Operator):
         _link_to_coll(coll, hole)
         hole.parent = root
 
-        existing.append(hole_name)
-        _set_hole_names(root, existing)
+        _resync_hole_cache(root)
         _rebuild_hole_assignments(root)
 
         # Select the new hole so the user can immediately position it
@@ -587,9 +901,8 @@ class PROTEINBLENDER_OT_remove_hole(Operator):
             except Exception:
                 pass
 
-        # Update the tracked list.
-        names = [n for n in _iter_hole_names(root) if n != target]
-        _set_hole_names(root, names)
+        # Refresh the cache from current children (target is gone).
+        _resync_hole_cache(root)
         _rebuild_hole_assignments(root)
 
         # Re-select the membrane root.

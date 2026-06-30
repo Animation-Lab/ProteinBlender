@@ -1,13 +1,14 @@
-"""Builder panel for DNA/RNA creation.
+"""Builders panel — entry points for the DNA/RNA and Membrane build dialogs.
 
-The panel is intentionally minimal: just a "Create New DNA / RNA" button
-that opens the build dialog (``proteinblender.build_dna``). Editing an
-existing strand is driven from the PB Outliner's edit pencil, which
-fires the same operator with ``molecule_id_to_update`` set — so the
-create and edit flows are pixel-identical.
+Both builders share this one panel. Each is a single button that opens
+its build dialog; editing an existing item is driven from the PB
+Outliner's edit pencil, which fires the same operator with the
+appropriate ``*_to_update`` argument (so create and edit show pixel-
+identical dialogs).
 
-The Shape / bend-rig controls live inside that dialog too (edit mode
-only). Nothing about DNA editing lives in this panel anymore.
+The bend-rig controls for DNA live inside the DNA dialog (edit mode);
+the hole / deformation controls for membranes live inside the membrane
+dialog (edit mode). Nothing about a selected item shows in this panel.
 """
 
 import bpy
@@ -15,7 +16,7 @@ from bpy.types import Panel
 
 
 class PROTEINBLENDER_PT_builders(Panel):
-    """Builders panel — entry point for the DNA / RNA build dialog."""
+    """Builders panel — entry point for the DNA/RNA and Membrane dialogs."""
 
     bl_label = "Builders"
     bl_idname = "PROTEINBLENDER_PT_builders"
@@ -32,12 +33,20 @@ class PROTEINBLENDER_PT_builders(Panel):
         main_box.label(text="Builders", icon="CURVE_DATA")
         main_box.separator()
 
-        create_row = main_box.row()
-        create_row.scale_y = 1.4
-        create_row.operator(
+        dna_row = main_box.row()
+        dna_row.scale_y = 1.4
+        dna_row.operator(
             "proteinblender.build_dna",
             text="Create New DNA / RNA",
             icon="ADD",
+        )
+
+        mem_row = main_box.row()
+        mem_row.scale_y = 1.4
+        mem_row.operator(
+            "proteinblender.build_membrane",
+            text="Create New Membrane",
+            icon="MOD_FLUIDSIM",
         )
 
 
