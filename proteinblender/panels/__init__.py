@@ -38,11 +38,15 @@ from .pose_library_panel import (
     PROTEINBLENDER_OT_placeholder
 )
 from .animation_panel import (
+    PROTEINBLENDER_KeyframeListItem,
+    PROTEINBLENDER_UL_keyframes,
     PROTEINBLENDER_PT_animation,
     PROTEINBLENDER_OT_delete_keyframe as PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
     PROTEINBLENDER_OT_edit_keyframe,
     PROTEINBLENDER_OT_dismiss_dialogs,
+    register_props as animation_register_props,
+    unregister_props as animation_unregister_props,
 )
 # Direct panels - no container needed
 
@@ -104,6 +108,11 @@ CLASSES = [
     PROTEINBLENDER_OT_edit_keyframe,
     PROTEINBLENDER_OT_dismiss_dialogs,
 
+    # Data types used by the animation panel's template_list. Both must
+    # be registered before PROTEINBLENDER_PT_animation references them.
+    PROTEINBLENDER_KeyframeListItem,
+    PROTEINBLENDER_UL_keyframes,
+
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
@@ -118,8 +127,10 @@ def register():
     """Register all panel properties"""
     visual_setup_register_props()
     domain_maker_register_props()
+    animation_register_props()
 
 def unregister():
     """Unregister all panel properties"""
+    animation_unregister_props()
     visual_setup_unregister_props()
     domain_maker_unregister_props()

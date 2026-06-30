@@ -8,8 +8,8 @@ native timeline to manage ProteinBlender keyframes.
 """
 
 import bpy
-from bpy.types import Panel
-from bpy.props import IntProperty, BoolProperty
+from bpy.types import Panel, PropertyGroup, UIList
+from bpy.props import IntProperty, BoolProperty, CollectionProperty
 from ..utils.animation import (
     delete_transform_keyframes,
     remove_color_keyframes,
@@ -23,6 +23,69 @@ from ..operators.keyframe_operators import (
     delete_keyframe_metadata,
     delete_lattice_deformation_keyframes,
 )
+
+
+# ---------------------------------------------------------------------------
+# Scrolling keyframe list — backed by a CollectionProperty so we can use
+# template_list (the only native widget that gives us a fixed-row scroll
+# region; a plain column() of boxes just expands as long as there are
+# items, which gets ugly past ~10 keyframes).
+# ---------------------------------------------------------------------------
+
+class PROTEINBLENDER_KeyframeListItem(PropertyGroup):
+    """One row in the keyframe scroll list. We mirror the computed frames
+    list into this collection on each draw — the source of truth is still
+    the F-Curves; this is a UI cache."""
+    frame: IntProperty(default=-1)
+
+
+class PROTEINBLENDER_UL_keyframes(UIList):
+    """Scrolling list of ProteinBlender keyframes.
+
+    template_list (which renders this UIList) caps the visible area at
+    ``rows=N`` and scrolls beyond that. Each row shows the frame
+    number + jump / edit / delete buttons — identical to the old
+    per-frame ``row()`` layout, just inside a scrolling container.
+    """
+
+    def draw_item(self, context, layout, data, item, icon,
+                  active_data, active_propname):
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            current = context.scene.frame_current
+            is_cur = (item.frame == current)
+            row = layout.row(align=True)
+            jump_op = row.operator(
+                "proteinblender.jump_to_keyframe",
+                text=f"Frame {item.frame}",
+                icon='KEYFRAME_HLT' if is_cur else 'KEYFRAME',
+                depress=is_cur,
+            )
+            jump_op.frame = item.frame
+            row.operator(
+                "proteinblender.edit_keyframe", text="",
+                icon='GREASEPENCIL',
+            ).frame = item.frame
+            row.operator(
+                "proteinblender.delete_keyframe", text="",
+                icon='X',
+            ).frame = item.frame
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text=f"Frame {item.frame}")
+
+
+def _sync_keyframe_collection(scene, frames):
+    """Mirror *frames* into ``scene.pb_keyframe_list`` only if the contents
+    differ. Re-running this every draw is fine because the no-change
+    fast-path avoids the touch that would otherwise schedule another
+    redraw and risk an oscillation."""
+    kf_list = scene.pb_keyframe_list
+    current = [it.frame for it in kf_list]
+    if current == frames:
+        return
+    kf_list.clear()
+    for f in frames:
+        kf_list.add().frame = f
 
 
 class PROTEINBLENDER_PT_animation(Panel):
@@ -39,11 +102,17 @@ class PROTEINBLENDER_PT_animation(Panel):
         layout = self.layout
         scene = context.scene
         current = scene.frame_current
-        # Selection scoping: if any selected object belongs to a keyframe
-        # target, restrict the list (and prev/next nav) to those targets.
-        # Otherwise show every keyframe in the scene.
-        filtered_targets, n_selected = get_filtered_keyframe_targets(context)
-        frames = get_keyframe_frames(context, targets=filtered_targets)
+
+        # Selection scoping is now opt-in via a toggle on the keyframe
+        # list header. Default ON — same behaviour as before. When OFF,
+        # the panel always shows every keyframe in the scene.
+        filter_on = scene.pb_keyframe_filter_by_selection
+        if filter_on:
+            targets, n_selected = get_filtered_keyframe_targets(context)
+        else:
+            targets = get_keyframe_targets(context)
+            n_selected = 0
+        frames = get_keyframe_frames(context, targets=targets)
 
         main_box = layout.box()
         main_box.label(text="Animate Scene", icon='PLAY')
@@ -79,30 +148,40 @@ class PROTEINBLENDER_PT_animation(Panel):
         tools.separator()
         tools.label(text=f"Current Frame: {current}", icon='TIME')
 
-        # --- Keyframe list: one row per frame, with jump + delete ---
+        # --- Keyframe list: scrolling once past 10 entries ---
         list_box = col.box()
-        if n_selected > 0:
+
+        # Header: title on the left, "filter by selection" toggle on the
+        # right. The toggle pinches to icon-only (FILTER) and depresses
+        # when active so it reads as a stateful button.
+        header_row = list_box.row(align=True)
+        header_row.label(text=f"Keyframes ({len(frames)})", icon='KEYFRAME')
+        header_row.prop(
+            scene, "pb_keyframe_filter_by_selection",
+            text="", icon='FILTER', toggle=True,
+        )
+
+        if filter_on and n_selected > 0:
             obj_word = "object" if n_selected == 1 else "objects"
             list_box.label(
                 text=f"Filtered to {n_selected} selected {obj_word}",
                 icon='RESTRICT_SELECT_OFF',
             )
-        list_box.label(text=f"Keyframes ({len(frames)})", icon='KEYFRAME')
+
         if frames:
-            for f in frames:
-                r = list_box.row(align=True)
-                is_cur = (f == current)
-                op = r.operator("proteinblender.jump_to_keyframe",
-                                text=f"Frame {f}",
-                                icon='KEYFRAME_HLT' if is_cur else 'KEYFRAME',
-                                depress=is_cur)
-                op.frame = f
-                r.operator("proteinblender.edit_keyframe", text="",
-                           icon='GREASEPENCIL').frame = f
-                r.operator("proteinblender.delete_keyframe", text="", icon='X').frame = f
+            _sync_keyframe_collection(scene, frames)
+            list_box.template_list(
+                "PROTEINBLENDER_UL_keyframes", "pb_keyframes",
+                scene, "pb_keyframe_list",
+                scene, "pb_keyframe_list_index",
+                rows=min(10, len(frames)),
+                maxrows=10,
+            )
         else:
-            empty_msg = ("No keyframes for the selected object"
-                         if n_selected > 0 else "No keyframes yet")
+            empty_msg = (
+                "No keyframes for the selected object"
+                if filter_on and n_selected > 0 else "No keyframes yet"
+            )
             list_box.label(text=empty_msg, icon='INFO')
 
         layout.separator()
@@ -238,21 +317,33 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# Classes to register
-CLASSES = [
-    PROTEINBLENDER_PT_animation,
-    PROTEINBLENDER_OT_delete_keyframe,
-    PROTEINBLENDER_OT_jump_to_keyframe,
-    PROTEINBLENDER_OT_edit_keyframe,
-    PROTEINBLENDER_OT_dismiss_dialogs,
-]
+# Class registration is owned by ``proteinblender.panels.__init__``'s
+# central CLASSES list. This module only exposes a ``register_props`` /
+# ``unregister_props`` pair (called from the same central place) for the
+# scene-level keyframe-list state.
+
+def register_props():
+    bpy.types.Scene.pb_keyframe_list = CollectionProperty(
+        type=PROTEINBLENDER_KeyframeListItem,
+    )
+    bpy.types.Scene.pb_keyframe_list_index = IntProperty(default=0)
+    bpy.types.Scene.pb_keyframe_filter_by_selection = BoolProperty(
+        name="Filter Keyframes by Selection",
+        description=(
+            "When on, the keyframe list only shows frames belonging to the "
+            "currently selected object(s) — clicking a chain, hole, or "
+            "bend node scopes the list to that target. When off, every "
+            "scene keyframe is shown regardless of selection."
+        ),
+        default=True,
+    )
 
 
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)
+def unregister_props():
+    for attr in ("pb_keyframe_list", "pb_keyframe_list_index",
+                 "pb_keyframe_filter_by_selection"):
+        if hasattr(bpy.types.Scene, attr):
+            try:
+                delattr(bpy.types.Scene, attr)
+            except Exception:
+                pass
