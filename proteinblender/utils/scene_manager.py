@@ -1363,7 +1363,7 @@ def build_outliner_hierarchy(context=None):
             protein_item.object_name = ""
 
         protein_item.indent_level = 0
-        protein_item.icon = 'OUTLINER_OB_CURVE' if is_nucleic else 'MESH_DATA'
+        protein_item.icon = 'RNA' if is_nucleic else 'MESH_DATA'
 
         try:
             protein_item.is_visible = not mol_object.hide_get(view_layer=context.view_layer) if mol_object else True

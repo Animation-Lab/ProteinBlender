@@ -20,11 +20,24 @@ def _on_nucleic_type_changed(self, context):
     Flip ``double_stranded`` accordingly, and rename ``name_prefix`` to
     match the type — but only when it still looks like a default
     ("DNA"/"RNA"), so a user's custom name isn't clobbered.
+
+    Also swap the base letter that differs between the two alphabets: T in
+    DNA, U in RNA. Case is preserved so a lowercased sequence stays
+    lowercased.
     """
     is_dna = self.nucleic_type == "DNA"
     self.double_stranded = is_dna
     if self.name_prefix in ("DNA", "RNA", ""):
         self.name_prefix = "DNA" if is_dna else "RNA"
+
+    if is_dna:
+        # RNA -> DNA: U -> T
+        new_seq = self.sequence.replace("U", "T").replace("u", "t")
+    else:
+        # DNA -> RNA: T -> U
+        new_seq = self.sequence.replace("T", "U").replace("t", "u")
+    if new_seq != self.sequence:
+        self.sequence = new_seq
 
 
 class DNABuilderProperties(PropertyGroup):
