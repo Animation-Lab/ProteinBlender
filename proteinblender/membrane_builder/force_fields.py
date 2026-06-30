@@ -133,57 +133,74 @@ def iter_ff_emitter_objects() -> Iterable[bpy.types.Object]:
             yield obj
 
 
-def _local_centroid(obj: bpy.types.Object) -> Optional[Vector]:
-    """Mean vertex position in the object's *local* mesh space.
+def _evaluated_coords_local(obj: bpy.types.Object):
+    """Return an Nx3 numpy array of the evaluated mesh's vertex coordinates
+    in obj's local space, or None if no usable vertices.
 
-    The anchor is parented to obj, so its ``.location`` is interpreted
-    in obj's local frame. Storing the local centroid there means the
-    anchor's world position is ``obj.matrix_world @ centroid_local`` —
-    which Blender computes live as the parent's transform changes.
+    Reading the *evaluated* mesh is critical: a per-chain object inherits
+    the parent protein's full 5k-vert atom cloud as its raw mesh data,
+    and a ``DomainNodes`` Geometry-Nodes modifier filters it down to
+    only that chain's atoms at evaluation time. Reading
+    ``obj.data.vertices`` would give us the whole protein's centroid /
+    bbox, not the chain's. The same logic applies to domain children.
+
+    Coords are returned in obj's local space (no matrix_world applied)
+    because anchor.location is interpreted in obj's local frame.
     """
+    import numpy as np
     if obj is None or obj.type != "MESH":
         return None
-    data = getattr(obj, "data", None)
-    verts = getattr(data, "vertices", None) if data is not None else None
-    if not verts or len(verts) == 0:
+    deps = bpy.context.evaluated_depsgraph_get() if bpy.context else None
+    if deps is None:
         return None
-    cx = cy = cz = 0.0
-    n = 0
-    for v in verts:
-        cx += v.co.x
-        cy += v.co.y
-        cz += v.co.z
-        n += 1
-    return Vector((cx / n, cy / n, cz / n))
+    eo = obj.evaluated_get(deps)
+    mesh = getattr(eo, "data", None)
+    if mesh is None:
+        return None
+    n = len(mesh.vertices)
+    if n == 0:
+        return None
+    coords = np.empty(n * 3, dtype=np.float32)
+    mesh.vertices.foreach_get("co", coords)
+    return coords.reshape(n, 3)
+
+
+def _local_centroid(obj: bpy.types.Object) -> Optional[Vector]:
+    """Mean vertex position in obj's local space, from the *evaluated* mesh.
+
+    Parented to obj, anchor.location is interpreted in obj's local frame,
+    so storing the local centroid there means anchor.matrix_world ends
+    up at obj.matrix_world @ centroid_local — exactly the chain's visual
+    centre, tracked live through any puppet transform.
+    """
+    coords = _evaluated_coords_local(obj)
+    if coords is None:
+        return None
+    mean = coords.mean(axis=0)
+    return Vector((float(mean[0]), float(mean[1]), float(mean[2])))
 
 
 def _local_bbox_extent(obj: bpy.types.Object) -> float:
-    """Longest axis of the object's local-space mesh AABB, scaled by
-    the world-scale magnitude. Falls back to ``obj.dimensions`` only if
-    the mesh has no vertices.
+    """Longest axis of the object's local-space *evaluated* mesh AABB,
+    scaled by the world-scale magnitude.
 
-    Local space (not world) so the radius reflects the chain / domain's
-    own extent rather than the union of every neighbour's bbox. The
-    scale fold-in matters for puppeteered objects: Blender preserves
-    world-scale across reparenting via the basis matrix, but our radius
-    is fed straight into a world-space GN comparison.
+    Falls back to ``obj.dimensions`` only if no evaluated geometry is
+    available (e.g. a split-protein parent whose own MN modifier emits
+    nothing — the chain children would be the things to FF in that case
+    anyway, so this fallback is for safety, not the common path).
     """
-    if obj is None or obj.type != "MESH":
-        return 0.0
-    data = getattr(obj, "data", None)
-    verts = getattr(data, "vertices", None) if data is not None else None
-    if not verts or len(verts) == 0:
+    coords = _evaluated_coords_local(obj)
+    if coords is None:
         dim = obj.dimensions
         return float(max(dim.x, dim.y, dim.z))
-    xs = [v.co.x for v in verts]
-    ys = [v.co.y for v in verts]
-    zs = [v.co.z for v in verts]
-    span = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0)
+    span = float((maxs - mins).max())
     try:
         span *= max(abs(s) for s in obj.matrix_world.to_scale())
     except Exception:
         pass
-    return float(span)
+    return span
 
 
 def compute_force_field_radius_bu(obj: bpy.types.Object,
