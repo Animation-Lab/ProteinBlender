@@ -49,9 +49,15 @@ def _sync_to_active_membrane(self, context):
         return
     from .membrane_operators import _get_membrane_root, apply_props_to_membrane
 
-    target = _get_membrane_root(context.active_object)
-    if target is None:
-        candidates = [o for o in context.scene.objects
+    # During file load / early-init the Context may not yet expose
+    # active_object or scene — fall back to None / no sync rather than
+    # raising AttributeError to stderr.
+    active_obj = getattr(context, "active_object", None)
+    scene = getattr(context, "scene", None)
+
+    target = _get_membrane_root(active_obj) if active_obj is not None else None
+    if target is None and scene is not None:
+        candidates = [o for o in scene.objects
                       if o.get("pb_is_membrane", False)]
         if len(candidates) == 1:
             target = candidates[0]
