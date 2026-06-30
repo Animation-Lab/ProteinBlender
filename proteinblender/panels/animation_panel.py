@@ -379,7 +379,7 @@ def register_props():
             "bend node scopes the list to that target. When off, every "
             "scene keyframe is shown regardless of selection."
         ),
-        default=True,
+        default=False,
     )
 
 
