@@ -74,18 +74,62 @@ class PROTEINBLENDER_UL_keyframes(UIList):
             layout.label(text=f"Frame {item.frame}")
 
 
+# --- Deferred sync of the keyframe list collection ---
+#
+# Blender forbids mutating ID datablocks (including Scene CollectionProperty
+# rows) during ``draw()`` — calling ``kf_list.clear()`` directly from the
+# panel raises:
+#     AttributeError: Writing to ID classes in this context is not allowed
+# So when draw sees a mismatch between the live frames list and the
+# collection, it stages the desired state in this module-level slot and
+# registers a one-shot timer. The timer runs *outside* the draw context,
+# applies the change safely, and tags the property areas for redraw so
+# the user sees the new list within one tick.
+#
+# Idempotent: multiple draws with the same target frames just rewrite the
+# pending state to the same value; ``is_registered`` keeps the timer
+# single-fire.
+
+_pending_kf_sync = {"frames": None, "scene_name": None}
+
+
+def _apply_pending_kf_sync():
+    name = _pending_kf_sync.get("scene_name")
+    target = _pending_kf_sync.get("frames")
+    _pending_kf_sync["scene_name"] = None
+    _pending_kf_sync["frames"] = None
+    if not name or target is None:
+        return None
+    scene = bpy.data.scenes.get(name)
+    if scene is None:
+        return None
+    current = [it.frame for it in scene.pb_keyframe_list]
+    if current == target:
+        return None
+    scene.pb_keyframe_list.clear()
+    for f in target:
+        scene.pb_keyframe_list.add().frame = f
+    # Force the panel to redraw with the freshly populated list.
+    if bpy.context and bpy.context.screen:
+        for area in bpy.context.screen.areas:
+            if area.type == 'PROPERTIES':
+                area.tag_redraw()
+    return None  # one-shot timer
+
+
 def _sync_keyframe_collection(scene, frames):
-    """Mirror *frames* into ``scene.pb_keyframe_list`` only if the contents
-    differ. Re-running this every draw is fine because the no-change
-    fast-path avoids the touch that would otherwise schedule another
-    redraw and risk an oscillation."""
-    kf_list = scene.pb_keyframe_list
-    current = [it.frame for it in kf_list]
+    """If the collection diverges from *frames*, stage the new value and
+    register a deferred apply. Safe to call from draw — no ID mutation
+    happens here."""
+    current = [it.frame for it in scene.pb_keyframe_list]
     if current == frames:
         return
-    kf_list.clear()
-    for f in frames:
-        kf_list.add().frame = f
+    _pending_kf_sync["frames"] = list(frames)
+    _pending_kf_sync["scene_name"] = scene.name
+    if not bpy.app.timers.is_registered(_apply_pending_kf_sync):
+        bpy.app.timers.register(
+            _apply_pending_kf_sync, first_interval=0.0,
+        )
 
 
 class PROTEINBLENDER_PT_animation(Panel):
