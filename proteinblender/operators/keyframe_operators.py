@@ -751,23 +751,29 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 color_row.enabled = item.use_puppet and is_puppet
                 color_row.prop(item, "keyframe_color", text="")
 
-                # Brownian motion checkbox
-                brownian_row = row.row()
-                brownian_row.enabled = item.use_puppet and is_puppet
-                brownian_row.prop(item, "brownian_enabled", text="")
+                # Brownian motion is a puppet-only feature (per-domain noise
+                # bake). For DNA/RNA and membranes the checkbox + settings
+                # gear are hidden entirely — replaced by blank placeholders
+                # so the row's column alignment with the header stays intact.
+                if is_puppet:
+                    brownian_row = row.row()
+                    brownian_row.enabled = item.use_puppet
+                    brownian_row.prop(item, "brownian_enabled", text="")
 
-                # Settings button (gear icon)
-                settings_row = row.row()
-                settings_row.enabled = item.use_puppet and is_puppet
-                settings_op = settings_row.operator(
-                    "proteinblender.brownian_settings",
-                    text="",
-                    icon='PREFERENCES'
-                )
-                settings_op.puppet_id = item.puppet_id
-                settings_op.puppet_name = item.puppet_name
-                settings_op.controller_object_name = item.controller_object_name
-                settings_op.frame_number = self.frame_number
+                    settings_row = row.row()
+                    settings_row.enabled = item.use_puppet
+                    settings_op = settings_row.operator(
+                        "proteinblender.brownian_settings",
+                        text="",
+                        icon='PREFERENCES'
+                    )
+                    settings_op.puppet_id = item.puppet_id
+                    settings_op.puppet_name = item.puppet_name
+                    settings_op.controller_object_name = item.controller_object_name
+                    settings_op.frame_number = self.frame_number
+                else:
+                    row.label(text="", icon='BLANK1')  # brownian column placeholder
+                    row.label(text="", icon='BLANK1')  # settings column placeholder
 
         layout.separator()
 
