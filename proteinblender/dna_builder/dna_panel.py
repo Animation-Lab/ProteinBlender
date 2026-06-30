@@ -41,7 +41,7 @@ class PROTEINBLENDER_PT_builders(Panel):
         dna_row.operator(
             "proteinblender.build_dna",
             text="Create New DNA / RNA",
-            icon="ADD",
+            icon="RNA",
         )
 
         mem_row = main_box.row()
