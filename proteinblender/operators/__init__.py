@@ -64,7 +64,6 @@ from .keyframe_operators import (
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
     PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
     PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
-    PROTEINBLENDER_OT_sync_keyframe_metadata,
     register as register_keyframe_operators,
     unregister as unregister_keyframe_operators,
 )
@@ -136,7 +135,6 @@ CLASSES = (
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
     PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
     PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
-    PROTEINBLENDER_OT_sync_keyframe_metadata,
     # Pivot operators
     PROTEINBLENDER_OT_set_pivot_first,
     PROTEINBLENDER_OT_set_pivot_last,

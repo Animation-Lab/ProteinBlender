@@ -529,20 +529,28 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
     bl_idname = "proteinblender.create_keyframe"
     bl_label = "Create Keyframe"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
+    # Live handle to the currently-open dialog instance. Modal operators
+    # invoked via invoke_props_dialog don't appear in wm.operators until
+    # they finish, so the Select All / Select None buttons inside the
+    # dialog can't find this instance through the usual operator history.
+    # invoke() stashes self here; execute()/cancel() clear it. The Select
+    # helpers read it directly to mutate puppet_items on the live form.
+    _active_instance = None
+
     frame_number: IntProperty(
         name="Frame",
         description="Frame number for keyframe",
         default=1,
         min=1
     )
-    
+
     puppet_items: CollectionProperty(
         type=PuppetKeyframeSettings,
         name="Puppet Items",
         description="Collection of puppets to keyframe"
     )
-    
+
 
 
     def get_puppet_objects(self, context, puppet_id):
@@ -660,9 +668,13 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mem_item.keyframe_color = False
             mem_item.brownian_enabled = False
 
+        # Publish self so the in-dialog Select All / Select None buttons
+        # can mutate puppet_items on this live instance.
+        type(self)._active_instance = self
+
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
-    
+
     def draw(self, context):
         layout = self.layout
         
@@ -782,15 +794,20 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         row.operator("proteinblender.keyframe_select_all_puppets", text="Select All")
         row.operator("proteinblender.keyframe_select_none_puppets", text="Select None")
 
-        # Add sync button for rebuilding metadata from timeline
-        layout.separator()
-        row = layout.row()
-        row.operator("proteinblender.sync_keyframe_metadata", text="Sync from Timeline", icon='FILE_REFRESH')
-    
+    def cancel(self, context):
+        """Esc-dismiss path: drop the live-instance handle so the next
+        invoke gets a clean slot."""
+        if type(self)._active_instance is self:
+            type(self)._active_instance = None
+
     def execute(self, context):
+        # Dialog is closing — drop the live-instance handle.
+        if type(self)._active_instance is self:
+            type(self)._active_instance = None
+
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
-        
+
         # Get selected items (puppets and/or DNA/RNA molecules)
         selected_puppets = [item for item in self.puppet_items if item.use_puppet]
 
@@ -1029,44 +1046,45 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         return {'FINISHED'}
 
 
+def _set_create_keyframe_selection(context, target_value: bool) -> bool:
+    """Toggle use_puppet on every row of the active Create Keyframe dialog.
+
+    Modal invoke_props_dialog operators are absent from wm.operators until
+    they finish, so we read the live instance from the class-level slot
+    set by PROTEINBLENDER_OT_create_keyframe.invoke. Returns True if a
+    dialog was found and mutated.
+    """
+    op = PROTEINBLENDER_OT_create_keyframe._active_instance
+    if op is None:
+        return False
+    for item in op.puppet_items:
+        item.use_puppet = target_value
+    if context.area:
+        context.area.tag_redraw()
+    return True
+
+
 class PROTEINBLENDER_OT_keyframe_select_all_puppets(Operator):
-    """Select all puppets for keyframing"""
+    """Tick the leftmost checkbox on every row in the Create Keyframe dialog"""
     bl_idname = "proteinblender.keyframe_select_all_puppets"
     bl_label = "Select All"
-    
+
     def execute(self, context):
-        # Get the active operator
-        wm = context.window_manager
-        if hasattr(wm, 'operators') and len(wm.operators) > 0:
-            for op in reversed(wm.operators):
-                if hasattr(op, 'bl_idname') and op.bl_idname == 'proteinblender.create_keyframe':
-                    if hasattr(op, 'puppet_items'):
-                        for item in op.puppet_items:
-                            item.use_puppet = True
-                            # Keep default transform settings
-                        # Force a redraw
-                        context.area.tag_redraw()
-                    break
+        if not _set_create_keyframe_selection(context, True):
+            self.report({'WARNING'}, "No active Create Keyframe dialog.")
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
 class PROTEINBLENDER_OT_keyframe_select_none_puppets(Operator):
-    """Deselect all puppets"""
+    """Untick the leftmost checkbox on every row in the Create Keyframe dialog"""
     bl_idname = "proteinblender.keyframe_select_none_puppets"
     bl_label = "Select None"
-    
+
     def execute(self, context):
-        # Get the active operator
-        wm = context.window_manager
-        if hasattr(wm, 'operators') and len(wm.operators) > 0:
-            for op in reversed(wm.operators):
-                if hasattr(op, 'bl_idname') and op.bl_idname == 'proteinblender.create_keyframe':
-                    if hasattr(op, 'puppet_items'):
-                        for item in op.puppet_items:
-                            item.use_puppet = False
-                        # Force a redraw
-                        context.area.tag_redraw()
-                    break
+        if not _set_create_keyframe_selection(context, False):
+            self.report({'WARNING'}, "No active Create Keyframe dialog.")
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -1087,61 +1105,6 @@ class PROTEINBLENDER_OT_keyframe_select_none(Operator):
 
     def execute(self, context):
         return bpy.ops.proteinblender.keyframe_select_none_poses()
-
-
-class PROTEINBLENDER_OT_sync_keyframe_metadata(Operator):
-    """Sync keyframe metadata from timeline for current frame"""
-    bl_idname = "proteinblender.sync_keyframe_metadata"
-    bl_label = "Sync Keyframe Metadata from Timeline"
-    bl_description = "Rebuild keyframe metadata by reading actual keyframes from the timeline at current frame"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        scene = context.scene
-        current_frame = scene.frame_current
-        synced_count = 0
-
-        # Process all puppets
-        if hasattr(scene, 'outliner_items'):
-            for item in scene.outliner_items:
-                if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
-                    if item.controller_object_name:
-                        controller_obj = bpy.data.objects.get(item.controller_object_name)
-                        if not controller_obj:
-                            continue
-
-                        # Get puppet's domain objects
-                        from ..operators.keyframe_operators import PROTEINBLENDER_OT_create_keyframe
-                        temp_op = PROTEINBLENDER_OT_create_keyframe()
-                        domain_objects = temp_op.get_puppet_objects(context, item.item_id)
-
-                        # Check what's actually keyframed
-                        actual_state = check_existing_keyframes(controller_obj, domain_objects, current_frame)
-
-                        # Create a temporary settings object to save
-                        class TempSettings:
-                            def __init__(self):
-                                self.use_puppet = any(actual_state.values())  # True if any property is keyframed
-                                self.keyframe_location = actual_state.get('location', False)
-                                self.keyframe_rotation = actual_state.get('rotation', False)
-                                self.keyframe_scale = actual_state.get('scale', False)
-                                self.keyframe_pose = actual_state.get('pose', False)
-                                self.keyframe_color = actual_state.get('color', False)
-
-                        temp_settings = TempSettings()
-
-                        # Only save metadata if at least one property is keyframed
-                        if temp_settings.use_puppet:
-                            save_keyframe_metadata(controller_obj, current_frame, temp_settings)
-                            synced_count += 1
-                            print(f"🔄 Synced metadata for '{item.name}' at frame {current_frame}")
-
-        if synced_count > 0:
-            self.report({'INFO'}, f"Synced keyframe metadata for {synced_count} puppet(s) at frame {current_frame}")
-        else:
-            self.report({'INFO'}, f"No keyframes found at frame {current_frame}")
-
-        return {'FINISHED'}
 
 
 def register():
