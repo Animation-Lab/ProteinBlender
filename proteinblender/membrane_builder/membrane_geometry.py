@@ -1613,11 +1613,16 @@ def _required_slot_counts(scene: Optional[bpy.types.Scene] = None
             if count > num_holes:
                 num_holes = count
 
+    # FF count is now per-object (chains, domains, or proteins each carry
+    # their own pb_force_field_enabled). Walk every object, count those
+    # with the flag on — skip our own anchor Empties so they don't
+    # double-count.
     num_ffs = 0
-    if scene is not None and hasattr(scene, "molecule_list_items"):
-        for item in scene.molecule_list_items:
-            if getattr(item, "force_field_enabled", False):
-                num_ffs += 1
+    for obj in bpy.data.objects:
+        if obj.get("pb_is_ff_anchor", False):
+            continue
+        if getattr(obj, "pb_force_field_enabled", False):
+            num_ffs += 1
 
     return (min(num_holes, MAX_HOLES), min(num_ffs, MAX_PROTEIN_FFS))
 

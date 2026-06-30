@@ -8,42 +8,45 @@ from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.chain_utils import get_chain_objects, get_chain_domains
 
 
-def _resolve_selected_proteins(scene, selected_items):
-    """Return the set of protein molecule identifiers implied by the current
-    selection. Items that don't resolve to a protein (PUPPET rows, MEMBRANE
-    rows, puppet member-references) are *ignored*, not treated as a veto —
-    selecting a protein that happens to live inside a puppet must still
-    surface the FF UI for that protein.
+def _resolve_selected_ff_objects(scene, selected_items):
+    """Return the dict ``{name: Object}`` of FF-eligible Blender objects
+    implied by the current selection.
+
+    Eligible types: PROTEIN, CHAIN, DOMAIN (any of the addon's
+    user-movable meshes). PUPPET rows, MEMBRANE rows, and puppet
+    member-references are ignored — a puppet member-ref points to the
+    same underlying chain mesh the canonical CHAIN row points to, so
+    including refs would just double-add.
     """
-    by_id = {it.item_id: it for it in scene.outliner_items}
-
-    def protein_owner(item):
-        cur = item
-        seen = set()
-        while cur is not None and cur.item_id not in seen:
-            seen.add(cur.item_id)
-            if cur.item_type == 'PROTEIN':
-                return cur.item_id
-            cur = by_id.get(cur.parent_id) if cur.parent_id else None
-        return None
-
-    owners = set()
+    objs = {}
     for it in selected_items:
-        oid = protein_owner(it)
-        if oid is not None:
-            owners.add(oid)
-    return owners
+        # Skip puppet member-references (mirrors of canonical chains).
+        # The convention is item_id contains "_ref_" for these rows.
+        if "_ref_" in it.item_id:
+            continue
+        if it.item_type == 'PROTEIN':
+            sm = ProteinBlenderScene.get_instance()
+            wrapper = sm.molecules.get(it.item_id)
+            obj = wrapper.molecule.object if (wrapper and wrapper.molecule) else None
+            if obj is not None:
+                objs[obj.name] = obj
+        elif it.item_type in ('CHAIN', 'DOMAIN'):
+            name = it.object_name
+            if name:
+                obj = bpy.data.objects.get(name)
+                if obj is not None and obj.type == 'MESH':
+                    objs[obj.name] = obj
+    return objs
 
 
 class PROTEINBLENDER_OT_toggle_force_fields(Operator):
-    """Bulk-toggle the Membrane Force Field on every protein the current
-    selection resolves to.
+    """Bulk-toggle the Membrane Force Field on every FF-eligible object
+    the current selection resolves to (proteins, chains, domains).
 
-    Aggregate rule: if *all* selected proteins already have the force field
-    on, the click turns them all off; otherwise (any off, or a mixed
-    state), the click turns them all on. That matches the button label
-    rendered by the panel, so the toggle is unambiguous even when the
-    proteins started in an incoherent state.
+    Aggregate rule: if *all* are already on, the click turns them off;
+    otherwise (any off, or mixed) the click turns them all on. Matches
+    the panel label so the toggle is unambiguous even from a mixed
+    starting state.
     """
 
     bl_idname = "proteinblender.toggle_force_fields"
@@ -61,19 +64,19 @@ class PROTEINBLENDER_OT_toggle_force_fields(Operator):
     def execute(self, context):
         scene = context.scene
         selected = [it for it in scene.outliner_items if it.is_selected]
-        protein_ids = _resolve_selected_proteins(scene, selected)
-        if not protein_ids:
-            self.report({'WARNING'}, "No proteins in selection.")
+        ff_objs = _resolve_selected_ff_objects(scene, selected)
+        if not ff_objs:
+            self.report({'WARNING'}, "No FF-eligible objects in selection.")
             return {'CANCELLED'}
 
         new_state = (self.target_state == 'on')
-        for mi in scene.molecule_list_items:
-            if mi.identifier in protein_ids and mi.force_field_enabled != new_state:
-                mi.force_field_enabled = new_state  # update= handler syncs membranes
+        for obj in ff_objs.values():
+            if getattr(obj, "pb_force_field_enabled", False) != new_state:
+                obj.pb_force_field_enabled = new_state  # update= syncs membranes
 
         verb = "enabled" if new_state else "disabled"
         self.report({'INFO'},
-                    f"Force field {verb} on {len(protein_ids)} protein(s).")
+                    f"Force field {verb} on {len(ff_objs)} object(s).")
         return {'FINISHED'}
 
 
@@ -210,49 +213,53 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
             row.operator("proteinblender.set_pivot_custom", text="Custom")
             row.operator("proteinblender.set_pivot_last", text="Last")
 
-        # ---- Membrane Force Field (per-protein) ---------------------------
-        # Surfaces whenever the selection contains at least one protein.
-        # Non-protein items in the selection (PUPPET rows, MEMBRANE rows,
-        # puppet member-references) are ignored — so clicking a protein
-        # that lives inside a puppet still shows the FF toggle. The UI
-        # adapts to how many proteins resolved:
-        #   * 1 protein  → per-protein checkbox + spacing slider (live)
-        #   * 2+ proteins → bulk-toggle button. Aggregate state decides
-        #     the label: "Turn Off" iff all are already on, else "Turn
-        #     On". Mixed states resolve to "Turn On" so the next click
-        #     coheres the group.
-        protein_ids = _resolve_selected_proteins(scene, selected_items)
-        if protein_ids:
-            mol_items = [mi for mi in scene.molecule_list_items
-                         if mi.identifier in protein_ids]
-            if len(mol_items) == 1:
+        # ---- Membrane Force Field (per-object) ----------------------------
+        # Surfaces whenever the selection contains at least one
+        # FF-eligible mesh object (protein, chain, or domain). PUPPET
+        # rows, MEMBRANE rows, and puppet member-references are ignored —
+        # a chain that lives inside a puppet still shows the FF toggle
+        # via its canonical CHAIN row.
+        #
+        # The FF flag lives directly on the chosen object as RNA prop
+        # ``pb_force_field_enabled`` (see ``membrane_builder.force_fields``).
+        # The anchor is parented to the object, so puppeting a chain
+        # carries its FF anchor along automatically.
+        #
+        #   1 object  → per-object checkbox + spacing slider
+        #   2+ objects → bulk-toggle button. "Turn Off" iff all on, else
+        #                "Turn On" (mixed coheres to On on next click).
+        ff_objs = _resolve_selected_ff_objects(scene, selected_items)
+        if ff_objs:
+            objs_list = list(ff_objs.values())
+            if len(objs_list) == 1:
                 box.separator()
                 ff_box = box.box()
-                mol_item = mol_items[0]
+                obj = objs_list[0]
                 ff_box.prop(
-                    mol_item, "force_field_enabled",
+                    obj, "pb_force_field_enabled",
                     text="Membrane Force Field",
                     icon='FORCE_FORCE',
                 )
-                if mol_item.force_field_enabled:
+                if obj.pb_force_field_enabled:
                     spacing_row = ff_box.row(align=True)
-                    spacing_row.prop(mol_item, "force_field_spacing",
+                    spacing_row.prop(obj, "pb_force_field_spacing",
                                       text="Spacing (nm)")
                     ff_box.label(
-                        text="Lipids part around this protein in any membrane.",
+                        text=f"Lipids part around {obj.name} in any membrane.",
                         icon='INFO',
                     )
-            elif len(mol_items) > 1:
+            else:
                 box.separator()
                 ff_box = box.box()
-                n_on = sum(1 for mi in mol_items if mi.force_field_enabled)
-                n = len(mol_items)
+                n_on = sum(1 for o in objs_list
+                           if getattr(o, "pb_force_field_enabled", False))
+                n = len(objs_list)
                 all_on = (n_on == n)
                 target = 'off' if all_on else 'on'
                 if all_on:
-                    label = f"Turn Membrane Force Field Off ({n} proteins)"
+                    label = f"Turn Membrane Force Field Off ({n} objects)"
                 elif n_on == 0:
-                    label = f"Turn Membrane Force Field On ({n} proteins)"
+                    label = f"Turn Membrane Force Field On ({n} objects)"
                 else:
                     label = (f"Turn Membrane Force Field On "
                              f"(mixed: {n_on}/{n} on)")
@@ -264,7 +271,7 @@ class PROTEINBLENDER_PT_visual_setup(Panel):
                 )
                 op.target_state = target
                 ff_box.label(
-                    text="Per-protein spacing is editable when one protein is selected.",
+                    text="Per-object spacing is editable when one object is selected.",
                     icon='INFO',
                 )
 
