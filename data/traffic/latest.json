@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-07-09T04:10:32+00:00",
+  "generated_at": "2026-07-10T04:10:37+00:00",
   "summary": {
-    "views": 26,
-    "visitors": 11,
-    "clones": 350,
-    "cloners": 131
+    "views": 16,
+    "visitors": 9,
+    "clones": 322,
+    "cloners": 123
   },
   "all_time": {
-    "views": 508,
-    "visitors": 243,
-    "clones": 3004,
-    "cloners": 1369,
-    "days_tracked": 113
+    "views": 509,
+    "visitors": 244,
+    "clones": 3018,
+    "cloners": 1377,
+    "days_tracked": 114
   },
   "current_day": {
+    "date": "2026-07-08",
+    "views": 1,
+    "visitors": 1,
+    "clones": 14,
+    "cloners": 8
+  },
+  "previous_day": {
     "date": "2026-07-07",
     "views": 3,
     "visitors": 1,
     "clones": 22,
     "cloners": 13
   },
-  "previous_day": {
-    "date": "2026-07-06",
-    "views": 1,
-    "visitors": 1,
-    "clones": 15,
-    "cloners": 9
-  },
   "delta_since_previous_day": {
-    "views": 2,
+    "views": -2,
     "visitors": 0,
-    "clones": 7,
-    "cloners": 4
+    "clones": -8,
+    "cloners": -5
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 19,
-      "uniques": 8
+      "count": 9,
+      "uniques": 6
     },
     {
       "referrer": "github.com",
@@ -55,32 +55,14 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 16,
+      "count": 14,
       "uniques": 8
-    },
-    {
-      "path": "/Animation-Lab/proteinblender/issues",
-      "title": "/issues",
-      "count": 4,
-      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 3,
-      "uniques": 3
-    },
-    {
-      "path": "/Animation-Lab/proteinblender/issues/14",
-      "title": "/issues/14",
       "count": 2,
       "uniques": 2
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/blob/main/CLAUDE.md",
-      "title": "/blob/main/CLAUDE.md",
-      "count": 1,
-      "uniques": 1
     }
   ]
 }
