@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-07-10T04:10:37+00:00",
+  "generated_at": "2026-07-11T03:38:07+00:00",
   "summary": {
-    "views": 16,
-    "visitors": 9,
-    "clones": 322,
-    "cloners": 123
+    "views": 22,
+    "visitors": 12,
+    "clones": 290,
+    "cloners": 114
   },
   "all_time": {
-    "views": 509,
-    "visitors": 244,
-    "clones": 3018,
-    "cloners": 1377,
-    "days_tracked": 114
+    "views": 515,
+    "visitors": 247,
+    "clones": 3038,
+    "cloners": 1386,
+    "days_tracked": 115
   },
   "current_day": {
+    "date": "2026-07-09",
+    "views": 6,
+    "visitors": 3,
+    "clones": 20,
+    "cloners": 9
+  },
+  "previous_day": {
     "date": "2026-07-08",
     "views": 1,
     "visitors": 1,
     "clones": 14,
     "cloners": 8
   },
-  "previous_day": {
-    "date": "2026-07-07",
-    "views": 3,
-    "visitors": 1,
-    "clones": 22,
-    "cloners": 13
-  },
   "delta_since_previous_day": {
-    "views": -2,
-    "visitors": 0,
-    "clones": -8,
-    "cloners": -5
+    "views": 5,
+    "visitors": 2,
+    "clones": 6,
+    "cloners": 1
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 9,
-      "uniques": 6
+      "count": 12,
+      "uniques": 9
     },
     {
       "referrer": "github.com",
@@ -47,22 +47,28 @@
     },
     {
       "referrer": "Bing",
-      "count": 1,
-      "uniques": 1
+      "count": 3,
+      "uniques": 2
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 14,
-      "uniques": 8
+      "count": 19,
+      "uniques": 11
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
       "count": 2,
       "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/commit/7b831a55a60fbbeccd638a727a99b95c6f2ad250",
+      "title": "/commit/7b831a55a60fbbeccd638a727a99b95c6f2ad250",
+      "count": 1,
+      "uniques": 1
     }
   ]
 }
