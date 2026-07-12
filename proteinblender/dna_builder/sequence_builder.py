@@ -35,12 +35,23 @@ RES_NAMES = {
 # 1BNA is the palindromic Dickerson dodecamer; both chains read CGCGAATTCGCG 5'->3'.
 # 1BNA chain-A (sense): DC1  DG2  DC3  DG4  DA5  DA6  DT7  DT8  DC9  DG10 DC11 DG12
 # 1BNA chain-B (anti):  DC13 DG14 DC15 DG16 DA17 DA18 DT19 DT20 DC21 DG22 DC23 DG24
-# Pairing: A:i pairs with B:(25-i). Antisense picks below mirror the sense picks
-# spatially: each antisense pick is the chain-B residue paired with the same-base
-# chain-A residue used by the sense picks (e.g. sense DC=A:3 pairs with B:22=DG, so
-# antisense DG=B:22; sense DG=A:4 pairs with B:21=DC, so antisense DC=B:21; etc.).
+# Pairing: A:i pairs with B:(25-i).
+#
+# The antisense templates are NOT rebuilt as an independent strand. Each
+# antisense residue below is the chain-B residue Watson-Crick paired with a
+# chain-A sense pick, and it is extracted in that sense partner's frame (see
+# ``_extract_pair_anti``) so the base pair keeps its true crystal geometry
+# when stamped onto the idealized helix. Keyed by the ANTISENSE base's name:
+#   anti DT = B:20 (partner of sense DA = A:5)
+#   anti DA = B:18 (partner of sense DT = A:7)
+#   anti DG = B:22 (partner of sense DC = A:3)
+#   anti DC = B:21 (partner of sense DG = A:4)
 _SENSE_PICKS = {"DC": 3, "DG": 4, "DA": 5, "DT": 7}
 _ANTI_PICKS = {"DC": 21, "DG": 22, "DA": 18, "DT": 20}
+
+# Watson-Crick complement of each DNA template res_name (used to find the
+# sense partner of an antisense pick).
+_TEMPLATE_COMPLEMENT = {"DA": "DT", "DT": "DA", "DC": "DG", "DG": "DC"}
 
 # Map single-letter base to DNA template key
 _BASE_TO_TEMPLATE = {"A": "DA", "T": "DT", "G": "DG", "C": "DC", "U": "DT"}
@@ -111,16 +122,53 @@ class _HelixTemplates:
         return t
 
     def _extract_all(self, ref):
-        sense, anti = {}, {}
+        sense = {}
         for rn, pos in _SENSE_PICKS.items():
             t = self._extract_one(ref, "A", pos)
             if t is not None:
                 sense[rn] = t
-        for rn, pos in _ANTI_PICKS.items():
-            t = self._extract_one(ref, "B", pos)
-            if t is not None:
-                anti[rn] = t
+        anti = self._extract_pair_anti(ref)
         return sense, anti
+
+    def _extract_pair_anti(self, ref):
+        """Antisense templates in their Watson-Crick sense partner's frame.
+
+        Each 1BNA antisense residue is transformed by the *same* operation
+        ``_extract_one`` applies to its sense partner — translate the sense
+        C1' to the origin, then de-rotate by the sense C1' angle — instead of
+        being re-centred on its own C1'. The antisense residue therefore keeps
+        its true crystal offset from the sense C1'.
+
+        When the sense partner is later stamped onto the idealized helix, the
+        antisense loop applies that same helical placement to this template
+        (see ``build_nucleic_acid``), so every base pair reproduces 1BNA's real
+        relative geometry: partners sit ~10.4 A apart with their bases meeting,
+        and each base's nearest cross-strand neighbour is its true complement.
+
+        The previous approach rebuilt the antisense as an independent strand
+        from its own mean radius and phase angle; combined with the sense
+        strand's mean radius that placed Watson-Crick partners ~11 A apart —
+        farther than the diagonal (wrong-identity) neighbours — so bases
+        appeared to pair with a same-identity base (Alpha 1.0.6 critical bug).
+        """
+        anti = {}
+        for anti_rn, anti_pos in _ANTI_PICKS.items():
+            sense_pos = _SENSE_PICKS[_TEMPLATE_COMPLEMENT[anti_rn]]
+            sc1_mask = (
+                (ref.chain_id == "A")
+                & (ref.res_id == sense_pos)
+                & (ref.atom_name == "C1'")
+            )
+            sc1_hits = ref.coord[sc1_mask]
+            if len(sc1_hits) == 0:
+                continue
+            sc1 = sc1_hits[0]
+            phi_sense = math.atan2(sc1[1], sc1[0])
+            a = ref[(ref.chain_id == "B") & (ref.res_id == anti_pos)].copy()
+            a.coord = a.coord - sc1
+            a.coord = Rotation.from_euler("z", -phi_sense).apply(a.coord)
+            anti[anti_rn] = a
+        return anti
 
     # -- geometry measurements from aligned reference -----------------------
 
@@ -237,9 +285,14 @@ def build_nucleic_acid(
         anti_tmpls = {k: _flip_template_about_x(v) for k, v in sense_tmpls.items()}
     else:
         sense_phi = tmpl.phi_sense
-        anti_phi = tmpl.phi_anti
         sense_radius = tmpl.sense_radius
-        anti_radius = tmpl.anti_radius
+        # HELIX antisense is stamped rigidly relative to its sense partner
+        # (its template — from _extract_pair_anti — already carries the
+        # crystal pair offset), so it uses the SAME helical placement
+        # parameters as the sense strand. Placing it on an independent
+        # phase/radius is what broke Watson-Crick pairing in Alpha 1.0.6.
+        anti_phi = tmpl.phi_sense
+        anti_radius = tmpl.sense_radius
         sense_tmpls = tmpl.sense
         anti_tmpls = tmpl.anti
 
