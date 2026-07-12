@@ -504,20 +504,48 @@ def _create_bend_nodes(dna_obj, curve_obj, n_points):
     prev_selected = list(bpy.context.selected_objects)
     prev_mode = bpy.context.mode
 
+    # Edit mode + hook_reset cannot run on a hidden object — Blender's
+    # mode_set poll raises "Cannot edit hidden object". The bend curve may be
+    # hidden (the user hid the guide, or a legacy file saved it with the old
+    # hide_viewport toggle), so temporarily reveal it and restore its hide
+    # state afterward. Without this, changing the node count on a hidden curve
+    # errored and left the bend rig half-rebuilt (tester report, Janet:
+    # "I got an error and the bend curve option no longer appears").
+    prev_curve_hide_vp = curve_obj.hide_viewport
+    prev_curve_hide_eye = curve_obj.hide_get()
+    curve_obj.hide_viewport = False
+    curve_obj.hide_set(False)
+
     try:
         if prev_mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action="DESELECT")
         curve_obj.select_set(True)
         bpy.context.view_layer.objects.active = curve_obj
-        bpy.ops.object.mode_set(mode="EDIT")
-        for hname in hook_names:
-            try:
-                bpy.ops.object.hook_reset(modifier=hname)
-            except Exception:
-                pass
-        bpy.ops.object.mode_set(mode="OBJECT")
+        try:
+            bpy.ops.object.mode_set(mode="EDIT")
+            for hname in hook_names:
+                try:
+                    bpy.ops.object.hook_reset(modifier=hname)
+                except Exception:
+                    pass
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except RuntimeError:
+            # Couldn't enter edit mode for hook_reset — fall back to the
+            # pre-set translation matrix_inverse (assigned above), which
+            # still gives a usable (near-zero) initial deformation.
+            if bpy.context.mode != "OBJECT":
+                try:
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception:
+                    pass
     finally:
+        # Restore the curve's hide state.
+        curve_obj.hide_viewport = prev_curve_hide_vp
+        try:
+            curve_obj.hide_set(prev_curve_hide_eye)
+        except Exception:
+            pass
         # Restore the previous selection state.
         try:
             bpy.ops.object.select_all(action="DESELECT")
