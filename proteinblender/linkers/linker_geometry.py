@@ -21,6 +21,19 @@ ANGSTROM_PER_RESIDUE = 3.5
 MN_SCALE = 0.01  # MolecularNodes scale: 1 BU = 100 Angstroms
 BU_PER_RESIDUE = ANGSTROM_PER_RESIDUE * MN_SCALE  # 0.035 BU per residue
 
+# Random-coil wiggle density: base number of coils ≈ residues * this factor
+# (~a gentle turn every ~3 residues). Scaling the coil count with the residue
+# count lets a longer / slacker linker absorb its excess length as many small
+# waves instead of a few big ones, so the coil stays gentle instead of reading
+# as a sharp large-amplitude sine wave.
+COILS_PER_RESIDUE = 0.3
+# Bounds on the coil frequency so short linkers still wiggle and very long ones
+# don't turn into a tight spring (or an unbounded control-point count).
+MIN_COIL_CYCLES = 2.0
+MAX_COIL_CYCLES = 12.0
+# Cap on random-coil sample points (bezier control points) for performance.
+MAX_COIL_SAMPLES = 128
+
 
 # ---------------------------------------------------------------------------
 # Residue position helpers
@@ -557,8 +570,21 @@ def compute_random_coil_points(start: Vector, end: Vector,
     D = (end - start).length
     L = total_length
 
-    # More samples for smoother wiggles (~3 per residue)
-    num_samples = max(9, num_residues * 3)
+    # Coil density scales with residue count so a longer / slacker linker
+    # absorbs its excess length as many gentle waves instead of a few large
+    # ones. This keeps the amplitude small — the old fixed [2, 3, 5] cycles
+    # forced a big amplitude to reach the target length, which read as a
+    # "sharp sine wave with large amplitude", especially when the endpoints
+    # were close together (tester report, Janet).
+    base_cycles = min(MAX_COIL_CYCLES,
+                      max(MIN_COIL_CYCLES, num_residues * COILS_PER_RESIDUE))
+    # Prime-ish ratios avoid a repetitive pattern; 1/f amplitude falloff.
+    freqs = [base_cycles, base_cycles * 1.7, base_cycles * 2.7]
+    amps = [1.0, 0.5, 0.25]
+
+    # Enough samples to resolve the highest-frequency wiggle (~5 per cycle),
+    # capped so the control-point count (and bead instancing) stays bounded.
+    num_samples = max(9, min(MAX_COIL_SAMPLES, int(freqs[-1] * 5) + 1))
 
     # Taut or nearly taut: straight line
     if D >= L * 0.99 or D < 1e-6:
@@ -578,11 +604,6 @@ def compute_random_coil_points(start: Vector, end: Vector,
     # Use golden ratio multiples for well-distributed phases
     phi = 1.6180339887
     phase_offsets = [seed * phi * (k + 1) for k in range(6)]
-
-    # Frequency multipliers (prime-ish ratios avoid repetitive patterns)
-    freqs = [2.0, 3.0, 5.0]
-    # Amplitude falloff for higher frequencies (1/f character)
-    amps = [1.0, 0.5, 0.25]
 
     # Binary search for the amplitude that makes arc length == total_length.
     # The straight-line distance D is the minimum arc length (amplitude=0).
