@@ -375,10 +375,12 @@ def sync_outliner_to_blender_selection(context, item_id):
 
             # Don't cascade to members - puppet checkbox only controls the controller
 
-        elif item.item_type == 'MEMBRANE':
-            # Select / deselect the membrane root object — Membrane Builder
-            # panel keys off active_object, so this also flips the panel
-            # into edit mode for the selected membrane.
+        elif item.item_type in ('MEMBRANE', 'DNA_RNA'):
+            # Single-object rows. Select / deselect that object and, when
+            # selecting, make it active. The Membrane Builder and DNA/RNA
+            # Builder panels both key off active_object (the DNA panel via its
+            # active-object msgbus sync), so this also flips them into edit mode
+            # for the selected item.
             if item.object_name:
                 root = bpy.data.objects.get(item.object_name)
                 if root:
