@@ -99,18 +99,30 @@ class PB2_PT_linkers(Panel):
                     has_puppets = True
                     break
 
-        if not has_puppets:
+        has_linkers = hasattr(scene, 'pb2_linkers') and len(scene.pb2_linkers) > 0
+
+        # No puppets AND no linkers: nothing to do but point at puppet creation.
+        if not has_puppets and not has_linkers:
             info_box = main_box.box()
             info_box.label(text="Create a puppet first to use linkers", icon='INFO')
             return
 
-        # Create Linker button
-        header_row = main_box.row()
-        header_row.scale_y = 1.2
-        header_row.operator("pb2.add_linker", text="Create Linker", icon='ADD')
+        if has_puppets:
+            # Create Linker button
+            header_row = main_box.row()
+            header_row.scale_y = 1.2
+            header_row.operator("pb2.add_linker", text="Create Linker", icon='ADD')
+        else:
+            # Linkers exist but their puppet is gone (deleted, or an orphan from
+            # an older file). Still surface the list below so the user can delete
+            # them — otherwise the linker geometry stays in the scene with no way
+            # to remove it (tester report, Janet). New linkers need a puppet.
+            warn_box = main_box.box()
+            warn_box.label(text="No puppets — linker(s) below are orphaned.", icon='ERROR')
+            warn_box.label(text="Remove them with the − button, or create a puppet.")
 
         # Linker list
-        if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        if not has_linkers:
             info_box = main_box.box()
             info_box.label(text="No linkers defined", icon='INFO')
             info_box.label(text="Click 'Create Linker' to connect chains within a puppet")
