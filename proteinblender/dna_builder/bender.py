@@ -975,6 +975,46 @@ class PROTEINBLENDER_OT_dna_finish_bend_edit(Operator):
         return {"FINISHED"}
 
 
+class PROTEINBLENDER_OT_dna_toggle_bend_curve(Operator):
+    """Show / hide the bend curve guide in the viewport.
+
+    Toggles the curve's *eye* visibility (``hide_set``) — NOT its
+    "disable in viewport" flag (``hide_viewport``). The bend curve is the
+    target of the DNA's Curve modifier and the anchor for the hook rig;
+    ``hide_viewport`` removes it from depsgraph evaluation, which on some
+    Blender versions drops the Curve deformation and makes the strand snap
+    back to its object-space rest position (tester report, Janet: "the DNA
+    jumps down so that end is sitting at the origin"). Eye visibility keeps
+    the curve fully evaluated, so hiding the guide never moves the strand.
+    The curve is already ``hide_render=True`` / ``hide_select=True``, so this
+    is purely a viewport-guide toggle.
+    """
+
+    bl_idname = "proteinblender.dna_toggle_bend_curve"
+    bl_label = "Toggle Bend Curve"
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        if obj is None:
+            return False
+        if obj.get("pb_is_nucleic_acid", False) and obj.get(BEND_CURVE_PROP):
+            return True
+        return get_dna_for_node(obj) is not None
+
+    def execute(self, context):
+        dna = _resolve_dna(context.active_object)
+        if dna is None:
+            return {"CANCELLED"}
+        curve_obj = get_bend_curve(dna)
+        if curve_obj is None:
+            self.report({"ERROR"}, "Bend curve not found.")
+            return {"CANCELLED"}
+        curve_obj.hide_set(not curve_obj.hide_get())
+        return {"FINISHED"}
+
+
 class PROTEINBLENDER_OT_dna_remove_bend(Operator):
     """Remove the bend modifier and delete the bend curve and all nodes."""
 
@@ -1023,6 +1063,7 @@ CLASSES = (
     PROTEINBLENDER_OT_dna_edit_bend,
     PROTEINBLENDER_OT_dna_set_bend_resolution,
     PROTEINBLENDER_OT_dna_finish_bend_edit,
+    PROTEINBLENDER_OT_dna_toggle_bend_curve,
     PROTEINBLENDER_OT_dna_remove_bend,
 )
 

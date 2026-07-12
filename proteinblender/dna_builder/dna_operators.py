@@ -322,16 +322,19 @@ def _draw_shape_section(layout, props, dna_obj):
                 icon="INFO",
             )
 
-    # Hide bend curve (viewport-only, never affects renders)
+    # Hide bend curve (viewport-only, never affects renders). Uses a toggle
+    # operator that flips the curve's EYE visibility (hide_set), not its
+    # depsgraph "disable in viewport" flag — hiding it must never disturb the
+    # Curve modifier / hook rig or the strand jumps (tester report, Janet).
     curve_obj = get_bend_curve(dna_obj)
     if curve_obj is not None:
         shape_box.separator(factor=0.3)
+        is_hidden = curve_obj.hide_get()
         vis_row = shape_box.row(align=True)
-        vis_row.prop(
-            curve_obj,
-            "hide_viewport",
-            text="Hide Bend Curve",
-            icon="HIDE_ON" if curve_obj.hide_viewport else "HIDE_OFF",
+        vis_row.operator(
+            "proteinblender.dna_toggle_bend_curve",
+            text="Show Bend Curve" if is_hidden else "Hide Bend Curve",
+            icon="HIDE_ON" if is_hidden else "HIDE_OFF",
         )
         shape_box.label(
             text="Bend curve is a guide only — never appears in renders.",
