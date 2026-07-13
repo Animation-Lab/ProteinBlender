@@ -50,6 +50,15 @@ def _on_linker_color_update(self, context):
         pass
 
 
+def _on_linker_coil_update(self, context):
+    """Rebuild the curve when a random-coil appearance parameter changes."""
+    try:
+        from .linker_geometry import update_linker_curve
+        update_linker_curve(self)
+    except Exception:
+        pass
+
+
 class PB2_LinkerDefinition(PropertyGroup):
     """Definition of a flexible linker connecting chains within a single puppet.
 
@@ -214,6 +223,19 @@ class PB2_LinkerDefinition(PropertyGroup):
             ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
         ],
         default='GRAVITY'
+    )
+
+    # Random-coil appearance: radius of the coil loops. Smaller = more, tighter
+    # coils; larger = fewer, looser loops. Only used when behavior='RANDOM_COIL'.
+    coil_width: FloatProperty(
+        name="Coil Width",
+        description="Radius of the random-coil loops. Smaller = more, tighter "
+                    "coils; larger = fewer, looser loops",
+        default=0.03,
+        min=0.005, soft_max=0.1, max=0.3,
+        step=0.1,
+        unit='LENGTH',
+        update=_on_linker_coil_update,
     )
 
     # Rigid binding zone length at each end

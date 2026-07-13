@@ -278,6 +278,8 @@ def _draw_linker_form(layout, op):
     box.label(text="Appearance", icon='MATERIAL')
     box.prop(op, "style")
     box.prop(op, "behavior")
+    if op.behavior == 'RANDOM_COIL':
+        box.prop(op, "coil_width")
     box.prop(op, "color")
     if op.style == 'TUBE':
         box.prop(op, "tube_radius")
@@ -445,6 +447,13 @@ class PB2_OT_add_linker(Operator):
         default='GRAVITY'
     )
 
+    coil_width: FloatProperty(
+        name="Coil Width",
+        description="Random-coil loop radius. Smaller = more, tighter coils; "
+                    "larger = fewer, looser loops",
+        default=0.03, min=0.005, soft_max=0.1, max=0.3, step=0.1, unit='LENGTH',
+    )
+
     binding_zone_residues: IntProperty(
         name="Binding Zone (residues)",
         description="Rigid zone at each endpoint to prevent chain collision",
@@ -553,6 +562,7 @@ class PB2_OT_add_linker(Operator):
         linker.style = self.style
         linker.rendering_mode = self.rendering_mode
         linker.behavior = self.behavior
+        linker.coil_width = self.coil_width
         linker.color = self.color
         linker.tube_radius = self.tube_radius
         linker.bead_radius = self.bead_radius
@@ -744,6 +754,9 @@ class PB2_OT_edit_linker(Operator):
             ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
         ]
     )
+    coil_width: FloatProperty(
+        name="Coil Width", default=0.03, min=0.005, soft_max=0.1, max=0.3,
+        step=0.1, unit='LENGTH')
     color: FloatVectorProperty(name="Color", subtype='COLOR', size=4, min=0.0, max=1.0)
     tube_radius: FloatProperty(name="Radius", default=0.015, min=0.001, soft_max=0.03, max=0.1, step=0.1)
     # Bead-style appearance — only drawn when style == 'BEADS'.
@@ -774,6 +787,7 @@ class PB2_OT_edit_linker(Operator):
                 self.style = linker.style
                 self.rendering_mode = linker.rendering_mode
                 self.behavior = linker.behavior
+                self.coil_width = linker.coil_width
                 self.color = linker.color
                 self.tube_radius = linker.tube_radius
                 self.bead_radius = linker.bead_radius
@@ -824,6 +838,7 @@ class PB2_OT_edit_linker(Operator):
                 linker.style = self.style
                 linker.rendering_mode = self.rendering_mode
                 linker.behavior = self.behavior
+                linker.coil_width = self.coil_width
                 linker.color = self.color
                 linker.tube_radius = self.tube_radius
                 linker.bead_radius = self.bead_radius
