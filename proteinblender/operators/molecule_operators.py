@@ -810,6 +810,13 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
 
+        # Cascade: remove any linker left dangling by the chain deletion.
+        try:
+            from ..linkers.linker_handlers import prune_dangling_linkers
+            prune_dangling_linkers(context.scene, "chain deleted")
+        except Exception:
+            pass
+
         self.report({'INFO'}, f"Deleted chain {self.chain_id} and {len(domains_to_delete)} domain(s)")
         return {'FINISHED'}
 

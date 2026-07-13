@@ -275,6 +275,13 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
 
+        # Cascade: remove any linker left dangling by the domain deletion.
+        try:
+            from ..linkers.linker_handlers import prune_dangling_linkers
+            prune_dangling_linkers(context.scene, "domain deleted")
+        except Exception:
+            pass
+
         return {'FINISHED'}
 
     def _remove_chain_from_puppets(self, context, molecule_id, chain_id):

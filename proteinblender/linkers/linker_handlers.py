@@ -403,34 +403,102 @@ def linker_frame_change_handler(scene):
 
 
 # ---------------------------------------------------------------------------
-# Puppet deletion cleanup
+# Cascade deletion — remove linkers when the things they reference are deleted
 # ---------------------------------------------------------------------------
+#
+# Linkers are child objects of the puppet/molecule graph: they only make sense
+# while both of their endpoints (and the puppet) exist. When a user deletes a
+# puppet, protein, chain or domain we must remove any dependent linker so no
+# orphaned curve is left hanging in the scene.
+
+def _remove_linker_indices(scene, indices, reason=""):
+    """Delete geometry for the given linker indices and drop them from the list.
+
+    Indices are removed in descending order so earlier indices stay valid.
+    Returns the number removed.
+    """
+    removed = 0
+    for i in sorted(set(indices), reverse=True):
+        linker = scene.pb2_linkers[i]
+        logger.info(
+            "Cascade-removing linker '%s'%s",
+            linker.name, f" ({reason})" if reason else "",
+        )
+        delete_linker_geometry(linker)
+        scene.pb2_linkers.remove(i)
+        removed += 1
+
+    if scene.pb2_linkers_index >= len(scene.pb2_linkers):
+        scene.pb2_linkers_index = max(0, len(scene.pb2_linkers) - 1)
+    return removed
+
+
+def _endpoint_root_molecule(scene, item_id: str):
+    """Return the molecule id an endpoint belongs to by walking parent_id.
+
+    Chain/domain outliner items chain up to their PROTEIN item, whose item_id
+    is the molecule identifier. Returns None if the item can't be resolved.
+    """
+    items = {it.item_id: it for it in scene.outliner_items}
+    cur = items.get(item_id)
+    seen = set()
+    while cur is not None and cur.parent_id and cur.item_id not in seen:
+        seen.add(cur.item_id)
+        cur = items.get(cur.parent_id)
+    return cur.item_id if cur is not None else None
+
 
 def on_puppet_deleted(puppet_id: str):
     """Remove all linkers belonging to a deleted puppet.
 
     Called from group_maker_panel.py when a puppet is deleted.
-
-    Args:
-        puppet_id: ID of the deleted puppet
     """
     scene = bpy.context.scene
     if not hasattr(scene, 'pb2_linkers'):
         return
+    indices = [i for i, linker in enumerate(scene.pb2_linkers)
+               if linker.puppet_id == puppet_id]
+    _remove_linker_indices(scene, indices, "puppet deleted")
 
-    linkers_to_remove = []
+
+def on_molecule_deleted(molecule_id: str):
+    """Remove linkers with an endpoint belonging to a deleted molecule.
+
+    Called from the molecule delete flow *before* the molecule's objects and
+    outliner rows are removed, so endpoint ancestry can still be resolved. A
+    linker is removed if either endpoint traces back to ``molecule_id`` (a
+    puppet can hold chains from several proteins, so a linker may straddle two).
+    """
+    scene = bpy.context.scene
+    if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        return
+    indices = []
     for i, linker in enumerate(scene.pb2_linkers):
-        if linker.puppet_id == puppet_id:
-            linkers_to_remove.append(i)
+        root_a = _endpoint_root_molecule(scene, linker.endpoint_a_item_id)
+        root_b = _endpoint_root_molecule(scene, linker.endpoint_b_item_id)
+        if root_a == molecule_id or root_b == molecule_id:
+            indices.append(i)
+    _remove_linker_indices(scene, indices, f"molecule '{molecule_id}' deleted")
 
-    for i in reversed(linkers_to_remove):
-        linker = scene.pb2_linkers[i]
-        logger.info(f"Removing linker '{linker.name}' (puppet deleted)")
-        delete_linker_geometry(linker)
-        scene.pb2_linkers.remove(i)
 
-    if scene.pb2_linkers_index >= len(scene.pb2_linkers):
-        scene.pb2_linkers_index = max(0, len(scene.pb2_linkers) - 1)
+def prune_dangling_linkers(scene=None, reason="dangling"):
+    """Remove any linker whose endpoint no longer resolves to an outliner item.
+
+    Call this after an outliner rebuild that dropped rows (chain/domain
+    deletion). Because a valid linker's endpoints are always present outliner
+    items, anything that can't be resolved is genuinely orphaned. Intended for
+    synchronous use inside delete operators only — the undo/load handlers
+    instead *recreate* transiently-missing geometry, so this must not run there.
+    """
+    if scene is None:
+        scene = bpy.context.scene
+    if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        return 0
+    valid_ids = {it.item_id for it in scene.outliner_items}
+    indices = [i for i, linker in enumerate(scene.pb2_linkers)
+               if linker.endpoint_a_item_id not in valid_ids
+               or linker.endpoint_b_item_id not in valid_ids]
+    return _remove_linker_indices(scene, indices, reason)
 
 
 # ---------------------------------------------------------------------------
