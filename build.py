@@ -9,12 +9,13 @@ It is used to update the blender manifest.toml file with the necessary wheels fo
 
 '''
 
+import argparse
 import glob
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import List, Union
+from typing import Dict, List, Union
 
 
 def run_python(args: str | List[str]):
@@ -43,6 +44,51 @@ TOML_PATH = "proteinblender/blender_manifest.toml"
 WHL_PATH = "./proteinblender/wheels"
 PYPROJ_PATH = "./pyproject.toml"
 INIT_PATH = "proteinblender/__init__.py"
+
+# Alpha "swap" channel identity. Building with --alpha temporarily rewrites the
+# manifest id/name/tagline so the produced zip is a *separate* Blender extension
+# (its own id => its own module path, its own entry in the extensions list, and
+# its own update channel). The id must stay [a-z0-9_]+ and be a valid module name.
+ALPHA_ID = "proteinblender_alpha"
+ALPHA_NAME = "ProteinBlender (Alpha)"
+# Keep ASCII: the manifest is TOML (must be UTF-8) and Blender caps the tagline at
+# 64 chars with no trailing punctuation.
+ALPHA_TAGLINE = "Alpha test build - disable the release version while testing"
+
+
+def _write_manifest(manifest) -> None:
+    """Serialize a parsed manifest back to TOML_PATH with the project's list style.
+
+    Written as UTF-8 with LF newlines explicitly: TOML must be UTF-8, and the
+    default encoding on Windows (cp1252) would corrupt any non-ASCII byte for
+    downstream parsers; LF matches the repo's .gitattributes eol=lf policy so the
+    identity swap restores the working tree byte-for-byte.
+    """
+    with open(TOML_PATH, "w", encoding="utf-8", newline="\n") as file:
+        file.write(
+            tomlkit.dumps(manifest)
+            .replace('["', '[\n\t"')
+            .replace("\\\\", "/")
+            .replace('", "', '",\n\t"')
+            .replace('"]', '",\n]')
+        )
+
+
+def set_manifest_identity(**fields: str) -> Dict[str, str]:
+    """Overwrite the given top-level manifest keys (e.g. id, name, tagline).
+
+    Returns the previous values so the caller can restore them afterwards.
+    """
+    with open(TOML_PATH, "r", encoding="utf-8") as file:
+        manifest = tomlkit.parse(file.read())
+
+    previous: Dict[str, str] = {}
+    for key, value in fields.items():
+        previous[key] = manifest.get(key)
+        manifest[key] = value
+
+    _write_manifest(manifest)
+    return previous
 
 
 def get_current_version() -> str:
@@ -318,14 +364,39 @@ def build(platform) -> None:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Build the ProteinBlender extension.")
+    parser.add_argument(
+        "--alpha",
+        action="store_true",
+        help=(
+            "Build the alpha 'swap' channel: temporarily rewrites the manifest to "
+            f"id='{ALPHA_ID}', name='{ALPHA_NAME}' so the zip is a separate Blender "
+            "extension for testers. The working-tree manifest is restored afterwards."
+        ),
+    )
+    args = parser.parse_args()
+
     # Prompt for version first
     new_version = prompt_for_version()
     update_version(new_version)
     print()  # Extra newline after version update messages
 
-    # for platform in build_platforms:
-    #     build(platform)
-    build(build_platforms)
+    if args.alpha:
+        # Swap identity before build() so update_toml_whls() preserves the alpha
+        # id/name, then always restore the release identity in the working tree.
+        original = set_manifest_identity(
+            id=ALPHA_ID, name=ALPHA_NAME, tagline=ALPHA_TAGLINE
+        )
+        print(f"🔬 Building ALPHA channel as id='{ALPHA_ID}', name='{ALPHA_NAME}'")
+        try:
+            build(build_platforms)
+        finally:
+            set_manifest_identity(**original)
+            print("✓ Restored release manifest identity in working tree")
+    else:
+        # for platform in build_platforms:
+        #     build(platform)
+        build(build_platforms)
 
 
 if __name__ == "__main__":

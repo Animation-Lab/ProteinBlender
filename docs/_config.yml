@@ -32,5 +32,7 @@ navigation:
     url: /poses
   - title: Keyframes
     url: /keyframes
+  - title: Alpha Testing
+    url: /alpha-testing
   - title: Repository Traffic
     url: /traffic

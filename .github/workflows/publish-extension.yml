@@ -54,25 +54,29 @@ jobs:
       - name: Generate extension repository index
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Write channel indexes straight into the Pages output:
+          #   release -> _site/extensions/index.json
+          #   alpha   -> _site/extensions/alpha/index.json
+          OUTPUT_DIR: _site/extensions
         run: |
           # Install dependencies
           pip install tomli requests
 
-          # Generate index.json with URLs pointing to GitHub Releases
+          # Generate per-channel index.json files (URLs point to GitHub Releases)
           python .github/scripts/generate_index.py
 
-          # Move to site extensions directory
-          mkdir -p _site/extensions
-          mv index.json _site/extensions/
-
-          # Verify the index was created
-          if [ -f _site/extensions/index.json ]; then
-            echo "✓ index.json generated successfully"
-            cat _site/extensions/index.json
-          else
-            echo "✗ Failed to generate index.json"
-            exit 1
-          fi
+          # Verify both channel indexes were created
+          ok=true
+          for idx in _site/extensions/index.json _site/extensions/alpha/index.json; do
+            if [ -f "$idx" ]; then
+              echo "✓ $idx generated successfully"
+              cat "$idx"
+            else
+              echo "✗ Failed to generate $idx"
+              ok=false
+            fi
+          done
+          $ok || exit 1
 
       - name: Prepare commit message
         id: commit_msg

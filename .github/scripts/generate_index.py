@@ -30,6 +30,22 @@ REPO_OWNER = "Animation-Lab"
 REPO_NAME = "ProteinBlender"
 GITHUB_API = "https://api.github.com"
 
+# One published extension repository ("channel") per extension id. Each channel
+# gets its own index.json so testers can add the alpha repo URL independently of
+# the release repo. Any id not listed here falls back to the release channel so
+# an unexpected build is never silently dropped.
+#   release -> <site>/extensions/index.json
+#   alpha   -> <site>/extensions/alpha/index.json
+CHANNELS = {
+    "proteinblender": "",
+    "proteinblender_alpha": "alpha",
+}
+DEFAULT_CHANNEL_SUBDIR = ""
+
+# Base directory the index files are written under. In CI this is set to the
+# Pages output dir (e.g. "_site/extensions"); locally it defaults to ".".
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", ".")
+
 
 def get_releases():
     """Fetch all releases from GitHub API."""
@@ -201,24 +217,30 @@ def main():
                 )
                 extensions.append(entry)
 
-    # Build the final index.json
-    index = {
-        "version": "v1",
-        "blocklist": [],
-        "data": extensions,
-    }
+    # Group entries into channels by extension id, then write one index.json per
+    # channel. Unknown ids fall back to the release channel so nothing is lost.
+    channels = {subdir: [] for subdir in set(CHANNELS.values()) | {DEFAULT_CHANNEL_SUBDIR}}
+    for entry in extensions:
+        subdir = CHANNELS.get(entry["id"], DEFAULT_CHANNEL_SUBDIR)
+        if entry["id"] not in CHANNELS:
+            print(f"  Note: id '{entry['id']}' has no channel mapping; using release channel")
+        channels[subdir].append(entry)
 
-    # Write index.json
-    output_path = Path("index.json")
-    with open(output_path, "w") as f:
-        json.dump(index, f, indent=2)
+    for subdir, entries in channels.items():
+        index = {
+            "version": "v1",
+            "blocklist": [],
+            "data": entries,
+        }
+        out_dir = Path(OUTPUT_DIR) / subdir if subdir else Path(OUTPUT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        output_path = out_dir / "index.json"
+        with open(output_path, "w") as f:
+            json.dump(index, f, indent=2)
 
-    print(f"\nGenerated {output_path} with {len(extensions)} extensions")
-
-    # Print summary
-    if extensions:
-        print("\nExtensions included:")
-        for ext in extensions:
+        label = subdir or "release"
+        print(f"\nGenerated {output_path} ({label} channel) with {len(entries)} extensions")
+        for ext in entries:
             platform = ext.get("platforms", ["all"])[0] if "platforms" in ext else "all"
             print(f"  - {ext['id']} v{ext['version']} ({platform})")
 
