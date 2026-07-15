@@ -238,6 +238,40 @@ class MoleculeWrapper:
             self.join_nodes.append(overflow)
             i += 1
 
+    def _refresh_domain_node_refs(self, parent_node_group) -> bool:
+        """Re-resolve the cached domain-mask infrastructure nodes by NAME.
+
+        Blender reallocates a node group's node collection whenever nodes are
+        added or removed — including elsewhere in the file. Duplicating a
+        molecule and then deleting the copy (which purges the copy's node
+        groups) is enough to invalidate the ``bpy`` node pointers this wrapper
+        cached at setup time (``domain_join_node`` / ``join_nodes`` /
+        ``final_not``). Dereferencing a stale pointer reads freed memory and
+        hard-crashes Blender (seen on 5.1); if it instead lands on a different
+        live node it raises a confusing KeyError (seen on 5.0 as
+        ``key "Result" not found``).
+
+        Node NAMES are stable, so re-resolve from them at use time — the same
+        approach ``get_main_style_node`` and ``_rebind_domain_infrastructure``
+        already take. Returns True if the primary join + final NOT exist (the
+        infrastructure is set up), False otherwise.
+        """
+        join = parent_node_group.nodes.get("Domain_Boolean_Join")
+        final_not = parent_node_group.nodes.get("Domain_Final_Not")
+        if join is None or final_not is None:
+            return False
+        self.domain_join_node = join
+        self.final_not = final_not
+        self.join_nodes = [join]
+        i = 2
+        while True:
+            overflow = parent_node_group.nodes.get(f"Domain_Boolean_Join_{i}")
+            if not overflow:
+                break
+            self.join_nodes.append(overflow)
+            i += 1
+        return True
+
     @property
     def object(self) -> Optional[bpy.types.Object]:
         """Get the Blender object, healing reference if needed."""
@@ -1830,7 +1864,15 @@ class MoleculeWrapper:
             parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
             if parent_modifier and parent_modifier.node_group:
                 parent_node_group = parent_modifier.node_group
-                
+
+                # Re-resolve infra node refs by name before touching them — the
+                # cached pointers may be stale (see _refresh_domain_node_refs),
+                # and reading `.name` off a stale pointer crashes Blender. If
+                # the infrastructure is already gone, there's nothing to remove.
+                if not self._refresh_domain_node_refs(parent_node_group):
+                    self.join_nodes = []
+                    self.final_not = None
+
                 # List of specific node *instances* to remove from the parent molecule's node group
                 # These are part of the domain masking infrastructure.
                 infra_node_instances_to_remove = []
@@ -2324,10 +2366,22 @@ class MoleculeWrapper:
             if not main_style_node:
                 return
             
-            # Check if domain infrastructure is set up
-            if self.domain_join_node is None:
-                return
-                
+            # Re-resolve the domain-mask infrastructure nodes by name. The
+            # cached bpy pointers (domain_join_node / join_nodes / final_not)
+            # can be invalidated — and dereferencing them crashes Blender —
+            # after an unrelated node-collection reallocation, e.g. duplicating
+            # this molecule and then deleting the copy.
+            if not self._refresh_domain_node_refs(parent_node_group):
+                # The infrastructure is missing from this node group entirely.
+                # Deleting a duplicate of this molecule tears the Join/NOT nodes
+                # out of the (aliased) group, leaving the original without them.
+                # Rebuild it (idempotent self-heal) rather than silently
+                # skipping the mask — otherwise the split "succeeds" but the
+                # domain is never actually masked out. Then re-resolve.
+                self._setup_protein_domain_infrastructure()
+                if not self._refresh_domain_node_refs(parent_node_group):
+                    return
+
             # Step 1: Create and configure chain selection node
             chain_select_name = f"Domain_Chain_Select_{domain_id}"
             chain_select = None

@@ -547,14 +547,23 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                             numeric_chain_id = str(num_id)
                             break
 
-                result = new_molecule.create_domain(
-                    chain_id=numeric_chain_id,
-                    start=domain_data['start'],
-                    end=domain_data['end'],
-                    name=domain_data['name']
+                # Copy the domain VERBATIM — do not auto-fill the rest of the
+                # chain. create_domain()'s auto_fill_chain is for interactive
+                # creation of a *partial* domain (fill the untouched remainder);
+                # here we already replicate every source domain explicitly, so
+                # auto-fill only fabricates spurious degenerate filler domains —
+                # e.g. a 0-0 "prefix filler" for a full chain that starts at
+                # residue 1, which reads to the user as "Chain A got split into
+                # two domains" on copy. See test_duplicate_preserves_domain_structure.
+                result = new_molecule._create_domain_with_params(
+                    numeric_chain_id,
+                    domain_data['start'],
+                    domain_data['end'],
+                    domain_data['name'],
+                    auto_fill_chain=False,
                 )
 
-                # create_domain returns a list of domain IDs (due to auto-fill), take the first one
+                # _create_domain_with_params may return a list of domain IDs; take the first one
                 if not result:
                     print(f"    Warning: Failed to create domain {source_domain.name}")
                     continue
