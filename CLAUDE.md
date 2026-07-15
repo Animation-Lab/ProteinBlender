@@ -71,9 +71,45 @@ blender --python dev_register.py
 - Each molecule has domains, poses, and keyframes
 
 ### Testing
-- Test scripts located in `tmp_tests/` directory
-- Run individual tests directly in Blender
-- No formal test framework currently implemented
+- Formal pytest suite in `tests/` — runs **headless inside Blender's Python**.
+- Run it: `python tests/run_tests.py` (whole suite), or a subset, e.g.
+  `python tests/run_tests.py tests/unit` / `-k domain` / `-m "not network"`.
+- Lanes: `tests/unit/` (pure logic), `tests/integration/` (operator-driven, one
+  module per subsystem), `tests/roundtrip/` (save/load via a subprocess).
+- Full guide: [tests/README.md](tests/README.md); coverage map + known
+  issues/xfails: [tests/COVERAGE.md](tests/COVERAGE.md).
+- One-time setup (per Blender install): install `pytest syrupy pytest-xdist`
+  into *Blender's* Python (see tests/README.md).
+- The old hand-run scripts (`tests/feature_audit/`, `tests/stress_test/`,
+  `tmp_tests/`) are kept for reference but are not part of the suite.
+
+## Bug-Fixing Workflow (test-first — REQUIRED)
+
+Every bug fix follows this order. Do **not** change product code before step 2.
+
+1. **Reproduce with a test.** Add an automated test to `tests/` (usually
+   `tests/integration/`) that exercises the exact reported scenario and asserts
+   the correct behaviour. Use bundled offline fixtures in `tests/data/`
+   (fetch a new PDB into it if needed) — never depend on the network.
+2. **Confirm it FAILS (red).** Run the test and verify it fails with the real
+   bug signature *before* touching product code. This proves the test actually
+   catches the bug rather than passing vacuously.
+   - Native crashes (segfault) kill the pytest process — reproduce those in a
+     **subprocess** first, and prefer a **deterministic in-process trigger**
+     for the committed test (e.g. a removed-node reference raises a catchable
+     `ReferenceError`, the analog of the native crash).
+3. **Fix** the product code — the smallest change that addresses the root
+   cause, not the symptom.
+4. **Confirm it PASSES (green)**, then run the **full suite**
+   (`python tests/run_tests.py`) to check for regressions. For
+   version-sensitive bugs, verify on both Blender 5.0 and 5.1.
+5. **Prove red→green rigour** for non-obvious fixes: confirm the test fails on
+   the pre-fix code — `git stash push -- <product-file>` → run the test →
+   `git stash pop`.
+6. **Document**: add a one-line entry to the regression section of
+   [tests/COVERAGE.md](tests/COVERAGE.md).
+
+Commits omit any AI/Co-Authored-By attribution.
 
 ## Key Concepts
 

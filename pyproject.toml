@@ -26,6 +26,24 @@ dev = ["pytest", "pytest-cov", "syrupy", "scipy", "fake-bpy-module", "IPython"]
 test = ["pytest", "pytest-cov", "syrupy", "scipy", "IPython", "pytest-xdist"]
 docs = ["quartodoc", "tomlkit", "nodepad", "jupyter", "IPython", "jupyter-cache"]
 
+[tool.pytest.ini_options]
+# The suite runs inside Blender's Python (see tests/run_blender.py). Test
+# discovery is scoped to tests/; markers are declared in tests/conftest.py.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --tb=short"
+# Only collect the new pytest suite — the legacy hand-run scripts and vendored
+# MolecularNodes tests are not part of it.
+norecursedirs = [
+    "tests/feature_audit",
+    "tests/stress_test",
+    "tests/stress_test_workdir",
+    "proteinblender/utils/molecularnodes",
+    "*.egg", "dist", "build", ".git",
+]
+
 [build-system]
 build-backend = "setuptools.build_meta"
 requires = ["setuptools>=61.0"]

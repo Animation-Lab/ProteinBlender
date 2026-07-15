@@ -60,6 +60,10 @@ htmlcov/
 .tox/
 example_pdbs/
 tmp_tests/
+# test-suite runtime artifacts (keep the modules + tests/data + __snapshots__)
+tests/**/*.verify.json
+tests/feature_audit/results/
+tests/stress_test_workdir/
 
 # Documentation
 docs/_build/

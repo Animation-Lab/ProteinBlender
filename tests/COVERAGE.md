@@ -1,0 +1,114 @@
+# Test coverage map
+
+What the suite exercises, per subsystem, and the known gaps. Regenerate the
+numbers by running `python tests/run_tests.py -q`.
+
+Current status (Blender 5.0, offline lane): **211 passing, 10 skipped,
+4 xfailed** across ~225 collected tests. Also verified on Blender 5.1.
+
+## Lanes
+
+| lane | dir | what it proves |
+|------|-----|----------------|
+| unit | `tests/unit/` | pure logic (chain maths, DNA sequence, base geometry, catenary physics) with no scene |
+| integration | `tests/integration/` | every registered subsystem operator, driven headless against a real scene |
+| roundtrip | `tests/roundtrip/` | save → reopen (fresh Blender) → state preserved |
+| smoke | `tests/test_harness_smoke.py` | the harness itself (register, reset isolation, import) |
+
+## Unit lane
+
+| module | targets |
+|--------|---------|
+| `test_chain_utils.py` | `get_chain_mapping_from_string`, `chain_mapping_to_string`, serialize/deserialize chain mappings + residue ranges — incl. the gapped-chain (A,B,D) index-vs-letter gotcha |
+| `test_dna_sequence.py` | `get_complement` (DNA/RNA), `validate_sequence`, `calculate_helix_info`, `make_wound_mask`, `_cumulative_twist`, `build_nucleic_acid` |
+| `test_canonical_geometry.py` | `build_canonical_template`, `get_canonical_templates`, purine/pyrimidine ring builders (atom counts, finite coords) |
+| `test_linker_geometry.py` | `compute_catenary_points`, `compute_zero_g_points`, `_arc_length`, `compute_random_coil_points`, `_solve_catenary_parameter`, `apply_rigid_binding_zones` |
+
+## Integration lane (subsystem → operators covered)
+
+| module | operators / behaviour |
+|--------|-----------------------|
+| `test_proteins.py` | `molecule.import_protein` (network) / offline import, `change_style` across all styles, duplicate, toggle_visibility, center_protein, delete, delete_chain, auto-domain count |
+| `test_domains.py` | `create_domain`, `update_domain_name`, `rename_domain`, `update_domain_color/style`, `copy_domain`, `split_domain` (both idnames), `merge_domains`, set/update parent, `reset_domain_transform`, `snap_pivot_to_residue`, `toggle_domain_expanded` |
+| `test_poses.py` | `molecule.create_pose/apply_pose/update_pose/rename_pose/delete_pose/apply_pose_and_keyframe`; pose-library `apply_pose/delete_pose` |
+| `test_keyframes.py` | `molecule.keyframe_protein/select_keyframe/edit_keyframe/delete_keyframe`, `jump_to_keyframe` — asserts real F-curves (4.x/5.x shim) |
+| `test_animation.py` | keyframe-selection filter (`get_keyframe_targets`/`get_filtered_keyframe_targets`), `keyframe_select_all/none_puppets` |
+| `test_puppets.py` | `create_puppet`, `edit_puppet` (RENAME), `delete_puppet`, controller parenting + move, exclusive membership, un-parent on delete |
+| `test_linkers.py` | `add_linker`, `update_linker`, `toggle_linker_visibility`, `edit_linker`, `remove_linker`, cascade-delete on puppet/chain/protein removal |
+| `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
+| `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
+| `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
+| `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
+| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `apply_representation`, `toggle_force_fields` |
+| `test_panels.py` | all 9 Panels + 2 UILists registered; `poll()` safety |
+| `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
+
+## Behaviour regressions (guard against reintroduction)
+
+- **Duplicate fabricated a spurious 0-0 domain.** Copying a freshly imported
+  protein via the PB Outliner produced a copy whose first chain gained an extra
+  degenerate `0-0` domain (read as "Chain A split into two"), because the
+  duplicate path copied each domain through `create_domain`
+  (`auto_fill_chain=True`) instead of replicating it verbatim. Fixed to call
+  `_create_domain_with_params(..., auto_fill_chain=False)`. Guarded by
+  `test_proteins.py::test_duplicate_preserves_domain_structure` (verified to
+  fail on the pre-fix code).
+
+## Crash regressions (guard against reintroduction)
+
+- **Split domain after duplicate → delete → crash.** Splitting a domain after
+  duplicating a molecule and deleting the copy dereferenced stale cached node
+  pointers in `molecule_wrapper._create_domain_mask_nodes` — a hard native
+  crash on Blender 5.1, a `KeyError: "Result" not found` on 5.0. Fixed by
+  re-resolving the domain-mask infrastructure nodes by name at use time
+  (`_refresh_domain_node_refs`) and rebuilding the infrastructure if the copy's
+  deletion tore it out of the shared node group. Guarded by
+  `test_split_domain_regression.py` (both the real workflow and a deterministic
+  stale-pointer trigger). Verified to fail on the pre-fix code on both 5.0/5.1.
+
+## Bugs this suite already surfaced (xfail → fix flips to XPASS)
+
+1. **`molecule.create_domain` crashes on a partial chain range.** When a domain
+   covers only part of a chain, `MoleculeWrapper.create_domain` auto-creates
+   filler domains and returns a **list** of ids, but
+   [`operators/domain_operators.py:62`](../proteinblender/operators/domain_operators.py#L62)
+   does `if domain_id in molecule.domains:` — hashing a list raises
+   `TypeError`. Fix: normalize the return to a list and iterate.
+   (`test_domains.py::test_create_custom_range_domain`)
+2. **`molecule.update_domain_color` reads an unregistered property.** It reads
+   `scene.domain_color`, which the addon never registers (only
+   `temp_domain_color`), so the operator raises. The working path is the object
+   property `obj.domain_color` (tested strictly).
+   (`test_domains.py::test_update_domain_color_operator_is_broken`)
+
+## Intentional xfails (design, not bugs)
+
+- `proteinblender.create_pose` and `proteinblender.create_keyframe` — need a
+  modal `invoke_props_dialog` whose per-instance selection is built in
+  `invoke()`, unreachable via `EXEC_DEFAULT` headless. The underlying
+  create paths are covered via `molecule.*` operators.
+- `edit_puppet` membership change — populates its selection collection in
+  `invoke()`. The RENAME path is tested normally.
+
+## Not reachable headless (skipped)
+
+- `set_pivot_custom` — spawns an interactive gizmo Empty and drives the move
+  tool through `context.screen.areas` (None in `--background`).
+- Panel `poll()` — 8 of 9 panels define no `poll` of their own (nothing to
+  test); `PROTEINBLENDER_PT_domain_maker`'s poll is exercised.
+- Edit-mode operators (`dna_edit_bend`/`dna_finish_bend_edit`,
+  `membrane_edit_deform`/`membrane_finish_deform`) degrade to a skip if
+  headless mode-switching fails; their non-edit siblings are asserted.
+- `draw()` for panels — no window/screen exists in `--background`, so panels
+  are checked via registration + `poll`, not rendering.
+
+## Deliberately not covered
+
+- **Undo/redo** — the prior audit (ISSUE-1) established addon operations don't
+  fully reverse through Blender's undo stack; driving it from a script is
+  unreliable. Confirm interactively in a fresh session.
+- **Visual/pixel regression** — the `geo_snapshot` fixture + `snapshot_ext.py`
+  are wired for syrupy geometry snapshots, but no image-diff baselines are
+  committed yet. Add per-feature geometry snapshots as styles stabilize.
+- **`virus_builder`** — present only as compiled `.pyc`, not registered, so
+  there's no live surface to test.
