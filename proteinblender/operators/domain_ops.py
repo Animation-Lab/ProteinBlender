@@ -1057,19 +1057,4 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
 
 
 # Operator classes to register
-CLASSES = [
-    PROTEINBLENDER_OT_split_domain_popup,
-    PROTEINBLENDER_OT_split_domain,
-    PROTEINBLENDER_OT_merge_domains,
-    PROTEINBLENDER_OT_rename_domain,
-]
 
-
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

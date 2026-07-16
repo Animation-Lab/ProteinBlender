@@ -71,17 +71,3 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
             self.report({'ERROR'}, f"Error importing file: {str(e)}")
             return {'CANCELLED'}
 
-# Classes to register
-CLASSES = [
-    MOLECULE_OT_import_local,
-]
-
-
-def register_operator_import_local() -> None:
-    """Register the local import operator."""
-    bpy.utils.register_class(MOLECULE_OT_import_local)
-
-
-def unregister_operator_import_local() -> None:
-    """Unregister the local import operator."""
-    bpy.utils.unregister_class(MOLECULE_OT_import_local) 

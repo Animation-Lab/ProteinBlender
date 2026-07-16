@@ -1036,16 +1036,6 @@ class PROTEINBLENDER_OT_delete_pose(Operator):
 
 
 # Placeholder operator to fix animation panel errors
-class PROTEINBLENDER_OT_placeholder(Operator):
-    """Placeholder for future functionality"""
-    bl_idname = "proteinblender.placeholder"
-    bl_label = "Coming Soon"
-    bl_description = "This feature will be available in a future update"
-    bl_options = {'REGISTER'}
-    
-    def execute(self, context):
-        self.report({'INFO'}, "This feature is coming soon!")
-        return {'FINISHED'}
 
 
 class PROTEINBLENDER_PT_pose_library(Panel):
@@ -1225,25 +1215,4 @@ class PROTEINBLENDER_OT_toggle_puppet_selection(Operator):
 
 
 # Register classes
-CLASSES = [
-    GroupSelectionItem,  # Register the helper class first
-    PROTEINBLENDER_OT_toggle_puppet_selection,  # Add toggle operator
-    PROTEINBLENDER_OT_create_pose,
-    PROTEINBLENDER_OT_apply_pose,
-    PROTEINBLENDER_OT_capture_pose,
-    PROTEINBLENDER_OT_delete_pose,
-    PROTEINBLENDER_OT_placeholder,  # Added placeholder operator
-    PROTEINBLENDER_PT_pose_library,
-]
 
-
-def register():
-    """Register pose library panel classes"""
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    """Unregister pose library panel classes"""
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

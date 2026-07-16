@@ -6,57 +6,6 @@ from bpy.props import IntProperty
 from ..utils.scene_manager import ProteinBlenderScene
 
 
-def get_selected_item_range(context):
-    """Get the valid range for the currently selected item"""
-    scene = context.scene
-    for item in scene.outliner_items:
-        if item.is_selected and item.item_type in ['CHAIN', 'DOMAIN']:
-            if item.item_type == 'CHAIN':
-                # Check if we have valid chain ranges
-                if item.chain_start > 0 and item.chain_end > 0 and item.chain_end >= item.chain_start:
-                    return item.chain_start, item.chain_end
-                else:
-                    # Fallback to a reasonable default range
-                    return 1, 200
-            else:  # DOMAIN
-                return item.domain_start, item.domain_end
-    return 1, 200  # Default if nothing selected
-
-
-
-
-class PROTEINBLENDER_OT_validate_domain_range(Operator):
-    """Validate and clamp domain range values"""
-    bl_idname = "proteinblender.validate_domain_range"
-    bl_label = "Validate Domain Range"
-    bl_options = {'REGISTER', 'INTERNAL'}
-    
-    def execute(self, context):
-        scene = context.scene
-        min_val, max_val = get_selected_item_range(context)
-        
-        # Clamp values to valid range
-        if scene.domain_maker_start < min_val:
-            scene.domain_maker_start = min_val
-        elif scene.domain_maker_start > max_val:
-            scene.domain_maker_start = max_val
-            
-        if scene.domain_maker_end < min_val:
-            scene.domain_maker_end = min_val
-        elif scene.domain_maker_end > max_val:
-            scene.domain_maker_end = max_val
-            
-        # Ensure start < end
-        if scene.domain_maker_start >= scene.domain_maker_end:
-            if scene.domain_maker_end > min_val:
-                scene.domain_maker_start = scene.domain_maker_end - 1
-            else:
-                scene.domain_maker_end = scene.domain_maker_start + 1
-                if scene.domain_maker_end > max_val:
-                    scene.domain_maker_end = max_val
-                    scene.domain_maker_start = max_val - 1
-        
-        return {'FINISHED'}
 
 
 class PROTEINBLENDER_PT_domain_maker(Panel):
@@ -389,21 +338,3 @@ def unregister_props():
     if hasattr(bpy.types.Scene, "domain_maker_end"):
         del bpy.types.Scene.domain_maker_end
 
-
-# Classes to register
-CLASSES = [
-    PROTEINBLENDER_OT_validate_domain_range,
-    PROTEINBLENDER_PT_domain_maker,
-]
-
-
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-    register_props()
-
-
-def unregister():
-    unregister_props()
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

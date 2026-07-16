@@ -500,12 +500,3 @@ class MOLECULE_PB_OT_apply_pose_and_keyframe(Operator):
         self.report({'INFO'}, f"Applied pose and created keyframe '{self.keyframe_name}' at frame {context.scene.frame_current}")
         return {'FINISHED'}
 
-# List of operator classes to be registered
-CLASSES = [
-    MOLECULE_PB_OT_create_pose,
-    MOLECULE_PB_OT_apply_pose,
-    MOLECULE_PB_OT_apply_pose_and_keyframe,
-    MOLECULE_PB_OT_update_pose,
-    MOLECULE_PB_OT_delete_pose,
-    MOLECULE_PB_OT_rename_pose,
-] 

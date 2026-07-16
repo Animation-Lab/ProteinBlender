@@ -1076,22 +1076,3 @@ def unregister_props():
     if hasattr(bpy.types.Scene, "visual_setup_style"):
         del bpy.types.Scene.visual_setup_style
 
-
-# Classes to register
-CLASSES = [
-    PROTEINBLENDER_OT_toggle_force_fields,
-    PROTEINBLENDER_OT_apply_representation,
-    PROTEINBLENDER_PT_visual_setup,
-]
-
-
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-    register_props()
-
-
-def unregister():
-    unregister_props()
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

@@ -77,17 +77,3 @@ class MOLECULE_OT_import_protein(Operator):
         
         return import_configs.get(props.import_method)
 
-# Classes to register
-CLASSES = [
-    MOLECULE_OT_import_protein,
-]
-
-
-def register_operator_import_protein() -> None:
-    """Register the import protein operator."""
-    bpy.utils.register_class(MOLECULE_OT_import_protein)
-
-
-def unregister_operator_import_protein() -> None:
-    """Unregister the import protein operator."""
-    bpy.utils.unregister_class(MOLECULE_OT_import_protein)

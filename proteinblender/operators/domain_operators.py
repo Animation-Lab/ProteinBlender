@@ -1252,34 +1252,4 @@ class MOLECULE_PB_OT_initialize_domain_temp_name(Operator):
         return {'FINISHED'}
 
 # List of all operator classes in this file
-classes = (
-    MOLECULE_PB_OT_create_domain,
-    MOLECULE_PB_OT_update_domain,
-    MOLECULE_PB_OT_copy_domain,
-    MOLECULE_PB_OT_delete_domain,
-    MOLECULE_PB_OT_keyframe_protein,
-    MOLECULE_PB_OT_toggle_domain_expanded,
-    MOLECULE_PB_OT_update_domain_color,
-    MOLECULE_PB_OT_update_domain_name,
-    MOLECULE_PB_OT_update_domain_style,
-    MOLECULE_PB_OT_toggle_pivot_edit,
-    MOLECULE_PB_OT_set_parent_domain,
-    MOLECULE_PB_OT_update_parent_domain,
-    MOLECULE_PB_OT_reset_domain_transform,
-    MOLECULE_PB_OT_snap_pivot_to_residue,
-    MOLECULE_PB_OT_update_domain_name_dialog,
-    MOLECULE_PB_OT_initialize_domain_temp_name,
-    MOLECULE_PB_OT_select_keyframe,
-    MOLECULE_PB_OT_delete_keyframe,
-    MOLECULE_PB_OT_edit_keyframe,
-    MOLECULE_PB_OT_split_domain
-)
-
-def register():
-    for cls in classes:
-        bpy.utils.register_class(cls)
-
-def unregister():
-    for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
 

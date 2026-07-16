@@ -35,7 +35,6 @@ from .pose_library_panel import (
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,
     PROTEINBLENDER_OT_delete_pose,
-    PROTEINBLENDER_OT_placeholder
 )
 from .animation_panel import (
     PROTEINBLENDER_KeyframeListItem,
@@ -71,7 +70,6 @@ __all__ = [
     'PROTEINBLENDER_OT_apply_pose',
     'PROTEINBLENDER_OT_capture_pose',
     'PROTEINBLENDER_OT_delete_pose',
-    'PROTEINBLENDER_OT_placeholder',
     'PROTEINBLENDER_PT_animation',
     'CLASSES',
     'register',
@@ -96,7 +94,6 @@ CLASSES = [
     PROTEINBLENDER_OT_apply_pose,
     PROTEINBLENDER_OT_capture_pose,
     PROTEINBLENDER_OT_delete_pose,
-    PROTEINBLENDER_OT_placeholder,
     PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
     PROTEINBLENDER_OT_edit_keyframe,

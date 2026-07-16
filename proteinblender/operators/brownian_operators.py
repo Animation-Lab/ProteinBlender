@@ -365,23 +365,3 @@ class PROTEINBLENDER_OT_brownian_clear_all(Operator):
         self.report({'INFO'}, f"Cleared all Brownian motion from '{controller_obj.name}'")
         return {'FINISHED'}
 
-
-# Classes to register
-CLASSES = (
-    PROTEINBLENDER_OT_brownian_settings,
-    PROTEINBLENDER_OT_brownian_disable,
-    PROTEINBLENDER_OT_brownian_rebuild,
-    PROTEINBLENDER_OT_brownian_clear_all,
-)
-
-
-def register():
-    """Register Brownian motion operators."""
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    """Unregister Brownian motion operators."""
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

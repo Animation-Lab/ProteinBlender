@@ -923,21 +923,4 @@ class PROTEINBLENDER_PT_outliner(Panel):
 
 
 # Operator and panel classes to register
-CLASSES = [
-    PROTEINBLENDER_UL_outliner,
-    PROTEINBLENDER_OT_toggle_expand,
-    PROTEINBLENDER_OT_outliner_select,
-    PROTEINBLENDER_OT_toggle_visibility,
-    PROTEINBLENDER_OT_outliner_item_info,
-    PROTEINBLENDER_PT_outliner,
-]
 
-
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

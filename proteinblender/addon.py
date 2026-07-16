@@ -11,7 +11,7 @@ from typing import List, Type
 
 from .core import CLASSES as core_classes
 from .handlers import CLASSES as handler_classes
-from .operators import CLASSES as operator_classes, register as register_operators, unregister as unregister_operators
+from .operators import CLASSES as operator_classes
 from .panels import CLASSES as panel_classes, register as register_panels, unregister as unregister_panels
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
@@ -100,7 +100,6 @@ def register() -> None:
     register_molecule_props()
     register_pose_props()  # Register pose properties
     register_panels()  # Register panel properties
-    register_operators()  # Register operator properties (includes keyframe_dialog_items)
     
     # Register domain expanded property if not already registered
     if not hasattr(bpy.types.Object, "domain_expanded"):
@@ -141,6 +140,14 @@ def register() -> None:
         bpy.app.handlers.load_post.append(purge_orphaned_molecules_on_load)
     if detect_deleted_molecules not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(detect_deleted_molecules)
+
+    # Finalises custom-pivot placement when the user clicks away from the gizmo.
+    # Registered here, with every other handler, so unregister() can take it back
+    # out: it used to be appended lazily from set_pivot_custom.execute(), which
+    # left it installed across reloads holding a reference to the stale module.
+    from .operators.pivot_operators import custom_pivot_deselection_handler
+    if custom_pivot_deselection_handler not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(custom_pivot_deselection_handler)
 
     # Register selection sync handlers
     from .handlers import selection_sync
@@ -199,6 +206,14 @@ def unregister() -> None:
     except Exception as e:
         logger.debug(f"Failed to unregister self-healing handlers: {e}")
 
+    # Unregister the custom-pivot deselection handler
+    try:
+        from .operators.pivot_operators import custom_pivot_deselection_handler
+        if custom_pivot_deselection_handler in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.remove(custom_pivot_deselection_handler)
+    except Exception as e:
+        logger.debug(f"Failed to unregister custom pivot handler: {e}")
+
     # Unregister selection sync handlers
     try:
         from .handlers import selection_sync
@@ -251,11 +266,6 @@ def unregister() -> None:
         unregister_panels()
     except Exception as e:
         logger.debug(f"Failed to unregister panel props: {e}")
-    
-    try:
-        unregister_operators()
-    except Exception as e:
-        logger.debug(f"Failed to unregister operator props: {e}")
     
     # Unregister domain expanded property
     if hasattr(bpy.types.Object, "domain_expanded"):

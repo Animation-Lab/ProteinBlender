@@ -527,13 +527,10 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
                         space.show_gizmo_object_scale = False
                 break
         
-        # Activate custom pivot mode
+        # Activate custom pivot mode. The deselection handler that finalises the
+        # placement is registered by addon.register(), not appended here.
         scene["custom_pivot_active"] = True
-        
-        # Register the deselection handler if not already registered
-        if custom_pivot_deselection_handler not in bpy.app.handlers.depsgraph_update_post:
-            bpy.app.handlers.depsgraph_update_post.append(custom_pivot_deselection_handler)
-        
+
         self.report({'INFO'}, "Move the orange sphere to position pivot. Click elsewhere to confirm.")
         
         # Force UI redraw
@@ -544,30 +541,3 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         return {'FINISHED'}
 
 
-# Classes to register
-CLASSES = [
-    PROTEINBLENDER_OT_set_pivot_first,
-    PROTEINBLENDER_OT_set_pivot_last,
-    PROTEINBLENDER_OT_set_pivot_center,
-    PROTEINBLENDER_OT_set_pivot_custom,
-]
-
-
-def register():
-    """Register pivot operators"""
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-    
-    # Register the deselection handler
-    if custom_pivot_deselection_handler not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(custom_pivot_deselection_handler)
-
-
-def unregister():
-    """Unregister pivot operators"""
-    # Remove the deselection handler
-    if custom_pivot_deselection_handler in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(custom_pivot_deselection_handler)
-    
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

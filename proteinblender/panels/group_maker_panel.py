@@ -727,22 +727,3 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         # Create the button
         op = row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
 
-
-
-# Classes to register
-CLASSES = [
-    PROTEINBLENDER_OT_create_puppet,
-    PROTEINBLENDER_OT_delete_puppet,
-    PROTEINBLENDER_OT_edit_puppet,
-    PROTEINBLENDER_PT_puppet_maker,
-]
-
-
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-
-def unregister():
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)

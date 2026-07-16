@@ -1100,31 +1100,3 @@ class PROTEINBLENDER_OT_keyframe_select_none_puppets(Operator):
 
 
 # Keep old operators for backwards compatibility but deprecated
-class PROTEINBLENDER_OT_keyframe_select_all(Operator):
-    """Deprecated - use keyframe_select_all_poses"""
-    bl_idname = "proteinblender.keyframe_select_all"
-    bl_label = "Select All (Deprecated)"
-    
-    def execute(self, context):
-        return bpy.ops.proteinblender.keyframe_select_all_poses()
-
-
-class PROTEINBLENDER_OT_keyframe_select_none(Operator):
-    """Deprecated - use keyframe_select_none_poses"""
-    bl_idname = "proteinblender.keyframe_select_none"
-    bl_label = "Select None (Deprecated)"
-
-    def execute(self, context):
-        return bpy.ops.proteinblender.keyframe_select_none_poses()
-
-
-def register():
-    """Register keyframe operators and properties"""
-    # PoseKeyframeSettings is now registered with the main CLASSES in __init__.py
-    pass
-
-
-def unregister():
-    """Unregister keyframe operators and properties"""
-    # PoseKeyframeSettings is now unregistered with the main CLASSES in __init__.py
-    pass

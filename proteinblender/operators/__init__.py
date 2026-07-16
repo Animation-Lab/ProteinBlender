@@ -60,10 +60,6 @@ from .keyframe_operators import (
     PROTEINBLENDER_OT_create_keyframe,
     PROTEINBLENDER_OT_keyframe_select_all_puppets,
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
-    PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
-    PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
-    register as register_keyframe_operators,
-    unregister as unregister_keyframe_operators,
 )
 from .pivot_operators import (
     PROTEINBLENDER_OT_set_pivot_first,
@@ -129,8 +125,6 @@ CLASSES = (
     PROTEINBLENDER_OT_create_keyframe,
     PROTEINBLENDER_OT_keyframe_select_all_puppets,
     PROTEINBLENDER_OT_keyframe_select_none_puppets,
-    PROTEINBLENDER_OT_keyframe_select_all,  # Deprecated
-    PROTEINBLENDER_OT_keyframe_select_none,  # Deprecated
     # Pivot operators
     PROTEINBLENDER_OT_set_pivot_first,
     PROTEINBLENDER_OT_set_pivot_last,
@@ -142,15 +136,3 @@ CLASSES = (
     PROTEINBLENDER_OT_brownian_rebuild,
     PROTEINBLENDER_OT_brownian_clear_all,
 )
-
-
-def register():
-    """Register operator-specific properties"""
-    # Call keyframe operators registration to add Scene properties
-    register_keyframe_operators()
-
-
-def unregister():
-    """Unregister operator-specific properties"""
-    # Call keyframe operators unregistration to remove Scene properties
-    unregister_keyframe_operators()
