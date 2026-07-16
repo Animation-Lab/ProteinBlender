@@ -86,6 +86,15 @@ Prefer driving a new test through the addon's own operator over reaching for a B
   file before registering (`roundtrip/_verify.py`). These are marked `slow`.
 - **Panels can't be drawn headless.** `--background` has no window/screen, so
   panel tests assert registration and exercise `poll()` rather than `draw()`.
+- **Never hold an outliner row across an operator.** Most PB operators finish by
+  calling `build_outliner_hierarchy`, which clears and refills
+  `scene.outliner_items`. Any row object captured beforehand is left dangling,
+  and Blender does not raise on a stale `CollectionProperty` row - it returns
+  defaults, so `item.item_id` silently reads `""` once the slot is reused. That
+  made `test_linkers.py` fail roughly half the time. Capture `item_id` strings,
+  call the operator, then re-resolve the rows you need from the rebuilt
+  collection (see `_setup_puppet_two_chains`). The same applies to
+  `molecule_list_items` and `pb2_linkers`.
 
 ## Markers
 

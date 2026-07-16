@@ -13,6 +13,8 @@ cascade cleanup handlers, then assert observable scene state. Ported and
 expanded from the retired hand-run linker audit.
 """
 
+from typing import NamedTuple
+
 import pytest
 import bpy
 import helpers as H
@@ -21,6 +23,36 @@ import helpers as H
 # --------------------------------------------------------------------------
 # Setup helpers
 # --------------------------------------------------------------------------
+
+class _Row(NamedTuple):
+    """An immutable snapshot of one ``scene.outliner_items`` row.
+
+    Most PB operators finish by calling ``build_outliner_hierarchy``, which
+    clears and refills that CollectionProperty. Any live row object held across
+    such a call is left dangling: once Blender reuses the slot, reads return
+    defaults (``item_id == ""``) rather than raising. Holding rows across
+    ``create_puppet`` made these tests fail intermittently, depending on whether
+    the freed slot had been reused yet.
+
+    Snapshot what the assertions need, and re-resolve by id when live state is
+    required.
+    """
+    item_id: str
+    name: str
+    chain_id: str
+    chain_start: int
+    chain_end: int
+
+
+def _snap(item) -> _Row:
+    return _Row(
+        item_id=item.item_id,
+        name=item.name,
+        chain_id=getattr(item, "chain_id", ""),
+        chain_start=getattr(item, "chain_start", 0),
+        chain_end=getattr(item, "chain_end", 0),
+    )
+
 
 def _build_outliner():
     H.scene_manager_module().build_outliner_hierarchy(bpy.context)
@@ -37,18 +69,29 @@ def _puppets():
 
 
 def _setup_puppet_two_chains(name="LinkerPuppet"):
-    """Import 4hhb, puppet its first two chains. Returns (mid, puppet, [c0, c1])."""
+    """Import 4hhb, puppet its first two chains. Returns (mid, puppet, [c0, c1]).
+
+    The puppet and chains come back as _Row snapshots taken *after*
+    create_puppet has rebuilt the outliner, so callers never hold a stale row.
+    """
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
-    chains = _chain_items(mid)[:2]
-    assert len(chains) == 2
-    wanted = {c.item_id for c in chains}
+    chain_ids = [it.item_id for it in _chain_items(mid)[:2]]
+    assert len(chain_ids) == 2
+    wanted = set(chain_ids)
     for it in bpy.context.scene.outliner_items:
         it.is_selected = it.item_id in wanted
     bpy.ops.proteinblender.create_puppet('EXEC_DEFAULT', puppet_name=name)
+
+    # Re-resolve from the rebuilt collection; the rows gathered above are gone.
     puppet = next((p for p in _puppets() if p.name == name), None)
     assert puppet is not None, "puppet setup failed"
-    return mid, puppet, chains
+    by_id = {it.item_id: it for it in bpy.context.scene.outliner_items}
+    chains = []
+    for cid in chain_ids:
+        assert cid in by_id, f"chain row {cid} vanished from the rebuilt outliner"
+        chains.append(_snap(by_id[cid]))
+    return mid, _snap(puppet), chains
 
 
 def _mid_residue(chain_item):
@@ -268,3 +311,40 @@ def test_cascade_delete_on_protein_deletion(scene):
 
     assert len(scene.pb2_linkers) == 0, \
         "deleting the protein should remove its dependent linkers"
+
+
+@pytest.mark.integration
+def test_update_linker_curve_is_a_noop_when_nothing_changed(scene):
+    """Re-running the live update path must reproduce the same curve.
+
+    update_linker_curve is what frame_change_post and depsgraph_update_post
+    drive, so it runs constantly. It resolved backbone direction WITHOUT passing
+    numeric_chain_id, while the three other call sites (add_linker, edit_linker,
+    linker_handlers) all pass it. On a multi-chain object that fallback can
+    resolve against the wrong chain, so the binding zones - which are built from
+    those directions - come out different from what add_linker just created.
+
+    4hhb is 4 chains, and a non-zero binding zone is what makes the direction
+    reach the geometry, so a drift shows up as moved control points.
+    """
+    from proteinblender.linkers.linker_geometry import update_linker_curve
+
+    mid, puppet, chains = _setup_puppet_two_chains()
+    linker = _add_linker(puppet, chains[0], chains[1],
+                         linker_name="L_Idempotent", binding_zone_residues=4)
+
+    curve_obj = bpy.data.objects.get(linker.curve_object_name)
+    assert curve_obj is not None
+    before = [tuple(bp.co) for bp in curve_obj.data.splines[0].bezier_points]
+    assert before, "expected control points on the created curve"
+
+    assert update_linker_curve(linker) is not False
+
+    after = [tuple(bp.co) for bp in curve_obj.data.splines[0].bezier_points]
+    assert len(after) == len(before), "update changed the control point count"
+    for i, (b, a) in enumerate(zip(before, after)):
+        for axis in range(3):
+            assert abs(b[axis] - a[axis]) < 1e-4, (
+                f"control point {i} moved on axis {axis} ({b[axis]} -> {a[axis]}) "
+                "with no input change - update resolved a different backbone direction"
+            )

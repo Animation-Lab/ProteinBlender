@@ -890,15 +890,22 @@ def update_linker_curve(linker_def) -> bool:
     obj_a = get_object_for_item(linker_def.endpoint_a_item_id)
     obj_b = get_object_for_item(linker_def.endpoint_b_item_id)
 
+    # Pass numeric_chain_id like every other get_backbone_direction call site
+    # (add_linker, edit_linker, linker_handlers). It is the resolver's most
+    # reliable input; without it this path relies on the mesh's chain_mapping_str
+    # or single-chain detection, and chain_mapping_str is documented as coming
+    # back empty for some structures (see MoleculeWrapper's "Bug C" fallback).
     start_dir = None
     end_dir = None
     if obj_a:
         start_dir = get_backbone_direction(
-            obj_a, linker_def.endpoint_a_chain, linker_def.endpoint_a_residue
+            obj_a, linker_def.endpoint_a_chain, linker_def.endpoint_a_residue,
+            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_a_item_id)
         )
     if obj_b:
         end_dir = get_backbone_direction(
-            obj_b, linker_def.endpoint_b_chain, linker_def.endpoint_b_residue
+            obj_b, linker_def.endpoint_b_chain, linker_def.endpoint_b_residue,
+            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_b_item_id)
         )
 
     # Compute new curve points based on behavior

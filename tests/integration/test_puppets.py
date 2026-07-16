@@ -67,11 +67,19 @@ def _member_objects(puppet_item):
 
 
 def _make_puppet(mid, name="Puppet_AB", n_chains=2):
-    """Create a puppet from the first *n_chains* chains of *mid*. Returns row."""
-    chains = _chain_items(mid)[:n_chains]
-    assert len(chains) >= n_chains, "need enough chains to build the puppet"
-    _select_only_items([c.item_id for c in chains])
+    """Create a puppet from the first *n_chains* chains of *mid*. Returns row.
+
+    create_puppet rebuilds scene.outliner_items, which invalidates every row
+    gathered beforehand - a stale row reads back "" instead of raising. Collect
+    the ids first, then re-resolve the rows from the rebuilt collection.
+    """
+    chain_ids = [c.item_id for c in _chain_items(mid)[:n_chains]]
+    assert len(chain_ids) >= n_chains, "need enough chains to build the puppet"
+    _select_only_items(chain_ids)
     bpy.ops.proteinblender.create_puppet('EXEC_DEFAULT', puppet_name=name)
+    by_id = {it.item_id: it for it in bpy.context.scene.outliner_items}
+    chains = [by_id[cid] for cid in chain_ids if cid in by_id]
+    assert len(chains) == len(chain_ids), "chain rows vanished from the rebuilt outliner"
     return next((p for p in _puppets() if p.name == name), None), chains
 
 
