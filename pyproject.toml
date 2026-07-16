@@ -3,10 +3,20 @@ name = "proteinblender"
 version = "1.0.6"
 description = "Visualize and animate proteins in Blender"
 readme = "README.md"
+# build.py feeds this list straight to `pip download` once per (python version,
+# platform) pair, so an open upper bound resolves to a different release per pair
+# and ships several versions of one package in a single build.
 dependencies = [
     "databpy>=0.0.18",
     "MDAnalysis>=2.7.0",
-    "biotite>=1.1",
+    # Capped below 1.7: the embedded MolecularNodes imports
+    # biotite.structure.connect_via_residue_names at module scope
+    # (utils/molecularnodes/entities/molecule/pdb.py), which biotite 1.7 removed.
+    # Uncapped, 1.0.6 shipped 1.7.1 to Blender 5.x on Windows and macOS-arm64,
+    # where importing the PDB reader raises ImportError. The cap (rather than an
+    # exact pin) keeps each platform on the newest biotite it has a wheel for -
+    # manylinux_2_17 only resolves as far as 1.4.0.
+    "biotite>=1.1,<1.7",
     "mrcfile",
     "starfile",
     "PyYAML"
