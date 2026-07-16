@@ -3,8 +3,11 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.0, offline lane): **211 passing, 10 skipped,
-4 xfailed** across ~225 collected tests. Also verified on Blender 5.1.
+Current status (Blender 5.2, offline lane): **214 passing, 10 skipped,
+4 xfailed** across ~228 collected tests. The suite was previously verified on
+Blender 5.0 and 5.1 (211 passing); the membrane Random Value fix addresses
+sockets by identity so it stays compatible with those versions, though the
+214-passing count above was re-run only on 5.2.
 
 ## Lanes
 
@@ -53,6 +56,17 @@ Current status (Blender 5.0, offline lane): **211 passing, 10 skipped,
   `_create_domain_with_params(..., auto_fill_chain=False)`. Guarded by
   `test_proteins.py::test_duplicate_preserves_domain_structure` (verified to
   fail on the pre-fix code).
+
+- **Membrane build crashed on Blender 5.2 (Random Value socket order).** The
+  membrane GN builder addressed the Random Value node's float/int Min/Max/Value
+  sockets by positional index (`inputs[2]`/`[3]`, `inputs[4]`/`[5]`,
+  `outputs[1]`/`[2]`). Blender 5.2 reordered them (a `NodeSocketInt` now sits at
+  index 2), so building any membrane raised
+  `TypeError: NodeSocketInt.default_value expected an int type, not float` and
+  every membrane operation failed. Fixed by addressing those sockets by
+  identity (name + `.type`) via `_socket_by_type`, which is stable across all of
+  Blender 5.x. Guarded by all of `test_membrane.py` (10 tests build a membrane;
+  verified to fail on the pre-fix code on 5.2 and pass after).
 
 ## Crash regressions (guard against reintroduction)
 

@@ -22,6 +22,26 @@ from typing import Tuple, List, Optional
 from mathutils import Vector
 
 
+def _socket_by_type(sockets, name, sock_type):
+    """Find a node socket by (name, RNA type), independent of positional index.
+
+    The Random Value node (``FunctionNodeRandomValue``) carries a Min/Max/Value
+    socket for every data type and exposes them all at once; only the pair
+    matching ``data_type`` is active. Their positional order is NOT stable
+    across Blender 5.x - in 5.2 a NodeSocketInt sits at index 2, so the float
+    Min/Max no longer live at indices 2/3 (which raised ``TypeError`` when a
+    float was written to the int socket). Addressing sockets by identity keeps
+    the builder working on all of Blender 5.x. ``sock_type`` is the socket
+    ``.type`` enum: ``'VALUE'`` for float, ``'INT'`` for integer.
+    """
+    for sock in sockets:
+        if sock.name == name and sock.type == sock_type:
+            return sock
+    raise RuntimeError(
+        f"membrane GN: no {sock_type} socket named {name!r} "
+        f"(have {[(s.name, s.type) for s in sockets]})")
+
+
 # 1 BU = 10 nm. The MN convention is 1 BU = 100 Å.
 NM_PER_BU = 10.0
 MAX_HOLES = 8
@@ -1239,11 +1259,13 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                      name=f"Rnd{seed_int} L{leaflet_index}")
             rv.data_type = "FLOAT"
             rv.location = loc
-            rv.inputs[2].default_value = lo            # Min (float)
-            rv.inputs[3].default_value = hi            # Max (float)
+            # Address the float Min/Max/Value sockets by identity, not index -
+            # their position shifted in Blender 5.2 (see _socket_by_type).
+            _socket_by_type(rv.inputs, "Min", "VALUE").default_value = lo
+            _socket_by_type(rv.inputs, "Max", "VALUE").default_value = hi
             rv.inputs["Seed"].default_value = seed_int + leaflet_index * 10000
             links.new(idx.outputs[0], rv.inputs["ID"])
-            return rv.outputs[1]                       # FLOAT "Value" output
+            return _socket_by_type(rv.outputs, "Value", "VALUE")  # FLOAT output
 
         # ---- Wobble channel ----------------------------------------------
         # value = sin(t · BobSpeed · freqMul · 2π + phase) · baseAmp · ampMul
@@ -1507,10 +1529,10 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                         name=f"RandPick {leaflet_index}")
         rand_pick.data_type = "INT"
         rand_pick.location = (3200, y_pos - 850)
-        # INT Min / Max live at indices 4 / 5 on FunctionNodeRandomValue
-        # (the node carries inputs for every data type; only the matching
-        # pair is active per data_type).
-        rand_pick.inputs[4].default_value = 0
+        # INT Min / Max / Value sockets are addressed by identity, not index -
+        # the node carries a set for every data type and their order is not
+        # stable across Blender 5.x (see _socket_by_type).
+        _socket_by_type(rand_pick.inputs, "Min", "INT").default_value = 0
         rand_pick.inputs["Seed"].default_value = 800 + leaflet_index * 10000
         links.new(idx.outputs[0], rand_pick.inputs["ID"])
 
@@ -1521,15 +1543,15 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         pick_max.inputs[1].default_value = 1.0
         pick_max.location = (3000, y_pos - 990)
         links.new(get_in("Lipid Variant Count"), pick_max.inputs[0])
-        links.new(pick_max.outputs[0], rand_pick.inputs[5])
+        links.new(pick_max.outputs[0], _socket_by_type(rand_pick.inputs, "Max", "INT"))
 
         iop = new("GeometryNodeInstanceOnPoints", name=f"IoP {leaflet_index}")
         iop.location = (3450, y_pos)
         iop.inputs["Pick Instance"].default_value = True
         links.new(bob_set.outputs["Geometry"], iop.inputs["Points"])
         links.new(ci_lipid.outputs["Instances"], iop.inputs["Instance"])
-        # INT output of FunctionNodeRandomValue is at index 2.
-        links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
+        links.new(_socket_by_type(rand_pick.outputs, "Value", "INT"),
+                  iop.inputs["Instance Index"])
         links.new(base_rot, iop.inputs["Rotation"])
         # IoP Scale left at its (1, 1, 1) default — lipid size is fixed.
 
