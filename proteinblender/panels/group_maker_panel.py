@@ -453,7 +453,18 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
         name="Puppet Name",
         description="Name for the puppet"
     )
-    
+
+    # Scripted/headless entry point for an EDIT membership change: a
+    # comma-separated list of the item_ids that should be the puppet's new
+    # members. When set (item_selections empty, i.e. execute() reached without
+    # the modal dialog) execute() uses this instead of the dialog collection.
+    member_ids: StringProperty(
+        name="Member IDs",
+        description="Comma-separated item ids for the new membership (used when "
+                    "the operator is run without its interactive dialog)",
+        default=""
+    )
+
     # Properties to track item selection in edit dialog
     item_selections: bpy.props.CollectionProperty(
         type=bpy.types.PropertyGroup
@@ -580,11 +591,14 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             # Update puppet name
             puppet_item.name = self.new_name
             
-            # Update puppet members
-            new_members = []
-            for item_sel in self.item_selections:
-                if item_sel.get('is_selected', False):
-                    new_members.append(item_sel.get('item_id', ''))
+            # Update puppet members. The modal dialog fills item_selections;
+            # a scripted/headless call (no dialog) passes member_ids instead.
+            if len(self.item_selections) > 0:
+                new_members = [item_sel.get('item_id', '')
+                               for item_sel in self.item_selections
+                               if item_sel.get('is_selected', False)]
+            else:
+                new_members = [m for m in self.member_ids.split(',') if m]
             
             # Update puppet membership
             puppet_item.puppet_memberships = ','.join(filter(None, new_members))

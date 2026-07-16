@@ -216,21 +216,60 @@ def test_delete_keyframe_removes_list_entry_and_fcurve(scene, sm, single_chain):
 
 
 # ---------------------------------------------------------------------------
-# proteinblender.create_keyframe — modal / target-bound, documented as skipped
+# proteinblender.create_keyframe — modal dialog, driven via its execute() path
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_create_keyframe_is_modal_and_target_bound():
-    """proteinblender.create_keyframe builds its per-target checkbox collection
-    only inside invoke() (a modal invoke_props_dialog) and needs at least one
-    puppet / DNA / membrane target. Neither is available via EXEC_DEFAULT in a
-    headless run, so the interactive create path is not directly testable here.
+def test_create_keyframe_keys_puppet_controller(scene):
+    """proteinblender.create_keyframe keyframes a ticked puppet's controller.
 
-    We still assert the operator is registered so a rename/removal is caught.
+    The operator is a modal ``invoke_props_dialog``, but the only thing
+    ``invoke()`` does that ``execute()`` needs is fill the ``puppet_items``
+    checkbox collection from the outliner. That is a real ``CollectionProperty``,
+    so we pass the rows directly via ``bpy.ops`` (``EXEC_DEFAULT``) and exercise
+    the execute() path - the multi-target keyframe aggregation - without the
+    interactive dialog.
     """
-    assert hasattr(bpy.types, "PROTEINBLENDER_OT_create_keyframe") or \
-        hasattr(bpy.ops.proteinblender, "create_keyframe")
-    pytest.skip(
-        "proteinblender.create_keyframe requires a modal dialog + a puppet/"
-        "DNA/membrane target; its selection collection is populated only in "
-        "invoke(). Covered indirectly by molecule.keyframe_protein above.")
+    # Build a puppet from two chains of 4hhb so there is a controller to key.
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    chains = [it for it in scene.outliner_items
+              if it.item_type == "CHAIN" and it.parent_id == mid][:2]
+    assert len(chains) == 2
+    for it in scene.outliner_items:
+        it.is_selected = it.item_id in {c.item_id for c in chains}
+    bpy.ops.proteinblender.create_puppet('EXEC_DEFAULT', puppet_name="KF_Puppet")
+    puppet = next(p for p in scene.outliner_items
+                  if p.item_type == "PUPPET" and p.name == "KF_Puppet")
+    controller = bpy.data.objects.get(puppet.controller_object_name)
+    assert controller is not None
+
+    frame = 12
+    res = bpy.ops.proteinblender.create_keyframe(
+        'EXEC_DEFAULT',
+        frame_number=frame,
+        puppet_items=[{
+            "name": puppet.name,  # required by bpy.ops collection conversion
+            "puppet_id": puppet.item_id,
+            "puppet_name": puppet.name,
+            "controller_object_name": controller.name,
+            "item_kind": "PUPPET",
+            "use_puppet": True,
+            "keyframe_location": True,
+            "keyframe_rotation": True,
+            "keyframe_scale": True,
+            "keyframe_pose": False,
+            "keyframe_color": False,
+            "brownian_enabled": False,
+        }],
+    )
+    assert res == {'FINISHED'}
+
+    # The controller now carries an action with transform keys at `frame`.
+    assert controller.animation_data is not None
+    action = controller.animation_data.action
+    assert action is not None
+    keyed = {round(kp.co[0])
+             for fc in _action_fcurves(action)
+             for kp in fc.keyframe_points}
+    assert frame in keyed, f"expected a key at frame {frame}, got {sorted(keyed)}"

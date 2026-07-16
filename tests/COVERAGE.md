@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **216 passing, 10 skipped,
-2 xfailed** across ~228 collected tests. The remaining 2 xfails are intentional
+Current status (Blender 5.2, offline lane): **218 passing, 9 skipped,
+1 xfailed** across ~228 collected tests. The remaining 2 xfails are intentional
 (modal-dialog operators unreachable headless - see below), not bugs. The suite
 was previously verified on Blender 5.0 and 5.1 (211 passing); the membrane
 Random Value fix addresses sockets by identity so it stays compatible with those
@@ -37,7 +37,7 @@ versions, though the 216-passing count above was re-run only on 5.2.
 | `test_poses.py` | `molecule.create_pose/apply_pose/update_pose/rename_pose/delete_pose/apply_pose_and_keyframe`; pose-library `apply_pose/delete_pose` |
 | `test_keyframes.py` | `molecule.keyframe_protein/select_keyframe/edit_keyframe/delete_keyframe`, `jump_to_keyframe` — asserts real F-curves (4.x/5.x shim) |
 | `test_animation.py` | keyframe-selection filter (`get_keyframe_targets`/`get_filtered_keyframe_targets`), `keyframe_select_all/none_puppets` |
-| `test_puppets.py` | `create_puppet`, `edit_puppet` (RENAME), `delete_puppet`, controller parenting + move, exclusive membership, un-parent on delete |
+| `test_puppets.py` | `create_puppet`, `edit_puppet` (RENAME + EDIT membership change), `delete_puppet`, controller parenting + move, exclusive membership, un-parent on delete |
 | `test_linkers.py` | `add_linker`, `update_linker`, `toggle_linker_visibility`, `edit_linker`, `remove_linker`, cascade-delete on puppet/chain/protein removal |
 | `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
 | `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
@@ -103,19 +103,34 @@ None outstanding. The two `create_domain` / `update_domain_color` bugs this
 suite originally surfaced as xfails are fixed and are now normal passing tests,
 documented under "Behaviour regressions (guard against reintroduction)".
 
+## Modal-dialog operators driven via their execute() path
+
+These operators are modal `invoke_props_dialog`s, but `invoke()` only fills a
+settable operator property that `execute()` reads, so they are driven headless
+by passing that state directly (no dialog needed):
+
+- `proteinblender.create_keyframe` — `invoke()` fills the `puppet_items`
+  `CollectionProperty`; the test passes those rows via `bpy.ops` and asserts the
+  puppet controller is keyframed (`test_keyframes.py::test_create_keyframe_keys_puppet_controller`).
+- `edit_puppet` (EDIT membership) — `invoke()` fills the `item_selections` dialog
+  collection; for scripted use `execute()` now also accepts a `member_ids`
+  string, so the test drives a membership change directly
+  (`test_puppets.py::test_edit_puppet_membership_change_via_member_ids`).
+
 ## Intentional xfails (design, not bugs)
 
-- `proteinblender.create_pose` and `proteinblender.create_keyframe` — need a
-  modal `invoke_props_dialog` whose per-instance selection is built in
-  `invoke()`, unreachable via `EXEC_DEFAULT` headless. The underlying
-  create paths are covered via `molecule.*` operators.
-- `edit_puppet` membership change — populates its selection collection in
-  `invoke()`. The RENAME path is tested normally.
+- `proteinblender.create_pose` — modal dialog whose selection state is *plain
+  Python* built in `invoke()` (`self.available_puppets` / `self.selected_puppets`),
+  so `bpy.ops` can't set it and the wrapper can't be `execute()`-driven without a
+  refactor. Its pose-creation logic is already fully covered by
+  `molecule.create_pose`, so no refactor is warranted.
 
 ## Not reachable headless (skipped)
 
-- `set_pivot_custom` — spawns an interactive gizmo Empty and drives the move
-  tool through `context.screen.areas` (None in `--background`).
+- `set_pivot_custom` — spawns an interactive gizmo Empty and finalizes through a
+  user-driven depsgraph deselection handler; needs a human, not just a screen.
+  (Its stated `context.screen.areas is None` reason is stale — screen is present
+  headless on 5.2 — but it remains genuinely interactive.)
 - Panel `poll()` — 8 of 9 panels define no `poll` of their own (nothing to
   test); `PROTEINBLENDER_PT_domain_maker`'s poll is exercised.
 - Edit-mode operators (`dna_edit_bend`/`dna_finish_bend_edit`,

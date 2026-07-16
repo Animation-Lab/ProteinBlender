@@ -221,14 +221,29 @@ def test_delete_puppet_unparents_and_removes_controller(scene):
 
 
 @pytest.mark.integration
-def test_edit_puppet_membership_change_needs_dialog(scene):
-    """edit_puppet(action='EDIT') membership editing is dialog-driven.
-
-    The EDIT path populates its ``item_selections`` collection inside ``invoke``
-    (the modal props dialog); ``execute`` reads that collection to recompute
-    membership. Driven head-less via EXEC_DEFAULT there is no populated
-    collection, so a membership change cannot be exercised without an
-    interactive window. Rename (tested separately) is the scriptable edit path.
+def test_edit_puppet_membership_change_via_member_ids(scene):
+    """edit_puppet(action='EDIT') recomputes membership from the dialog's
+    ``item_selections`` collection; run without the dialog it takes the new
+    membership from the scriptable ``member_ids`` string instead. Start with a
+    two-chain puppet, then EDIT to keep only the first chain.
     """
-    pytest.xfail("edit_puppet EDIT membership change requires the invoke props "
-                 "dialog (item_selections is populated in invoke, not execute)")
+    mid = _import_4hhb()
+    puppet, chains = _make_puppet(mid, "EP", 2)
+    pid = puppet.item_id
+    keep, drop = chains[0], chains[1]
+
+    # Sanity: both chains are members before the edit.
+    before = set((puppet.puppet_memberships or "").split(","))
+    assert {keep.item_id, drop.item_id} <= before
+
+    bpy.ops.proteinblender.edit_puppet(
+        'EXEC_DEFAULT', action='EDIT', puppet_id=pid, new_name=puppet.name,
+        member_ids=keep.item_id)
+
+    updated = next(it for it in scene.outliner_items if it.item_id == pid)
+    members = [m for m in (updated.puppet_memberships or "").split(",") if m]
+    assert keep.item_id in members, "kept chain should remain a member"
+    assert drop.item_id not in members, "unticked chain should be removed"
+    # The dropped chain's row no longer references this puppet.
+    drop_row = next(it for it in scene.outliner_items if it.item_id == drop.item_id)
+    assert pid not in (drop_row.puppet_memberships or "").split(",")

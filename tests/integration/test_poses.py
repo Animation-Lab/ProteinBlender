@@ -235,9 +235,13 @@ def test_pose_library_apply_pose_invalid_index_rejected(scene):
 @pytest.mark.integration
 @pytest.mark.xfail(
     strict=False,
-    reason="proteinblender.create_pose requires at least one puppet AND a "
-           "modal invoke_props_dialog whose per-instance selection state is "
-           "only built in invoke() — not reachable via EXEC_DEFAULT headless.",
+    reason="proteinblender.create_pose is a modal invoke_props_dialog whose "
+           "selection state (self.available_puppets / self.selected_puppets) is "
+           "plain-Python built only in invoke() - not settable via bpy.ops, so "
+           "the wrapper can't be execute()-driven without a refactor. The pose "
+           "CREATION logic it wraps is already fully covered by "
+           "molecule.create_pose (test_create_pose_* above), so no refactor is "
+           "warranted just to test the UI wrapper.",
 )
 def test_pose_library_create_pose_needs_puppet_and_dialog(scene, single_chain):
     """Documents that the pose-library create path is UI/puppet-bound. With no
