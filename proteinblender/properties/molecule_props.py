@@ -432,7 +432,6 @@ def register():
     bpy.types.Scene.molecule_list_items = CollectionProperty(type=MoleculeListItem)
     bpy.types.Scene.molecule_list_index = IntProperty()
     bpy.types.Scene.selected_molecule_id = StringProperty()
-    bpy.types.Scene.show_molecule_edit_panel = BoolProperty(default=False)
     bpy.types.Scene.edit_molecule_identifier = StringProperty(
         name="Identifier",
         description="New identifier for the molecule",
@@ -567,7 +566,6 @@ def unregister():
         "chain_selections",
         "molecule_style",
         "edit_molecule_identifier",
-        "show_molecule_edit_panel",
         "selected_molecule_id",
         "molecule_list_index",
         "molecule_list_items",

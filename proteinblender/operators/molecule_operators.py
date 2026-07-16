@@ -97,18 +97,6 @@ class MOLECULE_PB_OT_select(Operator):
             
         return {'FINISHED'}
 
-class MOLECULE_PB_OT_edit(Operator):
-    bl_idname = "molecule.edit"
-    bl_label = "Edit Molecule"
-    bl_description = "Edit this molecule"
-    
-    molecule_id: StringProperty()
-    
-    def execute(self, context):
-        context.scene.show_molecule_edit_panel = True
-        context.scene.selected_molecule_id = self.molecule_id
-        return {'FINISHED'}
-
 class MOLECULE_PB_OT_delete(Operator):
     bl_idname = "molecule.delete"
     bl_label = "Delete Molecule"

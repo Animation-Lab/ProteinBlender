@@ -626,20 +626,6 @@ class MOLECULE_PB_OT_split_domain(Operator):
 
         return {'FINISHED'}
 
-class MOLECULE_PB_OT_update_domain_ui_values(Operator):
-    bl_idname = "molecule.update_domain_ui_values"
-    bl_label = "Update Domain UI"
-    bl_description = "Update UI values to match domain values"
-    bl_options = {'INTERNAL'}
-    
-    domain_id: StringProperty()
-    
-    def execute(self, context):
-        # This operator is largely obsolete now since we're using direct domain properties
-        # It's kept for backward compatibility but doesn't need to do anything
-        print(f"UI values updated for domain {self.domain_id}")
-        return {'FINISHED'}
-
 class MOLECULE_PB_OT_update_domain_color(Operator):
     bl_idname = "molecule.update_domain_color"
     bl_label = "Update Domain Color"
@@ -1273,7 +1259,6 @@ classes = (
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_toggle_domain_expanded,
-    MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
     MOLECULE_PB_OT_update_domain_name,
     MOLECULE_PB_OT_update_domain_style,

@@ -5,7 +5,6 @@ This module exports all operator classes used by the ProteinBlender addon.
 
 from .molecule_operators import (
     MOLECULE_PB_OT_select,
-    MOLECULE_PB_OT_edit,
     MOLECULE_PB_OT_delete,
     MOLECULE_PB_OT_delete_chain,
     MOLECULE_PB_OT_update_identifier,
@@ -30,7 +29,6 @@ from .domain_operators import (
     MOLECULE_PB_OT_update_domain,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_toggle_domain_expanded,
-    MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
     MOLECULE_PB_OT_update_domain_style,
     MOLECULE_PB_OT_update_domain_name,
@@ -85,7 +83,6 @@ CLASSES = (
     PuppetKeyframeSettings,
     # Operators
     MOLECULE_PB_OT_select,
-    MOLECULE_PB_OT_edit,
     MOLECULE_PB_OT_delete,
     MOLECULE_PB_OT_delete_chain,
     MOLECULE_PB_OT_update_identifier,
@@ -107,7 +104,6 @@ CLASSES = (
     MOLECULE_PB_OT_edit_keyframe,
     MOLECULE_PB_OT_update_domain,
     MOLECULE_PB_OT_toggle_domain_expanded,
-    MOLECULE_PB_OT_update_domain_ui_values,
     MOLECULE_PB_OT_update_domain_color,
     MOLECULE_PB_OT_update_domain_style,
     MOLECULE_PB_OT_update_domain_name,

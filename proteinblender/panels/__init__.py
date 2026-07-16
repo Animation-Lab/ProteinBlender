@@ -48,12 +48,6 @@ from .animation_panel import (
     register_props as animation_register_props,
     unregister_props as animation_unregister_props,
 )
-# Direct panels - no container needed
-
-# Legacy panels (to be phased out)
-# from .molecule_edit_panel import MOLECULE_PB_PT_edit
-# from .molecule_list_panel import MOLECULE_PB_PT_list, MOLECULE_PB_OT_toggle_chain_selection
-
 # Export all for clarity
 __all__ = [
     'PROTEIN_PB_PT_import_protein',

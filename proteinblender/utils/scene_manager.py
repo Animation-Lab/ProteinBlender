@@ -334,7 +334,6 @@ class ProteinBlenderScene:
                 # scene.active_splitting_domain_id = "" # Also related to active split context
 
                 # scene.show_domain_preview = False # This relates to a different feature
-                scene.show_molecule_edit_panel = False
                 scene.edit_molecule_identifier = ""
 
             # Rebuild the outliner so chain/domain rows for the deleted

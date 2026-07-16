@@ -16,7 +16,6 @@ from .panels import CLASSES as panel_classes, register as register_panels, unreg
 from .properties.protein_props import register as register_protein_props, unregister as unregister_protein_props
 from .properties.molecule_props import register as register_molecule_props, unregister as unregister_molecule_props
 from .properties.pose_props import register as register_pose_props, unregister as unregister_pose_props
-from .properties.brownian_props import register as register_brownian_props, unregister as unregister_brownian_props
 from .linkers import register as register_linkers, unregister as unregister_linkers
 from .dna_builder import register as register_dna_builder, unregister as unregister_dna_builder
 from .membrane_builder import register as register_membrane_builder, unregister as unregister_membrane_builder
@@ -100,7 +99,6 @@ def register() -> None:
     register_protein_props()
     register_molecule_props()
     register_pose_props()  # Register pose properties
-    register_brownian_props()  # Register Brownian motion properties
     register_panels()  # Register panel properties
     register_operators()  # Register operator properties (includes keyframe_dialog_items)
     
@@ -248,11 +246,6 @@ def unregister() -> None:
         unregister_pose_props()
     except Exception as e:
         logger.debug(f"Failed to unregister pose props: {e}")
-
-    try:
-        unregister_brownian_props()
-    except Exception as e:
-        logger.debug(f"Failed to unregister brownian props: {e}")
 
     try:
         unregister_panels()

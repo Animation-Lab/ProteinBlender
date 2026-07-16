@@ -476,37 +476,6 @@ class MoleculeWrapper:
             print(f"Error changing style for {self.identifier}: {str(e)}")
             raise
 
-    def select_chains(self, chain_ids):
-        """Select specific chains in the molecule"""
-        if self.object and "chain_id" in self.object.data.attributes:
-            # Get the geometry nodes modifier
-            gn_mod = self.object.modifiers.get("MolecularNodes")
-            if gn_mod is None:
-                return
-            
-            node_group = gn_mod.node_group
-            if node_group is None:
-                return
-            
-            # Get chain attribute data
-            chain_attr = self.object.data.attributes["chain_id"]
-            numeric_chain_ids = sorted({value.value for value in chain_attr.data})
-            
-            # Get chain mapping if available
-            mapping_str = self.object.data.get("chain_mapping_str", "")
-            chain_mapping = {}
-            if mapping_str:
-                for pair in mapping_str.split(","):
-                    if ":" in pair:
-                        k, v = pair.split(":")
-                        chain_mapping[int(k)] = v
-            
-            # Map numeric IDs to author chain IDs
-            mapped_chains = {}
-            for chain_id in numeric_chain_ids:
-                mapped_chain_id = chain_mapping.get(chain_id, str(chain_id))
-                mapped_chains[str(mapped_chain_id)] = chain_id
-
     def create_domain(self, chain_id: Optional[str] = None, start: int = 1, end: int = 9999, name: Optional[str] = None) -> Optional[str]:
         """Create a new domain with default or provided values"""
 
