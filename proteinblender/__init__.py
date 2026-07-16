@@ -19,13 +19,18 @@ from typing import Dict, Set
 # build.py automatically sets this to False when building for release
 DEV_MODE = False  # Change to False for production, or set PROTEINBLENDER_DEV_MODE env var
 
-# Set up logging
+# Set up logging.
+# Guard against adding a duplicate handler when this module is re-imported (e.g. a dev
+# hot-reload, or Blender re-enabling the addon): without this the same StreamHandler
+# stacks on the module-level logger and every log line prints once per past import.
+# propagate=False keeps records from also surfacing via the root logger.
 logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
 
 if DEV_MODE:
     logger.info("🔧 DEV_MODE enabled - skipping dependency checks for faster reloads")
