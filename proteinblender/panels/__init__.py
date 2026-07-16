@@ -11,7 +11,6 @@ from .protein_outliner_panel import (
     PROTEINBLENDER_PT_outliner
 )
 from .visual_setup_panel import (
-    PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_OT_toggle_force_fields,
     PROTEINBLENDER_PT_visual_setup,
     register_props as visual_setup_register_props,
@@ -55,7 +54,6 @@ __all__ = [
     'PROTEINBLENDER_OT_toggle_visibility',
     'PROTEINBLENDER_OT_outliner_item_info',
     'PROTEINBLENDER_PT_outliner',
-    'PROTEINBLENDER_OT_apply_representation',
     'PROTEINBLENDER_OT_toggle_force_fields',
     'PROTEINBLENDER_PT_visual_setup',
     'PROTEINBLENDER_PT_domain_maker',
@@ -83,7 +81,6 @@ CLASSES = [
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
     PROTEINBLENDER_OT_outliner_item_info,
-    PROTEINBLENDER_OT_apply_representation,
     PROTEINBLENDER_OT_toggle_force_fields,
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,

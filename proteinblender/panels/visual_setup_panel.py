@@ -2,9 +2,8 @@
 
 import bpy
 from bpy.types import Panel, Operator
-from bpy.props import EnumProperty, FloatVectorProperty, StringProperty
+from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
-from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.chain_utils import get_chain_objects, get_chain_domains
 
 
@@ -77,45 +76,6 @@ class PROTEINBLENDER_OT_toggle_force_fields(Operator):
         verb = "enabled" if new_state else "disabled"
         self.report({'INFO'},
                     f"Force field {verb} on {len(ff_objs)} object(s).")
-        return {'FINISHED'}
-
-
-class PROTEINBLENDER_OT_apply_representation(Operator):
-    """Apply representation style to selected items"""
-    bl_idname = "proteinblender.apply_representation"
-    bl_label = "Apply Representation"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    style: EnumProperty(
-        name="Style",
-        items=STYLE_ITEMS,
-        default='surface'
-    )
-    
-    def execute(self, context):
-        scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Find selected items
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        
-        if not selected_items:
-            self.report({'WARNING'}, "No items selected")
-            return {'CANCELLED'}
-        
-        # Apply style based on selection context
-        for item in selected_items:
-            if item.item_type == 'PROTEIN':
-                # Apply to entire protein
-                molecule = scene_manager.molecules.get(item.item_id)
-                if molecule:
-                    # TODO: Change molecule style using MolecularNodes
-                    self.report({'INFO'}, f"Applied {self.style} to {item.name}")
-            elif item.item_type == 'DOMAIN':
-                # Apply to domain only
-                # TODO: Change domain style
-                self.report({'INFO'}, f"Applied {self.style} to {item.name}")
-        
         return {'FINISHED'}
 
 

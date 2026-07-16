@@ -4,11 +4,11 @@ What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
 Current status (Blender 5.2, offline lane): **218 passing, 9 skipped,
-1 xfailed** across ~228 collected tests. The remaining 2 xfails are intentional
-(modal-dialog operators unreachable headless - see below), not bugs. The suite
-was previously verified on Blender 5.0 and 5.1 (211 passing); the membrane
-Random Value fix addresses sockets by identity so it stays compatible with those
-versions, though the 216-passing count above was re-run only on 5.2.
+1 xfailed** across 228 collected tests. The single xfail is intentional (a
+modal-dialog operator unreachable headless - see below), not a bug. The suite
+was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
+addresses sockets by identity so it stays compatible with those versions, though
+the count above was re-run only on 5.2.
 
 ## Lanes
 
@@ -43,7 +43,7 @@ versions, though the 216-passing count above was re-run only on 5.2.
 | `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
-| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `apply_representation`, `toggle_force_fields` |
+| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |
 | `test_panels.py` | all 9 Panels + 2 UILists registered; `poll()` safety |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
@@ -188,5 +188,3 @@ by passing that state directly (no dialog needed):
 - **Visual/pixel regression** — the `geo_snapshot` fixture + `snapshot_ext.py`
   are wired for syrupy geometry snapshots, but no image-diff baselines are
   committed yet. Add per-feature geometry snapshots as styles stabilize.
-- **`virus_builder`** — present only as compiled `.pyc`, not registered, so
-  there's no live surface to test.

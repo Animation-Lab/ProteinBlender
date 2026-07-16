@@ -19,19 +19,11 @@ Covered operators:
   * proteinblender.toggle_expand
   * proteinblender.toggle_visibility
   * proteinblender.outliner_item_info
-  * proteinblender.apply_representation
   * proteinblender.toggle_force_fields
 """
 
 import bpy
 import pytest
-
-import helpers as H
-
-from proteinblender.utils.molecularnodes.style import STYLE_ITEMS
-
-STYLE_VALUES = [item[0] for item in STYLE_ITEMS]
-
 
 def _item_by_id(scene, item_id):
     for it in scene.outliner_items:
@@ -120,39 +112,6 @@ def test_outliner_item_info_runs(scene, sm, single_chain):
                if it.item_type == "PROTEIN" and it.item_id == single_chain)
     res = bpy.ops.proteinblender.outliner_item_info(item_id=pit.item_id)
     assert res == {'FINISHED'}
-
-
-# --------------------------------------------------------------------------
-# Visual Set-up: apply_representation
-# --------------------------------------------------------------------------
-
-@pytest.mark.integration
-def test_apply_representation_requires_selection(scene, sm, single_chain):
-    # Nothing selected → the operator warns and cancels.
-    for it in scene.outliner_items:
-        it.is_selected = False
-    res = bpy.ops.proteinblender.apply_representation(style="surface")
-    assert res == {'CANCELLED'}
-
-
-@pytest.mark.integration
-def test_apply_representation_finishes_with_selection(scene, sm, single_chain):
-    pit = next(it for it in scene.outliner_items
-               if it.item_type == "PROTEIN" and it.item_id == single_chain)
-    pit.is_selected = True
-    res = bpy.ops.proteinblender.apply_representation(style="surface")
-    assert res == {'FINISHED'}
-
-
-@pytest.mark.integration
-def test_apply_representation_style_enum_accepts_all_values(scene, sm, single_chain):
-    # Every advertised style value must be a legal operator argument.
-    pit = next(it for it in scene.outliner_items
-               if it.item_type == "PROTEIN" and it.item_id == single_chain)
-    pit.is_selected = True
-    for style in STYLE_VALUES:
-        res = bpy.ops.proteinblender.apply_representation(style=style)
-        assert res == {'FINISHED'}, f"apply_representation rejected style {style!r}"
 
 
 # --------------------------------------------------------------------------
