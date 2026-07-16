@@ -15,10 +15,6 @@ import gc
 import time
 from typing import Dict, Set
 
-# Development mode flag - set to True to skip dependency checks for faster reloads
-# build.py automatically sets this to False when building for release
-DEV_MODE = False  # Change to False for production, or set PROTEINBLENDER_DEV_MODE env var
-
 # Set up logging.
 # Guard against adding a duplicate handler when this module is re-imported (e.g. a dev
 # hot-reload, or Blender re-enabling the addon): without this the same StreamHandler
@@ -31,9 +27,6 @@ if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
     logger.addHandler(handler)
-
-if DEV_MODE:
-    logger.info("🔧 DEV_MODE enabled - skipping dependency checks for faster reloads")
 
 # Add user site-packages to sys.path if not already present
 user_site = site.getusersitepackages()
@@ -133,7 +126,12 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
 
         return False  # Package is installed and working
 
-    except (pkg_resources.DistributionNotFound, Exception):
+    except Exception:
+        # Deliberately broad, and deliberately NOT a tuple naming
+        # pkg_resources.DistributionNotFound: the `import pkg_resources` above is
+        # inside this try, so naming that attribute in the except clause raised
+        # NameError in exactly the case it was meant to catch. Exception already
+        # covers DistributionNotFound.
         return True  # Package not found or error checking, needs install
 
 
@@ -444,14 +442,26 @@ bl_info = {
 }
 
 # --- Constants ---
+# Runtime specs for the last-resort pip fallback (Blender installs the bundled
+# wheels itself; this only runs when that has failed and the imports are broken).
+#
+# The specs that overlap pyproject.toml's [project.dependencies] MUST match it -
+# that list drives `pip download` at build time, and this one drives pip at
+# runtime, so a disagreement means the addon repairs itself to a version it was
+# never built against. They had already drifted (databpy >=0.0.15 here vs
+# >=0.0.18 there; biotite >=1.2.0 here vs the cap there).
 REQUIRED_PACKAGES = {
     # Core scientific packages - must be installed first with compatible versions
     "numpy": ">=1.24.0",  # Blender 5.1 ships numpy 2.x; don't cap
     "scipy": ">=1.13",  # Required by biotite and MDAnalysis
 
-    # Main dependencies with relaxed version constraints
-    "biotite": ">=1.2.0",  # Use >= instead of == to allow minor updates
-    "databpy": ">=0.0.15",  # Use >= instead of == to allow patches
+    # Main dependencies
+    # biotite is capped below 1.7 for the same reason as pyproject.toml: 1.7
+    # removed structure.connect_via_residue_names, which the embedded
+    # MolecularNodes imports at module scope. Without the cap this fallback
+    # "repairs" a broken install by fetching the one version guaranteed to break.
+    "biotite": ">=1.1,<1.7",
+    "databpy": ">=0.0.18",
     "MDAnalysis": ">=2.7.0",
 
     # File format handlers
@@ -497,28 +507,31 @@ def _update_dependency_cache():
     except Exception as e:
         logger.debug(f"Could not update dependency cache: {e}")
 
-if DEV_MODE:
-    # In development mode, skip dependency checks for faster reloads
-    logger.info("Skipping dependency check in DEV_MODE")
+# Normal mode: avoid pip operations when the packages already work (running
+# pip during an addon update triggers Windows permission errors).
+#
+# The import check is authoritative: if it fails, the dependencies are not
+# usable, and no cache entry can make them usable. The cache only rate-limits
+# how often a *failing* install is retried - it must never be read as success.
+# It previously was, so a failed import plus a fresh cache entry left
+# dependencies_installed True and the addon carried on into
+# `from .addon import register`, which then died on ImportError with no
+# warning shown to the user.
+if _can_import_core_packages():
+    logger.info("All core packages importable, skipping installation")
     dependencies_installed = True
+    _update_dependency_cache()
+elif _should_check_dependencies():
+    logger.info("Core packages missing, verifying dependencies...")
+    dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
+    # Record the attempt either way, so a persistently failing install backs
+    # off instead of re-running pip on every startup.
+    _update_dependency_cache()
 else:
-    # Normal mode: Smart dependency checking to avoid permission errors during updates
-    # Step 1: Quick check if all packages are importable (no pip operations)
-    if _can_import_core_packages():
-        logger.info("All core packages importable, skipping installation")
-        dependencies_installed = True
-        # Update cache to prevent check on next startup
-        _update_dependency_cache()
-    # Step 2: Only run full pip install if imports fail AND cache expired
-    elif _should_check_dependencies():
-        logger.info("Core packages missing or cache expired, verifying dependencies...")
-        dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
-        if dependencies_installed:
-            _update_dependency_cache()
-    # Step 3: Trust the cache if it's still valid
-    else:
-        logger.info("Dependencies checked recently, skipping verification")
-        dependencies_installed = True
+    logger.warning(
+        "Core packages are not importable and an install was attempted "
+        "recently; not retrying yet.")
+    dependencies_installed = False
 
 # Dynamically set warning if dependencies failed
 if not dependencies_installed:
