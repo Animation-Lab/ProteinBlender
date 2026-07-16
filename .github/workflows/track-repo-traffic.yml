@@ -1,5 +1,11 @@
 name: Track Repository Traffic
 
+# Appends the daily GitHub traffic snapshot to the dedicated, append-only
+# `traffic-data` branch. GitHub's traffic API only returns the last 14 days, so
+# fetch_repo_traffic.py merges each run into daily.json (keyed by date) to build
+# a permanent history. The ledger lives on its own branch so it never pollutes
+# the code trunk (main) and can never be clobbered by the site build.
+
 on:
   schedule:
     - cron: '15 0 * * *'
@@ -13,9 +19,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # main: provides the fetch script (.github/scripts/fetch_repo_traffic.py).
+      - name: Checkout main (for the fetch script)
+        uses: actions/checkout@v4
+
+      # traffic-data: the append-only ledger, checked out into a subdirectory so
+      # the script and the ledger coexist. fetch-depth 0 keeps full history.
+      - name: Checkout traffic-data ledger
         uses: actions/checkout@v4
         with:
+          ref: traffic-data
+          path: _traffic
           fetch-depth: 0
 
       - name: Set up Python
@@ -27,16 +41,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.TRAFFIC_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Write the ledger into the traffic-data checkout, not the trunk.
+          TRAFFIC_DATA_DIR: ${{ github.workspace }}/_traffic
         run: python .github/scripts/fetch_repo_traffic.py
 
-      - name: Commit updated traffic data
+      - name: Commit updated ledger to traffic-data
+        working-directory: _traffic
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/data/traffic
+          git add daily.json latest.json
           if git diff --cached --quiet; then
             echo "No traffic changes to commit."
             exit 0
           fi
-          git commit -m "Update repository traffic data"
-          git push
+          git commit -m "Update repository traffic data ($(date -u +%Y-%m-%d))"
+          git push origin HEAD:traffic-data

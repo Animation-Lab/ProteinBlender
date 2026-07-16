@@ -13,7 +13,15 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = ROOT / "docs" / "data" / "traffic"
+# The traffic ledger lives on the dedicated `traffic-data` branch, not on the code
+# trunk. The Track Repository Traffic workflow checks that branch out and points
+# TRAFFIC_DATA_DIR at it; when unset we fall back to the in-repo location so the
+# script can still be run locally against a working copy.
+DATA_DIR = (
+    Path(os.environ["TRAFFIC_DATA_DIR"]).resolve()
+    if os.environ.get("TRAFFIC_DATA_DIR")
+    else ROOT / "docs" / "data" / "traffic"
+)
 DAILY_PATH = DATA_DIR / "daily.json"
 LATEST_PATH = DATA_DIR / "latest.json"
 API_BASE = "https://api.github.com"

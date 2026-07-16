@@ -46,6 +46,20 @@ jobs:
           echo "✓ Jekyll site built successfully"
           ls -lah _site/
 
+      # The traffic ledger lives on the dedicated `traffic-data` branch, not in
+      # the code trunk, so pull its JSON into the published site here. The
+      # dashboard (traffic.html) fetches /data/traffic/{daily,latest}.json.
+      - name: Add traffic ledger to the site
+        run: |
+          if git fetch origin traffic-data --depth=1 2>/dev/null; then
+            mkdir -p _site/data/traffic
+            git show origin/traffic-data:daily.json  > _site/data/traffic/daily.json
+            git show origin/traffic-data:latest.json > _site/data/traffic/latest.json
+            echo "✓ traffic ledger copied into _site/data/traffic"
+          else
+            echo "traffic-data branch not found yet; skipping traffic ledger"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
