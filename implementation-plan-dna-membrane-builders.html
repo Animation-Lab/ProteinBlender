@@ -1,0 +1,1760 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/implementation-plan-dna-membrane-builders.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/implementation-plan-dna-membrane-builders.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder","url":"https://animation-lab.github.io/ProteinBlender/implementation-plan-dna-membrane-builders.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=04a8a3e237fa86d87d3f8fd139ac25b9ed082b48">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="implementation-plan-dna-builder--phospholipid-membrane-builder">Implementation Plan: DNA Builder &amp; Phospholipid Membrane Builder</h1>
+
+<p><strong>Date:</strong> 2026-04-21
+<strong>Status:</strong> Proposal — Pending Review
+<strong>Author:</strong> Generated via Claude Code
+<strong>Target:</strong> ProteinBlender Addon (Blender 4.2+)</p>
+
+<hr />
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+<ol>
+  <li><a href="#1-executive-summary">Executive Summary</a></li>
+  <li><a href="#2-background--motivation">Background &amp; Motivation</a></li>
+  <li><a href="#3-current-state-of-the-codebase">Current State of the Codebase</a></li>
+  <li><a href="#4-phase-1-b-form-dna-builder">Phase 1: B-Form DNA Builder</a></li>
+  <li><a href="#5-phase-2-phospholipid-membrane-builder">Phase 2: Phospholipid Membrane Builder</a></li>
+  <li><a href="#6-phase-3-a-form--z-form-dna-support">Phase 3: A-Form &amp; Z-Form DNA Support</a></li>
+  <li><a href="#7-molecularnodes-upgrade-considerations">MolecularNodes Upgrade Considerations</a></li>
+  <li><a href="#8-new-file--directory-structure">New File &amp; Directory Structure</a></li>
+  <li><a href="#9-dependency-changes">Dependency Changes</a></li>
+  <li><a href="#10-risk-assessment--open-questions">Risk Assessment &amp; Open Questions</a></li>
+  <li><a href="#appendix-a-dna-helix-parameter-reference">Appendix A: DNA Helix Parameter Reference</a></li>
+  <li><a href="#appendix-b-lipid-bilayer-parameter-reference">Appendix B: Lipid Bilayer Parameter Reference</a></li>
+</ol>
+
+<hr />
+
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+
+<p>This plan introduces two new builder systems to ProteinBlender:</p>
+
+<ol>
+  <li>
+    <p><strong>DNA Builder</strong> — Generates double-stranded DNA structures from a user-supplied nucleotide sequence. The initial implementation targets B-form DNA, with A-form and Z-form as follow-up work. The user types a sequence (e.g. <code class="language-plaintext highlighter-rouge">ATCGATCG</code>), picks a form, and gets a fully visualized DNA object in the Blender scene.</p>
+  </li>
+  <li>
+    <p><strong>Phospholipid Membrane Builder</strong> — Generates a lipid bilayer from a template lipid structure. The user selects a lipid type (DPPC, POPC, etc.), specifies membrane dimensions, and gets a bilayer object placed in the scene. This is a procedural/visualization-first approach — not a simulation-grade builder.</p>
+  </li>
+</ol>
+
+<p>Both features follow the existing ProteinBlender architecture: operators with dialog-based input, integration via the MolecularNodes molecule pipeline, and full undo/redo support through the existing property system.</p>
+
+<p><strong>No MolecularNodes upgrade is required</strong> for either feature. The upstream MN (4.5.12) does not include DNA or membrane builders — these are custom features we build ourselves. An MN upgrade is discussed separately as a maintenance task.</p>
+
+<hr />
+
+<h2 id="2-background--motivation">2. Background &amp; Motivation</h2>
+
+<h3 id="why-dna">Why DNA?</h3>
+
+<p>Protein-DNA interactions are central to gene regulation, chromatin structure, and drug design. Currently, ProteinBlender can load pre-existing DNA structures from PDB files, but cannot generate DNA from a sequence. A DNA builder enables:</p>
+
+<ul>
+  <li>Quick creation of DNA fragments for protein-DNA complex scenes</li>
+  <li>B-form DNA of arbitrary length and sequence for educational/presentation use</li>
+  <li>A foundation for future features (DNA-protein docking visualization, chromatin scenes)</li>
+</ul>
+
+<h3 id="why-membranes">Why Membranes?</h3>
+
+<p>Membrane proteins represent ~30% of all proteins. Visualizing them in their native lipid bilayer context is essential for:</p>
+
+<ul>
+  <li>Showing transmembrane protein topology</li>
+  <li>Building scenes with membrane-embedded receptors (GPCRs, ion channels)</li>
+  <li>Educational content about cell membrane structure</li>
+</ul>
+
+<h3 id="why-not-just-load-from-pdb">Why Not Just Load From PDB?</h3>
+
+<ul>
+  <li>No PDB entry exists for “a 100x100 Angstrom DPPC membrane” — membranes are built, not downloaded</li>
+  <li>DNA structures in the PDB are short crystallographic fragments, not arbitrary sequences</li>
+  <li>Generating structures programmatically gives users precise control over dimensions and composition</li>
+</ul>
+
+<hr />
+
+<h2 id="3-current-state-of-the-codebase">3. Current State of the Codebase</h2>
+
+<h3 id="what-already-exists">What Already Exists</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Capability</th>
+      <th>Status</th>
+      <th>Location</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>DNA/RNA residue definitions</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/data.py</code> (lines 764-776)</td>
+    </tr>
+    <tr>
+      <td>DNA backbone atom names</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/data.py</code> (lines 824-875)</td>
+    </tr>
+    <tr>
+      <td>oxDNA trajectory import</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/entities/trajectory/dna.py</code></td>
+    </tr>
+    <tr>
+      <td>Lipid residue names (500+)</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/data.py</code> (lines 3254+)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">is_lipid</code> boolean attribute</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/entities/trajectory/trajectory.py</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">is_nucleic</code> boolean attribute</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/entities/molecule/molecule.py</code></td>
+    </tr>
+    <tr>
+      <td>SDF/MOL small molecule import</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/entities/molecule/sdf.py</code></td>
+    </tr>
+    <tr>
+      <td>AtomArray → Blender object pipeline</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/entities/molecule/molecule.py</code></td>
+    </tr>
+    <tr>
+      <td>Geometry node styling (ball+stick, ribbon, etc.)</td>
+      <td>Complete</td>
+      <td><code class="language-plaintext highlighter-rouge">utils/molecularnodes/style.py</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="what-does-not-exist">What Does NOT Exist</h3>
+
+<ul>
+  <li>No sequence-to-structure DNA generation</li>
+  <li>No DNA form (A/B/Z) builder</li>
+  <li>No phospholipid membrane assembly</li>
+  <li>No <code class="language-plaintext highlighter-rouge">proteinblender/builders/</code> directory</li>
+  <li>No SMILES/RDKit integration</li>
+</ul>
+
+<h3 id="bundled-dependencies">Bundled Dependencies</h3>
+
+<ul>
+  <li><strong>biotite 1.4.0–1.6.0</strong> — Structure I/O and filtering. Does NOT have a DNA builder.</li>
+  <li><strong>MDAnalysis 2.9.0–2.10.0</strong> — Trajectory analysis. Not needed for building.</li>
+  <li><strong>scipy</strong> — Available for numerical work (Newton solvers, rotations, etc.)</li>
+  <li><strong>numpy</strong> — Available everywhere.</li>
+</ul>
+
+<h3 id="architecture-patterns-to-follow">Architecture Patterns to Follow</h3>
+
+<p>All new features should follow the established patterns in the codebase:</p>
+
+<ul>
+  <li><strong>Operators</strong>: Class naming <code class="language-plaintext highlighter-rouge">[DOMAIN]_PB_OT_[action]</code>, use <code class="language-plaintext highlighter-rouge">invoke_props_dialog()</code> for parameter input, return <code class="language-plaintext highlighter-rouge">{'FINISHED'}</code> or <code class="language-plaintext highlighter-rouge">{'CANCELLED'}</code></li>
+  <li><strong>Registration</strong>: Add to <code class="language-plaintext highlighter-rouge">CLASSES</code> tuple in the relevant <code class="language-plaintext highlighter-rouge">__init__.py</code>; PropertyGroups must register before operators that use them</li>
+  <li><strong>Scene integration</strong>: Molecules created via <code class="language-plaintext highlighter-rouge">scene_manager.create_molecule_*</code> methods, stored in <code class="language-plaintext highlighter-rouge">ProteinBlenderScene.molecules</code> dict</li>
+  <li><strong>Property persistence</strong>: Serializable PropertyGroups for undo/redo safety; string-based object references (never Blender pointers)</li>
+  <li><strong>MolecularNodes pipeline</strong>: Build a biotite <code class="language-plaintext highlighter-rouge">AtomArray</code> → call <code class="language-plaintext highlighter-rouge">Molecule.create_object()</code> → geometry node tree is applied automatically</li>
+</ul>
+
+<hr />
+
+<h2 id="4-phase-1-b-form-dna-builder">4. Phase 1: B-Form DNA Builder</h2>
+
+<h3 id="41-overview">4.1 Overview</h3>
+
+<p>The DNA builder takes a nucleotide sequence string and generates a double-stranded B-form DNA helix as a biotite <code class="language-plaintext highlighter-rouge">AtomArray</code>. This array is then fed into the existing MolecularNodes molecule pipeline to produce a styled Blender object.</p>
+
+<h3 id="42-user-interface">4.2 User Interface</h3>
+
+<h4 id="panel-location">Panel Location</h4>
+
+<p>A new section within the existing <strong>Import panel</strong> (<code class="language-plaintext highlighter-rouge">panels/panel_import_protein.py</code>), or alternatively a new dedicated panel. The section is titled <strong>“DNA Builder”</strong> and appears below the existing protein import controls.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────┐
+│  ProteinBlender                     │
+├─────────────────────────────────────┤
+│  Import Protein                     │
+│  ┌───────────────────────────────┐  │
+│  │ PDB ID: [________]  [Import] │  │
+│  └───────────────────────────────┘  │
+│                                     │
+│  DNA Builder                        │
+│  ┌───────────────────────────────┐  │
+│  │ Sequence (5'→3'):             │  │
+│  │ [ATCGATCGATCG____________]   │  │
+│  │                               │  │
+│  │ Form:  (●) B-form             │  │
+│  │        ( ) A-form  [grayed]   │  │
+│  │        ( ) Z-form  [grayed]   │  │
+│  │                               │  │
+│  │ Name: [DNA_001___________]   │  │
+│  │                               │  │
+│  │ Style: [Ball and Stick ▾]    │  │
+│  │                               │  │
+│  │ Info: 12 bp, 40.8 Å length   │  │
+│  │       1 full turn + 1.5 bp   │  │
+│  │                               │  │
+│  │         [ Build DNA ]         │  │
+│  └───────────────────────────────┘  │
+│                                     │
+│  Membrane Builder                   │
+│  ┌───────────────────────────────┐  │
+│  │ ...                           │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+</code></pre></div></div>
+
+<h4 id="user-flow">User Flow</h4>
+
+<ol>
+  <li>User types a nucleotide sequence using characters <code class="language-plaintext highlighter-rouge">A</code>, <code class="language-plaintext highlighter-rouge">T</code>, <code class="language-plaintext highlighter-rouge">G</code>, <code class="language-plaintext highlighter-rouge">C</code> (case-insensitive)</li>
+  <li>The complementary strand is auto-generated (A↔T, G↔C)</li>
+  <li>Info line updates in real-time showing base pair count, helix length in Angstroms, and number of turns</li>
+  <li>User optionally changes the name and visualization style</li>
+  <li>User clicks <strong>“Build DNA”</strong></li>
+  <li>A double-stranded DNA object appears in the scene at the 3D cursor location</li>
+  <li>The DNA molecule is added to the ProteinBlender molecule list and outliner</li>
+</ol>
+
+<h4 id="validation-rules">Validation Rules</h4>
+
+<ul>
+  <li>Only characters <code class="language-plaintext highlighter-rouge">A</code>, <code class="language-plaintext highlighter-rouge">T</code>, <code class="language-plaintext highlighter-rouge">G</code>, <code class="language-plaintext highlighter-rouge">C</code> are accepted (whitespace and digits are stripped)</li>
+  <li>Minimum length: 2 base pairs</li>
+  <li>Maximum length: 1000 base pairs (soft limit with warning above 500)</li>
+  <li>Empty sequence shows error message in the info line</li>
+</ul>
+
+<h3 id="43-technical-implementation">4.3 Technical Implementation</h3>
+
+<h4 id="431-core-algorithm-buildersdna_builderpy">4.3.1 Core Algorithm: <code class="language-plaintext highlighter-rouge">builders/dna_builder.py</code></h4>
+
+<p>The builder constructs a B-form DNA double helix using known geometric parameters and reference nucleotide coordinates.</p>
+
+<p><strong>B-Form Parameters:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rise per base pair</td>
+      <td>3.4 Å</td>
+    </tr>
+    <tr>
+      <td>Twist per base pair</td>
+      <td>36.0° (= 360° / 10 bp per turn)</td>
+    </tr>
+    <tr>
+      <td>Base pairs per turn</td>
+      <td>10.0</td>
+    </tr>
+    <tr>
+      <td>Helix diameter</td>
+      <td>20.0 Å</td>
+    </tr>
+    <tr>
+      <td>Propeller twist</td>
+      <td>-11.4°</td>
+    </tr>
+    <tr>
+      <td>Sugar pucker</td>
+      <td>C2’-endo</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Algorithm (pseudocode):</strong></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">DNABuilder</span><span class="p">:</span>
+    <span class="s">"""Generates double-stranded DNA as a biotite AtomArray."""</span>
+
+    <span class="c1"># B-form helix parameters
+</span>    <span class="n">RISE_PER_BP</span> <span class="o">=</span> <span class="mf">3.4</span>        <span class="c1"># Angstroms
+</span>    <span class="n">TWIST_PER_BP</span> <span class="o">=</span> <span class="mf">36.0</span>      <span class="c1"># Degrees
+</span>    <span class="n">HELIX_RADIUS</span> <span class="o">=</span> <span class="mf">10.0</span>      <span class="c1"># Angstroms (half of 20 Å diameter)
+</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sequence</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">form</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s">"B"</span><span class="p">):</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">sequence</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_validate_sequence</span><span class="p">(</span><span class="n">sequence</span><span class="p">)</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">complement</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_complementary_strand</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sequence</span><span class="p">)</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">form</span> <span class="o">=</span> <span class="n">form</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">HELIX_PARAMS</span><span class="p">[</span><span class="n">form</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">biotite</span><span class="p">.</span><span class="n">structure</span><span class="p">.</span><span class="n">AtomArray</span><span class="p">:</span>
+        <span class="s">"""
+        Build the full double-stranded DNA.
+
+        Returns a biotite AtomArray with all atoms, bonds,
+        chain IDs ('A' for sense, 'B' for antisense),
+        residue IDs, and residue names.
+        """</span>
+        <span class="n">arrays</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Build sense strand (5' → 3')
+</span>        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">base</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sequence</span><span class="p">):</span>
+            <span class="n">nucleotide</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_build_nucleotide</span><span class="p">(</span>
+                <span class="n">base_char</span><span class="o">=</span><span class="n">base</span><span class="p">,</span>
+                <span class="n">strand</span><span class="o">=</span><span class="s">'sense'</span><span class="p">,</span>
+                <span class="n">position_index</span><span class="o">=</span><span class="n">i</span><span class="p">,</span>
+                <span class="n">chain_id</span><span class="o">=</span><span class="s">'A'</span><span class="p">,</span>
+                <span class="n">res_id</span><span class="o">=</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="p">)</span>
+            <span class="n">arrays</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">nucleotide</span><span class="p">)</span>
+
+        <span class="c1"># Build antisense strand (3' → 5', reversed)
+</span>        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">base</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">complement</span><span class="p">):</span>
+            <span class="n">nucleotide</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_build_nucleotide</span><span class="p">(</span>
+                <span class="n">base_char</span><span class="o">=</span><span class="n">base</span><span class="p">,</span>
+                <span class="n">strand</span><span class="o">=</span><span class="s">'antisense'</span><span class="p">,</span>
+                <span class="n">position_index</span><span class="o">=</span><span class="n">i</span><span class="p">,</span>
+                <span class="n">chain_id</span><span class="o">=</span><span class="s">'B'</span><span class="p">,</span>
+                <span class="n">res_id</span><span class="o">=</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="p">)</span>
+            <span class="n">arrays</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">nucleotide</span><span class="p">)</span>
+
+        <span class="c1"># Concatenate and add inter-residue bonds
+</span>        <span class="n">full_array</span> <span class="o">=</span> <span class="n">struc</span><span class="p">.</span><span class="n">array</span><span class="p">(</span><span class="n">arrays</span><span class="p">)</span>
+        <span class="n">full_array</span><span class="p">.</span><span class="n">bonds</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_build_bonds</span><span class="p">(</span><span class="n">full_array</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">full_array</span>
+
+    <span class="k">def</span> <span class="nf">_build_nucleotide</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">base_char</span><span class="p">,</span> <span class="n">strand</span><span class="p">,</span> <span class="n">position_index</span><span class="p">,</span> <span class="n">chain_id</span><span class="p">,</span> <span class="n">res_id</span><span class="p">):</span>
+        <span class="s">"""
+        Place a single nucleotide at the correct helical position.
+
+        1. Load reference nucleotide atom coordinates (template)
+        2. Rotate around helix axis by (twist * position_index)
+        3. Translate along helix axis by (rise * position_index)
+        4. For antisense strand: rotate 180° + apply base-pair offset
+        """</span>
+        <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_get_nucleotide_template</span><span class="p">(</span><span class="n">base_char</span><span class="p">,</span> <span class="n">strand</span><span class="p">)</span>
+
+        <span class="c1"># Helical transformation
+</span>        <span class="n">theta</span> <span class="o">=</span> <span class="n">math</span><span class="p">.</span><span class="n">radians</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'twist'</span><span class="p">]</span> <span class="o">*</span> <span class="n">position_index</span><span class="p">)</span>
+        <span class="n">z_offset</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'rise'</span><span class="p">]</span> <span class="o">*</span> <span class="n">position_index</span>
+
+        <span class="k">if</span> <span class="n">strand</span> <span class="o">==</span> <span class="s">'antisense'</span><span class="p">:</span>
+            <span class="c1"># Antisense runs in opposite direction
+</span>            <span class="c1"># Offset by ~154° (B-form base pair displacement angle)
+</span>            <span class="n">theta</span> <span class="o">+=</span> <span class="n">math</span><span class="p">.</span><span class="n">radians</span><span class="p">(</span><span class="mf">154.0</span><span class="p">)</span>
+
+        <span class="n">rotation</span> <span class="o">=</span> <span class="n">scipy</span><span class="p">.</span><span class="n">spatial</span><span class="p">.</span><span class="n">transform</span><span class="p">.</span><span class="n">Rotation</span><span class="p">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s">'z'</span><span class="p">,</span> <span class="n">theta</span><span class="p">)</span>
+        <span class="n">coords</span> <span class="o">=</span> <span class="n">rotation</span><span class="p">.</span><span class="nb">apply</span><span class="p">(</span><span class="n">template</span><span class="p">.</span><span class="n">coord</span><span class="p">)</span>
+        <span class="n">coords</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">+=</span> <span class="n">z_offset</span>
+
+        <span class="n">nucleotide</span> <span class="o">=</span> <span class="n">template</span><span class="p">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">nucleotide</span><span class="p">.</span><span class="n">coord</span> <span class="o">=</span> <span class="n">coords</span>
+        <span class="n">nucleotide</span><span class="p">.</span><span class="n">chain_id</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">chain_id</span>
+        <span class="n">nucleotide</span><span class="p">.</span><span class="n">res_id</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">res_id</span>
+        <span class="k">return</span> <span class="n">nucleotide</span>
+</code></pre></div></div>
+
+<h4 id="432-nucleotide-templates">4.3.2 Nucleotide Templates</h4>
+
+<p>We need reference atomic coordinates for each nucleotide type. Two approaches:</p>
+
+<p><strong>Option A: Extract from a known PDB structure (Recommended)</strong></p>
+
+<ol>
+  <li>Bundle a short, high-resolution B-form DNA crystal structure (e.g., PDB ID <code class="language-plaintext highlighter-rouge">1BNA</code> — the Dickerson dodecamer, 1.9 Å resolution)</li>
+  <li>At build time, parse the PDB, extract one instance of each nucleotide type (DA, DT, DG, DC)</li>
+  <li>Center each template at its glycosidic bond (C1’ atom) for consistent placement</li>
+  <li>Store extracted templates in memory (lazy-loaded singleton)</li>
+</ol>
+
+<p><strong>File:</strong> <code class="language-plaintext highlighter-rouge">proteinblender/builders/data/1BNA.pdb</code> (~50 KB, well within addon size budget)</p>
+
+<p><strong>Option B: Hardcoded coordinates</strong></p>
+
+<p>Define the ~30-35 atoms per nucleotide as coordinate arrays directly in Python. More self-contained but harder to maintain.</p>
+
+<p><strong>Recommendation:</strong> Option A. It’s cleaner, uses real crystallographic data, and biotite already has the PDB parser.</p>
+
+<h4 id="433-bond-generation">4.3.3 Bond Generation</h4>
+
+<p>Bonds are critical for ball-and-stick visualization:</p>
+
+<ol>
+  <li><strong>Intra-residue bonds</strong>: Use <code class="language-plaintext highlighter-rouge">biotite.structure.connect_via_residue_names()</code> — this already knows DNA residue bond topology from the component dictionary</li>
+  <li><strong>Backbone bonds</strong>: Connect O3’ of residue <em>i</em> to P of residue <em>i+1</em> within each strand</li>
+  <li><strong>Hydrogen bonds</strong> (optional, Phase 1 can skip): Connect base-pair hydrogen bond donors/acceptors across strands</li>
+</ol>
+
+<h4 id="434-integration-with-molecularnodes-pipeline">4.3.4 Integration with MolecularNodes Pipeline</h4>
+
+<p>Once we have a biotite <code class="language-plaintext highlighter-rouge">AtomArray</code>, we feed it into the existing pipeline:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">proteinblender.utils.molecularnodes.entities.molecule.molecule</span> <span class="kn">import</span> <span class="n">Molecule</span>
+
+<span class="k">class</span> <span class="nc">DNAMolecule</span><span class="p">(</span><span class="n">Molecule</span><span class="p">):</span>
+    <span class="s">"""Thin subclass that wraps a builder-generated AtomArray."""</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">array</span><span class="p">:</span> <span class="n">struc</span><span class="p">.</span><span class="n">AtomArray</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="c1"># Molecule base class expects an AtomArray
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">array</span> <span class="o">=</span> <span class="n">array</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="c1"># Skip file I/O — we already have the array
+</span>
+    <span class="k">def</span> <span class="nf">create_object</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="s">"ball_and_stick"</span><span class="p">,</span> <span class="p">...):</span>
+        <span class="c1"># Delegates to parent Molecule.create_object()
+</span>        <span class="c1"># which handles AtomArray → mesh → geometry nodes
+</span>        <span class="k">return</span> <span class="nb">super</span><span class="p">().</span><span class="n">create_object</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+            <span class="n">style</span><span class="o">=</span><span class="n">style</span><span class="p">,</span>
+            <span class="p">...</span>
+        <span class="p">)</span>
+</code></pre></div></div>
+
+<p>Alternatively, if subclassing <code class="language-plaintext highlighter-rouge">Molecule</code> is too coupled, we can create a standalone function:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">create_dna_blender_object</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">style</span><span class="p">):</span>
+    <span class="s">"""
+    Convert a biotite AtomArray to a Blender object
+    using MolecularNodes internals.
+    """</span>
+    <span class="n">mol</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">.</span><span class="n">__new__</span><span class="p">(</span><span class="n">Molecule</span><span class="p">)</span>
+    <span class="n">mol</span><span class="p">.</span><span class="n">array</span> <span class="o">=</span> <span class="n">array</span>
+    <span class="n">mol</span><span class="p">.</span><span class="nb">file</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="n">mol</span><span class="p">.</span><span class="n">file_path</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="n">obj</span> <span class="o">=</span> <span class="n">mol</span><span class="p">.</span><span class="n">create_object</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="n">style</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">mol</span><span class="p">,</span> <span class="n">obj</span>
+</code></pre></div></div>
+
+<p>The developer should examine <code class="language-plaintext highlighter-rouge">Molecule.__init__()</code> and <code class="language-plaintext highlighter-rouge">Molecule.create_object()</code> to determine the least-invasive integration point. The key requirement is: we have an <code class="language-plaintext highlighter-rouge">AtomArray</code> and need a Blender object with geometry nodes — the existing pipeline already does this.</p>
+
+<h4 id="435-scene-manager-integration">4.3.5 Scene Manager Integration</h4>
+
+<p>After the Blender object is created, register it with ProteinBlender’s molecule tracking:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># In the operator's execute():
+</span><span class="n">scene</span> <span class="o">=</span> <span class="n">ProteinBlenderScene</span><span class="p">.</span><span class="n">get_instance</span><span class="p">()</span>
+<span class="n">identifier</span> <span class="o">=</span> <span class="n">scene</span><span class="p">.</span><span class="n">generate_unique_id</span><span class="p">(</span><span class="s">"DNA"</span><span class="p">)</span>  <span class="c1"># e.g., "DNA_001"
+</span>
+<span class="c1"># Build the DNA
+</span><span class="n">builder</span> <span class="o">=</span> <span class="n">DNABuilder</span><span class="p">(</span><span class="n">sequence</span><span class="p">,</span> <span class="n">form</span><span class="o">=</span><span class="s">"B"</span><span class="p">)</span>
+<span class="n">array</span> <span class="o">=</span> <span class="n">builder</span><span class="p">.</span><span class="n">build</span><span class="p">()</span>
+
+<span class="c1"># Create Blender object via MN pipeline
+</span><span class="n">mol</span><span class="p">,</span> <span class="n">obj</span> <span class="o">=</span> <span class="n">create_dna_blender_object</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">identifier</span><span class="p">,</span> <span class="n">style</span><span class="p">)</span>
+
+<span class="c1"># Wrap in MoleculeWrapper
+</span><span class="n">wrapper</span> <span class="o">=</span> <span class="n">MoleculeWrapper</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">identifier</span><span class="p">)</span>
+
+<span class="c1"># Register
+</span><span class="n">scene</span><span class="p">.</span><span class="n">molecules</span><span class="p">[</span><span class="n">identifier</span><span class="p">]</span> <span class="o">=</span> <span class="n">wrapper</span>
+<span class="n">scene</span><span class="p">.</span><span class="n">_finalize_imported_molecule</span><span class="p">(</span><span class="n">wrapper</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This ensures the DNA molecule appears in:</p>
+<ul>
+  <li>The molecule list panel</li>
+  <li>The protein outliner</li>
+  <li>The domain maker (user can create domains on DNA chains)</li>
+  <li>The pose library</li>
+  <li>The animation timeline</li>
+</ul>
+
+<h3 id="44-operator-definition">4.4 Operator Definition</h3>
+
+<p><strong>File:</strong> <code class="language-plaintext highlighter-rouge">proteinblender/operators/dna_operators.py</code></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">DNA_PB_OT_build</span><span class="p">(</span><span class="n">Operator</span><span class="p">):</span>
+    <span class="n">bl_idname</span> <span class="o">=</span> <span class="s">"dna.build"</span>
+    <span class="n">bl_label</span> <span class="o">=</span> <span class="s">"Build DNA"</span>
+    <span class="n">bl_description</span> <span class="o">=</span> <span class="s">"Generate a double-stranded DNA helix from a nucleotide sequence"</span>
+    <span class="n">bl_options</span> <span class="o">=</span> <span class="p">{</span><span class="s">'REGISTER'</span><span class="p">,</span> <span class="s">'UNDO'</span><span class="p">}</span>
+
+    <span class="n">sequence</span><span class="p">:</span> <span class="n">StringProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Sequence (5'→3')"</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s">"Nucleotide sequence using A, T, G, C characters"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">"ATCGATCG"</span>
+    <span class="p">)</span>
+    <span class="n">form</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Form"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'B'</span><span class="p">,</span> <span class="s">"B-form"</span><span class="p">,</span> <span class="s">"Standard B-form DNA (most common)"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'A'</span><span class="p">,</span> <span class="s">"A-form"</span><span class="p">,</span> <span class="s">"A-form DNA (dehydrated, RNA-like) [Coming Soon]"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'Z'</span><span class="p">,</span> <span class="s">"Z-form"</span><span class="p">,</span> <span class="s">"Z-form DNA (left-handed) [Coming Soon]"</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'B'</span>
+    <span class="p">)</span>
+    <span class="n">name</span><span class="p">:</span> <span class="n">StringProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Name"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">"DNA"</span>
+    <span class="p">)</span>
+    <span class="n">style</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Style"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'ball_and_stick'</span><span class="p">,</span> <span class="s">"Ball and Stick"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'cartoon'</span><span class="p">,</span> <span class="s">"Cartoon"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'ribbon'</span><span class="p">,</span> <span class="s">"Ribbon"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'spheres'</span><span class="p">,</span> <span class="s">"Spheres (VDW)"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'sticks'</span><span class="p">,</span> <span class="s">"Sticks"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'surface'</span><span class="p">,</span> <span class="s">"Surface"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'ball_and_stick'</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">invoke</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">context</span><span class="p">.</span><span class="n">window_manager</span><span class="p">.</span><span class="n">invoke_props_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">350</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">draw</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="n">layout</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">layout</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"sequence"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"form"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"name"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"style"</span><span class="p">)</span>
+
+        <span class="c1"># Info readout
+</span>        <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_clean_sequence</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sequence</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">seq</span><span class="p">:</span>
+            <span class="n">bp</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+            <span class="n">length_a</span> <span class="o">=</span> <span class="n">bp</span> <span class="o">*</span> <span class="mf">3.4</span>  <span class="c1"># B-form rise
+</span>            <span class="n">turns</span> <span class="o">=</span> <span class="n">bp</span> <span class="o">/</span> <span class="mf">10.0</span>
+            <span class="n">box</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">box</span><span class="p">()</span>
+            <span class="n">box</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s">"</span><span class="si">{</span><span class="n">bp</span><span class="si">}</span><span class="s"> base pairs, </span><span class="si">{</span><span class="n">length_a</span><span class="si">:</span><span class="p">.</span><span class="mi">1</span><span class="n">f</span><span class="si">}</span><span class="s"> Angstrom length"</span><span class="p">)</span>
+            <span class="n">box</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s">"</span><span class="si">{</span><span class="n">turns</span><span class="si">:</span><span class="p">.</span><span class="mi">1</span><span class="n">f</span><span class="si">}</span><span class="s"> helical turns"</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">layout</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s">"Enter a valid sequence (A, T, G, C)"</span><span class="p">,</span> <span class="n">icon</span><span class="o">=</span><span class="s">'ERROR'</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_clean_sequence</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sequence</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">seq</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'ERROR'</span><span class="p">},</span> <span class="s">"Invalid sequence. Use only A, T, G, C characters."</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'CANCELLED'</span><span class="p">}</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'ERROR'</span><span class="p">},</span> <span class="s">"Sequence must be at least 2 nucleotides."</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'CANCELLED'</span><span class="p">}</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1000</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'WARNING'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"Long sequence (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span><span class="si">}</span><span class="s"> bp). This may be slow."</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="p">.</span><span class="n">form</span> <span class="o">!=</span> <span class="s">'B'</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'ERROR'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"</span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">form</span><span class="si">}</span><span class="s">-form DNA is not yet implemented."</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'CANCELLED'</span><span class="p">}</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">builder</span> <span class="o">=</span> <span class="n">DNABuilder</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">form</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">form</span><span class="p">)</span>
+            <span class="n">array</span> <span class="o">=</span> <span class="n">builder</span><span class="p">.</span><span class="n">build</span><span class="p">()</span>
+            <span class="c1"># ... create object and register (see 4.3.5)
+</span>            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'INFO'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"Created </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span><span class="si">}</span><span class="s"> bp </span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">form</span><span class="si">}</span><span class="s">-form DNA: </span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">name</span><span class="si">}</span><span class="s">"</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'FINISHED'</span><span class="p">}</span>
+        <span class="k">except</span> <span class="nb">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'ERROR'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"DNA build failed: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s">"</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'CANCELLED'</span><span class="p">}</span>
+
+    <span class="o">@</span><span class="nb">staticmethod</span>
+    <span class="k">def</span> <span class="nf">_clean_sequence</span><span class="p">(</span><span class="n">seq</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="s">"""Strip whitespace/digits, uppercase, validate characters."""</span>
+        <span class="n">cleaned</span> <span class="o">=</span> <span class="s">''</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">seq</span><span class="p">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="s">'ATGC'</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">cleaned</span>
+</code></pre></div></div>
+
+<h3 id="45-panel-integration">4.5 Panel Integration</h3>
+
+<p><strong>File:</strong> <code class="language-plaintext highlighter-rouge">proteinblender/panels/builder_panel.py</code></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">PROTEINBLENDER_PT_builders</span><span class="p">(</span><span class="n">Panel</span><span class="p">):</span>
+    <span class="n">bl_label</span> <span class="o">=</span> <span class="s">"Builders"</span>
+    <span class="n">bl_idname</span> <span class="o">=</span> <span class="s">"PROTEINBLENDER_PT_builders"</span>
+    <span class="n">bl_space_type</span> <span class="o">=</span> <span class="s">'PROPERTIES'</span>
+    <span class="n">bl_region_type</span> <span class="o">=</span> <span class="s">'WINDOW'</span>
+    <span class="n">bl_context</span> <span class="o">=</span> <span class="s">"scene"</span>
+    <span class="n">bl_parent_id</span> <span class="o">=</span> <span class="s">"PROTEINBLENDER_PT_main"</span>  <span class="c1"># Nest under main panel
+</span>    <span class="n">bl_options</span> <span class="o">=</span> <span class="p">{</span><span class="s">'DEFAULT_CLOSED'</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">draw</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="n">layout</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">layout</span>
+        <span class="n">props</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">scene</span><span class="p">.</span><span class="n">pb_builder_props</span>
+
+        <span class="c1"># DNA Builder section
+</span>        <span class="n">box</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">box</span><span class="p">()</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">box</span><span class="p">.</span><span class="n">row</span><span class="p">()</span>
+        <span class="n">row</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s">"DNA Builder"</span><span class="p">,</span> <span class="n">icon</span><span class="o">=</span><span class="s">'RNA'</span><span class="p">)</span>
+
+        <span class="n">box</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="n">props</span><span class="p">,</span> <span class="s">"dna_sequence"</span><span class="p">)</span>
+        <span class="n">box</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="n">props</span><span class="p">,</span> <span class="s">"dna_form"</span><span class="p">)</span>
+        <span class="n">box</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="n">props</span><span class="p">,</span> <span class="s">"dna_style"</span><span class="p">)</span>
+
+        <span class="c1"># Info readout
+</span>        <span class="n">seq</span> <span class="o">=</span> <span class="s">''</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">props</span><span class="p">.</span><span class="n">dna_sequence</span><span class="p">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="s">'ATGC'</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">seq</span><span class="p">:</span>
+            <span class="n">info_box</span> <span class="o">=</span> <span class="n">box</span><span class="p">.</span><span class="n">box</span><span class="p">()</span>
+            <span class="n">bp</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+            <span class="n">info_box</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s">"</span><span class="si">{</span><span class="n">bp</span><span class="si">}</span><span class="s"> bp | </span><span class="si">{</span><span class="n">bp</span> <span class="o">*</span> <span class="mf">3.4</span><span class="si">:</span><span class="p">.</span><span class="mi">1</span><span class="n">f</span><span class="si">}</span><span class="s"> Angstrom | </span><span class="si">{</span><span class="n">bp</span><span class="o">/</span><span class="mi">10</span><span class="si">:</span><span class="p">.</span><span class="mi">1</span><span class="n">f</span><span class="si">}</span><span class="s"> turns"</span><span class="p">)</span>
+        
+        <span class="n">box</span><span class="p">.</span><span class="n">operator</span><span class="p">(</span><span class="s">"dna.build"</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s">"Build DNA"</span><span class="p">,</span> <span class="n">icon</span><span class="o">=</span><span class="s">'MESH_CYLINDER'</span><span class="p">)</span>
+
+        <span class="n">layout</span><span class="p">.</span><span class="n">separator</span><span class="p">()</span>
+
+        <span class="c1"># Membrane Builder section (Phase 2)
+</span>        <span class="n">box</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">box</span><span class="p">()</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">box</span><span class="p">.</span><span class="n">row</span><span class="p">()</span>
+        <span class="n">row</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s">"Membrane Builder"</span><span class="p">,</span> <span class="n">icon</span><span class="o">=</span><span class="s">'SURFACE_NSPHERE'</span><span class="p">)</span>
+        <span class="c1"># ... (see Phase 2)
+</span></code></pre></div></div>
+
+<h3 id="46-properties">4.6 Properties</h3>
+
+<p><strong>File:</strong> <code class="language-plaintext highlighter-rouge">proteinblender/properties/builder_props.py</code></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">BuilderProperties</span><span class="p">(</span><span class="n">PropertyGroup</span><span class="p">):</span>
+    <span class="s">"""Properties for the DNA and Membrane builder panels."""</span>
+
+    <span class="c1"># DNA Builder
+</span>    <span class="n">dna_sequence</span><span class="p">:</span> <span class="n">StringProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Sequence (5'→3')"</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s">"Nucleotide sequence (A, T, G, C)"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">"ATCGATCG"</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dna_form</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Form"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'B'</span><span class="p">,</span> <span class="s">"B-form"</span><span class="p">,</span> <span class="s">"Standard right-handed B-form DNA"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'A'</span><span class="p">,</span> <span class="s">"A-form"</span><span class="p">,</span> <span class="s">"A-form DNA (coming soon)"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'Z'</span><span class="p">,</span> <span class="s">"Z-form"</span><span class="p">,</span> <span class="s">"Left-handed Z-form DNA (coming soon)"</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'B'</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dna_style</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Style"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'ball_and_stick'</span><span class="p">,</span> <span class="s">"Ball and Stick"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'cartoon'</span><span class="p">,</span> <span class="s">"Cartoon"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'ribbon'</span><span class="p">,</span> <span class="s">"Ribbon"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'spheres'</span><span class="p">,</span> <span class="s">"Spheres"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'sticks'</span><span class="p">,</span> <span class="s">"Sticks"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'ball_and_stick'</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Membrane Builder (Phase 2 — see section 5)
+</span>    <span class="n">membrane_lipid_type</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(...)</span>
+    <span class="n">membrane_size_x</span><span class="p">:</span> <span class="n">FloatProperty</span><span class="p">(...)</span>
+    <span class="n">membrane_size_y</span><span class="p">:</span> <span class="n">FloatProperty</span><span class="p">(...)</span>
+    <span class="c1"># ... etc.
+</span></code></pre></div></div>
+
+<p>Register in <code class="language-plaintext highlighter-rouge">proteinblender/properties/__init__.py</code> and attach to <code class="language-plaintext highlighter-rouge">bpy.types.Scene</code> as <code class="language-plaintext highlighter-rouge">pb_builder_props</code>.</p>
+
+<h3 id="47-testing-strategy">4.7 Testing Strategy</h3>
+
+<ol>
+  <li><strong>Unit test</strong> (<code class="language-plaintext highlighter-rouge">tmp_tests/test_dna_builder.py</code>): Run in Blender Python console
+    <ul>
+      <li>Build a 10 bp sequence, verify atom count matches expected (2 strands x ~30 atoms/nucleotide x 10 residues)</li>
+      <li>Verify chain IDs are ‘A’ and ‘B’</li>
+      <li>Verify rise between consecutive base pairs is ~3.4 Å</li>
+      <li>Verify total helix length is ~34 Å for 10 bp</li>
+      <li>Verify complementary strand correctness</li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Visual test</strong>: Build DNA, apply ball-and-stick style, visually confirm double helix shape</p>
+  </li>
+  <li><strong>Integration test</strong>: Build DNA, verify it appears in molecule list, can create domains, can animate</li>
+</ol>
+
+<h3 id="48-estimated-scope">4.8 Estimated Scope</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>Files</th>
+      <th>Complexity</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">builders/dna_builder.py</code></td>
+      <td>1 new file (~300-400 lines)</td>
+      <td>High — core algorithm</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">builders/data/1BNA.pdb</code></td>
+      <td>1 bundled data file</td>
+      <td>None — static asset</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">builders/__init__.py</code></td>
+      <td>1 new file</td>
+      <td>Trivial</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">operators/dna_operators.py</code></td>
+      <td>1 new file (~100-150 lines)</td>
+      <td>Medium</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">panels/builder_panel.py</code></td>
+      <td>1 new file (~80-120 lines)</td>
+      <td>Medium</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">properties/builder_props.py</code></td>
+      <td>1 new file (~50-80 lines)</td>
+      <td>Low</td>
+    </tr>
+    <tr>
+      <td>Registration changes</td>
+      <td>3 existing files modified</td>
+      <td>Low</td>
+    </tr>
+    <tr>
+      <td>Scene manager changes</td>
+      <td>1 existing file modified</td>
+      <td>Low-Medium</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="5-phase-2-phospholipid-membrane-builder">5. Phase 2: Phospholipid Membrane Builder</h2>
+
+<h3 id="51-overview">5.1 Overview</h3>
+
+<p>The membrane builder creates a lipid bilayer by replicating a template lipid structure on a 2D grid. This is a <strong>visualization-oriented</strong> approach — it produces a geometrically correct bilayer for rendering, not a simulation-ready system with proper forcefield parameters.</p>
+
+<h3 id="52-user-interface">5.2 User Interface</h3>
+
+<p>Added to the same <strong>Builders</strong> panel as the DNA builder:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────┐
+│  Membrane Builder                   │
+│  ┌───────────────────────────────┐  │
+│  │ Lipid Type: [DPPC ▾]         │  │
+│  │                               │  │
+│  │ Dimensions:                   │  │
+│  │   X: [100.0] Angstrom        │  │
+│  │   Y: [100.0] Angstrom        │  │
+│  │                               │  │
+│  │ Composition:                  │  │
+│  │   ☑ Single lipid type        │  │
+│  │   ☐ Mixed (advanced)         │  │
+│  │                               │  │
+│  │ Options:                      │  │
+│  │   ☑ Randomize rotation       │  │
+│  │   ☐ Add solvent shell        │  │
+│  │                               │  │
+│  │ Name: [Membrane_001_____]    │  │
+│  │ Style: [Ball and Stick ▾]    │  │
+│  │                               │  │
+│  │ Info: 15x15 grid, 225 lipids │  │
+│  │       per leaflet             │  │
+│  │                               │  │
+│  │     [ Build Membrane ]        │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+</code></pre></div></div>
+
+<h4 id="user-flow-1">User Flow</h4>
+
+<ol>
+  <li>User selects a lipid type from the dropdown (DPPC, POPC, DOPE, cholesterol, etc.)</li>
+  <li>User specifies membrane X and Y dimensions in Angstroms</li>
+  <li>Info line shows the resulting grid size and lipid count</li>
+  <li>User clicks <strong>“Build Membrane”</strong></li>
+  <li>A bilayer object appears in the scene — two leaflets of lipids oriented head-out, tails-in</li>
+  <li>The membrane is registered in the molecule list</li>
+</ol>
+
+<h4 id="advanced-option-mixed-composition">Advanced Option: Mixed Composition</h4>
+
+<p>When “Mixed” is enabled, additional controls appear:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>│  Composition (Mixed):             │
+│    DPPC: [70] %                   │
+│    Cholesterol: [30] %            │
+│    [+ Add Lipid Type]             │
+</code></pre></div></div>
+
+<p>This is a stretch goal for Phase 2. Single-type membranes come first.</p>
+
+<h3 id="53-technical-implementation">5.3 Technical Implementation</h3>
+
+<h4 id="531-approach-template-replication">5.3.1 Approach: Template Replication</h4>
+
+<p>The builder works by:</p>
+
+<ol>
+  <li><strong>Loading a template lipid</strong> — a single lipid molecule from a bundled PDB file</li>
+  <li><strong>Defining the grid</strong> — compute how many lipids fit in the requested X × Y area based on area-per-lipid</li>
+  <li><strong>Placing lipids on a 2D grid</strong> — for each grid position:
+    <ul>
+      <li>Clone the template</li>
+      <li>Translate to grid position (X, Y)</li>
+      <li>Randomize rotation around the membrane normal (Z-axis) if enabled</li>
+    </ul>
+  </li>
+  <li><strong>Creating both leaflets</strong> — the upper leaflet is the original grid; the lower leaflet is a copy rotated 180° around the X-axis and offset by the bilayer thickness</li>
+</ol>
+
+<h4 id="532-core-algorithm-buildersmembrane_builderpy">5.3.2 Core Algorithm: <code class="language-plaintext highlighter-rouge">builders/membrane_builder.py</code></h4>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">MembraneBuilder</span><span class="p">:</span>
+    <span class="s">"""Generates a lipid bilayer from a template lipid structure."""</span>
+
+    <span class="c1"># Default parameters (DPPC)
+</span>    <span class="n">LIPID_PARAMS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s">'DPPC'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s">'area_per_lipid'</span><span class="p">:</span> <span class="mf">65.0</span><span class="p">,</span>    <span class="c1"># Angstrom^2
+</span>            <span class="s">'bilayer_thickness'</span><span class="p">:</span> <span class="mf">34.3</span><span class="p">,</span>  <span class="c1"># Angstrom (head-to-head)
+</span>            <span class="s">'template_file'</span><span class="p">:</span> <span class="s">'DPPC.pdb'</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s">'POPC'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s">'area_per_lipid'</span><span class="p">:</span> <span class="mf">68.3</span><span class="p">,</span>
+            <span class="s">'bilayer_thickness'</span><span class="p">:</span> <span class="mf">36.5</span><span class="p">,</span>
+            <span class="s">'template_file'</span><span class="p">:</span> <span class="s">'POPC.pdb'</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s">'DOPE'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s">'area_per_lipid'</span><span class="p">:</span> <span class="mf">69.0</span><span class="p">,</span>
+            <span class="s">'bilayer_thickness'</span><span class="p">:</span> <span class="mf">35.0</span><span class="p">,</span>
+            <span class="s">'template_file'</span><span class="p">:</span> <span class="s">'DOPE.pdb'</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s">'CHL1'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s">'area_per_lipid'</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">,</span>
+            <span class="s">'bilayer_thickness'</span><span class="p">:</span> <span class="mf">34.0</span><span class="p">,</span>
+            <span class="s">'template_file'</span><span class="p">:</span> <span class="s">'CHL1.pdb'</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lipid_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">size_x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">size_y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                 <span class="n">randomize_rotation</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="bp">True</span><span class="p">):</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">lipid_type</span> <span class="o">=</span> <span class="n">lipid_type</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">size_x</span> <span class="o">=</span> <span class="n">size_x</span>  <span class="c1"># Angstroms
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">size_y</span> <span class="o">=</span> <span class="n">size_y</span>  <span class="c1"># Angstroms
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">randomize</span> <span class="o">=</span> <span class="n">randomize_rotation</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">params</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">LIPID_PARAMS</span><span class="p">[</span><span class="n">lipid_type</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">biotite</span><span class="p">.</span><span class="n">structure</span><span class="p">.</span><span class="n">AtomArray</span><span class="p">:</span>
+        <span class="s">"""Build the full bilayer."""</span>
+        <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_load_template</span><span class="p">()</span>
+        <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_orient_template</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>  <span class="c1"># Ensure tail-down orientation
+</span>
+        <span class="n">spacing</span> <span class="o">=</span> <span class="n">math</span><span class="p">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'area_per_lipid'</span><span class="p">])</span>
+        <span class="n">nx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">size_x</span> <span class="o">/</span> <span class="n">spacing</span><span class="p">)</span>
+        <span class="n">ny</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">size_y</span> <span class="o">/</span> <span class="n">spacing</span><span class="p">)</span>
+
+        <span class="n">upper_leaflet</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_build_leaflet</span><span class="p">(</span>
+            <span class="n">template</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">spacing</span><span class="p">,</span>
+            <span class="n">z_offset</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'bilayer_thickness'</span><span class="p">]</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span>
+            <span class="n">flip</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span>
+            <span class="n">chain_id</span><span class="o">=</span><span class="s">'A'</span>
+        <span class="p">)</span>
+        <span class="n">lower_leaflet</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_build_leaflet</span><span class="p">(</span>
+            <span class="n">template</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">spacing</span><span class="p">,</span>
+            <span class="n">z_offset</span><span class="o">=-</span><span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'bilayer_thickness'</span><span class="p">]</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span>
+            <span class="n">flip</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+            <span class="n">chain_id</span><span class="o">=</span><span class="s">'B'</span>
+        <span class="p">)</span>
+
+        <span class="n">full</span> <span class="o">=</span> <span class="n">struc</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="n">upper_leaflet</span><span class="p">,</span> <span class="n">lower_leaflet</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">full</span>
+
+    <span class="k">def</span> <span class="nf">_build_leaflet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">template</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">spacing</span><span class="p">,</span> <span class="n">z_offset</span><span class="p">,</span> <span class="n">flip</span><span class="p">,</span> <span class="n">chain_id</span><span class="p">):</span>
+        <span class="s">"""Place lipids on a grid for one leaflet."""</span>
+        <span class="n">lipids</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">res_id_counter</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="k">for</span> <span class="n">ix</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nx</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">iy</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ny</span><span class="p">):</span>
+                <span class="n">lipid</span> <span class="o">=</span> <span class="n">template</span><span class="p">.</span><span class="n">copy</span><span class="p">()</span>
+
+                <span class="c1"># Position on grid (centered)
+</span>                <span class="n">x</span> <span class="o">=</span> <span class="p">(</span><span class="n">ix</span> <span class="o">-</span> <span class="n">nx</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">spacing</span>
+                <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">iy</span> <span class="o">-</span> <span class="n">ny</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">spacing</span>
+
+                <span class="c1"># Random rotation around Z
+</span>                <span class="k">if</span> <span class="bp">self</span><span class="p">.</span><span class="n">randomize</span><span class="p">:</span>
+                    <span class="n">angle</span> <span class="o">=</span> <span class="n">random</span><span class="p">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">math</span><span class="p">.</span><span class="n">pi</span><span class="p">)</span>
+                    <span class="n">rot</span> <span class="o">=</span> <span class="n">Rotation</span><span class="p">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s">'z'</span><span class="p">,</span> <span class="n">angle</span><span class="p">)</span>
+                    <span class="n">lipid</span><span class="p">.</span><span class="n">coord</span> <span class="o">=</span> <span class="n">rot</span><span class="p">.</span><span class="nb">apply</span><span class="p">(</span><span class="n">lipid</span><span class="p">.</span><span class="n">coord</span><span class="p">)</span>
+
+                <span class="c1"># Flip for lower leaflet (rotate 180° around X)
+</span>                <span class="k">if</span> <span class="n">flip</span><span class="p">:</span>
+                    <span class="n">rot</span> <span class="o">=</span> <span class="n">Rotation</span><span class="p">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s">'x'</span><span class="p">,</span> <span class="n">math</span><span class="p">.</span><span class="n">pi</span><span class="p">)</span>
+                    <span class="n">lipid</span><span class="p">.</span><span class="n">coord</span> <span class="o">=</span> <span class="n">rot</span><span class="p">.</span><span class="nb">apply</span><span class="p">(</span><span class="n">lipid</span><span class="p">.</span><span class="n">coord</span><span class="p">)</span>
+
+                <span class="c1"># Translate to grid position
+</span>                <span class="n">lipid</span><span class="p">.</span><span class="n">coord</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="n">x</span>
+                <span class="n">lipid</span><span class="p">.</span><span class="n">coord</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">y</span>
+                <span class="n">lipid</span><span class="p">.</span><span class="n">coord</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">+=</span> <span class="n">z_offset</span>
+
+                <span class="n">lipid</span><span class="p">.</span><span class="n">chain_id</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">chain_id</span>
+                <span class="n">lipid</span><span class="p">.</span><span class="n">res_id</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">res_id_counter</span>
+                <span class="n">res_id_counter</span> <span class="o">+=</span> <span class="mi">1</span>
+
+                <span class="n">lipids</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">lipid</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">struc</span><span class="p">.</span><span class="n">array</span><span class="p">(</span><span class="n">lipids</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_load_template</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="s">"""Load template lipid from bundled PDB file."""</span>
+        <span class="n">template_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">__file__</span><span class="p">).</span><span class="n">parent</span> <span class="o">/</span> <span class="s">"data"</span> <span class="o">/</span> <span class="bp">self</span><span class="p">.</span><span class="n">params</span><span class="p">[</span><span class="s">'template_file'</span><span class="p">]</span>
+        <span class="n">pdb_file</span> <span class="o">=</span> <span class="n">biotite</span><span class="p">.</span><span class="n">structure</span><span class="p">.</span><span class="n">io</span><span class="p">.</span><span class="n">pdb</span><span class="p">.</span><span class="n">PDBFile</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">template_path</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">pdb_file</span><span class="p">.</span><span class="n">get_structure</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_orient_template</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">template</span><span class="p">):</span>
+        <span class="s">"""
+        Orient the template lipid so that:
+        - The headgroup is at +Z
+        - The tail is at -Z
+        - The lipid center of mass is at the origin
+        """</span>
+        <span class="c1"># Center at origin
+</span>        <span class="n">com</span> <span class="o">=</span> <span class="n">template</span><span class="p">.</span><span class="n">coord</span><span class="p">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">template</span><span class="p">.</span><span class="n">coord</span> <span class="o">-=</span> <span class="n">com</span>
+
+        <span class="c1"># Identify headgroup atoms (phosphorus, nitrogen in head)
+</span>        <span class="c1"># and tail atoms (terminal carbons)
+</span>        <span class="c1"># Orient so head is +Z direction
+</span>        <span class="c1"># (Implementation depends on lipid topology)
+</span>        <span class="k">return</span> <span class="n">template</span>
+</code></pre></div></div>
+
+<h4 id="533-template-lipid-files">5.3.3 Template Lipid Files</h4>
+
+<p>We need to bundle PDB files for each supported lipid type. Sources:</p>
+
+<ol>
+  <li><strong>Extract from existing MD simulations</strong> — Take a single lipid from a CHARMM-GUI or Martini equilibrated membrane</li>
+  <li><strong>Use RCSB ligand entries</strong> — Some lipids have component definitions in the PDB Chemical Component Dictionary</li>
+  <li><strong>Generate with CHARMM-GUI</strong> — Build a minimal membrane, extract one lipid</li>
+</ol>
+
+<p><strong>Bundled files</strong> (in <code class="language-plaintext highlighter-rouge">proteinblender/builders/data/</code>):</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">DPPC.pdb</code> — Dipalmitoylphosphatidylcholine (~130 atoms)</li>
+  <li><code class="language-plaintext highlighter-rouge">POPC.pdb</code> — Palmitoyloleoylphosphatidylcholine (~134 atoms)</li>
+  <li><code class="language-plaintext highlighter-rouge">DOPE.pdb</code> — Dioleoylphosphatidylethanolamine (~130 atoms)</li>
+  <li><code class="language-plaintext highlighter-rouge">CHL1.pdb</code> — Cholesterol (~74 atoms)</li>
+</ul>
+
+<p>Total bundle size: ~50-80 KB (negligible).</p>
+
+<h4 id="534-molecularnodes-integration">5.3.4 MolecularNodes Integration</h4>
+
+<p>Same pattern as DNA builder — the resulting <code class="language-plaintext highlighter-rouge">AtomArray</code> is fed through <code class="language-plaintext highlighter-rouge">Molecule.create_object()</code>. The lipid residue names (DPPC, POPC, etc.) are already in MolecularNodes’ <code class="language-plaintext highlighter-rouge">data.py</code>, so <code class="language-plaintext highlighter-rouge">is_lipid</code> attributes will be set correctly automatically.</p>
+
+<h4 id="535-performance-considerations">5.3.5 Performance Considerations</h4>
+
+<p>A 100×100 Å membrane with DPPC (spacing ~8.06 Å) = ~12×12 grid = 144 lipids per leaflet = 288 lipids total. At ~130 atoms/lipid = ~37,440 atoms. This is comparable to a large protein and should render fine.</p>
+
+<p>A 500×500 Å membrane = ~62×62 grid = 3,844 lipids/leaflet = ~1M atoms. This will be slow. The operator should warn for large membranes and potentially offer a coarse-grained option (single sphere per lipid) for very large systems.</p>
+
+<p><strong>Suggested limits:</strong></p>
+<ul>
+  <li>Default max: 200×200 Å (manageable atom count)</li>
+  <li>Soft warning above 300×300 Å</li>
+  <li>Hard limit at 500×500 Å</li>
+</ul>
+
+<h3 id="54-operator-definition">5.4 Operator Definition</h3>
+
+<p><strong>File:</strong> <code class="language-plaintext highlighter-rouge">proteinblender/operators/membrane_operators.py</code></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">MEMBRANE_PB_OT_build</span><span class="p">(</span><span class="n">Operator</span><span class="p">):</span>
+    <span class="n">bl_idname</span> <span class="o">=</span> <span class="s">"membrane.build"</span>
+    <span class="n">bl_label</span> <span class="o">=</span> <span class="s">"Build Membrane"</span>
+    <span class="n">bl_description</span> <span class="o">=</span> <span class="s">"Generate a phospholipid bilayer membrane"</span>
+    <span class="n">bl_options</span> <span class="o">=</span> <span class="p">{</span><span class="s">'REGISTER'</span><span class="p">,</span> <span class="s">'UNDO'</span><span class="p">}</span>
+
+    <span class="n">lipid_type</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Lipid Type"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'DPPC'</span><span class="p">,</span> <span class="s">"DPPC"</span><span class="p">,</span> <span class="s">"Dipalmitoylphosphatidylcholine"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'POPC'</span><span class="p">,</span> <span class="s">"POPC"</span><span class="p">,</span> <span class="s">"Palmitoyloleoylphosphatidylcholine"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'DOPE'</span><span class="p">,</span> <span class="s">"DOPE"</span><span class="p">,</span> <span class="s">"Dioleoylphosphatidylethanolamine"</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'CHL1'</span><span class="p">,</span> <span class="s">"Cholesterol"</span><span class="p">,</span> <span class="s">"Cholesterol"</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'DPPC'</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">size_x</span><span class="p">:</span> <span class="n">FloatProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"X Size"</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s">"Membrane width in Angstroms"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="mf">100.0</span><span class="p">,</span>
+        <span class="nb">min</span><span class="o">=</span><span class="mf">20.0</span><span class="p">,</span>
+        <span class="nb">max</span><span class="o">=</span><span class="mf">500.0</span><span class="p">,</span>
+        <span class="n">unit</span><span class="o">=</span><span class="s">'NONE'</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">size_y</span><span class="p">:</span> <span class="n">FloatProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Y Size"</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s">"Membrane depth in Angstroms"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="mf">100.0</span><span class="p">,</span>
+        <span class="nb">min</span><span class="o">=</span><span class="mf">20.0</span><span class="p">,</span>
+        <span class="nb">max</span><span class="o">=</span><span class="mf">500.0</span><span class="p">,</span>
+        <span class="n">unit</span><span class="o">=</span><span class="s">'NONE'</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">randomize_rotation</span><span class="p">:</span> <span class="n">BoolProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Randomize Rotation"</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s">"Randomly rotate each lipid around the membrane normal"</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">name</span><span class="p">:</span> <span class="n">StringProperty</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s">"Name"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s">"Membrane"</span><span class="p">)</span>
+    <span class="n">style</span><span class="p">:</span> <span class="n">EnumProperty</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s">"Style"</span><span class="p">,</span>
+        <span class="n">items</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s">'ball_and_stick'</span><span class="p">,</span> <span class="s">"Ball and Stick"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'spheres'</span><span class="p">,</span> <span class="s">"Spheres"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+            <span class="p">(</span><span class="s">'surface'</span><span class="p">,</span> <span class="s">"Surface"</span><span class="p">,</span> <span class="s">""</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s">'ball_and_stick'</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">invoke</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">context</span><span class="p">.</span><span class="n">window_manager</span><span class="p">.</span><span class="n">invoke_props_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">350</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">draw</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="n">layout</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">layout</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"lipid_type"</span><span class="p">)</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">row</span><span class="p">(</span><span class="n">align</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="n">row</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"size_x"</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s">"X (Å)"</span><span class="p">)</span>
+        <span class="n">row</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"size_y"</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s">"Y (Å)"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"randomize_rotation"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"name"</span><span class="p">)</span>
+        <span class="n">layout</span><span class="p">.</span><span class="n">prop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">"style"</span><span class="p">)</span>
+
+        <span class="c1"># Info readout
+</span>        <span class="n">params</span> <span class="o">=</span> <span class="n">MembraneBuilder</span><span class="p">.</span><span class="n">LIPID_PARAMS</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">lipid_type</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="k">if</span> <span class="n">params</span><span class="p">:</span>
+            <span class="n">spacing</span> <span class="o">=</span> <span class="n">math</span><span class="p">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="s">'area_per_lipid'</span><span class="p">])</span>
+            <span class="n">nx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">size_x</span> <span class="o">/</span> <span class="n">spacing</span><span class="p">)</span>
+            <span class="n">ny</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">size_y</span> <span class="o">/</span> <span class="n">spacing</span><span class="p">)</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="n">nx</span> <span class="o">*</span> <span class="n">ny</span> <span class="o">*</span> <span class="mi">2</span>
+            <span class="n">box</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">box</span><span class="p">()</span>
+            <span class="n">box</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s">"</span><span class="si">{</span><span class="n">nx</span><span class="si">}</span><span class="s">x</span><span class="si">{</span><span class="n">ny</span><span class="si">}</span><span class="s"> grid | </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s"> lipids total"</span><span class="p">)</span>
+            <span class="n">box</span><span class="p">.</span><span class="n">label</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="sa">f</span><span class="s">"Bilayer thickness: </span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s">'bilayer_thickness'</span><span class="p">]</span><span class="si">:</span><span class="p">.</span><span class="mi">1</span><span class="n">f</span><span class="si">}</span><span class="s"> Angstrom"</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">builder</span> <span class="o">=</span> <span class="n">MembraneBuilder</span><span class="p">(</span>
+                <span class="n">lipid_type</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">lipid_type</span><span class="p">,</span>
+                <span class="n">size_x</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">size_x</span><span class="p">,</span>
+                <span class="n">size_y</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">size_y</span><span class="p">,</span>
+                <span class="n">randomize_rotation</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">randomize_rotation</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">array</span> <span class="o">=</span> <span class="n">builder</span><span class="p">.</span><span class="n">build</span><span class="p">()</span>
+            <span class="c1"># ... create object and register (same pattern as DNA)
+</span>            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'INFO'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"Created </span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">lipid_type</span><span class="si">}</span><span class="s"> membrane: </span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">name</span><span class="si">}</span><span class="s">"</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'FINISHED'</span><span class="p">}</span>
+        <span class="k">except</span> <span class="nb">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="n">report</span><span class="p">({</span><span class="s">'ERROR'</span><span class="p">},</span> <span class="sa">f</span><span class="s">"Membrane build failed: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s">"</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s">'CANCELLED'</span><span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="55-testing-strategy">5.5 Testing Strategy</h3>
+
+<ol>
+  <li><strong>Unit test</strong>: Build a small 50×50 Å DPPC membrane
+    <ul>
+      <li>Verify bilayer has two leaflets</li>
+      <li>Verify upper leaflet headgroups at +Z, lower at -Z</li>
+      <li>Verify lipid spacing matches expected area-per-lipid</li>
+      <li>Verify total atom count = (lipids_per_leaflet × 2) × atoms_per_lipid</li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Visual test</strong>: Render with ball-and-stick, verify bilayer shape</p>
+  </li>
+  <li><strong>Performance test</strong>: Build 200×200 Å membrane, measure time and viewport responsiveness</li>
+</ol>
+
+<h3 id="56-estimated-scope">5.6 Estimated Scope</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>Files</th>
+      <th>Complexity</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">builders/membrane_builder.py</code></td>
+      <td>1 new file (~250-350 lines)</td>
+      <td>Medium-High</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">builders/data/DPPC.pdb</code> etc.</td>
+      <td>4 template PDB files</td>
+      <td>None — static assets</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">operators/membrane_operators.py</code></td>
+      <td>1 new file (~100-150 lines)</td>
+      <td>Medium</td>
+    </tr>
+    <tr>
+      <td>Panel additions to <code class="language-plaintext highlighter-rouge">builder_panel.py</code></td>
+      <td>Existing file modified</td>
+      <td>Low</td>
+    </tr>
+    <tr>
+      <td>Property additions to <code class="language-plaintext highlighter-rouge">builder_props.py</code></td>
+      <td>Existing file modified</td>
+      <td>Low</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="6-phase-3-a-form--z-form-dna-support">6. Phase 3: A-Form &amp; Z-Form DNA Support</h2>
+
+<h3 id="61-a-form-dna">6.1 A-Form DNA</h3>
+
+<p>Uses the same <code class="language-plaintext highlighter-rouge">DNABuilder</code> class with different parameters:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>B-form</th>
+      <th>A-form</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rise per bp</td>
+      <td>3.4 Å</td>
+      <td>2.6 Å</td>
+    </tr>
+    <tr>
+      <td>Twist per bp</td>
+      <td>36.0°</td>
+      <td>32.7°</td>
+    </tr>
+    <tr>
+      <td>bp per turn</td>
+      <td>10.0</td>
+      <td>11.0</td>
+    </tr>
+    <tr>
+      <td>Diameter</td>
+      <td>20.0 Å</td>
+      <td>23.0 Å</td>
+    </tr>
+    <tr>
+      <td>Sugar pucker</td>
+      <td>C2’-endo</td>
+      <td>C3’-endo</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The A-form template nucleotides should be extracted from an A-form crystal structure (e.g., PDB <code class="language-plaintext highlighter-rouge">440D</code> or similar).</p>
+
+<p>Key differences beyond parameters:</p>
+<ul>
+  <li>Base pairs are tilted ~19° relative to the helix axis (inclination)</li>
+  <li>The major groove is deeper and narrower</li>
+  <li>Sugar pucker changes affect backbone geometry</li>
+</ul>
+
+<p><strong>Implementation</strong>: Add <code class="language-plaintext highlighter-rouge">A</code> case to <code class="language-plaintext highlighter-rouge">HELIX_PARAMS</code> dict, bundle an A-form template PDB.</p>
+
+<h3 id="62-z-form-dna">6.2 Z-Form DNA</h3>
+
+<p>Z-form is structurally distinct:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>B-form</th>
+      <th>Z-form</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rise per bp</td>
+      <td>3.4 Å</td>
+      <td>3.7 Å</td>
+    </tr>
+    <tr>
+      <td>Twist per bp</td>
+      <td>36.0°</td>
+      <td>−30.0° (left-handed)</td>
+    </tr>
+    <tr>
+      <td>bp per turn</td>
+      <td>10.0</td>
+      <td>12.0</td>
+    </tr>
+    <tr>
+      <td>Diameter</td>
+      <td>20.0 Å</td>
+      <td>18.0 Å</td>
+    </tr>
+    <tr>
+      <td>Handedness</td>
+      <td>Right</td>
+      <td><strong>Left</strong></td>
+    </tr>
+    <tr>
+      <td>Repeat unit</td>
+      <td>1 bp</td>
+      <td><strong>2 bp</strong> (dinucleotide)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Z-form adds complexity:</p>
+<ul>
+  <li>Left-handed helix (negative twist)</li>
+  <li>Alternating syn/anti glycosidic conformations (the zig-zag pattern)</li>
+  <li>Preferentially forms with alternating purine-pyrimidine sequences (GC repeats)</li>
+  <li>The builder should warn if the sequence is not a good Z-DNA candidate</li>
+</ul>
+
+<p><strong>Implementation</strong>: Requires a Z-form template PDB (e.g., PDB <code class="language-plaintext highlighter-rouge">4OCB</code>) and a 2-step placement algorithm (alternating the nucleotide conformation every other position).</p>
+
+<h3 id="63-timeline">6.3 Timeline</h3>
+
+<p>Phase 3 should only begin after Phase 1 (B-form) is validated. The builder architecture is designed to be extensible — adding new forms is primarily about new parameter sets and template structures, not new algorithms.</p>
+
+<hr />
+
+<h2 id="7-molecularnodes-upgrade-considerations">7. MolecularNodes Upgrade Considerations</h2>
+
+<h3 id="current-state">Current State</h3>
+
+<ul>
+  <li><strong>Bundled version</strong>: 4.2.10</li>
+  <li><strong>Latest upstream</strong>: 4.5.12</li>
+  <li><strong>Upstream requires</strong>: Blender 5.1+, Python 3.13</li>
+</ul>
+
+<h3 id="what-the-upgrade-would-give-us">What the Upgrade Would Give Us</h3>
+
+<ul>
+  <li>Bug fixes and performance improvements</li>
+  <li>Potentially new geometry node presets</li>
+  <li>Better BCIF parsing</li>
+  <li>Updated biotite/MDAnalysis compatibility</li>
+</ul>
+
+<h3 id="what-it-would-not-give-us">What It Would NOT Give Us</h3>
+
+<ul>
+  <li>No DNA builder (doesn’t exist upstream)</li>
+  <li>No membrane builder (doesn’t exist upstream)</li>
+  <li>No small molecule SMILES support</li>
+</ul>
+
+<h3 id="recommendation">Recommendation</h3>
+
+<p><strong>Do not upgrade MN as part of this work.</strong> The features in this plan are built on top of MN, not within it, and do not require any upstream changes. An MN upgrade is a separate maintenance task with its own risks:</p>
+
+<ol>
+  <li>Blender 5.1 / Python 3.13 requirement means rebuilding all wheels</li>
+  <li>API changes in MN internals could break our <code class="language-plaintext highlighter-rouge">MoleculeWrapper</code> integration</li>
+  <li>Should be tested in isolation, not combined with feature work</li>
+</ol>
+
+<p><strong>When to upgrade</strong>: After Phase 1 and 2 are stable, as a dedicated maintenance sprint. The <code class="language-plaintext highlighter-rouge">molecule_wrapper.py</code> integration layer will need careful testing against MN 4.5.x API changes.</p>
+
+<hr />
+
+<h2 id="8-new-file--directory-structure">8. New File &amp; Directory Structure</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>proteinblender/
+├── builders/                          # NEW DIRECTORY
+│   ├── __init__.py                    # Builder registration
+│   ├── dna_builder.py                 # Phase 1: DNA generation algorithm
+│   ├── membrane_builder.py            # Phase 2: Membrane generation algorithm
+│   └── data/                          # Bundled template structures
+│       ├── 1BNA.pdb                   # B-form DNA reference (Dickerson dodecamer)
+│       ├── A_form_template.pdb        # Phase 3: A-form reference
+│       ├── Z_form_template.pdb        # Phase 3: Z-form reference
+│       ├── DPPC.pdb                   # DPPC lipid template
+│       ├── POPC.pdb                   # POPC lipid template
+│       ├── DOPE.pdb                   # DOPE lipid template
+│       └── CHL1.pdb                   # Cholesterol template
+├── operators/
+│   ├── dna_operators.py               # NEW: DNA build operator
+│   ├── membrane_operators.py          # NEW: Membrane build operator
+│   └── ... (existing)
+├── panels/
+│   ├── builder_panel.py               # NEW: Combined builder panel
+│   └── ... (existing)
+├── properties/
+│   ├── builder_props.py               # NEW: Builder PropertyGroup
+│   └── ... (existing)
+└── ... (existing unchanged)
+</code></pre></div></div>
+
+<p><strong>Modified existing files:</strong></p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">operators/__init__.py</code> — Add DNA and membrane operator classes to <code class="language-plaintext highlighter-rouge">CLASSES</code></li>
+  <li><code class="language-plaintext highlighter-rouge">panels/__init__.py</code> — Add builder panel to <code class="language-plaintext highlighter-rouge">CLASSES</code>, call property registration</li>
+  <li><code class="language-plaintext highlighter-rouge">properties/__init__.py</code> — Register <code class="language-plaintext highlighter-rouge">BuilderProperties</code></li>
+  <li><code class="language-plaintext highlighter-rouge">__init__.py</code> (addon root) — Ensure builder module imports</li>
+</ul>
+
+<hr />
+
+<h2 id="9-dependency-changes">9. Dependency Changes</h2>
+
+<h3 id="no-new-external-dependencies-required">No New External Dependencies Required</h3>
+
+<p>Both builders use only libraries already bundled:</p>
+<ul>
+  <li><strong>biotite</strong> — AtomArray construction, PDB parsing, bond inference</li>
+  <li><strong>scipy</strong> — <code class="language-plaintext highlighter-rouge">scipy.spatial.transform.Rotation</code> for coordinate transformations</li>
+  <li><strong>numpy</strong> — Array operations</li>
+</ul>
+
+<h3 id="optional-future-dependencies">Optional Future Dependencies</h3>
+
+<p>If we later want:</p>
+<ul>
+  <li><strong>SMILES → 3D structures</strong>: Would require RDKit (~50 MB wheel). Not needed for Phase 1-2.</li>
+  <li><strong>MDNA library</strong>: A Python DNA structure generator. Could replace our custom builder. Worth evaluating but adds a dependency.</li>
+  <li><strong>Simulation-ready membranes</strong>: Would require packmol or insane.py. Not in scope.</li>
+</ul>
+
+<hr />
+
+<h2 id="10-risk-assessment--open-questions">10. Risk Assessment &amp; Open Questions</h2>
+
+<h3 id="risks">Risks</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Risk</th>
+      <th>Likelihood</th>
+      <th>Impact</th>
+      <th>Mitigation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Template nucleotide extraction from 1BNA produces incorrect geometry</td>
+      <td>Medium</td>
+      <td>High</td>
+      <td>Validate against known B-form parameters; cross-check with 3DNA output</td>
+    </tr>
+    <tr>
+      <td>Bond generation misses inter-residue connections</td>
+      <td>Medium</td>
+      <td>Medium</td>
+      <td>Use biotite’s <code class="language-plaintext highlighter-rouge">connect_via_residue_names()</code> + manual backbone bonds</td>
+    </tr>
+    <tr>
+      <td>Large membranes crash Blender viewport</td>
+      <td>Low</td>
+      <td>High</td>
+      <td>Enforce size limits; offer coarse-grained fallback for large systems</td>
+    </tr>
+    <tr>
+      <td>MolecularNodes <code class="language-plaintext highlighter-rouge">Molecule</code> class API changes in future upgrade</td>
+      <td>Medium</td>
+      <td>Medium</td>
+      <td>Our builder returns an <code class="language-plaintext highlighter-rouge">AtomArray</code> — the conversion layer is a thin adapter</td>
+    </tr>
+    <tr>
+      <td>Lipid template orientation varies between PDB sources</td>
+      <td>Medium</td>
+      <td>Medium</td>
+      <td>Standardize orientation in <code class="language-plaintext highlighter-rouge">_orient_template()</code> with clear comments</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="open-questions-for-discussion">Open Questions for Discussion</h3>
+
+<ol>
+  <li>
+    <p><strong>Panel placement</strong>: Should the builders be in the existing import panel, a sibling panel, or a completely new tab? The mockup above shows a sibling panel under the main ProteinBlender tree.</p>
+  </li>
+  <li>
+    <p><strong>DNA naming</strong>: Should generated DNA auto-appear in the outliner as a “molecule” like proteins do? Or should it have its own category? Current plan treats it as a molecule (simplest integration).</p>
+  </li>
+  <li>
+    <p><strong>Membrane + protein combination</strong>: Should we add a convenience operator to “embed protein in membrane” (position a transmembrane protein at the center of the membrane and delete overlapping lipids)? This is a natural follow-up but may be out of scope.</p>
+  </li>
+  <li>
+    <p><strong>Coarse-grained option</strong>: For very large membranes, should we offer a simplified representation (one sphere per lipid, no atomic detail)? This would be a geometry-nodes-only approach, much faster.</p>
+  </li>
+  <li>
+    <p><strong>Template lipid source</strong>: Do we have access to pre-equilibrated lipid coordinates, or should we extract from published PDB structures? The quality of the bilayer visualization depends heavily on realistic lipid conformations.</p>
+  </li>
+  <li>
+    <p><strong>RNA support</strong>: The DNA builder could be extended to build RNA duplexes (A-form helix with U instead of T, 2’-OH on ribose). Should this be a Phase 3 goal alongside A/Z-form DNA?</p>
+  </li>
+</ol>
+
+<hr />
+
+<h2 id="appendix-a-dna-helix-parameter-reference">Appendix A: DNA Helix Parameter Reference</h2>
+
+<h3 id="comparison-of-dna-forms">Comparison of DNA Forms</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>B-DNA</th>
+      <th>A-DNA</th>
+      <th>Z-DNA</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Handedness</td>
+      <td>Right</td>
+      <td>Right</td>
+      <td>Left</td>
+    </tr>
+    <tr>
+      <td>Rise per bp (Å)</td>
+      <td>3.4</td>
+      <td>2.6</td>
+      <td>3.7</td>
+    </tr>
+    <tr>
+      <td>Twist per bp (°)</td>
+      <td>36.0</td>
+      <td>32.7</td>
+      <td>−30.0 (avg)</td>
+    </tr>
+    <tr>
+      <td>Base pairs per turn</td>
+      <td>10.0</td>
+      <td>11.0</td>
+      <td>12.0</td>
+    </tr>
+    <tr>
+      <td>Helix diameter (Å)</td>
+      <td>20.0</td>
+      <td>23.0</td>
+      <td>18.0</td>
+    </tr>
+    <tr>
+      <td>Pitch per turn (Å)</td>
+      <td>34.0</td>
+      <td>28.6</td>
+      <td>44.4</td>
+    </tr>
+    <tr>
+      <td>Major groove width (Å)</td>
+      <td>22.0</td>
+      <td>Narrow/deep</td>
+      <td>Flat</td>
+    </tr>
+    <tr>
+      <td>Minor groove width (Å)</td>
+      <td>12.0</td>
+      <td>Wide/shallow</td>
+      <td>Narrow/deep</td>
+    </tr>
+    <tr>
+      <td>Base inclination (°)</td>
+      <td>~0</td>
+      <td>+19</td>
+      <td>Variable</td>
+    </tr>
+    <tr>
+      <td>Propeller twist (°)</td>
+      <td>−11.4</td>
+      <td>Variable</td>
+      <td>Variable</td>
+    </tr>
+    <tr>
+      <td>Sugar pucker</td>
+      <td>C2’-endo</td>
+      <td>C3’-endo</td>
+      <td>Alternating</td>
+    </tr>
+    <tr>
+      <td>Glycosidic angle</td>
+      <td>Anti</td>
+      <td>Anti</td>
+      <td>Alternating syn/anti</td>
+    </tr>
+    <tr>
+      <td>Sequence preference</td>
+      <td>Any</td>
+      <td>Any</td>
+      <td>Alternating purine-pyrimidine</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="watson-crick-base-pairing">Watson-Crick Base Pairing</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Base Pair</th>
+      <th>Hydrogen Bonds</th>
+      <th>Complementary</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>A — T</td>
+      <td>2</td>
+      <td>A ↔ T</td>
+    </tr>
+    <tr>
+      <td>G — C</td>
+      <td>3</td>
+      <td>G ↔ C</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="nucleotide-atom-counts-approximate">Nucleotide Atom Counts (approximate)</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Residue</th>
+      <th>Heavy Atoms</th>
+      <th>With Hydrogens</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>dA (deoxyadenosine)</td>
+      <td>22</td>
+      <td>33</td>
+    </tr>
+    <tr>
+      <td>dT (deoxythymidine)</td>
+      <td>20</td>
+      <td>31</td>
+    </tr>
+    <tr>
+      <td>dG (deoxyguanosine)</td>
+      <td>23</td>
+      <td>34</td>
+    </tr>
+    <tr>
+      <td>dC (deoxycytidine)</td>
+      <td>19</td>
+      <td>30</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="reference-structures">Reference Structures</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>PDB ID</th>
+      <th>Description</th>
+      <th>Resolution</th>
+      <th>Use</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1BNA</td>
+      <td>Dickerson dodecamer (B-DNA)</td>
+      <td>1.9 Å</td>
+      <td>B-form template extraction</td>
+    </tr>
+    <tr>
+      <td>440D</td>
+      <td>A-form DNA decamer</td>
+      <td>1.6 Å</td>
+      <td>A-form template extraction</td>
+    </tr>
+    <tr>
+      <td>4OCB</td>
+      <td>Z-form DNA</td>
+      <td>1.2 Å</td>
+      <td>Z-form template extraction</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="appendix-b-lipid-bilayer-parameter-reference">Appendix B: Lipid Bilayer Parameter Reference</h2>
+
+<h3 id="common-lipid-parameters">Common Lipid Parameters</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Lipid</th>
+      <th>Area per Lipid (Å²)</th>
+      <th>Bilayer Thickness (Å)</th>
+      <th>Atoms per Molecule</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>DPPC</td>
+      <td>65.0</td>
+      <td>34.3</td>
+      <td>~130</td>
+    </tr>
+    <tr>
+      <td>POPC</td>
+      <td>68.3</td>
+      <td>36.5</td>
+      <td>~134</td>
+    </tr>
+    <tr>
+      <td>DOPE</td>
+      <td>69.0</td>
+      <td>35.0</td>
+      <td>~130</td>
+    </tr>
+    <tr>
+      <td>Cholesterol</td>
+      <td>40.0</td>
+      <td>34.0</td>
+      <td>~74</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="grid-calculation">Grid Calculation</h3>
+
+<p>For a membrane of dimensions X × Y Angstroms with lipid of area A:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>spacing = sqrt(A)          # Grid spacing in Angstroms
+nx = floor(X / spacing)    # Grid points in X
+ny = floor(Y / spacing)    # Grid points in Y
+lipids_per_leaflet = nx × ny
+total_lipids = lipids_per_leaflet × 2
+total_atoms ≈ total_lipids × atoms_per_lipid
+</code></pre></div></div>
+
+<h3 id="example-size-estimates">Example Size Estimates</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Membrane Size</th>
+      <th>DPPC Lipids</th>
+      <th>Total Atoms</th>
+      <th>Expected Performance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>50 × 50 Å</td>
+      <td>~76</td>
+      <td>~9,880</td>
+      <td>Fast</td>
+    </tr>
+    <tr>
+      <td>100 × 100 Å</td>
+      <td>~308</td>
+      <td>~40,040</td>
+      <td>Good</td>
+    </tr>
+    <tr>
+      <td>200 × 200 Å</td>
+      <td>~1,232</td>
+      <td>~160,160</td>
+      <td>Moderate</td>
+    </tr>
+    <tr>
+      <td>500 × 500 Å</td>
+      <td>~7,692</td>
+      <td>~999,960</td>
+      <td>Slow (warn user)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="sources">Sources</h3>
+
+<ul>
+  <li>Nagle &amp; Tristram-Nagle (2000), “Structure of lipid bilayers,” <em>Biochim. Biophys. Acta</em></li>
+  <li>Kučerka et al. (2011), “Fluid phase lipid areas and bilayer thicknesses,” <em>BBA - Biomembranes</em></li>
+  <li>Web 3DNA 2.0, <em>Nucleic Acids Research</em> 47(W1), W26-W34 (2019)</li>
+  <li>DNA structural parameters from Calladine &amp; Drew, <em>Understanding DNA</em> (3rd ed., Academic Press)</li>
+</ul>
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

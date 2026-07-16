@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Alpha Testing | ProteinBlender Documentation</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Alpha Testing" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Create stunning protein visualizations and animations in Blender" />
+<meta property="og:description" content="Create stunning protein visualizations and animations in Blender" />
+<link rel="canonical" href="https://animation-lab.github.io/ProteinBlender/alpha-testing.html" />
+<meta property="og:url" content="https://animation-lab.github.io/ProteinBlender/alpha-testing.html" />
+<meta property="og:site_name" content="ProteinBlender Documentation" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Alpha Testing" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"Create stunning protein visualizations and animations in Blender","headline":"Alpha Testing","url":"https://animation-lab.github.io/ProteinBlender/alpha-testing.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=04a8a3e237fa86d87d3f8fd139ac25b9ed082b48">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/ProteinBlender/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Alpha Testing</h1>
+      <h2 class="project-tagline">Create stunning protein visualizations and animations in Blender</h2>
+      
+        <a href="https://github.com/Animation-Lab/ProteinBlender" class="btn">View on GitHub</a>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="alpha-testing-channel">Alpha Testing Channel</h1>
+
+<p><a href="index.html">Back to Home</a></p>
+
+<p>The <strong>Alpha</strong> channel is a separate release stream for testers. It installs as its
+own extension — <strong>ProteinBlender (Alpha)</strong> — so you get update notifications for
+alpha builds through Blender’s normal extension updater instead of passing zip
+files around.</p>
+
+<blockquote>
+  <p><strong>Important — do not run both at once.</strong> The alpha build shares internal
+identifiers with the release build, so having <strong>ProteinBlender</strong> and
+<strong>ProteinBlender (Alpha)</strong> <em>enabled at the same time</em> will cause errors.
+<strong>Disable (or uninstall) the release version before enabling the alpha</strong>, and
+switch back when you’re done testing. Installing both is fine; only one may be
+<strong>enabled</strong> at a time.</p>
+</blockquote>
+
+<h2 id="add-the-alpha-repository">Add the Alpha Repository</h2>
+
+<ol>
+  <li><strong>Open Blender</strong> (4.2 or newer)</li>
+  <li>Go to <strong>Edit -&gt; Preferences -&gt; Get Extensions</strong></li>
+  <li>Click the <strong>Repositories</strong> dropdown at the top -&gt; <strong>+</strong> -&gt; <strong>Add Remote Repository</strong></li>
+  <li>
+    <p><strong>URL</strong>:</p>
+
+    <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>https://animation-lab.github.io/ProteinBlender/extensions/alpha/index.json
+</code></pre></div>    </div>
+  </li>
+  <li>(Recommended) Enable <strong>Check for Updates on Start</strong> so you’re notified when a
+new alpha is published.</li>
+  <li>Click <strong>OK</strong>.</li>
+</ol>
+
+<h2 id="switch-to-the-alpha-build">Switch to the Alpha Build</h2>
+
+<ol>
+  <li>In <strong>Get Extensions</strong>, first <strong>disable</strong> the release <strong>ProteinBlender</strong>
+(untick it), or uninstall it.</li>
+  <li>Select the alpha repository in the dropdown (it may show as
+<em>animation-lab.github.io</em>).</li>
+  <li>Find <strong>ProteinBlender (Alpha)</strong> and click <strong>Install</strong>.</li>
+  <li><strong>Restart Blender.</strong></li>
+</ol>
+
+<h2 id="switch-back-to-the-release-build">Switch Back to the Release Build</h2>
+
+<ol>
+  <li><strong>Disable</strong> or uninstall <strong>ProteinBlender (Alpha)</strong>.</li>
+  <li>Re-enable the release <strong>ProteinBlender</strong>.</li>
+  <li><strong>Restart Blender.</strong></li>
+</ol>
+
+<h2 id="reporting-issues">Reporting Issues</h2>
+
+<p>When you report a bug, please include the alpha <strong>version number</strong>
+(shown under the extension name in <em>Get Extensions</em>), your <strong>Blender version</strong>,
+and your <strong>operating system</strong>.</p>
+
+<hr />
+
+<h2 id="for-maintainers--publishing-an-alpha">For Maintainers — Publishing an Alpha</h2>
+
+<p>The alpha channel is a “swap” build of the same codebase with a different
+extension <code class="language-plaintext highlighter-rouge">id</code>. To publish one:</p>
+
+<ol>
+  <li>Check out the branch you want testers to try.</li>
+  <li>
+    <p>Build the alpha zips (temporarily rewrites the manifest to
+<code class="language-plaintext highlighter-rouge">id = "proteinblender_alpha"</code>, then restores the working tree):</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python build.py <span class="nt">--alpha</span>
+</code></pre></div>    </div>
+  </li>
+  <li>Create a GitHub <strong>Release</strong> and attach the <code class="language-plaintext highlighter-rouge">dist/proteinblender_alpha-*.zip</code>
+files. Tick <strong>“Set as a pre-release”</strong> to keep alphas visually separated from
+production releases.</li>
+  <li>The publish workflow regenerates the indexes and routes entries by <code class="language-plaintext highlighter-rouge">id</code>:
+    <ul>
+      <li>release builds -&gt; <code class="language-plaintext highlighter-rouge">extensions/index.json</code></li>
+      <li>alpha builds -&gt; <code class="language-plaintext highlighter-rouge">extensions/alpha/index.json</code></li>
+    </ul>
+
+    <p>Testers on the alpha repo URL only ever see the alpha builds, and vice versa.</p>
+  </li>
+</ol>
+
+
+      <footer class="site-footer">
+        
+          <span class="site-footer-owner"><a href="https://github.com/Animation-Lab/ProteinBlender">ProteinBlender</a> is maintained by <a href="https://github.com/Animation-Lab">Animation-Lab</a>.</span>
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>
