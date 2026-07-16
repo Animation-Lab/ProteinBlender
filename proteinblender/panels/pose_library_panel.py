@@ -54,6 +54,149 @@ def capture_controller_transform(context, pose, puppet_id, controller_obj):
     t.scale = relative_matrix.to_scale()
 
 
+# ---------------------------------------------------------------------------
+# Shared puppet/pose helpers
+#
+# These were previously duplicated as methods on the pose operators: three
+# copies of get_puppet_objects (two byte-identical 118-line copies carrying ~45
+# debug prints, plus this print-free variant) and two byte-identical copies of
+# capture_pose_preview. None of them ever touched self. Keeping one copy means
+# a pose is captured and applied through exactly the same resolution rules.
+# ---------------------------------------------------------------------------
+
+def get_puppet_objects(context, puppet_id):
+    """Get all objects that belong to a puppet (for validation)"""
+    objects = []
+    
+    # Find the puppet item
+    puppet_item = None
+    if hasattr(context.scene, 'outliner_items'):
+        for item in context.scene.outliner_items:
+            if item.item_id == puppet_id and item.item_type == 'PUPPET':
+                puppet_item = item
+                break
+    
+    if not puppet_item or not puppet_item.puppet_memberships:
+        return objects
+    
+    # Import scene manager
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    
+    # Parse member IDs
+    member_ids = puppet_item.puppet_memberships.split(',')
+    
+    for member_id in member_ids:
+        if '_' not in member_id:
+            continue
+            
+        # Parse member_id to find molecule and domain
+        if '_chain_' in member_id:
+            parts = member_id.rsplit('_chain_', 1)
+            mol_id = parts[0]
+            domain_id = 'chain_' + parts[1]
+        else:
+            import re
+            match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
+            if match:
+                mol_id = match.group(1)
+                domain_id = match.group(2)
+            else:
+                parts = member_id.rsplit('_', 1)
+                if len(parts) == 2:
+                    mol_id = parts[0]
+                    domain_id = parts[1]
+                else:
+                    continue
+        
+        # Find the domain object
+        if mol_id in scene_manager.molecules:
+            molecule = scene_manager.molecules[mol_id]
+            if domain_id in molecule.domains:
+                domain = molecule.domains[domain_id]
+                if domain.object:
+                    objects.append(domain.object)
+            elif domain_id.startswith('chain_'):
+                chain_index = domain_id.replace('chain_', '')
+                for dom_id, dom in molecule.domains.items():
+                    if dom_id.startswith(f"{mol_id}_{chain_index}_"):
+                        if dom.object:
+                            objects.append(dom.object)
+                        break
+        
+        # Fallback: check outliner items
+        for item in context.scene.outliner_items:
+            if item.item_id == member_id and item.object_name:
+                obj = bpy.data.objects.get(item.object_name)
+                if obj and obj not in objects:
+                    objects.append(obj)
+                break
+    
+    return objects
+
+def capture_pose_preview(context, pose):
+    """Capture a preview image for the pose"""
+    try:
+        import tempfile
+        from pathlib import Path
+        
+        # Create temp directory for pose previews if it doesn't exist
+        temp_dir = Path(tempfile.gettempdir()) / "proteinblender_poses"
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Generate filename based on pose name and timestamp
+        import time
+        timestamp = str(int(time.time()))
+        safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in pose.name)
+        preview_file = temp_dir / f"pose_{safe_name}_{timestamp}.png"
+        
+        # Store current render settings
+        old_path = context.scene.render.filepath
+        old_format = context.scene.render.image_settings.file_format
+        old_res_x = context.scene.render.resolution_x
+        old_res_y = context.scene.render.resolution_y
+        old_percentage = context.scene.render.resolution_percentage
+        
+        # Configure render for thumbnail
+        context.scene.render.filepath = str(preview_file)
+        context.scene.render.image_settings.file_format = 'PNG'
+        context.scene.render.resolution_x = 256
+        context.scene.render.resolution_y = 256
+        context.scene.render.resolution_percentage = 100
+        
+        # Render viewport preview
+        bpy.ops.render.opengl(write_still=True, view_context=True)
+        
+        # Restore render settings
+        context.scene.render.filepath = old_path
+        context.scene.render.image_settings.file_format = old_format
+        context.scene.render.resolution_x = old_res_x
+        context.scene.render.resolution_y = old_res_y
+        context.scene.render.resolution_percentage = old_percentage
+        
+        # Store the preview path in the pose
+        pose.preview_path = str(preview_file)
+        
+        # Load the image into Blender's data so it's available for display
+        # This must be done here, not during drawing
+        try:
+            # Check if image already exists and remove it
+            img_name = f"pose_preview_{safe_name}"
+            if img_name in bpy.data.images:
+                old_img = bpy.data.images[img_name]
+                bpy.data.images.remove(old_img)
+            
+            # Load the new image
+            img = bpy.data.images.load(str(preview_file))
+            img.name = img_name
+            # Generate preview for UI display
+            img.preview_ensure()
+        except Exception as e:
+            print(f"Warning: Could not load preview into Blender: {e}")
+        
+    except Exception as e:
+        print(f"Warning: Could not capture pose preview: {e}")
+
 class GroupSelectionItem(PropertyGroup):
     """Helper class to store puppet selection state"""
     puppet_id: StringProperty(name="Puppet ID")
@@ -190,7 +333,7 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                         break
 
                 # Get objects in this puppet
-                objects = self.get_puppet_objects(context, puppet_id)
+                objects = get_puppet_objects(context, puppet_id)
                 print(f"Debug: Group {puppet_id} has {len(objects)} objects")
 
                 if not objects:
@@ -264,7 +407,7 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                 traceback.print_exc()
         
         # Capture screenshot preview
-        self.capture_pose_preview(context, pose)
+        capture_pose_preview(context, pose)
         
         # Set as active
         if hasattr(scene, 'active_pose_index'):
@@ -273,189 +416,6 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         self.report({'INFO'}, f"Created pose '{self.pose_name}' with {len(selected_ids)} puppet(s)")
         return {'FINISHED'}
     
-    def capture_pose_preview(self, context, pose):
-        """Capture a preview image for the pose"""
-        try:
-            import tempfile
-            from pathlib import Path
-            
-            # Create temp directory for pose previews if it doesn't exist
-            temp_dir = Path(tempfile.gettempdir()) / "proteinblender_poses"
-            temp_dir.mkdir(exist_ok=True)
-            
-            # Generate filename based on pose name and timestamp
-            import time
-            timestamp = str(int(time.time()))
-            safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in pose.name)
-            preview_file = temp_dir / f"pose_{safe_name}_{timestamp}.png"
-            
-            # Store current render settings
-            old_path = context.scene.render.filepath
-            old_format = context.scene.render.image_settings.file_format
-            old_res_x = context.scene.render.resolution_x
-            old_res_y = context.scene.render.resolution_y
-            old_percentage = context.scene.render.resolution_percentage
-            
-            # Configure render for thumbnail
-            context.scene.render.filepath = str(preview_file)
-            context.scene.render.image_settings.file_format = 'PNG'
-            context.scene.render.resolution_x = 256
-            context.scene.render.resolution_y = 256
-            context.scene.render.resolution_percentage = 100
-            
-            # Render viewport preview
-            bpy.ops.render.opengl(write_still=True, view_context=True)
-            
-            # Restore render settings
-            context.scene.render.filepath = old_path
-            context.scene.render.image_settings.file_format = old_format
-            context.scene.render.resolution_x = old_res_x
-            context.scene.render.resolution_y = old_res_y
-            context.scene.render.resolution_percentage = old_percentage
-            
-            # Store the preview path in the pose
-            pose.preview_path = str(preview_file)
-            
-            # Load the image into Blender's data so it's available for display
-            # This must be done here, not during drawing
-            try:
-                # Check if image already exists and remove it
-                img_name = f"pose_preview_{safe_name}"
-                if img_name in bpy.data.images:
-                    old_img = bpy.data.images[img_name]
-                    bpy.data.images.remove(old_img)
-                
-                # Load the new image
-                img = bpy.data.images.load(str(preview_file))
-                img.name = img_name
-                # Generate preview for UI display
-                img.preview_ensure()
-            except Exception as e:
-                print(f"Warning: Could not load preview into Blender: {e}")
-            
-        except Exception as e:
-            print(f"Warning: Could not capture pose preview: {e}")
-    
-    def get_puppet_objects(self, context, puppet_id):
-        """Get all objects that belong to a puppet"""
-        objects = []
-        
-        # Find puppet item
-        puppet_item = None
-        if hasattr(context.scene, 'outliner_items'):
-            for item in context.scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    puppet_item = item
-                    break
-        
-        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
-            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
-            return objects
-        
-        if not puppet_item.puppet_memberships:
-            print(f"Debug: Empty memberships for puppet {puppet_id}")
-            return objects
-        
-        # Parse member IDs and find corresponding objects
-        member_ids = puppet_item.puppet_memberships.split(',')
-        print(f"Debug: Group '{puppet_item.name}' has members: {member_ids}")
-        
-        # Import scene manager to access molecules
-        from ..utils.scene_manager import ProteinBlenderScene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        for member_id in member_ids:
-            # Member IDs are in format: molecule_id_domain_id
-            # where molecule_id might contain underscores (e.g., '3b75_001')
-            # and domain_id is like 'chain_8' or a custom domain ID
-            
-            if '_' in member_id:
-                # Try to intelligently parse the member_id
-                # Look for patterns like 'XXX_###_chain_Y' or 'XXX_###_domain_id'
-                
-                # First, check if it contains '_chain_'
-                if '_chain_' in member_id:
-                    # Split at '_chain_' to separate molecule_id from chain identifier
-                    parts = member_id.rsplit('_chain_', 1)
-                    mol_id = parts[0]
-                    domain_id = 'chain_' + parts[1]
-                else:
-                    # For custom domains, we need to find where molecule_id ends
-                    # Molecule IDs typically follow pattern like '3b75_001'
-                    # Try to find the last occurrence of a pattern like '_###_' (underscore, numbers, underscore)
-                    import re
-                    match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
-                    if match:
-                        mol_id = match.group(1)
-                        domain_id = match.group(2)
-                    else:
-                        # Fallback to splitting on last underscore
-                        parts = member_id.rsplit('_', 1)
-                        if len(parts) == 2:
-                            mol_id = parts[0]
-                            domain_id = parts[1]
-                        else:
-                            print(f"Debug: Could not parse member_id '{member_id}'")
-                            continue
-                
-                print(f"Debug: Looking for mol_id='{mol_id}', domain_id='{domain_id}'")
-                
-                # Try to find the domain object (chains are domains too)
-                if mol_id in scene_manager.molecules:
-                    molecule = scene_manager.molecules[mol_id]
-                    
-                    # First try direct lookup
-                    if domain_id in molecule.domains:
-                        domain = molecule.domains[domain_id]
-                        if domain.object:
-                            objects.append(domain.object)
-                            print(f"Debug: Found domain object '{domain.object.name}' for {member_id}")
-                        else:
-                            print(f"Debug: Domain {domain_id} has no object")
-                    else:
-                        # If domain_id is like 'chain_4', try to find the matching domain
-                        if domain_id.startswith('chain_'):
-                            chain_index = domain_id.replace('chain_', '')
-                            print(f"Debug: Looking for chain index {chain_index}")
-                            
-                            # Find domain that starts with mol_id_chainindex_
-                            found_domain = None
-                            for dom_id, dom in molecule.domains.items():
-                                # Check if domain ID starts with pattern like '3b75_001_4_'
-                                if dom_id.startswith(f"{mol_id}_{chain_index}_"):
-                                    found_domain = dom
-                                    print(f"Debug: Matched chain_{chain_index} to domain {dom_id}")
-                                    break
-                            
-                            if found_domain and found_domain.object:
-                                objects.append(found_domain.object)
-                                print(f"Debug: Found chain object '{found_domain.object.name}' for {member_id}")
-                            else:
-                                print(f"Debug: Could not find domain for chain_{chain_index}")
-                                print(f"Debug: Available domains: {list(molecule.domains.keys())}")
-                        else:
-                            print(f"Debug: Domain {domain_id} not found in molecule {mol_id}")
-                            print(f"Debug: Available domains: {list(molecule.domains.keys())}")
-                else:
-                    print(f"Debug: Molecule {mol_id} not found")
-            
-            # Always check outliner items as fallback
-            # (some items might store objects directly)
-            for item in context.scene.outliner_items:
-                if item.item_id == member_id:
-                    if item.object_name:
-                        obj = bpy.data.objects.get(item.object_name)
-                        if obj and obj not in objects:
-                            objects.append(obj)
-                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
-                    else:
-                        print(f"Debug: Outliner item {member_id} has no object_name")
-                    break
-        
-        print(f"Debug: Total objects found for puppet: {len(objects)}")
-        return objects
-    
-
 class PROTEINBLENDER_OT_apply_pose(Operator):
     """Apply a saved pose to restore puppet positions"""
     bl_idname = "proteinblender.apply_pose"
@@ -464,76 +424,6 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     pose_index: IntProperty(name="Pose Index", default=0)
-    
-    def get_puppet_objects(self, context, puppet_id):
-        """Get all objects that belong to a puppet (for validation)"""
-        objects = []
-        
-        # Find the puppet item
-        puppet_item = None
-        if hasattr(context.scene, 'outliner_items'):
-            for item in context.scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    puppet_item = item
-                    break
-        
-        if not puppet_item or not puppet_item.puppet_memberships:
-            return objects
-        
-        # Import scene manager
-        from ..utils.scene_manager import ProteinBlenderScene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Parse member IDs
-        member_ids = puppet_item.puppet_memberships.split(',')
-        
-        for member_id in member_ids:
-            if '_' not in member_id:
-                continue
-                
-            # Parse member_id to find molecule and domain
-            if '_chain_' in member_id:
-                parts = member_id.rsplit('_chain_', 1)
-                mol_id = parts[0]
-                domain_id = 'chain_' + parts[1]
-            else:
-                import re
-                match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
-                if match:
-                    mol_id = match.group(1)
-                    domain_id = match.group(2)
-                else:
-                    parts = member_id.rsplit('_', 1)
-                    if len(parts) == 2:
-                        mol_id = parts[0]
-                        domain_id = parts[1]
-                    else:
-                        continue
-            
-            # Find the domain object
-            if mol_id in scene_manager.molecules:
-                molecule = scene_manager.molecules[mol_id]
-                if domain_id in molecule.domains:
-                    domain = molecule.domains[domain_id]
-                    if domain.object:
-                        objects.append(domain.object)
-                elif domain_id.startswith('chain_'):
-                    chain_index = domain_id.replace('chain_', '')
-                    for dom_id, dom in molecule.domains.items():
-                        if dom_id.startswith(f"{mol_id}_{chain_index}_"):
-                            if dom.object:
-                                objects.append(dom.object)
-                            break
-            
-            # Fallback: check outliner items
-            for item in context.scene.outliner_items:
-                if item.item_id == member_id and item.object_name:
-                    obj = bpy.data.objects.get(item.object_name)
-                    if obj and obj not in objects:
-                        objects.append(obj)
-                    break
-        
-        return objects
     
     def execute(self, context):
         scene = context.scene
@@ -579,7 +469,7 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                 print(f"    members: {item.puppet_memberships}")
                 
                 # Get current puppet objects for validation
-                current_objects = self.get_puppet_objects(context, item.item_id)
+                current_objects = get_puppet_objects(context, item.item_id)
                 current_obj_names = {obj.name for obj in current_objects}
                 stored_obj_names = {t.object_name for t in puppets[item.item_id]['transforms']
                                     if not t.is_controller}
@@ -763,7 +653,7 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                     break
 
             # Get objects in this puppet
-            objects = self.get_puppet_objects(context, puppet_id)
+            objects = get_puppet_objects(context, puppet_id)
 
             for obj in objects:
                 transform = pose.transforms.add()
@@ -805,194 +695,11 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
         pose.modified_timestamp = datetime.now().isoformat()
         
         # Update screenshot preview
-        self.capture_pose_preview(context, pose)
+        capture_pose_preview(context, pose)
         
         self.report({'INFO'}, f"Captured current positions for pose '{pose.name}'")
         return {'FINISHED'}
     
-    def capture_pose_preview(self, context, pose):
-        """Capture a preview image for the pose"""
-        try:
-            import tempfile
-            from pathlib import Path
-            
-            # Create temp directory for pose previews if it doesn't exist
-            temp_dir = Path(tempfile.gettempdir()) / "proteinblender_poses"
-            temp_dir.mkdir(exist_ok=True)
-            
-            # Generate filename based on pose name and timestamp
-            import time
-            timestamp = str(int(time.time()))
-            safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in pose.name)
-            preview_file = temp_dir / f"pose_{safe_name}_{timestamp}.png"
-            
-            # Store current render settings
-            old_path = context.scene.render.filepath
-            old_format = context.scene.render.image_settings.file_format
-            old_res_x = context.scene.render.resolution_x
-            old_res_y = context.scene.render.resolution_y
-            old_percentage = context.scene.render.resolution_percentage
-            
-            # Configure render for thumbnail
-            context.scene.render.filepath = str(preview_file)
-            context.scene.render.image_settings.file_format = 'PNG'
-            context.scene.render.resolution_x = 256
-            context.scene.render.resolution_y = 256
-            context.scene.render.resolution_percentage = 100
-            
-            # Render viewport preview
-            bpy.ops.render.opengl(write_still=True, view_context=True)
-            
-            # Restore render settings
-            context.scene.render.filepath = old_path
-            context.scene.render.image_settings.file_format = old_format
-            context.scene.render.resolution_x = old_res_x
-            context.scene.render.resolution_y = old_res_y
-            context.scene.render.resolution_percentage = old_percentage
-            
-            # Store the preview path in the pose
-            pose.preview_path = str(preview_file)
-            
-            # Load the image into Blender's data so it's available for display
-            # This must be done here, not during drawing
-            try:
-                # Check if image already exists and remove it
-                img_name = f"pose_preview_{safe_name}"
-                if img_name in bpy.data.images:
-                    old_img = bpy.data.images[img_name]
-                    bpy.data.images.remove(old_img)
-                
-                # Load the new image
-                img = bpy.data.images.load(str(preview_file))
-                img.name = img_name
-                # Generate preview for UI display
-                img.preview_ensure()
-            except Exception as e:
-                print(f"Warning: Could not load preview into Blender: {e}")
-            
-        except Exception as e:
-            print(f"Warning: Could not capture pose preview: {e}")
-    
-    def get_puppet_objects(self, context, puppet_id):
-        """Get all objects that belong to a puppet"""
-        objects = []
-        
-        # Find puppet item
-        puppet_item = None
-        if hasattr(context.scene, 'outliner_items'):
-            for item in context.scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    puppet_item = item
-                    break
-        
-        if not puppet_item or not hasattr(puppet_item, 'puppet_memberships'):
-            print(f"Debug: No puppet found or no memberships for puppet {puppet_id}")
-            return objects
-        
-        if not puppet_item.puppet_memberships:
-            print(f"Debug: Empty memberships for puppet {puppet_id}")
-            return objects
-        
-        # Parse member IDs and find corresponding objects
-        member_ids = puppet_item.puppet_memberships.split(',')
-        print(f"Debug: Group '{puppet_item.name}' has members: {member_ids}")
-        
-        # Import scene manager to access molecules
-        from ..utils.scene_manager import ProteinBlenderScene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        for member_id in member_ids:
-            # Member IDs are in format: molecule_id_domain_id
-            # where molecule_id might contain underscores (e.g., '3b75_001')
-            # and domain_id is like 'chain_8' or a custom domain ID
-            
-            if '_' in member_id:
-                # Try to intelligently parse the member_id
-                # Look for patterns like 'XXX_###_chain_Y' or 'XXX_###_domain_id'
-                
-                # First, check if it contains '_chain_'
-                if '_chain_' in member_id:
-                    # Split at '_chain_' to separate molecule_id from chain identifier
-                    parts = member_id.rsplit('_chain_', 1)
-                    mol_id = parts[0]
-                    domain_id = 'chain_' + parts[1]
-                else:
-                    # For custom domains, we need to find where molecule_id ends
-                    # Molecule IDs typically follow pattern like '3b75_001'
-                    # Try to find the last occurrence of a pattern like '_###_' (underscore, numbers, underscore)
-                    import re
-                    match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
-                    if match:
-                        mol_id = match.group(1)
-                        domain_id = match.group(2)
-                    else:
-                        # Fallback to splitting on last underscore
-                        parts = member_id.rsplit('_', 1)
-                        if len(parts) == 2:
-                            mol_id = parts[0]
-                            domain_id = parts[1]
-                        else:
-                            print(f"Debug: Could not parse member_id '{member_id}'")
-                            continue
-                
-                print(f"Debug: Looking for mol_id='{mol_id}', domain_id='{domain_id}'")
-                
-                # Try to find the domain object (chains are domains too)
-                if mol_id in scene_manager.molecules:
-                    molecule = scene_manager.molecules[mol_id]
-                    
-                    # First try direct lookup
-                    if domain_id in molecule.domains:
-                        domain = molecule.domains[domain_id]
-                        if domain.object:
-                            objects.append(domain.object)
-                            print(f"Debug: Found domain object '{domain.object.name}' for {member_id}")
-                        else:
-                            print(f"Debug: Domain {domain_id} has no object")
-                    else:
-                        # If domain_id is like 'chain_4', try to find the matching domain
-                        if domain_id.startswith('chain_'):
-                            chain_index = domain_id.replace('chain_', '')
-                            print(f"Debug: Looking for chain index {chain_index}")
-                            
-                            # Find domain that starts with mol_id_chainindex_
-                            found_domain = None
-                            for dom_id, dom in molecule.domains.items():
-                                # Check if domain ID starts with pattern like '3b75_001_4_'
-                                if dom_id.startswith(f"{mol_id}_{chain_index}_"):
-                                    found_domain = dom
-                                    print(f"Debug: Matched chain_{chain_index} to domain {dom_id}")
-                                    break
-                            
-                            if found_domain and found_domain.object:
-                                objects.append(found_domain.object)
-                                print(f"Debug: Found chain object '{found_domain.object.name}' for {member_id}")
-                            else:
-                                print(f"Debug: Could not find domain for chain_{chain_index}")
-                                print(f"Debug: Available domains: {list(molecule.domains.keys())}")
-                        else:
-                            print(f"Debug: Domain {domain_id} not found in molecule {mol_id}")
-                            print(f"Debug: Available domains: {list(molecule.domains.keys())}")
-                else:
-                    print(f"Debug: Molecule {mol_id} not found")
-            
-            # Always check outliner items as fallback
-            # (some items might store objects directly)
-            for item in context.scene.outliner_items:
-                if item.item_id == member_id:
-                    if item.object_name:
-                        obj = bpy.data.objects.get(item.object_name)
-                        if obj and obj not in objects:
-                            objects.append(obj)
-                            print(f"Debug: Found object via outliner '{obj.name}' for {member_id}")
-                    else:
-                        print(f"Debug: Outliner item {member_id} has no object_name")
-                    break
-        
-        print(f"Debug: Total objects found for puppet: {len(objects)}")
-        return objects
-
-
 class PROTEINBLENDER_OT_delete_pose(Operator):
     """Delete a saved pose"""
     bl_idname = "proteinblender.delete_pose"
