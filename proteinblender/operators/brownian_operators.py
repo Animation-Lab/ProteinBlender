@@ -23,7 +23,6 @@ from ..utils.brownian import (
     get_brownian_metadata,
     save_brownian_metadata,
     find_previous_keyframe,
-    rebuild_all_brownian_motion,
     rebuild_all_brownian_modifiers,  # legacy compat for v1 metadata
     clear_baked_brownian_keyframes,
     remove_brownian_noise_modifiers,

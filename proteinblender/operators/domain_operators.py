@@ -1,14 +1,12 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatVectorProperty
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.animation import (
     keyframe_transforms, 
     refresh_timeline, 
     delete_transform_keyframes
 )
-from mathutils import Vector
-import random
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
@@ -108,7 +106,6 @@ class MOLECULE_PB_OT_copy_domain(Operator):
     domain_id: StringProperty(description="ID of the domain to copy")
     
     def execute(self, context):
-        scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
         # Find which molecule owns this domain
@@ -149,7 +146,6 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
-        scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
 
         # Find which molecule owns this domain
@@ -987,7 +983,6 @@ class MOLECULE_PB_OT_reset_domain_transform(Operator):
     domain_id: StringProperty()
 
     def execute(self, context):
-        scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
         
         # Debug: Check if domain_id is being passed

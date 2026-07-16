@@ -4,7 +4,6 @@ This module provides operators for importing proteins from various sources
 including PDB and AlphaFold databases.
 """
 
-import bpy
 from bpy.types import Operator
 import logging
 from typing import Set

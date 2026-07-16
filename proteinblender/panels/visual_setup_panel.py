@@ -565,17 +565,12 @@ def apply_color_to_object(obj, color):
     
     node_tree = mod.node_group
 
-    # Look for existing color nodes
-    color_node = None
     set_color_node = None
     
     for node in node_tree.nodes:
         # Look for Set Color node (it's a group node)
         if node.type == 'GROUP' and node.node_tree and 'Set Color' in node.node_tree.name:
             set_color_node = node
-        # Look for existing color nodes
-        elif 'Color' in node.name and node.type == 'GROUP':
-            color_node = node
     
     if not set_color_node:
         return

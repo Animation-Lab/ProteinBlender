@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import bpy
 from bpy.types import Operator
-from bpy.props import IntProperty, StringProperty
+from bpy.props import StringProperty
 from typing import Optional
 
 from . import lipid_assets
@@ -18,12 +18,7 @@ from . import force_fields
 from .membrane_geometry import (
     NM_PER_BU,
     MAX_HOLES,
-    GN_TREE_NAME,
-    HEAD_MATERIAL_NAME,
-    TAIL_MATERIAL_NAME,
     SHAPE_FLAT,
-    SHAPE_SPHERE,
-    SHAPE_HEMISPHERE,
     SHAPE_MODE_INT,
     get_or_build_membrane_gn_tree,
     set_membrane_colors,

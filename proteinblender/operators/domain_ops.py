@@ -112,7 +112,6 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
     
     def invoke(self, context, event):
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
         
         # Initialize instance attributes
         self.original_visibility = {}
@@ -359,7 +358,6 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
         self.cleanup_preview_mode(context)
         
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
         
         # Find the item
         selected_item = None

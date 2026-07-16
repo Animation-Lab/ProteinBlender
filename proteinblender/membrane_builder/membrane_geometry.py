@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import math
 import bpy
-from typing import Tuple, List, Optional
-from mathutils import Vector
+from typing import Tuple, Optional
 
 
 def _socket_by_type(sockets, name, sock_type):
@@ -683,33 +682,21 @@ def _build_membrane_gn_tree(num_holes: int = 0,
 
         # ---- Compute hole redistribution displacement --------------------
         # Holes do NOT delete lipids — they shove them aside, the way a real
-        # membrane parts around a pore. Each hole applies a radial, area-
-        # preserving displacement in the XY plane:
+        # membrane parts around a pore. Every hole and force field is treated
+        # as a sphere pusher, and a lipid is displaced out of the combined
+        # union of those spheres by a single softmax-weighted smooth-min pass
+        # over their signed distance fields (see _compute_sdf_displacement).
+        # For sphere pushers both the SDF and its gradient are analytic, so one
+        # shot lands the lipid on the combined exit surface — no iteration, and
+        # no residual where pushers overlap.
         #
-        #   * A point at radius d from the hole centre is remapped to
-        #     d' = sqrt(d² + R²)  (R = hole radius). This exact map sends the
-        #     whole disk of radius R out into the annulus beyond R, conserving
-        #     lipid count — the hole interior empties, nothing vanishes.
-        #   * Beyond R the push tapers smoothly to zero at R · HOLE_INFLUENCE,
-        #     so lipids bunch into a compressed ring around the rim — they
-        #     "feel" the hole and redistribute, affecting their neighbours.
+        # A hole empty is a real sphere, so its Z position matters (see the
+        # effective-radius block below): sliding it out of the membrane shrinks
+        # and closes the hole.
         #
-        # The hole empty is treated as a real sphere — its Z position matters
-        # (see the effective-radius block below): sliding it out of the
-        # membrane shrinks and closes the hole.
-        #
-        # Every hole's displacement is summed. Because Object Info reads the
-        # empty live, animating a hole's scale or location makes the lipids
-        # flow in real time (grow the hole → lipids stream outward; shrink it
-        # → the membrane heals closed).
-        HOLE_INFLUENCE = 3.0   # disturbance reaches 3× the pusher radius
-        # v25: the Jacobi iteration scheme is replaced by a single
-        # softmax-weighted smooth-min pass (see _compute_sdf_displacement
-        # below). For sphere pushers the SDF and its gradient are
-        # analytic, so a one-shot push lands the lipid on (or arbitrarily
-        # close to, depending on the smoothness α) the combined exit
-        # surface — no iteration needed, and no asymptotic residual in
-        # overlap zones.
+        # Because Object Info reads each empty live, animating a hole's scale or
+        # location makes the lipids flow in real time (grow the hole → lipids
+        # stream outward; shrink it → the membrane heals closed).
 
         # is_curved = (Shape Mode >= 1) — true for sphere / hemisphere,
         # false for flat sheet. Used to swap the per-hole distance and

@@ -64,7 +64,6 @@ def _world_to_local_direction(obj, world_vector):
     Returns:
         Vector in the object's parent local space
     """
-    from mathutils import Vector
 
     if obj.parent:
         # Transform world vector into parent's local space

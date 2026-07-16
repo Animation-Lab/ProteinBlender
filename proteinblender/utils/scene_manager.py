@@ -16,9 +16,9 @@ import json
 import re
 import bpy
 from bpy.app.handlers import persistent
-from typing import Dict, Optional, List, Set, Tuple
+from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
-from .blender_utils import is_object_valid, get_object_safe, refresh_ui_areas
+from .blender_utils import is_object_valid
 from .chain_utils import chain_match_tokens
 
 class ProteinBlenderScene:
@@ -56,7 +56,7 @@ class ProteinBlenderScene:
                         # (objects may already be deleted by Blender on File->New)
                         if molecule_id in cls._instance.molecules:
                             cls._instance.molecule_manager.remove_molecule(molecule_id)
-                    except (ReferenceError, KeyError, AttributeError) as e:
+                    except (ReferenceError, KeyError, AttributeError):
                         # Expected errors when objects are already deleted
                         # Log at debug level, not warning
                         pass

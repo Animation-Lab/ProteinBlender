@@ -22,8 +22,10 @@ from ..operators.keyframe_operators import (
     get_puppet_member_objects,
     delete_keyframe_metadata,
     delete_lattice_deformation_keyframes,
-    remove_brownian_segments_touching,
 )
+# Imported from its defining module rather than laundered through
+# keyframe_operators, which merely re-exported it.
+from ..utils.brownian import remove_brownian_segments_touching
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import logging
 import platform
 import gc
 import time
-from typing import Dict, Set
+from typing import Dict
 
 # Set up logging.
 # Guard against adding a duplicate handler when this module is re-imported (e.g. a dev
@@ -194,7 +194,7 @@ def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0)
                 time.sleep(delay * (attempt + 1))  # Exponential backoff
             else:
                 raise
-        except PermissionError as e:
+        except PermissionError:
             if is_windows:
                 logger.info("Some package files are locked (addon update in progress).")
                 logger.info("Dependencies will be verified on next Blender restart.")

@@ -19,7 +19,6 @@ from ..utils.brownian import (
     get_brownian_metadata,
     save_brownian_metadata,
     find_previous_keyframe,
-    remove_brownian_segments_touching,
 )
 
 
@@ -817,7 +816,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             type(self)._active_instance = None
 
         scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
 
         # Get selected items (puppets and/or DNA/RNA molecules)
         selected_puppets = [item for item in self.puppet_items if item.use_puppet]

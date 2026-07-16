@@ -17,7 +17,7 @@ from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from ..utils.molecularnodes.blender import nodes
 from .domain import DomainDefinition
 from ..core.domain import ensure_domain_properties_registered
-from ..utils.blender_utils import ObjectRef, is_object_valid, get_object_safe
+from ..utils.blender_utils import is_object_valid
 
 class MoleculeWrapper:
     """
@@ -370,7 +370,6 @@ class MoleculeWrapper:
             A new MoleculeWrapper instance, or None if creation failed
         """
         try:
-            import biotite.structure as struc
 
             # Create a minimal mock Molecule that wraps the existing object
             class MockMolecule:

@@ -2,7 +2,7 @@
 
 import bpy
 from bpy.types import Panel, Operator, PropertyGroup
-from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, CollectionProperty, PointerProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty
 from datetime import datetime
 
 
@@ -224,7 +224,6 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                     # Store transforms RELATIVE to the puppet controller
                     if controller_obj:
                         # Calculate relative transforms using matrix math for accuracy
-                        from mathutils import Matrix
 
                         # Get the inverse of the controller's world matrix
                         controller_matrix_inv = controller_obj.matrix_world.inverted()
@@ -277,7 +276,6 @@ class PROTEINBLENDER_OT_create_pose(Operator):
     def capture_pose_preview(self, context, pose):
         """Capture a preview image for the pose"""
         try:
-            import os
             import tempfile
             from pathlib import Path
             
@@ -774,7 +772,6 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
 
                 # Store transforms RELATIVE to the puppet controller
                 if controller_obj:
-                    from mathutils import Matrix
 
                     # Get the inverse of the controller's world matrix
                     controller_matrix_inv = controller_obj.matrix_world.inverted()
@@ -816,7 +813,6 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
     def capture_pose_preview(self, context, pose):
         """Capture a preview image for the pose"""
         try:
-            import os
             import tempfile
             from pathlib import Path
             

@@ -2,9 +2,7 @@
 
 import bpy
 from bpy.types import Operator
-from bpy.props import BoolProperty
 from mathutils import Vector
-from ..utils.scene_manager import ProteinBlenderScene
 from bpy.app.handlers import persistent
 
 
@@ -382,7 +380,7 @@ def finalize_custom_pivot():
 
         # Then remove the object data
         bpy.data.objects.remove(pivot_empty, do_unlink=True)
-    except Exception as e:
+    except Exception:
         # Already removed or error
         pass
     

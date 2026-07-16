@@ -16,8 +16,7 @@ from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerPropert
                       FloatVectorProperty, EnumProperty)
 from ..utils.molecularnodes.style import STYLE_ITEMS
 from ..utils.blender_utils import (
-    ObjectRef, NodeGroupRef, is_object_valid, is_node_group_valid,
-    get_object_safe, get_node_group_safe, safe_remove_object, safe_remove_node_group
+    ObjectRef, NodeGroupRef, safe_remove_object, safe_remove_node_group
 )
 
 class DomainProperties(PropertyGroup):

@@ -4,7 +4,6 @@ This module provides operators for importing protein structure files
 from the local filesystem.
 """
 
-import bpy
 import os
 import logging
 from typing import Set

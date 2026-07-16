@@ -52,7 +52,6 @@ def build_domains():
 
 
 def build_keyframes():
-    import bpy
     from mathutils import Vector
     mid = H.import_local("1aki.pdb", "1aki")
     mol = H.sm().molecules[mid]

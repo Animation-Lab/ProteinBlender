@@ -725,5 +725,5 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         row.enabled = len(items_already_puppeted) == 0 and len(unpuppeted_items) > 0
         
         # Create the button
-        op = row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
+        row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
 

@@ -7,7 +7,7 @@ the codebase.
 """
 
 import bpy
-from typing import Optional, TypeVar, Generic
+from typing import Optional, TypeVar
 
 T = TypeVar('T')
 

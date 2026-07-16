@@ -10,7 +10,7 @@ reconstructed from these properties after undo/redo and file load operations.
 
 import bpy
 from bpy.props import (BoolProperty, StringProperty, CollectionProperty,
-                      IntProperty, EnumProperty, FloatVectorProperty, FloatProperty, PointerProperty)
+                      IntProperty, EnumProperty, FloatVectorProperty, PointerProperty)
 from bpy.types import PropertyGroup
 
 from ..utils.molecularnodes.style import STYLE_ITEMS

@@ -1,4 +1,3 @@
-import bpy
 from bpy.types import Panel
 
 class PROTEIN_PB_PT_import_protein(Panel):

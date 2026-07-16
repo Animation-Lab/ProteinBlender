@@ -5,7 +5,7 @@ for proper shortest-path interpolation.
 """
 
 import bpy
-from mathutils import Vector, Quaternion
+from mathutils import Quaternion
 
 
 # Blender 5.0 (4.4+) changed the animation API - fcurves are now in slots/layers/strips

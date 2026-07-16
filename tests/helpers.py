@@ -228,7 +228,6 @@ def geometry_summary(obj):
     """A compact, deterministic dict summarising an object's evaluated
     geometry — vertex count, bounding box, centroid. Stable enough to snapshot
     without tripping on floating-point noise (values rounded)."""
-    import numpy as np
     pos = eval_positions(obj)
     if len(pos) == 0:
         return {"verts": 0}

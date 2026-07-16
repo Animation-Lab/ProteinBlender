@@ -10,8 +10,8 @@ domains within a puppet. The linker behaves like a string/tube:
 
 import bpy
 import math
-from mathutils import Vector, Matrix
-from typing import Tuple, List, Optional
+from mathutils import Vector
+from typing import List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -320,9 +320,8 @@ def compute_catenary_points(start: Vector, end: Vector,
     direction = end - start
     grav_norm = gravity_dir.normalized()
 
-    # Build local coordinate frame:
-    # u_horiz: horizontal direction (start-to-end projected perpendicular to gravity)
-    # u_vert: gravity direction
+    # Split the start->end vector into components along and across gravity.
+    # The sag is applied along grav_norm directly.
     vertical_component = direction.dot(grav_norm) * grav_norm
     horizontal_component = direction - vertical_component
 
@@ -348,8 +347,6 @@ def compute_catenary_points(start: Vector, end: Vector,
             points.append(base + perp * bulge)
         return points
 
-    u_horiz = horizontal_component.normalized()
-
     # Solve for catenary parameter 'a':
     # Arc length of catenary between x=0 and x=h_dist:
     #   L_cat = sqrt(v_dist^2 + (2*a*sinh(h_dist/(2*a)))^2) approximately
@@ -358,10 +355,6 @@ def compute_catenary_points(start: Vector, end: Vector,
     #
     # We solve in the projected horizontal plane, then correct for vertical offset.
     # The catenary sag gives us the additional droop below the straight line.
-
-    # Compute how much extra length is available for sag
-    straight_dist = D
-    excess = L - straight_dist  # always positive since D < L*0.99
 
     # For a symmetric catenary y = a*cosh(x/a) - a between x=-h/2 and x=h/2:
     # Arc length = 2*a*sinh(h/(2*a))
@@ -408,7 +401,6 @@ def compute_catenary_points(start: Vector, end: Vector,
     half_h = h_dist / 2.0
     y_start_local = a * math.cosh(-half_h / a)
     y_end_local = a * math.cosh(half_h / a)
-    y_min_local = a  # minimum of cosh at x=0
 
     points = []
     for i in range(num_samples):
@@ -420,16 +412,11 @@ def compute_catenary_points(start: Vector, end: Vector,
         # Catenary y (sag depth below the line connecting endpoints)
         y_cat = a * math.cosh(x_local / a)
 
-        # Normalize: at endpoints y should be 0 (no sag), maximum sag at center
-        # y_cat ranges from y_min_local (center) to y_start_local/y_end_local (edges)
-        # We want sag = y_cat - (lerp between y_start and y_end)
+        # Sag below the chord: cosh is convex, so y_cat dips under the straight
+        # line between the endpoints. droop is that gap - zero at both ends,
+        # maximum at the centre - and is applied along gravity.
         y_line = y_start_local + t * (y_end_local - y_start_local)
-        sag_at_t = y_cat - y_line  # negative = below the line
-
-        # Since cosh is convex, the middle sags below the chord
-        # But we computed it as y_cat - y_line which is negative at the center
-        # The actual droop below the chord: negate it and apply along gravity
-        droop = -(y_cat - y_line)
+        droop = y_line - y_cat
 
         # World position: interpolate along start-to-end, then offset by droop
         base = start.lerp(end, t)

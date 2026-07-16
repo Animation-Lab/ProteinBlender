@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty, EnumProperty
+from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.chain_utils import chain_match_tokens
 
@@ -253,7 +253,6 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
     molecule_id: StringProperty()
 
     def execute(self, context):
-        from mathutils import Vector
         scene_manager = ProteinBlenderScene.get_instance()
         source_molecule = scene_manager.molecules.get(self.molecule_id)
 
@@ -320,11 +319,6 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             # Create MoleculeWrapper
             new_molecule = MoleculeWrapper(new_mol_obj, new_identifier)
             new_molecule.style = source_molecule.style
-
-            # 5. CRITICAL: Store the offset between source protein location and origin
-            # We'll temporarily move the new protein to match source protein's position
-            # during domain creation, then move everything together to preserve exact transforms
-            source_to_origin_offset = source_location.copy()
 
             # Move new protein to source location BEFORE creating domains
             # This ensures domains are created with correct relative positions
