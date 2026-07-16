@@ -16,7 +16,7 @@ class MOLECULE_PB_OT_delete(Operator):
         scene_manager = ProteinBlenderScene.get_instance()
         # Capture current state for potential undo restoration
         try:
-            scene_manager._capture_molecule_state(self.molecule_id)
+            scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
         except Exception:
             pass
 
@@ -605,7 +605,7 @@ class MOLECULE_PB_OT_delete_chain(Operator):
             return {'CANCELLED'}
 
         # Capture state for undo (reuse existing pattern)
-        scene_manager._capture_molecule_state(self.molecule_id)
+        scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
 
         # Find all domains belonging to this chain. self.chain_id arrives as
         # the chain *index* ("2") from the outliner row while domains store the

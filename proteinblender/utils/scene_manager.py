@@ -13,6 +13,7 @@ on-demand.
 """
 
 import json
+import logging
 import re
 import bpy
 from bpy.app.handlers import persistent
@@ -20,6 +21,9 @@ from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid
 from .chain_utils import chain_match_tokens
+
+logger = logging.getLogger(__name__)
+
 
 class ProteinBlenderScene:
     _instance = None
@@ -65,7 +69,6 @@ class ProteinBlenderScene:
                         print(f"ProteinBlender: Warning cleaning up molecule {molecule_id}: {e}")
                 
                 # Clear saved states
-                cls._instance._saved_states.clear()
                 
                 # Reset instance variables
                 cls._instance.active_molecule = None
@@ -82,7 +85,6 @@ class ProteinBlenderScene:
         self.molecule_manager = MoleculeManager()
         self.active_molecule: Optional[str] = None
         self.display_settings = {}
-        self._saved_states = {}  # molecule_id -> MoleculeState
 
     @property
     def molecules(self) -> Dict[str, MoleculeWrapper]:
@@ -103,17 +105,26 @@ class ProteinBlenderScene:
                 if fresh_ng:
                     domain.node_group = fresh_ng
 
-    def _capture_molecule_state(self, molecule_id):
-        """Store complete state before destructive operations"""
+    def refresh_domain_refs_before_destructive_op(self, molecule_id):
+        """Re-bind a molecule's domain object/node-group references to live data.
+
+        Called ahead of destructive operations so they never act through a stale
+        reference left behind by an undo/redo.
+
+        This used to also build a MoleculeState snapshot into self._saved_states.
+        Nothing ever read that dict and nothing ever called MoleculeState.
+        restore_to_scene, so every delete/split/merge walked the molecule's
+        domains copying matrices and materials, then threw the result away -
+        undo/redo is handled by sync_molecule_list_after_undo instead. The
+        snapshot is gone; the reference refresh it was wrapped around is real and
+        is why this method still exists.
+        """
         if molecule_id in self.molecules:
             try:
-                # Refresh domain object references to avoid stale references after undo/redo
                 self._refresh_domain_object_references(self.molecules[molecule_id])
-                from ..core.molecule_state import MoleculeState
-                self._saved_states[molecule_id] = MoleculeState(self.molecules[molecule_id])
             except Exception as e:
-                print(f"Warning: Failed to capture state for molecule {molecule_id}: {e}")
-                # Don't let state capture failures block other operations
+                logger.warning(
+                    f"Failed to refresh domain references for {molecule_id}: {e}")
 
     def set_active_molecule(self, molecule_id):
         """Set the active molecule."""
@@ -297,7 +308,7 @@ class ProteinBlenderScene:
     def delete_molecule(self, identifier: str) -> bool:
         """Delete a molecule and update the UI list"""
         # Capture state before deletion
-        self._capture_molecule_state(identifier)
+        self.refresh_domain_refs_before_destructive_op(identifier)
 
         # Check if the molecule exists via the manager, which holds the actual MoleculeWrapper objects
         if self.molecule_manager.get_molecule(identifier):

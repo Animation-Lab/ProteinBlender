@@ -522,7 +522,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         chain_tokens = chain_match_tokens(molecule, self.chain_id)
 
         # Capture molecule state before making changes (for undo/redo support)
-        scene_manager._capture_molecule_state(self.molecule_id)
+        scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
         
         # Log existing domains before split
         print(f"Existing domains before split:")
@@ -863,7 +863,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
             return {'CANCELLED'}
         
         # Capture molecule state before making changes (for undo/redo support)
-        scene_manager._capture_molecule_state(molecule_id)
+        scene_manager.refresh_domain_refs_before_destructive_op(molecule_id)
         
         # Calculate merged domain range using actual domains
         merged_start = actual_domain_items[0].domain_start

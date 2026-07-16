@@ -177,7 +177,7 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         chain_id = domain_to_delete.chain_id
 
         # Capture state for undo
-        scene_manager._capture_molecule_state(mol_id)
+        scene_manager.refresh_domain_refs_before_destructive_op(mol_id)
 
         # Delete the domain and check if chain should be removed
         result = molecule.delete_domain(self.domain_id)
