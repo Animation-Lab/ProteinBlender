@@ -43,7 +43,6 @@ from .animation_panel import (
     PROTEINBLENDER_OT_delete_keyframe as PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
     PROTEINBLENDER_OT_edit_keyframe,
-    PROTEINBLENDER_OT_dismiss_dialogs,
     register_props as animation_register_props,
     unregister_props as animation_unregister_props,
 )
@@ -97,7 +96,6 @@ CLASSES = [
     PROTEINBLENDER_OT_anim_delete_keyframe,
     PROTEINBLENDER_OT_jump_to_keyframe,
     PROTEINBLENDER_OT_edit_keyframe,
-    PROTEINBLENDER_OT_dismiss_dialogs,
 
     # Data types used by the animation panel's template_list. Both must
     # be registered before PROTEINBLENDER_PT_animation references them.

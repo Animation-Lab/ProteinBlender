@@ -183,3 +183,32 @@ def test_toggle_force_fields_no_selection_cancels(scene, sm, single_chain):
         it.is_selected = False
     res = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
     assert res == {'CANCELLED'}
+
+
+@pytest.mark.integration
+def test_outliner_chain_range_falls_back_to_auth_chain_id_map(scene, sm, single_chain):
+    """The chain-range resolver's second fallback must actually run.
+
+    build_outliner_hierarchy tries idx_to_label_asym_id_map first and
+    auth_chain_id_map second. The second branch referenced a bare
+    ``chain_mapping`` that was never bound in the function, so reaching it
+    raised NameError - masked in production because every caller wraps the
+    rebuild in a broad except, leaving the outliner silently unbuilt.
+
+    Emptying idx_to_label_asym_id_map forces the first lookup to miss.
+    """
+    from proteinblender.utils.scene_manager import build_outliner_hierarchy
+
+    molecule = sm.molecules[single_chain]
+    assert molecule.auth_chain_id_map, "fixture must have an auth chain map to fall back to"
+    assert molecule.chain_residue_ranges, "fixture must have residue ranges to resolve"
+
+    molecule.idx_to_label_asym_id_map = {}
+
+    build_outliner_hierarchy(bpy.context)
+
+    chain_rows = [i for i in scene.outliner_items if i.item_type == 'CHAIN']
+    assert chain_rows, "expected at least one chain row"
+    assert any(r.chain_end >= r.chain_start > 0 for r in chain_rows), (
+        "auth_chain_id_map fallback should still resolve a real residue range"
+    )

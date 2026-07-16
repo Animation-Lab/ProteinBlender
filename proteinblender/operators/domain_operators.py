@@ -99,92 +99,6 @@ class MOLECULE_PB_OT_create_domain(Operator):
     #  _check_numeric_atom_names, _find_alpha_carbon_numeric, 
     #  _find_alpha_carbon_textual are no longer needed here)
 
-class MOLECULE_PB_OT_update_domain(Operator):
-    bl_idname = "molecule.update_domain"
-    bl_label = "Update Domain"
-    bl_description = "Update the selected domain's parameters"
-    
-    domain_id: StringProperty()
-    action: StringProperty(default='UPDATE')
-    chain_id: StringProperty(default='')
-    
-    def execute(self, context):
-        scene = context.scene
-        scene_manager = ProteinBlenderScene.get_instance()
-        
-        # Get the selected molecule
-        molecule = scene_manager.molecules.get(scene.selected_molecule_id)
-        if not molecule:
-            self.report({'ERROR'}, "No molecule selected")
-            return {'CANCELLED'}
-            
-        # Get the domain
-        domain = molecule.domains.get(self.domain_id)
-        if not domain:
-            self.report({'ERROR'}, "Domain not found")
-            return {'CANCELLED'}
-        
-        # Handle different actions
-        if self.action == 'SET_CHAIN':
-            # Get the mapped chain
-            try:
-                author_chain_id = molecule.get_author_chain_id(int(self.chain_id) if self.chain_id.isdigit() else self.chain_id)
-                
-                # If chain has changed, update residue range to valid values for this chain
-                if author_chain_id in molecule.chain_residue_ranges:
-                    min_res, max_res = molecule.chain_residue_ranges[author_chain_id]
-                    
-                    # Check for overlaps
-                    if molecule._check_domain_overlap(
-                        self.chain_id, min_res, max_res,
-                        exclude_domain_id=self.domain_id
-                    ):
-                        self.report({'ERROR'}, "Cannot change chain - would overlap with existing domain")
-                        return {'CANCELLED'}
-                    
-                    # Proceed with update
-                    domain.chain_id = author_chain_id
-                    domain.start = min_res
-                    domain.end = max_res
-                    return {'FINISHED'}
-            except Exception as e:
-                self.report({'ERROR'}, f"Error updating chain: {str(e)}")
-                return {'CANCELLED'}
-        else:
-            # Use domain properties directly instead of scene properties
-            chain_id = domain.chain_id
-            start = domain.start
-            end = domain.end
-            
-            # Check if the residue range is valid
-            if start > end:
-                self.report({'ERROR'}, f"Invalid residue range: {start} > {end}")
-                return {'CANCELLED'}
-            
-            # Check for overlaps with other domains (exclude this domain)
-            if molecule._check_domain_overlap(
-                chain_id, 
-                start, 
-                end,
-                exclude_domain_id=self.domain_id
-            ):
-                self.report({'ERROR'}, f"Domain overlaps with existing domain in chain {chain_id}")
-                return {'CANCELLED'}
-                
-            # Update the domain
-            success = molecule.update_domain(
-                domain_id=self.domain_id,
-                chain_id=chain_id,
-                start=start,
-                end=end
-            )
-            
-            if not success:
-                self.report({'ERROR'}, "Failed to update domain")
-                return {'CANCELLED'}
-        
-        return {'FINISHED'}
-
 class MOLECULE_PB_OT_copy_domain(Operator):
     bl_idname = "molecule.copy_domain"
     bl_label = "Copy Domain"
@@ -1198,35 +1112,6 @@ class MOLECULE_PB_OT_snap_pivot_to_residue(Operator):
         return {'FINISHED'}
 
 # New dialog operator that looks like a text field but opens a dialog
-class MOLECULE_PB_OT_update_domain_name_dialog(Operator):
-    bl_idname = "molecule.update_domain_name_dialog"
-    bl_label = "Edit Domain Name"
-    bl_description = "Edit the name of this domain"
-    
-    domain_id: StringProperty()
-    name: StringProperty(name="Name", description="Enter new name for the domain")
-    
-    def invoke(self, context, event):
-        # Get the current domain name
-        scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(context.scene.selected_molecule_id)
-        if molecule and self.domain_id in molecule.domains:
-            domain = molecule.domains[self.domain_id]
-            self.name = domain.name
-        
-        # Show the dialog
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self, width=300)
-    
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "name")
-    
-    def execute(self, context):
-        # Call the standard update operator with the new name
-        bpy.ops.molecule.update_domain_name(domain_id=self.domain_id, name=self.name)
-        return {'FINISHED'}
-
 # Operator to initialize temp_domain_name (called from UI when needed)
 class MOLECULE_PB_OT_initialize_domain_temp_name(Operator):
     bl_idname = "molecule.initialize_domain_temp_name"

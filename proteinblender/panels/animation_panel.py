@@ -274,62 +274,6 @@ class PROTEINBLENDER_OT_edit_keyframe(bpy.types.Operator):
         return bpy.ops.proteinblender.create_keyframe('INVOKE_DEFAULT')
 
 
-class PROTEINBLENDER_OT_dismiss_dialogs(bpy.types.Operator):
-    """Dismiss any open modal popups by simulating Esc on every window.
-
-    Primarily a safety/testing tool — Blender exposes no public API to
-    introspect or cancel a running modal popup (``invoke_props_dialog``),
-    so automated callers that accidentally trigger one have no clean way
-    to recover. This operator sends a synthetic Esc keypress to each
-    window, which Blender treats the same as the user pressing Esc: the
-    topmost modal popup dismisses, normal viewport input resumes.
-
-    **Blender 5.x gotcha:** ``window.event_simulate`` is gated behind the
-    ``--enable-event-simulate`` command-line flag, NOT user preferences.
-    Without that flag the call raises RuntimeError and this operator can
-    only warn — the caller still has to dismiss the popup manually. To
-    enable: launch Blender as ``blender --enable-event-simulate``.
-
-    **Preferred path for MCP / scripted tests:** invoke the underlying
-    operator with the ``skip_dialog=True`` property (e.g.
-    ``bpy.ops.proteinblender.edit_keyframe(frame=N, skip_dialog=True)``)
-    so the modal never opens. The dismiss path is a recovery tool for
-    callers that didn't anticipate the modal."""
-    bl_idname = "proteinblender.dismiss_dialogs"
-    bl_label = "Dismiss ProteinBlender Dialogs"
-    bl_options = {'INTERNAL'}
-
-    def execute(self, context):
-        dispatched = 0
-        gated = 0
-        last_err = None
-        for window in context.window_manager.windows:
-            try:
-                window.event_simulate(type='ESC', value='PRESS')
-                window.event_simulate(type='ESC', value='RELEASE')
-                dispatched += 1
-            except RuntimeError as e:
-                # event_simulate is gated unless Blender was started with
-                # the --enable-event-simulate flag. Surface that as a
-                # single explicit warning so the caller knows what to do
-                # rather than seeing a per-window stack trace.
-                gated += 1
-                last_err = str(e).strip()
-
-        if dispatched:
-            self.report({'INFO'},
-                        f"Dispatched Esc to {dispatched} window(s)")
-        if gated:
-            self.report(
-                {'WARNING'},
-                f"event_simulate disabled on {gated} window(s) — relaunch "
-                f"Blender with --enable-event-simulate to use this "
-                f"operator (or pass skip_dialog=True to the operator that "
-                f"opens the modal). Last error: {last_err!r}"
-            )
-        return {'FINISHED'}
-
-
 class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
     """Delete every ProteinBlender keyframe at this frame — across all puppets
     and DNA/RNA molecules, including puppet domain pose/colour keyframes"""

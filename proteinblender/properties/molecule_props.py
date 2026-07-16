@@ -451,11 +451,6 @@ def register():
         min=1,
         update=lambda self, context: ensure_valid_scene_domain_range(self, context, "end")
     )
-    bpy.types.Scene.selected_chain = StringProperty(
-        name="Selected Chain",
-        description="Currently selected chain for domain creation",
-        default=""
-    )
     bpy.types.Scene.molecule_style = EnumProperty(
         name="Style",
         description="Visualization style for the molecule",
@@ -579,7 +574,6 @@ def unregister():
         "selected_chain_for_domain",
         "domain_start",
         "domain_end",
-        "selected_chain",
         "show_domain_preview",
         "split_domain_new_start",
         "split_domain_new_end",

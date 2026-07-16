@@ -49,6 +49,27 @@ versions, though the 216-passing count above was re-run only on 5.2.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Outliner chain-range fallback raised NameError.** `build_outliner_hierarchy`
+  resolves a chain's residue range from `idx_to_label_asym_id_map` first and
+  `auth_chain_id_map` second, but the second branch tested a bare `chain_mapping`
+  that was never bound in the function, so reaching it raised `NameError`. Every
+  caller wraps the rebuild in a broad `except`, so the outliner silently failed to
+  build instead of surfacing the error. Fixed to read `molecule.auth_chain_id_map`,
+  which is what the branch's own comment says. Guarded by
+  `test_outliner.py::test_outliner_chain_range_falls_back_to_auth_chain_id_map`
+  (verified to fail on the pre-fix code).
+
+- **Failed domain merge crashed with UnboundLocalError.** In
+  `PROTEINBLENDER_OT_merge_domains`, `covers_entire_chain` was bound only inside
+  `if created_domain_ids:`; the `else` branch reported "Failed to create merged
+  domain" and then fell through to `if affected_groups and covers_entire_chain:`.
+  Any failed merge whose domains belonged to a puppet raised `UnboundLocalError`.
+  Fixed to report and return `{'CANCELLED'}`. Guarded by
+  `test_domains.py::test_merge_domains_cancels_cleanly_when_creation_fails`
+  (verified to fail on the pre-fix code — note the assertion inspects the printed
+  traceback, because Blender surfaces `report({'ERROR'})` as `RuntimeError` either
+  way and the message alone cannot distinguish a clean refusal from a crash).
+
 - **Save/load wiped every persisted field but keyframes and poses.**
   `scene_manager._refresh_molecule_ui` preserved only `keyframes` and `poses`,
   then cleared `scene.molecule_list_items` and rebuilt each row writing just

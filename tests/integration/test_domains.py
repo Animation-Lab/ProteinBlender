@@ -331,6 +331,61 @@ def test_merge_domains_removes_sources_adds_merged(scene, sm, multi_chain):
     assert merged[0].end == d_end
 
 
+@pytest.mark.integration
+def test_merge_domains_cancels_cleanly_when_creation_fails(scene, sm, multi_chain, monkeypatch, capfd):
+    """A failed merge must report and stop, not fall into the success path.
+
+    `covers_entire_chain` was only bound inside `if created_domain_ids:`. The
+    else branch reported "Failed to create merged domain" and then fell through
+    to `if affected_groups and covers_entire_chain:`, raising UnboundLocalError
+    whenever the merged domains belonged to a puppet. Ruff cannot see this - it
+    is a conditional binding, not an unused one.
+
+    Forcing _create_domain_with_params to fail drives the else branch; the
+    puppet is what makes affected_groups non-empty and reaches the bad read.
+    """
+    mid = multi_chain
+    mol = sm.molecules[mid]
+    scene.selected_molecule_id = mid
+    for it in scene.outliner_items:
+        it.is_selected = False
+
+    did = _first_domain(mol)
+    dom = mol.domains[did]
+    author = dom.chain_id
+    d_start, d_end = dom.start, dom.end
+    mid_pt = d_start + max(1, (d_end - d_start) // 2)
+
+    bpy.ops.proteinblender.split_domain(
+        chain_id=author, molecule_id=mid, split_start=d_start, split_end=mid_pt)
+    chain_dids = [d for d, dm in mol.domains.items() if dm.chain_id == author]
+    assert len(chain_dids) == 2
+
+    # Put the two split domains in a puppet so affected_groups is non-empty.
+    for it in scene.outliner_items:
+        it.is_selected = it.item_type == "DOMAIN" and it.item_id in chain_dids
+    bpy.ops.proteinblender.create_puppet('EXEC_DEFAULT', puppet_name="Puppet_Merge")
+    assert any(i.item_type == "PUPPET" for i in scene.outliner_items)
+
+    # Re-select the domains (create_puppet changes the selection) and force the
+    # merged-domain creation to fail.
+    for it in scene.outliner_items:
+        it.is_selected = it.item_type == "DOMAIN" and it.item_id in chain_dids
+    monkeypatch.setattr(mol, "_create_domain_with_params", lambda *a, **k: None)
+
+    # Blender reports self.report({'ERROR'}) as RuntimeError either way, so the
+    # message alone cannot tell a clean refusal from a crash - assert on the
+    # traceback Blender prints when execute() raises. Pre-fix this contains the
+    # UnboundLocalError from the fall-through.
+    capfd.readouterr()  # discard output from the setup above
+    with pytest.raises(RuntimeError, match="Failed to create merged domain"):
+        bpy.ops.proteinblender.merge_domains('EXEC_DEFAULT')
+    captured = capfd.readouterr()
+    assert "UnboundLocalError" not in (captured.out + captured.err), (
+        "merge_domains fell through its failure branch into success-path code"
+    )
+
+
 # --------------------------------------------------------------------------
 # Parenting
 # --------------------------------------------------------------------------

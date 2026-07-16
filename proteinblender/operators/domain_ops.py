@@ -968,8 +968,14 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
                         else:
                             print(f"Chain already in group '{group_item.name}'")
         else:
+            # The source domains are already gone at this point, but there is no
+            # merged domain to take their place and nothing below applies to a
+            # failed merge - covers_entire_chain is only bound in the branch
+            # above. Stop here rather than fall through.
             self.report({'ERROR'}, "Failed to create merged domain")
-        
+            build_outliner_hierarchy(context)
+            return {'CANCELLED'}
+
         # Rebuild outliner
         build_outliner_hierarchy(context)
         

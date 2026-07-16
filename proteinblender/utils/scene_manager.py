@@ -1451,8 +1451,8 @@ def build_outliner_hierarchy(context=None):
                             chain_item.chain_start = start
                             chain_item.chain_end = end
                     # Second, try auth_chain_id_map
-                    elif chain_mapping and chain_id in chain_mapping:
-                        label_asym_id = chain_mapping[chain_id]
+                    elif chain_id in getattr(molecule, 'auth_chain_id_map', {}):
+                        label_asym_id = molecule.auth_chain_id_map[chain_id]
                         if label_asym_id in molecule.chain_residue_ranges:
                             start, end = molecule.chain_residue_ranges[label_asym_id]
                             chain_item.chain_start = start
