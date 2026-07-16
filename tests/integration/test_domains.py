@@ -30,14 +30,6 @@ def _first_domain(mol):
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=False,
-    reason="BUG surfaced by this test: creating a domain over a PARTIAL chain "
-    "range makes MoleculeWrapper.create_domain auto-generate filler domains "
-    "and return a LIST of ids, but molecule_operators.py:62 does "
-    "`if domain_id in molecule.domains:` — hashing a list raises TypeError, so "
-    "the operator errors out. Fix: normalize the return to a list and iterate. "
-    "Flips to XPASS once fixed. See tests/COVERAGE.md.")
 def test_create_custom_range_domain(scene, sm, multi_chain):
     """Free a chain of its auto-domain, then create a custom residue-range
     domain through molecule.create_domain (which reads scene.new_domain_*)."""
@@ -161,12 +153,13 @@ def test_update_domain_color_object_property(scene, sm, multi_chain):
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(reason="molecule.update_domain_color reads scene.domain_color, "
-                          "which the addon never registers (only temp_domain_color)",
-                   strict=False)
-def test_update_domain_color_operator_is_broken(scene, sm, multi_chain):
-    """Documents that the operator variant crashes on an unregistered scene
-    property. Kept xfail(strict=False) so a future fix flips it to XPASS."""
+def test_update_domain_color_operator_applies_color(scene, sm, multi_chain):
+    """molecule.update_domain_color applies the given colour to the domain.
+
+    Regression guard: the operator used to read the unregistered
+    `scene.domain_color` and crash with AttributeError; it now reads the
+    registered `scene.temp_domain_color` (overridden here by the explicit
+    `color` argument)."""
     mid = multi_chain
     mol = sm.molecules[mid]
     scene.selected_molecule_id = mid

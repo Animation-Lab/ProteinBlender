@@ -47,16 +47,24 @@ class MOLECULE_PB_OT_create_domain(Operator):
         print(f"Operator: Requesting domain creation for chain {scene.new_domain_chain} ({scene.new_domain_start}-{scene.new_domain_end})")
         
         # Create the domain using the MoleculeWrapper method (which now handles pivot setting)
-        domain_id = molecule.create_domain(
+        created = molecule.create_domain(
             chain_id=scene.new_domain_chain,  # Use the chain selected in UI
             start=scene.new_domain_start,  # Use the start value from UI
             end=scene.new_domain_end  # Use the end value from UI
         )
-        
-        if domain_id is None:
+
+        # create_domain returns a LIST of created domain ids - the requested
+        # domain first, followed by any auto-filled filler domains that span the
+        # rest of the chain. Normalize so a bare-id or None return still works,
+        # and focus the requested (first) domain in the UI. Previously this
+        # treated the return as a single id, so `domain_id in molecule.domains`
+        # hashed a list and raised TypeError on any partial-range domain.
+        created_ids = created if isinstance(created, list) else ([created] if created else [])
+        if not created_ids:
             self.report({'ERROR'}, "Failed to create domain via MoleculeWrapper")
             return {'CANCELLED'}
-            
+        domain_id = created_ids[0]
+
         # Automatically expand the new domain in the UI
         # (Pivot setting is now handled inside molecule.create_domain)
         if domain_id in molecule.domains:
@@ -662,10 +670,16 @@ class MOLECULE_PB_OT_update_domain_color(Operator):
             self.report({'ERROR'}, "Domain not found")
             return {'CANCELLED'}
             
-        # Get color
-        color = scene.domain_color
+        # Get color. The scene-level domain colour picker is registered as
+        # `temp_domain_color` (there is no `scene.domain_color`; reading it
+        # raised AttributeError and broke this operator). An explicit `color`
+        # operator argument still overrides it below.
+        # Snapshot to a plain tuple: assigning the live RNA property array would
+        # store a reference that reverts to the operator default once execute()
+        # returns, so the domain would lose the colour just set.
+        color = tuple(scene.temp_domain_color)
         if hasattr(self, "color") and self.color[0] >= 0:  # Check if color parameter was provided
-            color = self.color
+            color = tuple(self.color)
             
         print(f"1 Updating color for domain {self.domain_id} to {color}")
         # Update domain color

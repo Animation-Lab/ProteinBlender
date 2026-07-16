@@ -3,11 +3,12 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **214 passing, 10 skipped,
-4 xfailed** across ~228 collected tests. The suite was previously verified on
-Blender 5.0 and 5.1 (211 passing); the membrane Random Value fix addresses
-sockets by identity so it stays compatible with those versions, though the
-214-passing count above was re-run only on 5.2.
+Current status (Blender 5.2, offline lane): **216 passing, 10 skipped,
+2 xfailed** across ~228 collected tests. The remaining 2 xfails are intentional
+(modal-dialog operators unreachable headless - see below), not bugs. The suite
+was previously verified on Blender 5.0 and 5.1 (211 passing); the membrane
+Random Value fix addresses sockets by identity so it stays compatible with those
+versions, though the 216-passing count above was re-run only on 5.2.
 
 ## Lanes
 
@@ -68,6 +69,22 @@ sockets by identity so it stays compatible with those versions, though the
   Blender 5.x. Guarded by all of `test_membrane.py` (10 tests build a membrane;
   verified to fail on the pre-fix code on 5.2 and pass after).
 
+- **`molecule.create_domain` crashed on a partial chain range.**
+  `MoleculeWrapper.create_domain` returns a **list** of ids (the requested
+  domain plus any auto-filled fillers), but the operator treated it as a single
+  id — `if domain_id in molecule.domains:` hashed the list and raised
+  `TypeError` on any partial-range domain. Fixed in `domain_operators.py` by
+  normalizing the return and focusing the first (requested) id. Guarded by
+  `test_domains.py::test_create_custom_range_domain`.
+
+- **`molecule.update_domain_color` crashed, then dropped the colour.** It read
+  `scene.domain_color`, which is never registered (only `scene.temp_domain_color`
+  is), raising `AttributeError`; and it stored the live operator RNA-property
+  array, which reverts to the operator default once `execute()` returns. Fixed
+  in `domain_operators.py` to read `scene.temp_domain_color` and snapshot the
+  colour to a plain tuple before applying it. Guarded by
+  `test_domains.py::test_update_domain_color_operator_applies_color`.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
@@ -80,20 +97,11 @@ sockets by identity so it stays compatible with those versions, though the
   `test_split_domain_regression.py` (both the real workflow and a deterministic
   stale-pointer trigger). Verified to fail on the pre-fix code on both 5.0/5.1.
 
-## Bugs this suite already surfaced (xfail → fix flips to XPASS)
+## Bugs this suite surfaced (now fixed - see Behaviour regressions above)
 
-1. **`molecule.create_domain` crashes on a partial chain range.** When a domain
-   covers only part of a chain, `MoleculeWrapper.create_domain` auto-creates
-   filler domains and returns a **list** of ids, but
-   [`operators/domain_operators.py:62`](../proteinblender/operators/domain_operators.py#L62)
-   does `if domain_id in molecule.domains:` — hashing a list raises
-   `TypeError`. Fix: normalize the return to a list and iterate.
-   (`test_domains.py::test_create_custom_range_domain`)
-2. **`molecule.update_domain_color` reads an unregistered property.** It reads
-   `scene.domain_color`, which the addon never registers (only
-   `temp_domain_color`), so the operator raises. The working path is the object
-   property `obj.domain_color` (tested strictly).
-   (`test_domains.py::test_update_domain_color_operator_is_broken`)
+None outstanding. The two `create_domain` / `update_domain_color` bugs this
+suite originally surfaced as xfails are fixed and are now normal passing tests,
+documented under "Behaviour regressions (guard against reintroduction)".
 
 ## Intentional xfails (design, not bugs)
 
