@@ -457,7 +457,8 @@ def _snapshot_list_item(item):
     Historically this function only preserved keyframes and poses, which
     meant every panel-draw-after-load silently wiped object_name, style,
     chain mappings, residue ranges, and the persisted domains collection.
-    See save-load-stress-test.md (Bug A) for the regression history.
+    See tests/COVERAGE.md ("Save/load wiped every persisted field") for the
+    regression history; guarded by roundtrip/test_saveload.py.
     """
     snap = {
         # Top-level scalar persistence — without these, loading a saved file

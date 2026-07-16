@@ -32,12 +32,6 @@ for p in (str(TESTS_DIR), str(REPO_ROOT)):
 
 import helpers  # noqa: E402  (path set above)
 
-# The two legacy hand-run scripts at tests/ root define `test_*` functions but
-# are NOT pytest-shaped (they self-execute against a live interactive Blender).
-# Exclude them from collection — their assertions are ported into unit/ +
-# integration/.
-collect_ignore = ["test_full_suite.py", "test_chain_operations.py"]
-
 
 # --------------------------------------------------------------------------
 # Session: register the addon exactly once

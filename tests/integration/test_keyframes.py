@@ -3,7 +3,7 @@
 The primary, headless-reachable keyframe path for a plain protein is the
 ``molecule.keyframe_protein`` operator (per-molecule keyframes recorded on the
 ``MoleculeListItem`` AND real transform F-curves on the protein + domain
-objects). Ported and expanded from tests/feature_audit/section_keyframes.py.
+objects).
 
 The newer ``proteinblender.create_keyframe`` operator is a modal
 ``invoke_props_dialog`` whose per-target selection collection is only populated
@@ -12,9 +12,9 @@ so it is not exercisable via ``EXEC_DEFAULT`` headless. That is documented with
 a skip. The frame-based navigation operator ``proteinblender.jump_to_keyframe``
 IS reachable and is tested here.
 
-F-curve access uses the ``_action_fcurves`` compatibility shim (copied from
-tests/stress_test/inner_runner.py) so the assertions work on both the Blender
-4.x direct-``fcurves`` API and the 5.x slotted-action API.
+F-curve access goes through the ``_action_fcurves`` compatibility shim below,
+so the assertions work on both the Blender 4.x direct-``fcurves`` API and the
+5.x slotted-action API.
 """
 
 import pytest
@@ -23,8 +23,7 @@ import helpers as H
 
 
 # ---------------------------------------------------------------------------
-# Blender 4.x / 5.x F-curve compatibility shim (copied verbatim from
-# tests/stress_test/inner_runner.py so this module is self-contained).
+# Blender 4.x / 5.x F-curve compatibility shim.
 # ---------------------------------------------------------------------------
 
 def _action_fcurves(action):

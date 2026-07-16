@@ -10,7 +10,7 @@ stripped to the real item_id inside ``execute``.
 These drive the addon's own operators (``pb2.add_linker`` / ``update_linker`` /
 ``toggle_linker_visibility`` / ``edit_linker`` / ``remove_linker``) and the
 cascade cleanup handlers, then assert observable scene state. Ported and
-expanded from ``tests/feature_audit/section_linkers.py``.
+expanded from the retired hand-run linker audit.
 """
 
 import pytest

@@ -1,6 +1,6 @@
 """Integration tests for DOMAIN operations on a multi-chain protein.
 
-Ported and expanded from tests/feature_audit/section_domains.py. Each test
+Each test
 imports 4hhb offline (four auto-created chain domains) via the ``multi_chain``
 fixture and drives real ProteinBlender operators, asserting observable state on
 the MoleculeWrapper runtime dict (``sm.molecules[mid].domains``), the persisted

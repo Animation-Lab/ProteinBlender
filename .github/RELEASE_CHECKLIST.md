@@ -121,4 +121,5 @@ pip install tomlkit
 
 ---
 
-**Need help?** See full documentation in [AUTO_UPDATER_IMPLEMENTATION.md](../AUTO_UPDATER_IMPLEMENTATION.md)
+**Need help?** See [GITHUB_PAGES_SETUP.md](GITHUB_PAGES_SETUP.md) for the extension-repository
+hosting setup, and [docs/alpha-testing.md](../docs/alpha-testing.md) for the alpha channel.

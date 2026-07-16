@@ -27,7 +27,7 @@ REPO_ROOT = TESTS_DIR.parent
 
 
 def _bootstrap_paths():
-    # User site-packages holds pytest/syrupy/xdist (installed via Blender's
+    # User site-packages holds pytest/syrupy (installed via Blender's
     # python -m pip). Blender usually enables it, but make it explicit so the
     # runner works regardless of ENABLE_USER_SITE.
     try:
@@ -51,7 +51,7 @@ def main():
             "\n[run_blender] pytest is not installed in Blender's Python.\n"
             "Install it with:\n"
             '  "<blender>/<ver>/python/bin/python.exe" -m pip install '
-            "pytest syrupy pytest-xdist\n\n")
+            "pytest syrupy\n\n")
         sys.exit(3)
 
     argv = sys.argv

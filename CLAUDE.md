@@ -114,8 +114,7 @@ Most molecule-sync issues trace back to these handlers or to property update cal
 - Lanes: `tests/unit/` (pure logic), `tests/integration/` (operator-driven, one module per subsystem), `tests/roundtrip/` (save/load state preservation, verified in a fresh Blender subprocess).
 - Offline PDB fixtures live in `tests/data/`; an autouse fixture scrubs the scene around every test; geometry regressions use syrupy snapshots.
 - Full guide: [tests/README.md](tests/README.md); coverage map plus known issues/xfails: [tests/COVERAGE.md](tests/COVERAGE.md).
-- One-time setup (per Blender install): install `pytest syrupy pytest-xdist` into *Blender's* Python (see tests/README.md).
-- The older hand-run scripts (`tests/feature_audit/`, `tests/stress_test/`) are kept for reference but are not part of the suite.
+- One-time setup (per Blender install): install `pytest syrupy` into *Blender's* Python (see tests/README.md).
 
 ## Bug-fixing workflow (test-first, REQUIRED)
 

@@ -9,7 +9,7 @@ is parented to, so moving the controller moves the whole puppet.
 These drive the addon's own operators (``proteinblender.create_puppet`` /
 ``edit_puppet`` / ``delete_puppet``) exactly as the Protein Outliner would, then
 assert observable scene state. Ported and expanded from
-``tests/feature_audit/section_puppets.py``.
+the retired hand-run puppet audit.
 """
 
 import pytest

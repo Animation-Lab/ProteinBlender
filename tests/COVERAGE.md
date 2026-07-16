@@ -49,6 +49,26 @@ versions, though the 216-passing count above was re-run only on 5.2.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Save/load wiped every persisted field but keyframes and poses.**
+  `scene_manager._refresh_molecule_ui` preserved only `keyframes` and `poses`,
+  then cleared `scene.molecule_list_items` and rebuilt each row writing just
+  `identifier` and `object_ptr`. Everything else was reset: `object_name` to
+  `""`, both JSON blobs to `"{}"`, `style` back to `cartoon`, the `domains`
+  collection and the outliner's chain rows dropped entirely. A panel draw
+  triggered the sync, so merely looking at the addon after loading degraded the
+  molecule; the next save then persisted the cleared values. Fixed by snapshotting
+  and restoring the full persistent field set. Guarded by
+  `roundtrip/test_saveload.py::test_saveload_roundtrip`.
+
+- **Domains never reached the .blend.** `_create_domain_with_params` added the
+  domain to the runtime `MoleculeWrapper.domains` dict but never mirrored it into
+  `MoleculeListItem.domains`, the CollectionProperty Blender actually saves. The
+  panel showed domains the file did not contain, so on reload every custom
+  colour, name, residue range, split and copy was rebuilt from raw chain
+  attributes and lost. Fixed by `_mirror_domains_to_property_group`, called at the
+  end of each domain CRUD operation. Guarded by
+  `roundtrip/test_saveload.py::test_saveload_roundtrip`.
+
 - **Duplicate fabricated a spurious 0-0 domain.** Copying a freshly imported
   protein via the PB Outliner produced a copy whose first chain gained an extra
   degenerate `0-0` domain (read as "Chain A split into two"), because the

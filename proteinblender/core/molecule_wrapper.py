@@ -2735,8 +2735,8 @@ class MoleculeWrapper:
         (persistent CollectionProperty).
 
         Without this, every domain create/split/copy/delete is invisible to
-        a .blend save — see save-load-stress-test.md (Bug B). Called at the
-        end of each domain CRUD operation.
+        a .blend save - see tests/COVERAGE.md, "Domains never reached the
+        .blend". Called at the end of each domain CRUD operation.
         """
         item = self._get_list_item()
         if item is None:

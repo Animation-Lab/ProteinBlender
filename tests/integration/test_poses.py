@@ -17,7 +17,7 @@ ProteinBlender has TWO pose systems (see project memory + task brief):
     take an explicit ``pose_index`` and run through ``execute()`` directly, so
     they ARE tested against a hand-populated ``scene.pose_library``.
 
-Ported and expanded from tests/feature_audit/section_poses.py.
+
 """
 
 import pytest

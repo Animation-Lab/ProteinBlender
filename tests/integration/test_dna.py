@@ -1,7 +1,7 @@
 """Integration tests for the DNA/RNA Builder and its bend tools.
 
 Drives the real ProteinBlender operators against a live (headless) Blender
-scene. Ported and expanded from tests/feature_audit/section_dna.py.
+scene.
 
 Covered operators:
   * proteinblender.build_dna            (via helpers.build_dna)

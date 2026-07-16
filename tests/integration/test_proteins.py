@@ -2,9 +2,7 @@
 
 Drives the real ProteinBlender operators against a headless Blender scene and
 asserts observable outcomes (scene manager singleton, bpy.data objects,
-MoleculeListItem UI rows). Ported and expanded from
-tests/feature_audit/section_proteins.py, which records the proven-correct
-operator invocations.
+MoleculeListItem UI rows).
 
 Every test is self-contained: the autouse ``_clean_scene`` fixture (conftest)
 hands each test an empty scene, and the ``single_chain`` / ``multi_chain``

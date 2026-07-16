@@ -385,7 +385,7 @@ class Domain(PropertyGroup):
     Stored on `MoleculeListItem.domains` so domain definitions survive a
     .blend save → load cycle. The runtime DomainDefinition dict on
     MoleculeWrapper is reconstructed from this collection on load (see
-    save-load-stress-test.md, Bug B).
+    tests/COVERAGE.md, "Domains never reached the .blend").
     """
     is_expanded: BoolProperty(default=False)
     # `domain_id` is the stable identifier used as the dict key on

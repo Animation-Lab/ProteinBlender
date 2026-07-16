@@ -33,7 +33,7 @@ Documentation = "https://animation-lab.github.io/ProteinBlender/"
 bpy = ["bpy>=4.4"]
 jupyter = ["jupyter", "IPython"]
 dev = ["pytest", "pytest-cov", "syrupy", "scipy", "fake-bpy-module", "IPython"]
-test = ["pytest", "pytest-cov", "syrupy", "scipy", "IPython", "pytest-xdist"]
+test = ["pytest", "pytest-cov", "syrupy", "scipy", "IPython"]
 docs = ["quartodoc", "tomlkit", "nodepad", "jupyter", "IPython", "jupyter-cache"]
 
 [tool.pytest.ini_options]
@@ -44,12 +44,8 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra --tb=short"
-# Only collect the new pytest suite — the legacy hand-run scripts and vendored
-# MolecularNodes tests are not part of it.
+# The vendored MolecularNodes ships its own tests; they are not part of this suite.
 norecursedirs = [
-    "tests/feature_audit",
-    "tests/stress_test",
-    "tests/stress_test_workdir",
     "proteinblender/utils/molecularnodes",
     "*.egg", "dist", "build", ".git",
 ]

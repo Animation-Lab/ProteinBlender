@@ -32,12 +32,12 @@ inside a Blender you already have open a shell to:
 
 ## One-time setup
 
-The suite needs `pytest`, `syrupy`, and `pytest-xdist` in **Blender's** Python
+The suite needs `pytest` and `syrupy` in **Blender's** Python
 (not your system Python):
 
 ```bash
 "C:/Program Files/Blender Foundation/Blender 5.0/5.0/python/bin/python.exe" \
-    -m pip install pytest syrupy pytest-xdist
+    -m pip install pytest syrupy
 ```
 
 The addon's scientific dependencies (numpy, biotite, MDAnalysis, databpy, …)
@@ -59,10 +59,12 @@ tests/
   roundtrip/         # save/load state preservation (spawns a fresh Blender to reopen)
 ```
 
-The older hand-run scripts (`tests/feature_audit/`, `tests/stress_test/`) are
-kept for reference but are **not** part of this suite (excluded in
-`pyproject.toml`'s `norecursedirs`). Their proven assertions have been ported
-into the `integration/` and `roundtrip/` modules.
+## Design goal these tests protect
+
+ProteinBlender must stay a **self-contained UI**.
+Every capability a user needs - select, colour, style, puppet, pose, DNA, keyframe - is exercised through the addon's own `proteinblender.*` / `molecule.*` operators and the PB outliner, never through `bpy.ops.object.*` or Blender's native outliner/timeline.
+If a capability can only be reached through Blender-native UI, that is drift, and these tests are where it should surface.
+Prefer driving a new test through the addon's own operator over reaching for a Blender-native fallback, even when the fallback is shorter.
 
 ## How it works (the non-obvious bits)
 

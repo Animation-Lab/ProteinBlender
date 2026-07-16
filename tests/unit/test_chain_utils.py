@@ -4,7 +4,7 @@ Covers the string/JSON (de)serialisers that carry chain mappings and residue
 ranges through PropertyGroup storage and undo/redo. Special attention to the
 "index vs letter" gotcha: a gapped chain set like A, B, D must round-trip with
 index 2 -> "D" (NOT alphabet math, which would give "C"). See the module
-docstring of tests/test_chain_operations.py for the wider context.
+design-goal note in tests/README.md for the wider context.
 """
 
 import pytest
