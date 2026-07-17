@@ -1,8 +1,10 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty
+from mathutils import Vector
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.chain_utils import chain_match_tokens
+from ..core import domain_space
 
 class MOLECULE_PB_OT_delete(Operator):
     bl_idname = "molecule.delete"
@@ -82,10 +84,14 @@ class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
             return {'CANCELLED'}
         obj = molecule.object
         try:
-            bpy.ops.object.select_all(action='DESELECT')
-            obj.select_set(True)
-            context.view_layer.objects.active = obj
-            bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+            # bound_box is the evaluated geometry's bounds in local space, so it
+            # already has the pivot applied - map it with matrix_world directly
+            # rather than through domain_space.local_to_world.
+            corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+            center = sum(corners, Vector()) / len(corners)
+            if not domain_space.set_pivot_world(obj, center):
+                self.report({'ERROR'}, "Failed to snap pivot.")
+                return {'CANCELLED'}
             self.report({'INFO'}, "Protein pivot snapped to bounding box center.")
         except Exception as e:
             self.report({'ERROR'}, f"Failed to snap pivot: {e}")
@@ -158,12 +164,10 @@ class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
             helper = stored_state['helper']
             # Store location before deleting helper
             new_pivot_location = helper.location.copy()
-            # Set origin to helper location
-            context.scene.cursor.location = new_pivot_location
-            bpy.ops.object.select_all(action='DESELECT')
-            obj.select_set(True)
-            context.view_layer.objects.active = obj
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            # Move the origin to where the user parked the helper. Carries the
+            # pivot on the geometry-nodes modifier, so the molecule's mesh -
+            # shared with every one of its domains - is left untouched.
+            domain_space.set_pivot_world(obj, new_pivot_location)
             # Delete helper
             bpy.ops.object.select_all(action='DESELECT')
             helper.select_set(True)

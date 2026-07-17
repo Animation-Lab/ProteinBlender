@@ -5,68 +5,33 @@ from bpy.types import Operator
 from mathutils import Vector
 from bpy.app.handlers import persistent
 
+from ..core import domain_space
+
 
 def _apply_origin_to_cursor(obj, world_pos):
-    """Move ``obj``'s origin to ``world_pos`` (world space) without
-    touching any other object's origin.
+    """Move ``obj``'s origin to ``world_pos`` (world space).
 
-    Why: ``bpy.ops.object.origin_set`` operates on every selected
-    object, so the "First/Center/Last" pivot buttons used to also move
-    the parent protein's (and sibling domains') origins whenever they
-    happened to be selected — exactly the case after the user toggles
-    a PROTEIN row in the outliner, which selects the protein plus all
-    its domains. We snapshot selection/active/mode + cursor, isolate
-    just ``obj``, run origin_set, then restore everything. Also stamps
-    ``initial_matrix_local`` so Reset Transform respects the new pivot.
+    Delegates to ``core.domain_space``, which carries the pivot as a
+    geometry-nodes input rather than baking it into mesh vertices. That
+    keeps domain meshes shareable, and it means this touches only ``obj``
+    by construction: there is no selection to isolate, because nothing
+    operator-driven and scene-wide is involved any more.
+
+    (This used to snapshot selection/active/mode/cursor and isolate ``obj``
+    purely because ``bpy.ops.object.origin_set`` operates on *every*
+    selected object — so the First/Center/Last buttons would otherwise
+    also move the parent protein's and sibling domains' origins whenever
+    they happened to be selected, which is exactly the state the outliner
+    leaves behind after toggling a PROTEIN row.)
+
+    Also stamps ``initial_matrix_local`` so Reset Transform respects the
+    new pivot.
     """
-    context = bpy.context
-    scene = context.scene
-    view_layer = context.view_layer
-
-    # Snapshot state we're about to clobber.
-    original_mode = context.mode
-    original_active = view_layer.objects.active
-    original_selected = [o for o in context.selected_objects]
-    original_cursor = scene.cursor.location.copy()
-
-    needs_mode_restore = original_mode != 'OBJECT'
-    if needs_mode_restore:
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    try:
-        # Isolate obj as the sole selected + active target so origin_set
-        # only operates on it.
-        bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
-        view_layer.objects.active = obj
-
-        scene.cursor.location = world_pos
-        bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-
-        # Refresh the Reset-Transform baseline to the new origin.
-        obj["initial_matrix_local"] = [list(row) for row in obj.matrix_local]
-    finally:
-        # Restore selection set, active, cursor, and mode.
-        bpy.ops.object.select_all(action='DESELECT')
-        for prev_obj in original_selected:
-            try:
-                prev_obj.select_set(True)
-            except (ReferenceError, RuntimeError):
-                # Object may have been deleted mid-operation; skip.
-                pass
-        if original_active is not None:
-            try:
-                view_layer.objects.active = original_active
-            except (ReferenceError, RuntimeError):
-                pass
-
-        scene.cursor.location = original_cursor
-
-        if needs_mode_restore and context.mode != original_mode:
-            try:
-                bpy.ops.object.mode_set(mode=original_mode)
-            except RuntimeError:
-                pass
+    if not domain_space.set_pivot_world(obj, world_pos):
+        return False
+    bpy.context.view_layer.update()
+    obj["initial_matrix_local"] = [list(row) for row in obj.matrix_local]
+    return True
 
 
 def _chain_index_for_item(scene, item):
@@ -107,12 +72,15 @@ def _collect_chain_filtered_alphas(targets):
 
     ``targets``: iterable of ``(obj, chain_idx)``. When chain_idx is set
     we restrict to atoms whose ``chain_id`` attribute equals chain_idx —
-    essential because MN copies the full protein mesh into every domain
-    object, so every chain's atoms live in a domain's mesh. Without
+    essential because every domain object shares the whole molecule's
+    mesh, so every chain's atoms live in a domain's mesh. Without
     filtering, an "any alpha carbon" pick would always land on chain 0
-    residue 1, which is at mesh-local (0,0,0) → in world space that
-    collapses to the domain's current origin and First/Last become
-    silent no-ops.
+    residue 1 and First/Last would pick from the wrong chain.
+
+    Positions come from the *raw* mesh, so they must be mapped with
+    ``domain_space.local_to_world`` rather than ``obj.matrix_world @ co``:
+    the pivot is applied inside geometry nodes, and raw mesh coordinates
+    have not been through it.
 
     Skips objects without ``is_alpha_carbon``. If ``res_id`` is missing,
     falls back to a per-position running counter so first/last still
@@ -148,18 +116,18 @@ def _collect_chain_filtered_alphas(targets):
             if len(alpha_positions) == 0:
                 continue
 
+            world = domain_space.local_to_world_many(obj, alpha_positions)
+
             if "res_id" in mesh.attributes:
                 res_ids_arr = np.zeros(n, dtype=np.int32)
                 mesh.attributes["res_id"].data.foreach_get("value", res_ids_arr)
                 alpha_res_ids = res_ids_arr[mask]
-                for pos, rid in zip(alpha_positions, alpha_res_ids):
-                    results.append((obj.matrix_world @ Vector(pos.tolist()),
-                                    int(rid)))
+                for pos, rid in zip(world, alpha_res_ids):
+                    results.append((Vector(pos.tolist()), int(rid)))
             else:
-                for pos in alpha_positions:
+                for pos in world:
                     counter += 1
-                    results.append((obj.matrix_world @ Vector(pos.tolist()),
-                                    counter))
+                    results.append((Vector(pos.tolist()), counter))
         except Exception as e:
             print(f"Error collecting alpha carbons for {obj.name}: {e}")
 

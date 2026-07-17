@@ -14,6 +14,8 @@ from mathutils import Vector
 from typing import List, Optional
 import logging
 
+from ..core import domain_space
+
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -208,16 +210,19 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
             if chain_attr[i].value != chain_numeric:
                 continue
 
+        # Raw mesh coordinate: the object's pivot is applied inside geometry
+        # nodes, so mapping with matrix_world alone would miss it and land the
+        # linker endpoint off by exactly the pivot.
         pos = Vector(positions[i].co)
 
         # Prefer alpha carbons
         if has_is_alpha:
             is_alpha = mesh.attributes["is_alpha_carbon"].data
             if is_alpha[i].value:
-                return obj.matrix_world @ pos
+                return domain_space.local_to_world(obj, pos)
 
         if best_pos is None:
-            best_pos = obj.matrix_world @ pos
+            best_pos = domain_space.local_to_world(obj, pos)
 
     return best_pos
 

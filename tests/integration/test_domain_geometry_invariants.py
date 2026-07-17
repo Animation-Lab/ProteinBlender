@@ -199,6 +199,68 @@ def test_domain_rotates_about_its_pivot(multi_chain, scene):
         "the origin drifted under rotation")
 
 
+@pytest.mark.integration
+def test_setting_a_pivot_never_writes_to_mesh_data(multi_chain, scene):
+    """The pivot must live on the modifier, not in mesh vertices.
+
+    This is the whole reason domains can share a mesh. ``origin_set`` moved an
+    origin by rewriting every vertex and compensating the object transform; on a
+    shared datablock that reaches every sharer while only the active object's
+    origin compensates, so the others jump. If this ever regresses to mutating
+    mesh data, ``test_pivot_does_not_disturb_sibling_domains`` starts failing and
+    the mesh sharing has to be reverted with it.
+    """
+    _build_outliner()
+    rows = _chain_rows(scene)
+    item, obj, _chain_idx = rows[0]
+
+    mesh = obj.data
+    before = np.zeros(len(mesh.vertices) * 3)
+    mesh.vertices.foreach_get("co", before)
+
+    _select_only(scene, item)
+    assert bpy.ops.proteinblender.set_pivot_first() == {"FINISHED"}
+    assert bpy.ops.proteinblender.set_pivot_center() == {"FINISHED"}
+
+    after = np.zeros(len(mesh.vertices) * 3)
+    mesh.vertices.foreach_get("co", after)
+
+    np.testing.assert_array_equal(
+        after, before,
+        err_msg="setting a pivot rewrote mesh vertices; the mesh cannot be "
+                "shared between domains while that is true")
+
+
+@pytest.mark.integration
+def test_pivot_is_carried_on_the_modifier(multi_chain, scene):
+    """The pivot is readable as a per-object geometry-nodes input."""
+    from proteinblender.core import domain_space
+
+    _build_outliner()
+    rows = _chain_rows(scene)
+    item, obj, _ = rows[0]
+
+    assert domain_space.pb_modifier(obj) is not None
+
+    _select_only(scene, item)
+    bpy.ops.proteinblender.set_pivot_first()
+    first_pivot = domain_space.get_pivot(obj).copy()
+
+    bpy.ops.proteinblender.set_pivot_last()
+    last_pivot = domain_space.get_pivot(obj).copy()
+
+    assert (first_pivot - last_pivot).length > 1e-3, (
+        "the pivot input did not change between N- and C-terminal pivots")
+
+    # The invariant the rest of the add-on relies on: the pivot's world position
+    # is the object's origin.
+    bpy.ops.proteinblender.set_pivot_first()
+    bpy.context.view_layer.update()
+    assert (domain_space.local_to_world(obj, domain_space.get_pivot(obj))
+            - obj.matrix_world.translation).length < 1e-4, (
+        "world(pivot) must equal the object's origin")
+
+
 # --------------------------------------------------------------------------
 # Masking: what each domain actually renders
 # --------------------------------------------------------------------------

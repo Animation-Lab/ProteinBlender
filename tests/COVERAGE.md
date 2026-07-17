@@ -41,7 +41,7 @@ the count above was re-run only on 5.2.
 | `test_linkers.py` | `add_linker`, `update_linker`, `toggle_linker_visibility`, `edit_linker`, `remove_linker`, cascade-delete on puppet/chain/protein removal |
 | `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
 | `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
-| `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves atoms, never disturbs siblings, lands on the requested residue, and domains rotate about their pivot; plus alpha-carbon world-position snapshot and the mesh-sharing assertion |
+| `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves atoms, never writes to mesh data, never disturbs siblings, lands on the requested residue, and domains rotate about their pivot; `world(pivot) == origin`; plus alpha-carbon world-position snapshot and the mesh-sharing assertion |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |

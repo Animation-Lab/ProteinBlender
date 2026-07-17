@@ -17,6 +17,7 @@ from ..utils.molecularnodes.entities.molecule.molecule import Molecule
 from ..utils.molecularnodes.blender import nodes
 from .domain import DomainDefinition
 from ..core.domain import ensure_domain_properties_registered
+from . import domain_space
 from ..utils.blender_utils import is_object_valid
 
 class MoleculeWrapper:
@@ -1115,14 +1116,12 @@ class MoleculeWrapper:
                                 is_ca = True
                         
                         if is_ca:
-                            # Get local position from attributes
+                            # Raw mesh coordinate: the pivot is applied inside
+                            # geometry nodes, so this has not been through it.
+                            # local_to_world subtracts the parent's pivot before
+                            # applying its transform.
                             local_pos = positions_data[atom_idx].vector
-                            
-                            # *** FIX: Transform local position to world space using protein's matrix_world ***
-                            # We need to apply the parent protein's transformation to get the correct world position
-                            world_pos = mol_obj.matrix_world @ local_pos
-                            
-                            return world_pos  # Return the world position, not local position
+                            return domain_space.local_to_world(mol_obj, local_pos)
                             
                     except (AttributeError, IndexError, ValueError, TypeError):
                         continue # Skip malformed atom data
@@ -1256,36 +1255,23 @@ class MoleculeWrapper:
             center_of_mass = self._calculate_center_of_mass(context, obj)
 
             if not center_of_mass:
-                print("Warning: Could not calculate center of mass, using origin_set")
-                # Fallback to Blender's built-in center of volume
-                bpy.ops.object.select_all(action='DESELECT')
-                obj.select_set(True)
-                context.view_layer.objects.active = obj
-                bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_VOLUME')
-                obj.location = (0, 0, 0)
-                return True
+                # Nothing to aim at: fall back to the bounding-box centre of the
+                # evaluated geometry, which is already pivot-corrected.
+                print("Warning: Could not calculate center of mass, "
+                      "falling back to the bounding-box centre")
+                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+                if not bbox:
+                    return False
+                center_of_mass = sum(bbox, Vector()) / len(bbox)
 
-            # Store original cursor location
-            orig_cursor_loc = context.scene.cursor.location.copy()
+            # Put the origin on the centre of mass without moving any atoms...
+            if not domain_space.set_pivot_world(obj, center_of_mass):
+                return False
 
-            # Set 3D cursor to center of mass
-            context.scene.cursor.location = center_of_mass
-
-            # Select protein object
-            bpy.ops.object.select_all(action='DESELECT')
-            obj.select_set(True)
-            context.view_layer.objects.active = obj
-
-            # Set origin to cursor (center of mass)
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-
-            # Move protein to world origin
+            # ...then move the protein so that origin sits at the world origin.
             obj.location = (0, 0, 0)
 
-            # Restore cursor
-            context.scene.cursor.location = orig_cursor_loc
-
-            print(f"Set protein pivot to center of mass and moved to world origin")
+            print("Set protein pivot to center of mass and moved to world origin")
             return True
 
         except Exception as e:
@@ -1383,41 +1369,28 @@ class MoleculeWrapper:
         """
         if not domain or not domain.object or target_pos is None:
             return False
-        
-        # Store the original cursor location
-        orig_cursor_loc = context.scene.cursor.location.copy()
-        
+
         try:
-            # Set the 3D cursor to our target position (in world space)
-            context.scene.cursor.location = target_pos
-            
-            # Deselect all objects
-            bpy.ops.object.select_all(action='DESELECT')
-            
-            # Select only our domain object
-            domain.object.select_set(True)
-            context.view_layer.objects.active = domain.object
-            
-            # Set origin to cursor position
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
-            
+            # Carries the pivot on the domain's geometry-nodes modifier rather
+            # than baking it into vertices, so this is safe even though the
+            # domain shares the parent molecule's mesh. No cursor to stash and no
+            # selection to isolate: unlike origin_set, this touches only the one
+            # object it is handed.
+            if not domain_space.set_pivot_world(domain.object, target_pos):
+                return False
+
+            context.view_layer.update()
+
             # Store the domain's local matrix for resetting later
             # This is critical for Reset Transform functionality
             domain.object["initial_matrix_local"] = [list(row) for row in domain.object.matrix_local]
-            
+
             return True
-            
+
         except Exception:
             import traceback
             traceback.print_exc()
-            
-            # Restore cursor location on error
-            context.scene.cursor.location = orig_cursor_loc
             return False
-        
-        finally:
-            # Always restore cursor location
-            context.scene.cursor.location = orig_cursor_loc
     # --- End Moved Helper --- 
 
     def _create_additional_domains_to_span_context(self, chain_id: str, 
@@ -2263,7 +2236,15 @@ class MoleculeWrapper:
             
             domain.node_group.links.new(style_node.outputs[0], join_node.inputs[0])
             domain.node_group.links.new(join_node.outputs[0], output_node.inputs["Geometry"])
-            
+
+            # Re-insert the pivot transform between the group input and the rest
+            # of the chain. This has to run *after* the links.clear() above: that
+            # strips the pivot's links while leaving its nodes in place, so the
+            # domain would silently render at pivot-offset until something else
+            # rebuilt the tree. ensure_pivot_input is idempotent and rewires
+            # unconditionally for exactly this reason.
+            domain_space.ensure_pivot_input(domain.node_group)
+
             # Remove any orphaned or duplicate nodes
             self._clean_unused_nodes(domain.node_group)
             

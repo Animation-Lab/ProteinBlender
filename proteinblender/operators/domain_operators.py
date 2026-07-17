@@ -10,6 +10,7 @@ from ..utils.animation import (
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
+from ..core import domain_space
 ensure_domain_properties_registered()
 
 class MOLECULE_PB_OT_create_domain(Operator):
@@ -812,14 +813,11 @@ class MOLECULE_PB_OT_toggle_pivot_edit(Operator):
             stored_state = self._pivot_edit_active[self.domain_id]
             helper = stored_state['helper']
             
-            # Use helper location as new pivot
-            context.scene.cursor.location = helper.location
-            
-            # Select the domain object and set origin
-            bpy.ops.object.select_all(action='DESELECT')
-            domain.object.select_set(True)
-            context.view_layer.objects.active = domain.object
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            # Move the domain's origin to where the user parked the helper.
+            # Carried on the domain's geometry-nodes modifier, so the mesh it
+            # shares with the rest of the molecule is never written to.
+            domain_space.set_pivot_world(domain.object, helper.location.copy())
+            context.view_layer.update()
 
             # Update the stored initial matrix after setting the new origin
             if domain.object:

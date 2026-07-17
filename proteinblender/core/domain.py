@@ -15,6 +15,7 @@ from bpy.types import PropertyGroup
 from bpy.props import (BoolProperty, StringProperty, IntProperty, PointerProperty,
                       FloatVectorProperty, EnumProperty)
 from ..utils.molecularnodes.style import STYLE_ITEMS
+from . import domain_space
 from ..utils.blender_utils import (
     ObjectRef, NodeGroupRef, safe_remove_object, safe_remove_node_group
 )
@@ -281,7 +282,15 @@ class DomainDefinition:
                 self.object = None
                 self.object_name = ""
                 return False
-            
+
+            # Inherit the parent's pivot. _setup_node_group swaps in a *fresh*
+            # DomainNodes modifier, and a fresh modifier defaults every input to
+            # zero - including Pivot. Since the domain also inherits the parent's
+            # matrix_world and reads the same mesh coordinates, a zero pivot here
+            # would render the domain offset from the rest of the molecule by
+            # exactly the parent's pivot.
+            domain_space.copy_pivot(parent_obj, self.object)
+
             return True
         except Exception as e:
             print(f"Error creating domain object: {str(e)}")
