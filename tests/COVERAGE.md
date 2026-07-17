@@ -32,7 +32,7 @@ the count above was re-run only on 5.2.
 
 | module | operators / behaviour |
 |--------|-----------------------|
-| `test_proteins.py` | `molecule.import_protein` (network) / offline import, `change_style` across all styles, duplicate, toggle_visibility, center_protein, delete, delete_chain, auto-domain count |
+| `test_proteins.py` | `molecule.import_protein` (network) / offline import, `change_style` across all styles, duplicate, toggle_visibility, center_protein, delete, delete_chain, auto-domain count, critical-attribute import abort + non-critical degrade |
 | `test_domains.py` | `create_domain`, `update_domain_name`, `rename_domain`, `update_domain_color/style`, `copy_domain`, `split_domain` (both idnames), `merge_domains`, set/update parent, `reset_domain_transform`, `snap_pivot_to_residue`, `toggle_domain_expanded` |
 | `test_poses.py` | `molecule.create_pose/apply_pose/update_pose/rename_pose/delete_pose/apply_pose_and_keyframe`; pose-library `apply_pose/delete_pose` |
 | `test_keyframes.py` | `molecule.keyframe_protein/select_keyframe/edit_keyframe/delete_keyframe`, `jump_to_keyframe` — asserts real F-curves (4.x/5.x shim) |
@@ -201,6 +201,19 @@ by passing that state directly (no dialog needed):
   headless mode-switching fails; their non-edit siblings are asserted.
 - `draw()` for panels — no window/screen exists in `--background`, so panels
   are checked via registration + `poll`, not rendering.
+
+## Known issues surfaced but not fixed here
+
+- **`pdb_model_num` and `entity_id` fail to write on every PDB import.**
+  `_create_object` builds them from `array.pdb_model_num` / `array.entity_id`,
+  which a PDB-sourced biotite `AtomArray` simply does not carry, so both raise
+  `AttributeError` on every single `.pdb` import. This was invisible until the
+  attribute writer stopped swallowing failures - it now logs one WARNING apiece.
+  Consequence: MolecularNodes' `Select Entity_` node has no attribute to read for
+  PDB-format structures. ProteinBlender does not use entity selection, so nothing
+  in the add-on is broken by it today. The real fix belongs upstream (default the
+  annotation when the array lacks it) and should be picked up with the
+  4.2.10 -> 4.5.x sync rather than patched into the vendored copy.
 
 ## Deliberately not covered
 

@@ -25,6 +25,74 @@ STYLE_VALUES = [item[0] for item in STYLE_ITEMS]
 # Import
 # --------------------------------------------------------------------------
 
+def _attr_store_owner():
+    """The class in databpy's MRO that actually defines store_named_attribute.
+
+    Patching the defining class rather than ``BlenderObject`` keeps monkeypatch's
+    teardown from leaving a shadowing override behind on the subclass.
+    """
+    import databpy
+
+    return next(c for c in databpy.BlenderObject.__mro__
+                if "store_named_attribute" in c.__dict__)
+
+
+def _break_attribute(monkeypatch, attr):
+    """Make writing ``attr`` raise, leaving every other attribute alone."""
+    owner = _attr_store_owner()
+    original = owner.store_named_attribute
+
+    def exploding(self, data, name, *args, **kwargs):
+        if name == attr:
+            raise ValueError(f"induced failure writing {name}")
+        return original(self, data, name, *args, **kwargs)
+
+    monkeypatch.setattr(owner, "store_named_attribute", exploding)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("attr", ["chain_id", "res_id", "is_alpha_carbon"])
+def test_import_aborts_when_a_critical_attribute_cannot_be_written(
+        scene, sm, monkeypatch, capsys, attr):
+    """A critical attribute that fails to write must abort the import.
+
+    Domains select on chain_id + res_id in geometry nodes and pivots resolve
+    alpha carbons through is_alpha_carbon. Missing one of these does not make the
+    add-on fail - it masks nothing, or renders the wrong geometry, which is far
+    harder to diagnose. A half-built molecule must never reach the registry.
+
+    These used to be swallowed whole: the writer caught every exception and,
+    under the default verbose=False, discarded it with no warning and no log.
+    """
+    _break_attribute(monkeypatch, attr)
+
+    before = set(sm.molecules.keys())
+    with pytest.raises(RuntimeError):
+        H.import_local("1ubq.pdb", "1ubq_broken")
+
+    assert set(sm.molecules.keys()) == before, (
+        "a molecule missing a critical attribute was registered anyway")
+    assert not any(o.name.startswith("1ubq_broken") for o in bpy.data.objects), (
+        "a half-built molecule object was left behind in the scene")
+    # The attribute that failed must be named somewhere the user can see it.
+    assert attr in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_import_survives_a_non_critical_attribute_failure(
+        scene, sm, monkeypatch, caplog):
+    """A non-critical attribute failure degrades the render, so it logs and
+    continues rather than aborting - but it must never be silent."""
+    _break_attribute(monkeypatch, "b_factor")
+
+    with caplog.at_level("WARNING"):
+        mol_id = H.import_local("1ubq.pdb", "1ubq_partial")
+
+    assert mol_id in sm.molecules, "a lost b_factor should not abort the import"
+    assert any("b_factor" in r.getMessage() for r in caplog.records), (
+        "the failure was swallowed: nothing was logged")
+
+
 @pytest.mark.integration
 def test_import_single_chain_registers(scene, sm):
     """Offline single-chain import registers a wrapper, a Blender object and a

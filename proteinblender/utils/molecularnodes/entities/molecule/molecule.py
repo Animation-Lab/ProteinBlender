@@ -1,4 +1,5 @@
 import io
+import logging
 import time
 import warnings
 from abc import ABCMeta
@@ -16,6 +17,34 @@ from ... import blender as bl
 from ... import color, data, utils
 import databpy
 from ..entity import MolecularEntity, EntityType
+
+logger = logging.getLogger(__name__)
+
+# Attributes nothing downstream can work around if they are missing.
+#
+# ProteinBlender's domains select on ``chain_id`` + ``res_id`` inside geometry
+# nodes, and its pivots resolve alpha carbons through ``is_alpha_carbon``. When
+# one of these is absent the add-on does not fail - it renders the wrong
+# geometry, or silently masks nothing, which is far harder to diagnose than an
+# import that refuses. Everything else degrades gracefully (a missing b_factor
+# only costs you b_factor colouring), so it is logged rather than raised.
+CRITICAL_ATTRIBUTES = frozenset({"chain_id", "res_id", "is_alpha_carbon"})
+
+
+def _discard_partial_object(bob) -> None:
+    """Remove a half-built molecule object and its mesh from the file.
+
+    Best-effort: this runs while we are already unwinding on a failed import, so
+    a problem tearing down must not mask the error that got us here.
+    """
+    try:
+        obj = bob.object
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    except Exception:
+        logger.exception("Failed to clean up a partially built molecule object")
 
 
 class Molecule(MolecularEntity, metaclass=ABCMeta):
@@ -719,9 +748,28 @@ def _create_object(
             if verbose:
                 print(f'Added {att["name"]} after {time.process_time() - start} s')
         except Exception as e:
+            if att["name"] in CRITICAL_ATTRIBUTES:
+                # Take the half-built object down with us. It is already linked
+                # into the collection, but no caller ever claims it once we
+                # raise, so it would sit in the scene as an unmanaged molecule
+                # and collide with the name of the next import of the same
+                # structure.
+                _discard_partial_object(bob)
+                raise RuntimeError(
+                    f"Could not add required attribute {att['name']!r} to "
+                    f"{name!r}: {e}"
+                ) from e
+            # Never silent. This used to be swallowed whole under the default
+            # verbose=False, so a failed attribute produced no warning and no
+            # log - only a subtly wrong render.
+            #
+            # WARNING rather than ERROR because PDB-sourced AtomArrays legitimately
+            # carry no pdb_model_num or entity_id annotation, so those two fail on
+            # every PDB import (see tests/COVERAGE.md).
+            logger.warning(
+                "Unable to add attribute %r to %r: %s", att["name"], bob.name, e
+            )
             if verbose:
-                print(e)
-                warnings.warn(f"Unable to add attribute: {att['name']}")
                 print(
                     f'Failed adding {att["name"]} after {time.process_time() - start} s'
                 )
