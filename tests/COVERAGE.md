@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **243 passing, 9 skipped,
-1 xfailed** across 253 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **245 passing, 9 skipped,
+1 xfailed** across 255 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -40,7 +40,7 @@ the count above was re-run only on 5.2.
 | `test_puppets.py` | `create_puppet`, `edit_puppet` (RENAME + EDIT membership change), `delete_puppet`, controller parenting + move, exclusive membership, un-parent on delete |
 | `test_linkers.py` | `add_linker`, `update_linker`, `toggle_linker_visibility`, `edit_linker`, `remove_linker`, cascade-delete on puppet/chain/protein removal |
 | `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
-| `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
+| `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins); a full-chain domain's default pivot is its centre of mass; First/Center/Last move the origin and land on the selected chain's N-term/centroid/C-term |
 | `test_rendering.py` | that an imported molecule actually draws: the geometry path from Group Input to Group Output survives import, pivot changes and style swaps (style-independent), plus a real Cycles render asserting non-zero pixel coverage |
 | `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves atoms, never writes to mesh data, never disturbs siblings, lands on the requested residue, and domains rotate about their pivot; `world(pivot) == origin`; plus alpha-carbon world-position snapshot and the mesh-sharing assertion |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
@@ -50,6 +50,29 @@ the count above was re-run only on 5.2.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **A full chain's default pivot landed on its first residue, so "Set Pivot
+  First" looked like a no-op.** Select a chain, click Set Pivot First - nothing
+  moves, because the pivot is already there. Two independent causes in the
+  initial-pivot setup (`molecule_wrapper._create_domain_with_params`): (1) an
+  off-by-one - `chain_residue_ranges` can report a chain min of 0, but auto-
+  created domains are normalised to start at 1, so the `is_full_chain` test
+  failed for such chains and they were pivoted at the start residue instead of
+  the centre of mass; (2) `_calculate_center_of_mass` never actually filtered by
+  chain - it compared the mesh's integer `chain_id` attribute against a chain
+  *letter*, never matched, and fell back to the bounding-box centre of the shared
+  full mesh (the same wrong point for every chain). It only appeared to work
+  before because it read the *evaluated* mesh, which is masked to one chain, so
+  the bbox happened to bound the right atoms. Fixed by normalising the chain min
+  the same way domain creation does, and by resolving the chain letter to its
+  integer index via `obj["chain_ids"]`; `_calculate_center_of_mass` now reads the
+  *raw* mesh (deterministic, unmasked) and returns the true per-chain centroid.
+  Guarded by `test_pivot.py::test_full_chain_domain_default_pivot_is_center_of_mass`
+  and `::test_first_center_last_move_the_pivot_and_land_correctly` (both verified
+  red pre-fix). The alpha-carbon world-position snapshot was re-baselined once:
+  import centring now uses the true atom centroid rather than the centroid of the
+  style spheres, a small rigid shift of the whole molecule (geometry, overlap and
+  rendering are unchanged - the other 19 geometry/render tests still pass).
 
 - **Duplicating a protein and then splitting a chain on the copy moved that
   chain.** The two proteins overlapped perfectly until a chain was split on the

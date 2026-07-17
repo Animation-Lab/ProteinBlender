@@ -665,6 +665,15 @@ class MoleculeWrapper:
         if domain.object:
             # Determine if this is a full chain domain
             chain_min_res, chain_max_res = self.chain_residue_ranges.get(mapped_chain, (start, end))
+            # chain_residue_ranges can report a min of 0, but auto-created chain
+            # domains are normalised to start at 1 (see
+            # _create_domains_for_each_chain). Without matching that
+            # normalisation here, a full chain whose range starts at 0 fails the
+            # is_full_chain test, is treated as a partial domain, and is pivoted
+            # at its first residue instead of its centre of mass - so "Set Pivot
+            # First" then looks like a no-op because the pivot is already there.
+            if chain_min_res == 0:
+                chain_min_res = 1
             is_full_chain = (start == chain_min_res and end == chain_max_res)
 
             pivot_pos = None
@@ -1156,10 +1165,23 @@ class MoleculeWrapper:
             if not obj or not hasattr(obj, 'data') or not hasattr(obj.data, 'attributes'):
                 return None
 
-            # Get the mesh data with evaluated modifiers
-            depsgraph = context.evaluated_depsgraph_get()
-            eval_obj = obj.evaluated_get(depsgraph)
-            mesh = eval_obj.data
+            # Read the RAW mesh, not the evaluated one.
+            #
+            # Two reasons, both bugs we hit with the evaluated mesh:
+            #  * At domain-creation time the evaluated geometry is not reliably
+            #    populated yet, so this returned None and the caller fell back to
+            #    the start residue - non-deterministically (1ATN chain A fell
+            #    back, chain D did not). That mis-placed the default full-chain
+            #    pivot onto the first residue, which made "Set Pivot First" a
+            #    silent no-op.
+            #  * Once a molecule has domains, the parent's evaluated geometry is
+            #    masked by Domain_Final_Not, so the centre of mass would be taken
+            #    over whatever survives the mask.
+            # The raw mesh is the full canonical atom set, always present and
+            # deterministic. Its coordinates are canonical (pre-pivot), so the
+            # centroid is mapped to world with local_to_world below, not
+            # matrix_world @ co.
+            mesh = obj.data
             attrs = mesh.attributes
 
             # Check for required attributes
@@ -1189,13 +1211,29 @@ class MoleculeWrapper:
                     chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
                     attrs["chain_id"].data.foreach_get("value", chain_ids)
 
-                    # Get possible chain IDs (handle different ID formats)
-                    search_chain_ids = [chain_id]
-                    if isinstance(chain_id, str) and chain_id.isdigit():
-                        search_chain_ids.append(int(chain_id))
+                    # Resolve the chain to the INTEGER index the mesh attribute
+                    # uses. MolecularNodes encodes chain_id as a sorted-unique
+                    # integer and keeps the string labels in obj["chain_ids"]
+                    # (list index == the integer). A caller passing a letter
+                    # ("A") must be mapped through that list, or np.isin compares
+                    # a letter against an int array, never matches, and the whole
+                    # thing silently falls back to the bounding-box centre of the
+                    # (shared, full) mesh - the same wrong point for every chain.
+                    search_indices = []
+                    if isinstance(chain_id, int):
+                        search_indices.append(chain_id)
+                    elif isinstance(chain_id, str) and chain_id.isdigit():
+                        search_indices.append(int(chain_id))
+                    chain_labels = list(obj.get("chain_ids") or [])
+                    if chain_id in chain_labels:
+                        search_indices.append(chain_labels.index(chain_id))
 
-                    chain_mask = np.isin(chain_ids, search_chain_ids)
-                    filter_mask &= chain_mask
+                    if search_indices:
+                        chain_mask = np.isin(chain_ids, search_indices)
+                        filter_mask &= chain_mask
+                    else:
+                        print(f"Warning: could not resolve chain {chain_id!r} to "
+                              f"an index on {obj.name}; using all chains")
 
                 if (start_res is not None or end_res is not None) and "res_id" in attrs:
                     res_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
@@ -1222,7 +1260,9 @@ class MoleculeWrapper:
             # Calculate center of mass (simple average of alpha carbons)
             # Using carbon mass (12.01) for all alpha carbons
             center_local = np.mean(alpha_positions, axis=0)
-            center_world = obj.matrix_world @ Vector(center_local)
+            # Raw mesh coordinates are canonical (pre-pivot); map through the
+            # pivot with local_to_world, not matrix_world @ co.
+            center_world = domain_space.local_to_world(obj, Vector(center_local))
 
             return center_world
 

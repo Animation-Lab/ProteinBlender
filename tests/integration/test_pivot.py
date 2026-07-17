@@ -120,3 +120,123 @@ def test_pivot_reports_warning_when_nothing_selected(single_chain, scene):
     "index and cannot be driven non-interactively."))
 def test_set_pivot_custom_interactive():
     pass
+
+
+# --------------------------------------------------------------------------
+# Initial (default) pivot placement, and the full First/Center/Last flow on a
+# specific selected chain - the exact thing the user drives from the outliner.
+# --------------------------------------------------------------------------
+
+def _chain_alphas(obj, chain_idx):
+    from proteinblender.operators.pivot_operators import _collect_chain_filtered_alphas
+    return _collect_chain_filtered_alphas([(obj, chain_idx)])
+
+
+def _chain_rows_with_alphas(scene):
+    """CHAIN rows whose object carries alpha carbons for that chain, with the
+    resolved integer chain index. Skips tiny chains (e.g. 1ATN's chain B) that
+    have no alpha carbons."""
+    from proteinblender.operators.pivot_operators import _chain_index_for_item
+    out = []
+    for it in scene.outliner_items:
+        if it.item_type != "CHAIN" or not it.object_name:
+            continue
+        obj = bpy.data.objects.get(it.object_name)
+        if obj is None:
+            continue
+        idx = _chain_index_for_item(scene, it)
+        if _chain_alphas(obj, idx):
+            out.append((it, obj, idx))
+    return out
+
+
+@pytest.mark.integration
+def test_full_chain_domain_default_pivot_is_center_of_mass(scene, sm):
+    """A freshly imported full-chain domain must start pivoted at its centre of
+    mass, not its first residue.
+
+    The initial pivot was computed with ``_calculate_center_of_mass``, which read
+    the *evaluated* mesh. At creation time that mesh is not reliably populated
+    yet, so the read failed and fell back to the start residue -
+    non-deterministically (1ATN chain A fell back; chain D did not, from the same
+    code). The user then selects that chain, clicks "Set Pivot First", and
+    nothing moves because the pivot is already sitting on the first residue -
+    which reads as "the pivot buttons don't work".
+    """
+    import numpy as np
+    from mathutils import Vector
+
+    H.import_local("1atn.pdb", "1atn")
+    _build_outliner()
+
+    rows = _chain_rows_with_alphas(scene)
+    assert rows, "no chain rows with alpha carbons"
+
+    for it, obj, idx in rows:
+        alphas = _chain_alphas(obj, idx)
+        centroid = sum((p for p, _ in alphas), Vector()) / len(alphas)
+        first = min(alphas, key=lambda pr: pr[1])[0]
+        bpy.context.view_layer.update()
+        origin = obj.matrix_world.translation.copy()
+
+        d_centroid = (origin - centroid).length
+        d_first = (origin - first).length
+        assert d_centroid < d_first, (
+            f"{it.object_name}: default pivot is on the first residue "
+            f"(d={d_first:.3f}), not the centre of mass (d={d_centroid:.3f}) - "
+            f"the evaluated-mesh centre-of-mass read fell back at creation time")
+        assert d_centroid < 0.05, (
+            f"{it.object_name}: default pivot is {d_centroid:.3f} from the "
+            f"chain centroid; expected it on the centroid")
+
+
+@pytest.mark.integration
+def test_first_center_last_move_the_pivot_and_land_correctly(scene, sm):
+    """The user's exact flow: select a chain, click First / Center / Last.
+
+    Each must move the origin and land it on that chain's N-terminal CA /
+    centroid / C-terminal CA, and the three must be distinct. This is a no-op-
+    proof version of the report: First must actually *move* the origin from the
+    default, not silently coincide with it.
+    """
+    from mathutils import Vector
+
+    H.import_local("1atn.pdb", "1atn")
+    _build_outliner()
+    rows = _chain_rows_with_alphas(scene)
+    it, obj, idx = rows[0]
+
+    alphas = _chain_alphas(obj, idx)
+    alphas_sorted = sorted(alphas, key=lambda pr: pr[1])
+    first_truth = alphas_sorted[0][0]
+    last_truth = alphas_sorted[-1][0]
+    centroid_truth = sum((p for p, _ in alphas), Vector()) / len(alphas)
+
+    def _select_and_run(op):
+        for x in scene.outliner_items:
+            x.is_selected = False
+        it.is_selected = True
+        assert op() == {"FINISHED"}
+        bpy.context.view_layer.update()
+        return obj.matrix_world.translation.copy()
+
+    default = obj.matrix_world.translation.copy()
+    first = _select_and_run(bpy.ops.proteinblender.set_pivot_first)
+    center = _select_and_run(bpy.ops.proteinblender.set_pivot_center)
+    last = _select_and_run(bpy.ops.proteinblender.set_pivot_last)
+
+    # Land on the right atoms.
+    assert (first - first_truth).length < 1e-3, "First is not on the N-term CA"
+    assert (last - last_truth).length < 1e-3, "Last is not on the C-term CA"
+    assert (center - centroid_truth).length < 1e-3, "Center is not the centroid"
+
+    # Distinct from each other.
+    assert (first - last).length > 1e-3, "First and Last coincide"
+    assert (center - first).length > 1e-3
+    assert (center - last).length > 1e-3
+
+    # And First actually moved the pivot off the default (the reported no-op):
+    # since the default is now the centroid, First must differ from it.
+    assert (first - default).length > 1e-3, (
+        "Set Pivot First did not move the origin - it already sat on the first "
+        "residue (default pivot was mis-placed)")
