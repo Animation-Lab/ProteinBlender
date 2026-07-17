@@ -49,6 +49,27 @@ the count above was re-run only on 5.2.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Duplicating a protein aliased the source's GN tree, so deleting the copy
+  broke the original.** `MOLECULE_PB_OT_duplicate_protein` rebuilt modifiers by
+  assigning every non-readonly RNA property, and `node_group` is a *pointer* —
+  the copy's MolecularNodes modifier ended up aimed at the source's tree. That
+  tree is per-molecule state (it holds `Domain_Boolean_Join` / `Domain_Final_Not`
+  and a mask pair per domain), so both molecules shared one set of masking nodes.
+  Deleting the copy ran `MoleculeWrapper.cleanup()`, which tore the Join/NOT out
+  of the tree the original still rendered through, leaving the original's parent
+  mesh unmasked and drawn on top of its own domain objects — reported as "the
+  copy didn't get deleted, and lots of clipping". Fixed by giving the copy a
+  private `node_group.copy()`, and stripping the source's per-domain mask nodes
+  from it (the duplicate re-creates every domain against the new molecule, so the
+  inherited masks are never reused, keep masking after their domain is deleted,
+  and burn join input slots). Guarded by `test_proteins.py::`
+  `test_duplicate_gives_copy_its_own_node_group`,
+  `test_duplicate_does_not_inherit_source_domain_masks` and
+  `test_delete_copy_leaves_original_domain_masking_intact` (all verified to fail
+  on the pre-fix code). Note `molecule_wrapper._create_domain_mask_nodes` carries
+  a self-heal that rebuilds missing infrastructure — it was a workaround for this
+  aliasing, and can be revisited now the root cause is gone.
+
 - **Outliner chain-range fallback raised NameError.** `build_outliner_hierarchy`
   resolves a chain's residue range from `idx_to_label_asym_id_map` first and
   `auth_chain_id_map` second, but the second branch tested a bare `chain_mapping`

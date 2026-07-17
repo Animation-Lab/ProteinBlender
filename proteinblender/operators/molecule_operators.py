@@ -243,6 +243,24 @@ class MOLECULE_PB_OT_center_protein(Operator):
             return {'CANCELLED'}
 
 
+def _strip_inherited_domain_masks(node_group):
+    """Drop the source molecule's per-domain mask nodes from a freshly copied
+    GN tree.
+
+    The duplicate re-creates every source domain against the new molecule, and
+    those masks are keyed by the *new* domain ids — so the inherited pair per
+    source domain is never reused, just left wired into the boolean join. It
+    would keep hiding its residue range out of the copy's parent mesh after the
+    domain that should own it is deleted, and it occupies join input slots that
+    the copy's real masks need. The Join / Final NOT infrastructure is
+    deliberately kept: it carries the molecule's pre-domain selection wiring,
+    and MoleculeWrapper rebinds to it.
+    """
+    for node in list(node_group.nodes):
+        if node.name.startswith(("Domain_Chain_Select_", "Domain_Res_Select_")):
+            node_group.nodes.remove(node)
+
+
 class MOLECULE_PB_OT_duplicate_protein(Operator):
     """Create an exact duplicate of the protein with all domains and properties"""
     bl_idname = "molecule.duplicate_protein"
@@ -303,8 +321,22 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                     if not prop.is_readonly:
                         try:
                             setattr(new_mod, prop.identifier, getattr(mod, prop.identifier))
-                        except:
+                        except Exception:
                             pass
+
+                # `node_group` is a POINTER property, so the loop above aimed the
+                # copy's modifier at the *source's* GN tree. That tree is not a
+                # shared read-only asset: each molecule's domain masking lives as
+                # nodes inside it (Domain_Boolean_Join / Domain_Final_Not, plus a
+                # per-domain mask pair), so an aliased tree means the two
+                # molecules read and write one set of masking nodes. Deleting
+                # either one then tears that infrastructure out from under the
+                # survivor, which renders its full atom mesh on top of its own
+                # domain objects. Give the copy a private tree.
+                # See test_delete_copy_leaves_original_domain_masking_intact.
+                if mod.type == 'NODES' and mod.node_group is not None:
+                    new_mod.node_group = mod.node_group.copy()
+                    _strip_inherited_domain_masks(new_mod.node_group)
 
             # 4. Create new MoleculeWrapper
             # We need to create a Molecule object first
@@ -451,7 +483,7 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             if (current_location - source_location).length > 0.0001:
                 print(f"  Warning: Small location drift detected ({(current_location - source_location).length:.6f} units)")
             else:
-                print(f"  ✓ Location verified: exactly matches source")
+                print("  ✓ Location verified: exactly matches source")
 
             # 15. Force final scene update
             context.view_layer.update()
@@ -466,7 +498,7 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             # 18. Re-center the duplicated protein at origin (as if user clicked the re-center button)
             print(f"Re-centering duplicated protein '{new_identifier}' at origin...")
             bpy.ops.molecule.center_protein(molecule_id=new_identifier)
-            print(f"  ✓ Duplicated protein centered at origin")
+            print("  ✓ Duplicated protein centered at origin")
 
             self.report({'INFO'}, f"Duplicated protein '{base_id}' with {len(domain_mapping)} domains")
             return {'FINISHED'}

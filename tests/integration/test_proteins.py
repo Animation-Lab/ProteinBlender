@@ -243,6 +243,118 @@ def test_duplicate_preserves_domain_structure(scene, sm):
 
 
 # --------------------------------------------------------------------------
+# Duplicate must not share node groups with its source (regression)
+# --------------------------------------------------------------------------
+
+def _mn_node_group(mol):
+    """The parent MolecularNodes GN tree backing a molecule wrapper."""
+    mod = mol.object.modifiers.get("MolecularNodes")
+    return mod.node_group if mod else None
+
+
+@pytest.mark.integration
+def test_duplicate_gives_copy_its_own_node_group(scene, sm):
+    """A duplicated protein must own a private copy of the parent MolecularNodes
+    tree, not share the source's datablock.
+
+    The duplicate operator copies modifiers by assigning every non-readonly RNA
+    property, and `node_group` is a *pointer* — so the copy's modifier ends up
+    aimed at the source's tree. Both molecules then write their domain masking
+    into one shared tree.
+    """
+    mid = H.import_local("1atn.pdb", "1atn")
+    orig = sm.molecules[mid]
+    orig_tree = _mn_node_group(orig)
+    assert orig_tree is not None
+
+    before = set(sm.molecules.keys())
+    bpy.ops.molecule.duplicate_protein(molecule_id=mid)
+    copy_id = sorted(set(sm.molecules.keys()) - before)[-1]
+    copy_tree = _mn_node_group(sm.molecules[copy_id])
+
+    assert copy_tree is not None
+    assert copy_tree is not orig_tree, (
+        "duplicate shares the source's MolecularNodes tree "
+        f"({orig_tree.name}) — domain edits and deletion of either molecule "
+        "will corrupt the other")
+
+
+@pytest.mark.integration
+def test_duplicate_does_not_inherit_source_domain_masks(scene, sm):
+    """The copy's tree must carry masking nodes for its OWN domains only.
+
+    The duplicate re-creates every source domain explicitly, so any mask node
+    inherited from the source is cruft: it stays wired into the copy's boolean
+    join, so it keeps hiding that residue range out of the copy's parent mesh
+    even after the user deletes the domain that should own it — and it burns
+    join input slots, forcing premature overflow joins.
+    """
+    mid = H.import_local("1atn.pdb", "1atn")
+
+    before = set(sm.molecules.keys())
+    bpy.ops.molecule.duplicate_protein(molecule_id=mid)
+    copy_id = sorted(set(sm.molecules.keys()) - before)[-1]
+
+    tree = _mn_node_group(sm.molecules[copy_id])
+    masks = [n.name for n in tree.nodes
+             if n.name.startswith(("Domain_Chain_Select_", "Domain_Res_Select_"))]
+    assert masks, "copy has no domain masks at all"
+
+    # Every mask in the copy's tree must belong to one of the copy's domains.
+    own = set(sm.molecules[copy_id].domains.keys())
+    stale = [m for m in masks
+             if not any(m.endswith(domain_id) for domain_id in own)]
+    assert not stale, (
+        f"copy's tree carries {len(stale)} mask node(s) inherited from the "
+        f"source's domains: {stale}")
+
+
+@pytest.mark.integration
+def test_delete_copy_leaves_original_domain_masking_intact(scene, sm):
+    """Deleting a duplicate must not strip the *original's* domain masking.
+
+    Reported: import 1atn, Copy it, delete the copy — the original then renders
+    its full atom mesh on top of its per-domain objects (reads as "the copy
+    didn't get deleted", with heavy clipping between the two overlapping
+    surfaces).
+
+    Root cause: the copy shares the source's GN tree, so the copy's cleanup()
+    removes Domain_Boolean_Join / Domain_Final_Not — the nodes that mask the
+    parent's geometry out from under the domain objects — from the tree the
+    original is still rendering through.
+    """
+    mid = H.import_local("1atn.pdb", "1atn")
+    orig = sm.molecules[mid]
+    orig_tree = _mn_node_group(orig)
+    assert orig_tree.nodes.get("Domain_Boolean_Join") is not None
+    assert orig_tree.nodes.get("Domain_Final_Not") is not None
+
+    before = set(sm.molecules.keys())
+    bpy.ops.molecule.duplicate_protein(molecule_id=mid)
+    copy_id = sorted(set(sm.molecules.keys()) - before)[-1]
+
+    bpy.ops.molecule.delete(molecule_id=copy_id)
+    assert copy_id not in sm.molecules
+
+    # The original survives, still owns its tree, and that tree still masks.
+    assert mid in sm.molecules
+    tree = _mn_node_group(sm.molecules[mid])
+    assert tree is not None, "original lost its MolecularNodes node group"
+    assert tree.nodes.get("Domain_Boolean_Join") is not None, (
+        "deleting the copy removed the original's Domain_Boolean_Join — the "
+        "parent mesh is no longer masked out from under its domain objects")
+    assert tree.nodes.get("Domain_Final_Not") is not None, (
+        "deleting the copy removed the original's Domain_Final_Not")
+
+    # The masking must still be *wired into* the style node, not just present.
+    style_node = sm.molecules[mid].get_main_style_node()
+    assert style_node is not None
+    assert style_node.inputs["Selection"].links, (
+        "original's style node lost its Selection input link — the parent "
+        "renders every atom, overlapping the domain objects")
+
+
+# --------------------------------------------------------------------------
 # Network import (RCSB fetch) — only runs when explicitly selected.
 # --------------------------------------------------------------------------
 
