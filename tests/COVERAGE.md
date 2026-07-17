@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **234 passing, 9 skipped,
-1 xfailed** across 244 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **241 passing, 9 skipped,
+1 xfailed** across 251 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -41,6 +41,7 @@ the count above was re-run only on 5.2.
 | `test_linkers.py` | `add_linker`, `update_linker`, `toggle_linker_visibility`, `edit_linker`, `remove_linker`, cascade-delete on puppet/chain/protein removal |
 | `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
 | `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins) |
+| `test_rendering.py` | that an imported molecule actually draws: the geometry path from Group Input to Group Output survives import, pivot changes and style swaps (style-independent), plus a real Cycles render asserting non-zero pixel coverage |
 | `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves atoms, never writes to mesh data, never disturbs siblings, lands on the requested residue, and domains rotate about their pivot; `world(pivot) == origin`; plus alpha-carbon world-position snapshot and the mesh-sharing assertion |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
@@ -49,6 +50,33 @@ the count above was re-run only on 5.2.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Every imported molecule rendered nothing.** The pivot's Transform node was
+  wired to its own geometry input, so the atoms never entered the tree:
+  `Group Input.Atoms` fed nothing and the viewport stayed empty while the
+  molecule appeared normally in the PB Outliner. Reported against 1ATN; it
+  affected *every* structure and every style. Root cause: `ensure_pivot_input`
+  decided which links to move behind the Transform with
+  `if link.to_node is not transform`. **Blender returns a fresh `bpy_struct`
+  wrapper on every attribute access, so `is` compares Python wrapper identity,
+  not node identity** - it was always True, so on any tree where the pivot was
+  already wired the Transform's own input was collected as "downstream" and
+  relinked to the Transform's own output, clobbering the real source. Fixed by
+  comparing node *names* (`bpy_struct` implements `__eq__` for data identity;
+  `is` does not). **Never use `is`/`is not` to compare bpy structs.** Guarded by
+  the new `test_rendering.py` lane, verified to fail on the pre-fix code (6 of 7
+  red).
+
+  **Why 234 passing tests missed it:** every test asserted on raw mesh
+  coordinates, pivot maths and world positions - none checked that a node tree
+  emits geometry. The obvious check does not work either:
+  `bpy.data.meshes.new_from_object` and evaluated `dimensions` both report zero
+  for a *healthy* molecule, because the default Style Spheres emits a point
+  cloud rather than a mesh. Measuring either way looked identical before and
+  after the break. `test_rendering.py` therefore asserts on tree topology (the
+  geometry path from Group Input to Group Output, style-independent) plus a real
+  Cycles render at 96x96/1 sample counting covered pixels - which cleanly
+  separated broken (0 px) from known-good (48 px).
 
 - **Every domain deep-copied the whole molecule's mesh.** `core/domain.py` did
   `self.object.data = parent_obj.data.copy()`, so a domain covering 5% of a

@@ -113,26 +113,40 @@ def ensure_pivot_input(node_group) -> Optional[str]:
         socket.description = (
             "Origin of this object in canonical mesh space. Atoms are "
             "translated by -Pivot so the object's transform rotates about it.")
+    # Keep the identifier, not the socket: the pointer must not outlive the
+    # nodes.new() calls below.
+    identifier = socket.identifier
 
+    # Create every missing node BEFORE taking a reference to any node.
+    #
+    # nodes.new() can reallocate the tree's node collection, which invalidates
+    # every bpy pointer previously taken from it - they do not raise, they
+    # silently resolve to whatever now occupies that slot. Holding a Group Input
+    # reference across these two calls made it come back as the Transform node,
+    # which then got wired to its own geometry input: the atoms never entered the
+    # tree and nothing rendered, on every import. Nothing may be held across a
+    # nodes.new(); re-resolve by name afterwards. (Same hazard as the stale
+    # domain_join_node pointers in molecule_wrapper.)
+    if node_group.nodes.get(PIVOT_NODE) is None:
+        created = node_group.nodes.new("GeometryNodeTransform")
+        created.name = PIVOT_NODE
+        created.label = "PB Pivot"
+
+    if node_group.nodes.get(PIVOT_NEGATE_NODE) is None:
+        created = node_group.nodes.new("ShaderNodeVectorMath")
+        created.name = PIVOT_NEGATE_NODE
+        created.label = "PB Pivot (negate)"
+        created.operation = "SCALE"
+        created.inputs["Scale"].default_value = -1.0
+
+    # The collection is stable from here; resolve everything by name.
+    transform = node_group.nodes[PIVOT_NODE]
+    negate = node_group.nodes[PIVOT_NEGATE_NODE]
     group_inputs = _group_inputs(node_group)
     if not group_inputs:
         logger.warning("%r has no Group Input node; cannot install a pivot",
                        node_group.name)
-        return socket.identifier
-
-    transform = node_group.nodes.get(PIVOT_NODE)
-    if transform is None:
-        transform = node_group.nodes.new("GeometryNodeTransform")
-        transform.name = PIVOT_NODE
-        transform.label = "PB Pivot"
-
-    negate = node_group.nodes.get(PIVOT_NEGATE_NODE)
-    if negate is None:
-        negate = node_group.nodes.new("ShaderNodeVectorMath")
-        negate.name = PIVOT_NEGATE_NODE
-        negate.label = "PB Pivot (negate)"
-        negate.operation = "SCALE"
-        negate.inputs["Scale"].default_value = -1.0
+        return identifier
 
     anchor = group_inputs[0]
     transform.location = (anchor.location.x + 180, anchor.location.y - 40)
@@ -141,13 +155,21 @@ def ensure_pivot_input(node_group) -> Optional[str]:
     # Everything the group input's geometry currently feeds has to move behind
     # the transform. Collect first: creating links while iterating link
     # collections invalidates them.
+    #
+    # Compare by NAME, not with `is`. Blender hands out a fresh bpy_struct
+    # wrapper on every attribute access, so `link.to_node is transform` is False
+    # even when they are the same node - which silently classified the pivot's
+    # own input as "downstream" on any tree where it was already wired. It then
+    # got relinked to the pivot's own output, clobbering the real source: the
+    # Transform fed itself, the atoms never entered the tree, and nothing
+    # rendered. (bpy_struct implements __eq__ for data identity; `is` does not.)
     downstream = []
     for gi in group_inputs:
         geo = _geometry_output(gi)
         if geo is None:
             continue
         for link in list(geo.links):
-            if link.to_node is not transform:
+            if link.to_node.name != PIVOT_NODE:
                 downstream.append(link.to_socket)
 
     source = next((_geometry_output(gi) for gi in group_inputs
@@ -155,7 +177,7 @@ def ensure_pivot_input(node_group) -> Optional[str]:
     if source is None:
         logger.warning("%r Group Input exposes no geometry; cannot install a "
                        "pivot", node_group.name)
-        return socket.identifier
+        return identifier
 
     node_group.links.new(source, transform.inputs["Geometry"])
     for to_socket in downstream:
@@ -168,7 +190,7 @@ def ensure_pivot_input(node_group) -> Optional[str]:
             break
     node_group.links.new(negate.outputs["Vector"], transform.inputs["Translation"])
 
-    return socket.identifier
+    return identifier
 
 
 # --------------------------------------------------------------------------
