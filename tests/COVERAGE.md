@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **218 passing, 9 skipped,
-1 xfailed** across 228 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **234 passing, 9 skipped,
+1 xfailed** across 244 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -49,6 +49,27 @@ the count above was re-run only on 5.2.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Every domain deep-copied the whole molecule's mesh.** `core/domain.py` did
+  `self.object.data = parent_obj.data.copy()`, so a domain covering 5% of a
+  protein still stored 100% of the atoms - even though it masks itself down to a
+  residue range inside geometry nodes, which is what actually makes it render.
+  Import auto-creates one domain per chain, so stored atoms scaled as
+  `(1 + n_chains) x n_atoms`: measured 5.0x on 4hhb (4558 atoms -> 22798 stored
+  across 5 datablocks), and 61x on a 60-chain capsid. The copy existed solely to
+  serve pivots: `bpy.ops.object.origin_set` moves an origin by rewriting mesh
+  vertices (verified: 100% of 13674 coordinates), which on a shared datablock
+  reaches every sharer while only the active object's origin compensates, so the
+  siblings jump. Fixed by moving the pivot onto the geometry-nodes modifier
+  (`core/domain_space.py`) and then sharing the datablock - now 1.0x. Guarded by
+  `test_domain_geometry_invariants.py`, in particular
+  `test_setting_a_pivot_never_writes_to_mesh_data` (the precondition; verified to
+  fail on the pre-fix code) and `test_pivot_does_not_disturb_sibling_domains`
+  (the symptom). **If the pivot ever regresses to mutating mesh data, the mesh
+  sharing must be reverted with it** - the two are load-bearing for each other.
+  Note `obj.matrix_world @ co` is no longer the local->world mapping for molecule
+  objects; use `domain_space.local_to_world`. Coordinates read from an
+  *evaluated* object already have the pivot applied and must not be re-mapped.
 
 - **Duplicating a protein aliased the source's GN tree, so deleting the copy
   broke the original.** `MOLECULE_PB_OT_duplicate_protein` rebuilt modifiers by

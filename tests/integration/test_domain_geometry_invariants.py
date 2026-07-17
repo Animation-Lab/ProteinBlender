@@ -300,11 +300,6 @@ def _molecule_meshes(mol):
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason=(
-    "Domains still deep-copy the parent mesh (core/domain.py). Removing that "
-    "copy needs the pivot lifted out of mesh data first, since origin_set "
-    "mutates vertices and would drag every sharer with it. Unmark once "
-    "core.domain_space owns the pivot."))
 def test_domains_share_the_parent_mesh(multi_chain, sm):
     """Domains must not carry a private copy of the whole molecule's mesh.
 

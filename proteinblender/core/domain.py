@@ -238,9 +238,20 @@ class DomainDefinition:
                 print(f"Parent object {parent_obj.name} does not have a valid MolecularNodes or DomainNodes modifier")
                 return False
 
-            # Copy parent molecule object with data
+            # Copy the parent object but *share* its mesh: obj.copy() links the
+            # same datablock, and a domain never needs its own.
+            #
+            # A domain masks itself down to a residue range inside geometry nodes
+            # (see MoleculeWrapper._setup_domain_network), so a private mesh copy
+            # bought nothing but memory: a domain covering 5% of a protein still
+            # stored 100% of the atoms. Import auto-creates one domain per chain,
+            # so the cost scaled as (1 + n_chains) x n_atoms - 5x on 4hhb, 61x on
+            # a 60-chain capsid.
+            #
+            # This is only safe because nothing writes to a domain's mesh any
+            # more: the pivot moved onto the modifier (core/domain_space.py), and
+            # it was the sole writer.
             self.object = parent_obj.copy()
-            self.object.data = parent_obj.data.copy()
             self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
             # Store name for later restoration
             self.object_name = self.object.name
