@@ -25,6 +25,7 @@ Two tests:
 
 import pytest
 import bpy
+from mathutils import Vector
 
 import helpers as H
 
@@ -123,6 +124,18 @@ def test_domain_mask_heals_stale_node_refs(scene, sm, multi_chain):
 # Splitting a chain on a copy must not move that chain
 # --------------------------------------------------------------------------
 
+def _render_world(obj, co):
+    """Map a raw mesh coordinate of *obj* to world space, computing the formula
+    HERE from data (matrix_world + the modifier's Pivot input value) rather than
+    calling the product's local_to_world - the function this exercises must not
+    also be the measuring instrument. This is the same maths the geometry-nodes
+    Transform applies: world = matrix_world @ (co - pivot).
+    """
+    from proteinblender.core import domain_space
+
+    return obj.matrix_world @ (Vector(co) - domain_space.get_pivot(obj))
+
+
 def _chain_world(mol, chain_id):
     """Where *mol* draws the molecule's first canonical atom, via ``chain_id``.
 
@@ -131,11 +144,9 @@ def _chain_world(mol, chain_id):
     atom to the same world position as every other domain of the same molecule -
     and as the corresponding chain of an overlapping copy.
     """
-    from proteinblender.core import domain_space
-
     d = next(d for d in mol.domains.values()
              if d.chain_id == chain_id and d.object is not None)
-    return domain_space.local_to_world(d.object, d.object.data.vertices[0].co)
+    return _render_world(d.object, d.object.data.vertices[0].co)
 
 
 @pytest.mark.integration
@@ -196,8 +207,6 @@ def test_parent_pivot_matches_its_domains(scene, sm):
     inherits that pivot. This asserts the agreement directly, so the disagreement
     is caught where it starts rather than where it eventually shows.
     """
-    from proteinblender.core import domain_space
-
     orig_id = H.import_local("1atn.pdb", "1atn")
     orig = sm.molecules[orig_id]
     scene.selected_molecule_id = orig_id
@@ -208,13 +217,11 @@ def test_parent_pivot_matches_its_domains(scene, sm):
 
     for label, mol in (("original", orig), ("copy", sm.molecules[copy_id])):
         parent = mol.object
-        parent_world = domain_space.local_to_world(
-            parent, parent.data.vertices[0].co)
+        parent_world = _render_world(parent, parent.data.vertices[0].co)
         for d in mol.domains.values():
             if d.object is None:
                 continue
-            dom_world = domain_space.local_to_world(
-                d.object, d.object.data.vertices[0].co)
+            dom_world = _render_world(d.object, d.object.data.vertices[0].co)
             sep = (parent_world - dom_world).length
             assert sep < 1e-4, (
                 f"{label}: parent draws atom 0 at {tuple(parent_world)} but "

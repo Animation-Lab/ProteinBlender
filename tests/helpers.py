@@ -237,3 +237,114 @@ def geometry_summary(obj):
         "bbox_max": [round(float(x), 3) for x in pos.max(axis=0)],
         "centroid": [round(float(x), 3) for x in pos.mean(axis=0)],
     }
+
+
+# --------------------------------------------------------------------------
+# Independent ground truth (no addon code) for pivot / residue-position tests
+# --------------------------------------------------------------------------
+#
+# The rule (see CLAUDE.md "Ground truth must be independent of the code under
+# test"): a pivot/position test must not compute its expected value with the
+# same helper the operator calls. These parse the source PDB with biotite and
+# render pixels with Blender - neither touches proteinblender code - so they can
+# falsify a bug instead of moving with it.
+
+# MolecularNodes scales Angstrom -> Blender units by this factor at import
+# (utils/molecularnodes/entities/molecule/molecule.py). Distances in the mesh's
+# world space are PDB Angstrom distances times this.
+WORLD_SCALE = 0.01
+
+
+def pdb_amino_acid_cas(filename: str, chain_letter: str):
+    """{res_id: (x, y, z)} for the amino-acid alpha carbons of one chain, read
+    straight from the PDB fixture with biotite.
+
+    Independent of the addon: it re-parses the source file and uses biotite's
+    filter_amino_acids, so it excludes bound ions/ligands (e.g. 1ATN's Ca2+,
+    atom name 'CA') and keeps modified residues. Coordinates are in Angstrom, in
+    the PDB frame - compare via transform-invariant pairwise distances, not
+    absolute positions (the mesh is scaled and re-centred).
+    """
+    import numpy as np
+    import biotite.structure as struc
+    import biotite.structure.io.pdb as pdb
+
+    arr = pdb.PDBFile.read(data_path(filename)).get_structure(model=1)
+    chain = arr[arr.chain_id == chain_letter]
+    names = np.char.strip(chain.atom_name.astype(str))
+    mask = (np.char.upper(names) == "CA") & struc.filter_amino_acids(chain)
+    return {int(r): tuple(float(c) for c in xyz)
+            for r, xyz in zip(chain.res_id[mask], chain.coord[mask])}
+
+
+def assert_world_points_match_residues(points_by_label, cas, scale=WORLD_SCALE,
+                                       atol=2e-3):
+    """Verify a set of world-space points landed on the intended PDB residues,
+    using only pairwise distances (invariant under the unknown rigid+scale
+    transform between PDB Angstrom space and the mesh's world space).
+
+    ``points_by_label``: {label: mathutils.Vector | (x,y,z)} - the operator
+    results. ``cas``: {label: (x,y,z)} - the PDB Angstrom ground truth for the
+    residue each label should have landed on. For every pair of labels, the
+    world distance must equal the PDB distance times ``scale``. A pivot that
+    landed on the wrong atom (say a central ion instead of the terminus) breaks
+    at least one pair, so this cannot pass with the bug present.
+    """
+    import numpy as np
+
+    labels = list(points_by_label)
+    assert set(labels) == set(cas), "label mismatch between points and CAs"
+    problems = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            a, b = labels[i], labels[j]
+            pw = float(np.linalg.norm(np.array(tuple(points_by_label[a]))
+                                      - np.array(tuple(points_by_label[b]))))
+            pdb_d = float(np.linalg.norm(np.array(cas[a]) - np.array(cas[b])))
+            if abs(pw - pdb_d * scale) > atol:
+                problems.append(
+                    f"{a}<->{b}: world {pw:.4f} vs pdb {pdb_d * scale:.4f} "
+                    f"(pdb {pdb_d:.2f} A x {scale})")
+    assert not problems, (
+        "world pivot points do not match the intended residues:\n  "
+        + "\n  ".join(problems))
+
+
+def render_coverage(tmp_path, resolution=96):
+    """Pixels covered by geometry in a Cycles render (film_transparent alpha>0).
+
+    Ground truth for 'is anything on screen' and, compared frame-to-frame, for
+    'did the geometry move' - Blender's renderer, independent of any addon
+    coordinate maths.
+    """
+    import bpy
+    import numpy as np
+
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 1
+    scene.cycles.device = "CPU"
+    scene.render.resolution_x = resolution
+    scene.render.resolution_y = resolution
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    out = str(tmp_path / "cov.png")
+    scene.render.filepath = out
+    cam_data = bpy.data.cameras.new("cov_cam")
+    cam = bpy.data.objects.new("cov_cam", cam_data)
+    scene.collection.objects.link(cam)
+    cam.location = (0, -12, 0)
+    cam.rotation_euler = (1.5707963, 0, 0)
+    scene.camera = cam
+    try:
+        bpy.ops.render.render(write_still=True)
+        img = bpy.data.images.load(out)
+        try:
+            px = np.array(img.pixels[:], dtype=np.float32).reshape(-1, 4)
+            return px[:, 3] > 0.01
+        finally:
+            bpy.data.images.remove(img)
+    finally:
+        bpy.data.objects.remove(cam, do_unlink=True)
+        bpy.data.cameras.remove(cam_data)

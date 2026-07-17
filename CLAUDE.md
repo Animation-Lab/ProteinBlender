@@ -133,6 +133,22 @@ Do **not** change product code before step 2.
 5. **Prove red->green rigour** for non-obvious fixes: confirm the test fails on the pre-fix code (`git stash push -- <product-file>` -> run the test -> `git stash pop`).
 6. **Document**: add a one-line entry to the regression section of [tests/COVERAGE.md](tests/COVERAGE.md).
 
+### Ground truth must be independent of the code under test (no facade tests)
+
+A test that derives its *expected* value from the same code path it is exercising proves nothing.
+It passes whether that code is right or wrong, because both sides move together.
+This has burned us: a "Set Pivot Last" test computed its expected position with `_collect_chain_filtered_alphas` - the exact helper the operator calls - so it stayed green while the operator sent the pivot to a bound calcium ion in the centre of the chain.
+
+When you write the assertion, the expected value must come from a source the product code does not touch:
+
+- **Prefer external ground truth.** Parse the source file yourself (e.g. read the PDB with `biotite` or plain text), use a hand-computed constant, or a value from an independent tool. For the calcium-ion bug, the truth came from parsing `1atn.pdb` directly: chain A's real C-terminus is res 372, out at the periphery; the ion was res 373 in the centre.
+- **If you must read product state, read the *data*, not the *derivation*.** Asserting on raw mesh attributes (`is_alpha_carbon`, `res_id`, vertex `co`) is fine; asserting on the output of the very helper you are testing is not.
+- **A green test is not evidence until it has been red for the right reason.** Step 2 is where you catch a facade test: if the "before" run passes, or fails with the wrong signature, the test is not measuring the bug. Do not proceed to the fix.
+- **When numbers are hard to compare directly** (scaled/centred coordinates, non-deterministic ordering), assert an *invariant the bug violates* - a distance, a ratio, an ordering, "not equal to X", a count - rather than loosening the tolerance until it passes.
+- **Beware the tautology check:** before committing, ask "would this assertion still hold if the function returned its input unchanged, or returned the same wrong value the bug produces?" If yes, the test is a facade - rewrite it against independent truth.
+
+The end-to-end render/pixel check (`tests/integration/test_rendering.py`) exists for the same reason: it observes what the user sees, not what the node graph claims.
+
 ## Releases and alpha channel
 
 - `python build.py` builds the release extension and (interactively) bumps the version.

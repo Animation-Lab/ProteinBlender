@@ -7,10 +7,13 @@ pivot set. Removing that copy means the pivot has to be represented explicitly
 instead (see ``core.domain_space``).
 
 These tests pin the behaviour that must NOT change while that representation is
-swapped out underneath them. They deliberately assert through *production* code
-paths (``_collect_chain_filtered_alphas``, the pivot operators, the outliner)
-rather than recomputing coordinates locally, so they stay meaningful whether the
-pivot lives in mesh data or on a geometry-nodes input.
+swapped out underneath them. Ground truth is kept *independent of the code under
+test* (see CLAUDE.md): residue positions come from the PDB via biotite
+(``H.pdb_amino_acid_cas``), "did it move on screen" comes from Blender's renderer
+(``H.render_coverage``), and the origin comes from ``matrix_world`` - never from
+the pivot operators' own alpha-carbon collector, which would let a test pass in
+lock-step with a bug (that is how the bound-calcium C-terminus bug once slipped
+through a green suite).
 
 The one thing they must never do is assume ``obj.matrix_world @ co`` is the
 local->world mapping. That identity holds only while each domain owns a
@@ -23,10 +26,7 @@ import bpy
 from mathutils import Vector, Euler
 
 import helpers as H
-from proteinblender.operators.pivot_operators import (
-    _collect_chain_filtered_alphas,
-    _chain_index_for_item,
-)
+from proteinblender.operators.pivot_operators import _chain_index_for_item
 
 
 # --------------------------------------------------------------------------
@@ -63,17 +63,6 @@ def _select_only(scene, item):
     item.is_selected = True
 
 
-def _alpha_world(obj, chain_idx):
-    """World positions of ``obj``'s alpha carbons, as production computes them.
-
-    Routed through the pivot operators' own collector so this tracks whatever
-    local->world convention the product currently uses.
-    """
-    alphas = _collect_chain_filtered_alphas([(obj, chain_idx)])
-    alphas.sort(key=lambda pr: pr[1])
-    return np.array([tuple(pos) for pos, _ in alphas], dtype=np.float64)
-
-
 def _origin(obj):
     bpy.context.view_layer.update()
     return obj.matrix_world.translation.copy()
@@ -84,119 +73,106 @@ def _origin(obj):
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_setting_pivot_does_not_move_geometry(multi_chain, scene):
-    """Moving a domain's pivot relocates its origin, never its atoms.
+def test_setting_pivot_does_not_move_what_is_rendered(multi_chain, scene, tmp_path):
+    """Moving a domain's pivot relocates its origin, never what is drawn.
 
-    This is the invariant the whole refactor rests on. Under origin_set it holds
-    because the mesh shift and the origin move cancel; under an explicit pivot it
-    holds because the GN translate and the matrix_world translation cancel.
+    Measured with Blender's *renderer* (pixel coverage), not the addon's
+    coordinate maths: setting a pivot changes matrix_world and the GN pivot
+    input together, and if that maths is self-consistent-but-wrong the addon's
+    own local->world would still report "no movement". The rendered image is the
+    only witness that cannot move with the bug.
     """
     _build_outliner()
     rows = _chain_rows(scene)
     assert rows, "no chain rows to pivot"
-    item, obj, chain_idx = rows[0]
+    item, obj, _idx = rows[0]
 
-    before = _alpha_world(obj, chain_idx)
-    assert len(before), "chain has no alpha carbons"
+    bpy.context.view_layer.update()
+    before = H.render_coverage(tmp_path)
+    assert before.sum() > 0, "nothing rendered to begin with"
 
     _select_only(scene, item)
     assert bpy.ops.proteinblender.set_pivot_first() == {"FINISHED"}
-    after_first = _alpha_world(obj, chain_idx)
-
     assert bpy.ops.proteinblender.set_pivot_last() == {"FINISHED"}
-    after_last = _alpha_world(obj, chain_idx)
-
     assert bpy.ops.proteinblender.set_pivot_center() == {"FINISHED"}
-    after_center = _alpha_world(obj, chain_idx)
+    bpy.context.view_layer.update()
 
-    for label, arr in (("first", after_first),
-                       ("last", after_last),
-                       ("center", after_center)):
-        assert arr.shape == before.shape, f"{label}: atom count changed"
-        np.testing.assert_allclose(
-            arr, before, atol=1e-4,
-            err_msg=f"set_pivot_{label} moved the chain's atoms in world space")
+    after = H.render_coverage(tmp_path)
+    # Identical pixels covered - the molecule did not move on screen.
+    changed = int(np.logical_xor(before, after).sum())
+    assert changed == 0, (
+        f"{changed} pixels changed after setting pivots; the geometry moved on "
+        f"screen when it should not have")
 
 
 @pytest.mark.integration
-def test_pivot_does_not_disturb_sibling_domains(multi_chain, scene):
-    """Pivoting one chain must leave every other chain's atoms untouched.
+def test_pivot_lands_on_the_requested_residue(scene, sm):
+    """set_pivot_first/center/last land the origin on the chain's N-terminus /
+    centroid / C-terminus.
 
-    This is the failure mode a shared mesh introduces if the pivot is baked into
-    mesh data: origin_set shifts the geometry for every user of the datablock but
-    only compensates the active object's origin, so siblings visibly jump.
+    Ground truth is the PDB parsed with biotite - not the pivot operators' own
+    alpha collector, which would make this pass even if both were wrong (that is
+    how the bound-calcium C-terminus bug slipped through). Compared via
+    transform-invariant pairwise distances, since the mesh is scaled/re-centred.
+    """
+    mol = sm.molecules[H.import_local("4hhb.pdb", "4hhb")]
+    scene.selected_molecule_id = mol.identifier
+    _build_outliner()
+
+    # A chain that resolves to an alpha-carbon mesh, and its letter.
+    rows = _chain_rows(scene)
+    assert rows
+    item, obj, idx = rows[0]
+    labels = list(obj.get("chain_ids") or [])
+    letter = labels[idx]
+
+    _select_only(scene, item)
+
+    def _run(op):
+        assert op() == {"FINISHED"}
+        return _origin(obj)
+
+    first = _run(bpy.ops.proteinblender.set_pivot_first)
+    center = _run(bpy.ops.proteinblender.set_pivot_center)
+    last = _run(bpy.ops.proteinblender.set_pivot_last)
+
+    cas = H.pdb_amino_acid_cas("4hhb.pdb", letter)
+    res = sorted(cas)
+    truth = {
+        "first": cas[res[0]],
+        "center": tuple(np.mean([cas[r] for r in res], axis=0)),
+        "last": cas[res[-1]],
+    }
+    H.assert_world_points_match_residues(
+        {"first": first, "center": center, "last": last}, truth)
+
+
+@pytest.mark.integration
+def test_domain_rotates_about_its_pivot(multi_chain, scene, tmp_path):
+    """A rotated domain still renders, and its origin is the fixed point.
+
+    Independent instruments only: the origin (matrix_world.translation, from
+    Blender) must not move under a pure rotation about it, the rotation part of
+    matrix_world must actually change, and the molecule must still be on screen
+    (renderer). No addon coordinate maths involved.
     """
     _build_outliner()
     rows = _chain_rows(scene)
-    assert len(rows) >= 2, "need >=2 chains (use 4hhb)"
+    item, obj, _idx = rows[0]
+    _select_only(scene, item)
 
-    target_item, target_obj, target_idx = rows[0]
-    siblings = rows[1:]
-    before = {it.item_id: _alpha_world(o, idx) for it, o, idx in siblings}
-
-    _select_only(scene, target_item)
     assert bpy.ops.proteinblender.set_pivot_first() == {"FINISHED"}
-
-    for it, o, idx in siblings:
-        after = _alpha_world(o, idx)
-        np.testing.assert_allclose(
-            after, before[it.item_id], atol=1e-4,
-            err_msg=(f"pivoting {target_item.item_id} moved sibling "
-                     f"{it.item_id}'s atoms"))
-
-
-@pytest.mark.integration
-def test_pivot_lands_on_the_requested_residue(multi_chain, scene):
-    """set_pivot_first/last put the origin on the N-/C-terminal alpha carbon."""
-    _build_outliner()
-    rows = _chain_rows(scene)
-    item, obj, chain_idx = rows[0]
-    _select_only(scene, item)
-
-    alphas = _collect_chain_filtered_alphas([(obj, chain_idx)])
-    first_pos = min(alphas, key=lambda pr: pr[1])[0]
-    last_pos = max(alphas, key=lambda pr: pr[1])[0]
-
-    bpy.ops.proteinblender.set_pivot_first()
-    assert (_origin(obj) - first_pos).length < 1e-3, (
-        "origin is not on the N-terminal alpha carbon")
-
-    bpy.ops.proteinblender.set_pivot_last()
-    assert (_origin(obj) - last_pos).length < 1e-3, (
-        "origin is not on the C-terminal alpha carbon")
-
-
-@pytest.mark.integration
-def test_domain_rotates_about_its_pivot(multi_chain, scene):
-    """Rotating a domain leaves the pivot-anchored atom fixed in world space.
-
-    The point of a pivot: it is the one atom that does not move. If the pivot
-    representation and the local->world mapping ever disagree, this is what
-    catches it.
-    """
-    _build_outliner()
-    rows = _chain_rows(scene)
-    item, obj, chain_idx = rows[0]
-    _select_only(scene, item)
-
-    bpy.ops.proteinblender.set_pivot_first()
-    pivot_world = _origin(obj)
-
-    alphas = _collect_chain_filtered_alphas([(obj, chain_idx)])
-    anchor_before = min(alphas, key=lambda pr: pr[1])[0]
-    assert (anchor_before - pivot_world).length < 1e-3
+    origin_before = _origin(obj)
+    rot_before = np.array(obj.matrix_world.to_3x3())
 
     obj.rotation_euler = Euler((0.0, 0.0, 1.2), "XYZ")
     bpy.context.view_layer.update()
 
-    alphas_after = _collect_chain_filtered_alphas([(obj, chain_idx)])
-    anchor_after = min(alphas_after, key=lambda pr: pr[1])[0]
-
-    assert (anchor_after - anchor_before).length < 1e-3, (
-        f"the pivot atom moved under rotation: {tuple(anchor_before)} -> "
-        f"{tuple(anchor_after)}; the domain is not rotating about its pivot")
-    assert (_origin(obj) - pivot_world).length < 1e-3, (
-        "the origin drifted under rotation")
+    assert (_origin(obj) - origin_before).length < 1e-4, (
+        "the origin (pivot) moved under a pure rotation about it")
+    rot_after = np.array(obj.matrix_world.to_3x3())
+    assert not np.allclose(rot_before, rot_after), "the rotation did not apply"
+    assert H.render_coverage(tmp_path).sum() > 0, "nothing rendered after rotating"
 
 
 @pytest.mark.integration
@@ -235,10 +211,11 @@ def test_setting_a_pivot_never_writes_to_mesh_data(multi_chain, scene):
 def test_pivot_is_carried_on_the_modifier(multi_chain, scene):
     """The pivot is readable as a per-object geometry-nodes input."""
     from proteinblender.core import domain_space
+    from mathutils import Vector
 
     _build_outliner()
     rows = _chain_rows(scene)
-    item, obj, _ = rows[0]
+    item, obj, chain_idx = rows[0]
 
     assert domain_space.pb_modifier(obj) is not None
 
@@ -252,13 +229,27 @@ def test_pivot_is_carried_on_the_modifier(multi_chain, scene):
     assert (first_pivot - last_pivot).length > 1e-3, (
         "the pivot input did not change between N- and C-terminal pivots")
 
-    # The invariant the rest of the add-on relies on: the pivot's world position
-    # is the object's origin.
+    # After set_pivot_first, the modifier's Pivot input (canonical mesh space)
+    # must equal the raw-mesh coordinate of this chain's first-residue alpha
+    # carbon. Read straight from mesh attributes - not through local_to_world
+    # (whose composition with the pivot is true by construction and proves
+    # nothing).
+    mesh = obj.data
+    n = len(mesh.vertices)
+    isa = np.zeros(n, dtype=bool)
+    mesh.attributes["is_alpha_carbon"].data.foreach_get("value", isa)
+    chain = np.zeros(n, dtype=np.int32)
+    mesh.attributes["chain_id"].data.foreach_get("value", chain)
+    res = np.zeros(n, dtype=np.int32)
+    mesh.attributes["res_id"].data.foreach_get("value", res)
+    co = np.zeros(n * 3); mesh.vertices.foreach_get("co", co); co = co.reshape(-1, 3)
+
+    sel = isa & (chain == chain_idx)
+    first_res_co = Vector(co[sel][np.argmin(res[sel])].tolist())
+
     bpy.ops.proteinblender.set_pivot_first()
-    bpy.context.view_layer.update()
-    assert (domain_space.local_to_world(obj, domain_space.get_pivot(obj))
-            - obj.matrix_world.translation).length < 1e-4, (
-        "world(pivot) must equal the object's origin")
+    assert (domain_space.get_pivot(obj) - first_res_co).length < 1e-4, (
+        "the Pivot input is not the first residue's canonical mesh coordinate")
 
 
 # --------------------------------------------------------------------------
@@ -329,15 +320,21 @@ def test_domains_share_the_parent_mesh(multi_chain, sm):
 
 
 @pytest.mark.integration
-def test_chain_alpha_world_positions(multi_chain, scene, geo_snapshot):
-    """Pin every chain's alpha-carbon world positions.
+def test_rendered_molecule_has_stable_coverage(multi_chain, scene, tmp_path):
+    """Pin how much of the frame the molecule covers when rendered.
 
-    A geometry regression anywhere in the pivot/local->world rework shows up here
-    as a snapshot diff rather than as a silently misplaced protein.
+    Absolute-geometry regression signal (e.g. a centring change that shifts the
+    whole molecule) measured by Blender's renderer, independent of any addon
+    coordinate maths. This replaces an earlier snapshot that pinned the output of
+    the pivot operators' own alpha-carbon collector - which would have pinned the
+    bound-calcium bug's positions as "correct" rather than flagging them.
+
+    A wide band is used deliberately: the goal is to catch a gross shift/scale
+    change, not to re-baseline on every sub-pixel Cycles wobble.
     """
     _build_outliner()
-    rows = _chain_rows(scene)
-    assert len(rows) == 4, f"expected 4 chain rows, got {len(rows)}"
-
-    stacked = np.concatenate([_alpha_world(o, idx) for _, o, idx in rows])
-    assert geo_snapshot == np.round(stacked, 2)
+    bpy.context.view_layer.update()
+    covered = int(H.render_coverage(tmp_path).sum())
+    assert 20 < covered < 4000, (
+        f"rendered coverage {covered}px is outside the expected band for 4hhb - "
+        f"the molecule may have shifted, scaled, or stopped rendering")

@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **247 passing, 9 skipped,
-1 xfailed** across 257 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **246 passing, 9 skipped,
+1 xfailed** across 256 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -42,7 +42,7 @@ the count above was re-run only on 5.2.
 | `test_dna.py` | `build_dna` (ds/ss/RNA, all styles), `randomize_sequence`, `swap_to_complement`, `update_dna_colors/style`, bend `add/set_resolution/toggle/remove` |
 | `test_pivot.py` | `set_pivot_first/last/center` (distinct, sensible origins); a full-chain domain's default pivot is its centre of mass; First/Center/Last move the origin and land on the selected chain's N-term/centroid/C-term |
 | `test_rendering.py` | that an imported molecule actually draws: the geometry path from Group Input to Group Output survives import, pivot changes and style swaps (style-independent), plus a real Cycles render asserting non-zero pixel coverage |
-| `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves atoms, never writes to mesh data, never disturbs siblings, lands on the requested residue, and domains rotate about their pivot; `world(pivot) == origin`; plus alpha-carbon world-position snapshot and the mesh-sharing assertion |
+| `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves what is rendered (pixel render) and never writes to mesh data, First/Center/Last land on PDB-derived residues (biotite ground truth), the pivot input matches the raw first-residue coordinate, domains rotate about a fixed origin, rendered coverage stays in-band, and the mesh-sharing assertion. Ground truth is kept independent of the pivot code under test |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |
