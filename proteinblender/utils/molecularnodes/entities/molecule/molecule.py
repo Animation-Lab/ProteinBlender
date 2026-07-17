@@ -570,10 +570,20 @@ def _create_object(
             return color.color_chains(att_atomic_number(), att_chain_id())
 
     def att_is_alpha():
-        # Identify alpha carbons by stripping whitespace and matching 'CA'
-        # This handles atom names with padding in PDB files.
+        # An alpha carbon is the CA atom *of an amino-acid residue*. Match the
+        # name (stripped/uppercased to tolerate PDB padding), then require the
+        # atom to belong to an amino acid.
+        #
+        # Matching the name alone also catches a calcium ION (element Ca, atom
+        # name "CA") - e.g. the Ca2+ bound in actin (1ATN, chain A res 373).
+        # Such an ion sits in the centre of the protein with the highest res_id
+        # in its chain, so it pollutes the backbone/cartoon spline and sends
+        # "pivot to last residue" (max res_id alpha carbon) to the middle of the
+        # chain instead of the C-terminus. filter_amino_acids keeps modified
+        # residues (e.g. 1ATN's HIC at res 73) while dropping ions and ligands.
         names = np.char.strip(array.atom_name.astype(str))
-        return np.char.upper(names) == "CA"
+        is_ca_name = np.char.upper(names) == "CA"
+        return is_ca_name & struc.filter_amino_acids(array)
 
     def att_is_solvent():
         return struc.filter_solvent(array)

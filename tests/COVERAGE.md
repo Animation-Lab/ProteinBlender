@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **245 passing, 9 skipped,
-1 xfailed** across 255 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **247 passing, 9 skipped,
+1 xfailed** across 257 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -50,6 +50,24 @@ the count above was re-run only on 5.2.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **"Set Pivot Last" landed in the centre of the chain, not the C-terminus.**
+  A bound metal ion whose atom name is "CA" (a calcium ion - element Ca, e.g.
+  the Ca(2+) in actin, 1ATN chain A res 373) was flagged `is_alpha_carbon`,
+  because the (locally modified) MolecularNodes `att_is_alpha` matched any atom
+  named "CA". The ion sits in the centre of the protein and carries the highest
+  res_id in its chain, so "Set Pivot Last" (max-res_id alpha carbon) landed on
+  it - dead centre - instead of the real C-terminus (res 372, out at the
+  periphery). It also spliced the ion into the cartoon/backbone spline. Fixed in
+  `att_is_alpha`: require `struc.filter_amino_acids(array)` as well as the name,
+  which drops ions and ligands while keeping modified residues (1ATN's HIC at
+  res 73 stays). This is a vendored-MolecularNodes edit; note it for the
+  4.2.10 -> 4.5.x sync. Guarded by
+  `test_pivot.py::test_calcium_ion_is_not_counted_as_an_alpha_carbon` (reads the
+  mesh attributes directly) and
+  `::test_set_pivot_last_lands_on_the_terminus_not_the_center` (asserts Last is
+  off-centre) - both verified red pre-fix, using ground truth independent of the
+  pivot operators' own helpers.
 
 - **A full chain's default pivot landed on its first residue, so "Set Pivot
   First" looked like a no-op.** Select a chain, click Set Pivot First - nothing

@@ -190,6 +190,88 @@ def test_full_chain_domain_default_pivot_is_center_of_mass(scene, sm):
             f"chain centroid; expected it on the centroid")
 
 
+def _chain_a_alpha_res_ids(mol):
+    """res_ids of chain-A atoms flagged is_alpha_carbon, read straight from the
+    mesh - no pivot-operator helper involved, so this cannot be circular."""
+    import numpy as np
+
+    obj = mol.object
+    mesh = obj.data
+    n = len(mesh.vertices)
+    is_alpha = np.zeros(n, dtype=bool)
+    mesh.attributes["is_alpha_carbon"].data.foreach_get("value", is_alpha)
+    chain = np.zeros(n, dtype=np.int32)
+    mesh.attributes["chain_id"].data.foreach_get("value", chain)
+    res = np.zeros(n, dtype=np.int32)
+    mesh.attributes["res_id"].data.foreach_get("value", res)
+
+    labels = list(obj.get("chain_ids") or [])
+    a_idx = labels.index("A") if "A" in labels else 0
+    return set(res[is_alpha & (chain == a_idx)].tolist()), res, chain, is_alpha, a_idx
+
+
+@pytest.mark.integration
+def test_calcium_ion_is_not_counted_as_an_alpha_carbon(scene, sm):
+    """1ATN's actin binds a Ca(2+) ion: HETATM, element Ca, atom name 'CA',
+    residue 373, sitting in the centre of the chain.
+
+    is_alpha_carbon matched any atom named 'CA', so the ion was flagged as an
+    alpha carbon. It has the highest res_id in the chain, so 'Set Pivot Last'
+    (which takes the max-res_id alpha carbon) landed on it - in the middle of the
+    protein. The real C-terminus is residue 372, out at the periphery.
+
+    Ground truth here is the mesh attributes and the known structure, not any
+    pivot-operator code.
+    """
+    mol = sm.molecules[H.import_local("1atn.pdb", "1atn")]
+    alpha_res, res, chain, is_alpha, a_idx = _chain_a_alpha_res_ids(mol)
+
+    # The ion's residue (373) exists in chain A...
+    assert 373 in set(res[chain == a_idx].tolist()), "test fixture changed: no res 373 in chain A"
+    # ...but it must NOT be an alpha carbon.
+    assert 373 not in alpha_res, (
+        "the calcium ion (chain A res 373) is flagged is_alpha_carbon; "
+        "'Set Pivot Last' will land on it, in the centre of the chain")
+    # The last alpha-carbon residue is the true C-terminus, 372.
+    assert max(alpha_res) == 372, (
+        f"chain A's last alpha carbon is res {max(alpha_res)}, expected the "
+        f"C-terminus at 372")
+
+
+@pytest.mark.integration
+def test_set_pivot_last_lands_on_the_terminus_not_the_center(scene, sm):
+    """The user-facing symptom: Set Pivot Last must reach the peripheral
+    C-terminus, not the central calcium ion.
+
+    Independent of the pivot helper: it compares Last against Center (the
+    centroid) and asserts Last is genuinely off-centre. The Ca ion sat ~2.6 A
+    (~0.026 blender units) from the centroid; the real terminus is ~24 A (~0.24
+    units) out. A threshold of 0.1 units cleanly separates them.
+    """
+    mol = sm.molecules[H.import_local("1atn.pdb", "1atn")]
+    _build_outliner()
+    rows = _chain_rows_with_alphas(scene)
+    # chain A specifically (the one with the bound ion)
+    it, obj, idx = next((r for r in rows if r[1].get("chain_ids")
+                         and "A" in list(r[1]["chain_ids"])
+                         and r[2] == list(r[1]["chain_ids"]).index("A")), rows[0])
+
+    def _run(op):
+        for x in scene.outliner_items:
+            x.is_selected = False
+        it.is_selected = True
+        assert op() == {"FINISHED"}
+        bpy.context.view_layer.update()
+        return obj.matrix_world.translation.copy()
+
+    center = _run(bpy.ops.proteinblender.set_pivot_center)
+    last = _run(bpy.ops.proteinblender.set_pivot_last)
+
+    assert (last - center).length > 0.1, (
+        f"Set Pivot Last landed {(last - center).length:.3f} from the chain "
+        f"centre - it is on the central calcium ion, not the C-terminus")
+
+
 @pytest.mark.integration
 def test_first_center_last_move_the_pivot_and_land_correctly(scene, sm):
     """The user's exact flow: select a chain, click First / Center / Last.
