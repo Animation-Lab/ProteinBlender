@@ -117,3 +117,107 @@ def test_domain_mask_heals_stale_node_refs(scene, sm, multi_chain):
     # Cached refs were healed back to real, valid nodes.
     assert _infra_intact(mol)
     assert mol.join_nodes[-1].name in ng.nodes
+
+
+# --------------------------------------------------------------------------
+# Splitting a chain on a copy must not move that chain
+# --------------------------------------------------------------------------
+
+def _chain_world(mol, chain_id):
+    """Where *mol* draws the molecule's first canonical atom, via ``chain_id``.
+
+    Every domain shares the parent's mesh, so vertex 0 is the same atom in every
+    one of them. Whatever transform + pivot a domain carries, it must map that
+    atom to the same world position as every other domain of the same molecule -
+    and as the corresponding chain of an overlapping copy.
+    """
+    from proteinblender.core import domain_space
+
+    d = next(d for d in mol.domains.values()
+             if d.chain_id == chain_id and d.object is not None)
+    return domain_space.local_to_world(d.object, d.object.data.vertices[0].co)
+
+
+@pytest.mark.integration
+def test_split_on_a_copy_does_not_move_the_split_chain(scene, sm):
+    """Import 1ATN, Copy it, split chain D on the copy: it must not shift.
+
+    Reported: the two proteins overlap perfectly until you split a chain on the
+    copy, at which point that chain jumps (~0.39 units).
+
+    Cause: a newly created domain inherits its parent molecule's pivot, and the
+    copy's parent pivot was wrong. `_calculate_center_of_mass` measured the
+    *evaluated* geometry, which is masked by Domain_Final_Not once domains exist
+    - so the copy (which has domains by the time it is re-centred) computed a
+    different centre than the original (which is centred at import, before any
+    domain exists). The bad pivot sat harmlessly on the always-masked parent
+    until a split created domains that inherited it.
+    """
+    orig_id = H.import_local("1atn.pdb", "1atn")
+    orig = sm.molecules[orig_id]
+    scene.selected_molecule_id = orig_id
+
+    before = set(sm.molecules.keys())
+    bpy.ops.molecule.duplicate_protein(molecule_id=orig_id)
+    copy_id = sorted(set(sm.molecules.keys()) - before)[-1]
+    copy = sm.molecules[copy_id]
+
+    chains = sorted({d.chain_id for d in orig.domains.values() if d.object}
+                    & {d.chain_id for d in copy.domains.values() if d.object},
+                    key=str)
+    assert "D" in chains, f"expected a chain D on both molecules, got {chains}"
+
+    # Precondition: the copy overlaps the original exactly.
+    for ch in chains:
+        sep = (_chain_world(orig, ch) - _chain_world(copy, ch)).length
+        assert sep < 1e-4, f"copy chain {ch} does not overlap the original: {sep}"
+
+    # Split chain D (1-51) on the COPY.
+    scene.selected_molecule_id = copy_id
+    key = next(k for k, d in copy.domains.items() if d.chain_id == "D")
+    scene.split_domain_new_start = 1
+    scene.split_domain_new_end = 51
+    assert bpy.ops.molecule.split_domain(domain_id=key) == {"FINISHED"}
+
+    # Every chain of the copy must STILL sit exactly on the original's.
+    for ch in chains:
+        sep = (_chain_world(orig, ch) - _chain_world(copy, ch)).length
+        assert sep < 1e-4, (
+            f"after splitting chain D on the copy, chain {ch} moved {sep:.6f} "
+            f"away from the original - the two proteins no longer overlap")
+
+
+@pytest.mark.integration
+def test_parent_pivot_matches_its_domains(scene, sm):
+    """A molecule's parent and its domains must agree on where the atoms are.
+
+    The parent is masked out of the render, so a parent whose pivot disagrees
+    with its domains looks fine - right up until a new domain is created and
+    inherits that pivot. This asserts the agreement directly, so the disagreement
+    is caught where it starts rather than where it eventually shows.
+    """
+    from proteinblender.core import domain_space
+
+    orig_id = H.import_local("1atn.pdb", "1atn")
+    orig = sm.molecules[orig_id]
+    scene.selected_molecule_id = orig_id
+
+    before = set(sm.molecules.keys())
+    bpy.ops.molecule.duplicate_protein(molecule_id=orig_id)
+    copy_id = sorted(set(sm.molecules.keys()) - before)[-1]
+
+    for label, mol in (("original", orig), ("copy", sm.molecules[copy_id])):
+        parent = mol.object
+        parent_world = domain_space.local_to_world(
+            parent, parent.data.vertices[0].co)
+        for d in mol.domains.values():
+            if d.object is None:
+                continue
+            dom_world = domain_space.local_to_world(
+                d.object, d.object.data.vertices[0].co)
+            sep = (parent_world - dom_world).length
+            assert sep < 1e-4, (
+                f"{label}: parent draws atom 0 at {tuple(parent_world)} but "
+                f"domain {d.name} draws it at {tuple(dom_world)} ({sep:.6f} "
+                f"apart). Any domain created from this parent inherits the "
+                f"parent's pivot and will land in the wrong place.")

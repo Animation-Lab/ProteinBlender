@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **241 passing, 9 skipped,
-1 xfailed** across 251 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **243 passing, 9 skipped,
+1 xfailed** across 253 collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
@@ -50,6 +50,26 @@ the count above was re-run only on 5.2.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Duplicating a protein and then splitting a chain on the copy moved that
+  chain.** The two proteins overlapped perfectly until a chain was split on the
+  copy, at which point the split chain jumped (~0.39 units on 1ATN). Two causes,
+  both in the copy's *parent* pivot, which is masked out of the render and so was
+  invisible until a split created a domain that inherited it: (1) the pivot lives
+  as a geometry-nodes modifier input value, which the duplicate operator's
+  RNA-property copy loop does not carry, so the copy's parent defaulted to a zero
+  pivot; (2) the duplicate then re-centred the copy via `center_protein` *after*
+  its domains existed, and `center_protein` moves only the parent, desyncing it
+  from the already-placed domains. Fixed by copying the source parent's pivot
+  onto the copy (`domain_space.copy_pivot`) and removing the redundant, harmful
+  re-center - a duplicate is an exact overlay of the source and needs no
+  re-centring. Import is unaffected because it centres the parent *before*
+  creating domains, so they are born consistent. Guarded by
+  `test_split_domain_regression.py::test_split_on_a_copy_does_not_move_the_split_chain`
+  and `::test_parent_pivot_matches_its_domains` (both verified red pre-fix). The
+  latter asserts the general invariant - a molecule's parent and its domains must
+  render the same atom at the same world position - so the class is caught at its
+  source, not only via this one workflow.
 
 - **Every imported molecule rendered nothing.** The pivot's Transform node was
   wired to its own geometry input, so the atoms never entered the tree:

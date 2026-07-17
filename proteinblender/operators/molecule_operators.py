@@ -342,6 +342,16 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                     new_mod.node_group = mod.node_group.copy()
                     _strip_inherited_domain_masks(new_mod.node_group)
 
+            # 3b. Carry over the pivot. The pivot lives on the modifier as a
+            # geometry-nodes input value (not an RNA property), so the loop above
+            # did not copy it - the fresh modifier defaults it to zero. Without
+            # this the copy's parent renders its atoms at a different world
+            # position than its (correctly copied) domains. That mismatch is
+            # invisible because the parent is masked out, until a split creates a
+            # domain that inherits the parent's wrong pivot and jumps.
+            # See test_parent_pivot_matches_its_domains.
+            domain_space.copy_pivot(source_obj, new_protein_obj)
+
             # 4. Create new MoleculeWrapper
             # We need to create a Molecule object first
             from ..utils.molecularnodes.entities.molecule.molecule import Molecule
@@ -499,10 +509,13 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
 
-            # 18. Re-center the duplicated protein at origin (as if user clicked the re-center button)
-            print(f"Re-centering duplicated protein '{new_identifier}' at origin...")
-            bpy.ops.molecule.center_protein(molecule_id=new_identifier)
-            print("  ✓ Duplicated protein centered at origin")
+            # 18. The copy is placed as an exact overlay of the source (steps 2
+            # and 14 copy its transform verbatim, and 3b its pivot), so it is
+            # already centred wherever the source is. Do NOT re-center here:
+            # center_protein moves only the parent, and the domains already exist
+            # by now, so it would desync the parent from its domains - the parent
+            # would then hand a wrong pivot to any domain created later by a
+            # split. See test_split_on_a_copy_does_not_move_the_split_chain.
 
             self.report({'INFO'}, f"Duplicated protein '{base_id}' with {len(domain_mapping)} domains")
             return {'FINISHED'}

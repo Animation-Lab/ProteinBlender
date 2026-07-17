@@ -149,3 +149,30 @@ Do **not** change product code before step 2.
 ## Conventions
 
 - Commits omit any AI / Co-Authored-By attribution.
+
+### Two rules that will bite you silently
+
+Both of these fail *quietly* - no crash, no error, just wrong geometry.
+
+- **Never map a molecule/domain mesh coordinate with `obj.matrix_world @ co`.
+  Use `core.domain_space.local_to_world(obj, co)`.**
+  Domains share the parent molecule's mesh datablock, so a domain's pivot cannot
+  live in mesh vertices (see `core/domain_space.py`). It is carried on the
+  geometry-nodes modifier instead, and the real mapping is
+  `obj.matrix_world @ (co - pivot)`. `matrix_world @ co` is off by exactly the
+  pivot. This only applies to *raw* mesh reads (`obj.data.vertices`, a POINT
+  attribute): coordinates read from an **evaluated** object have already been
+  through the pivot and must not be re-mapped.
+
+- **Never compare `bpy` structs with `is` / `is not`. Use `==`, or compare
+  `.name`.**
+  Blender returns a fresh `bpy_struct` wrapper on every attribute access, so
+  `node_a is node_b` is False even when they are the same node. `bpy_struct`
+  implements `__eq__` for data identity; `is` compares Python wrappers. This
+  exact mistake wired a geometry-nodes Transform to its own input and made every
+  imported protein render nothing, while the whole test suite stayed green.
+
+- **Do not cache `bpy` node pointers across a `nodes.new()` / `nodes.remove()`.**
+  Those reallocate the node collection and silently invalidate previously-held
+  references. Re-resolve by name at point of use - see the self-healing
+  re-resolution in `molecule_wrapper._create_domain_mask_nodes`.
