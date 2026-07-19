@@ -31,6 +31,22 @@ python tests/artifact/run_artifact_tests.py --prepare-wheels
 python tests/run_tests.py --blender "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe"
 ```
 
+## Mandatory normal-profile deployment
+
+After every product-code change, deploy the tested working tree into both
+normal Blender installations before reporting completion:
+
+```bash
+python scripts/deploy_normal_blender.py
+```
+
+The deployer updates Blender 5.2 and 5.1 in both legacy `scripts/addons` and
+any installed `extensions/*/proteinblender` copy, preserves dependency wheels,
+and byte-verifies every copied Python file. Then fully close Blender,
+restart each applicable version without `--factory-startup`, and reproduce the
+changed user workflow through its public UI operator. Repository tests alone
+do not establish that a normal Blender profile is running the new code.
+
 `run_tests.py` finds Blender (via `--blender`, then `$BLENDER_PATH`, then the
 standard install dirs) and launches the suite headless. To run *directly*
 inside a Blender you already have open a shell to:

@@ -60,6 +60,10 @@ git push origin v0.1.3
 
 ## Test in Blender
 
+- [ ] Run `python scripts/deploy_normal_blender.py`
+- [ ] Confirm deployment reports PASS for normal Blender 5.2 and 5.1 profiles
+- [ ] Fully close all Blender processes so cached Python modules are discarded
+- [ ] Reproduce changed workflows through the normal-profile ProteinBlender UI
 - [ ] Open Blender 4.2+
 - [ ] Refresh extension repository
 - [ ] Verify new version appears

@@ -88,3 +88,11 @@ def test_behavioral_tests_trigger_import_and_split_through_public_ui_operators()
                     violations.append(
                         f"{path.relative_to(ROOT)}: {trigger} ({replacement})")
     assert not violations, "non-UI behavioral triggers found:\n" + "\n".join(violations)
+
+
+def test_normal_profile_deployer_covers_supported_local_blender_versions():
+    deployer = (ROOT / "scripts" / "deploy_normal_blender.py").read_text(
+        encoding="utf-8")
+    assert 'VERSIONS = ("5.2", "5.1")' in deployer
+    assert 'extensions_root.glob("*/proteinblender")' in deployer
+    assert "filecmp.cmp" in deployer, "deployer must verify copied files"
