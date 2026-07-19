@@ -511,7 +511,11 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         
         # Create an empty object as the pivot gizmo
         pivot_empty = bpy.data.objects.new("PROTEINBLENDER_PIVOT_GIZMO", None)
-        pivot_empty.empty_display_type = 'SPHERE'
+        # A SPHERE Empty draws three orange wire circles around the helper.
+        # Although those are not rotation handles, they look exactly like a
+        # rotation gizmo beside the Move arrows. Plain axes keep the helper
+        # selectable and visible without any surrounding circles.
+        pivot_empty.empty_display_type = 'PLAIN_AXES'
         pivot_empty.empty_display_size = 0.5
 
         # Get the actual current origin (pivot point) of the object in world space
@@ -542,7 +546,7 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         # placement is registered by addon.register(), not appended here.
         scene["custom_pivot_active"] = True
 
-        self.report({'INFO'}, "Move the orange sphere to position pivot. Click elsewhere to confirm.")
+        self.report({'INFO'}, "Move the pivot helper to position the pivot. Click elsewhere to confirm.")
         
         # Force UI redraw
         for area in context.screen.areas:

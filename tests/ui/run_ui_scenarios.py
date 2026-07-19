@@ -252,6 +252,9 @@ def assert_custom_pivot_uses_translation_and_finish():
     assert not space.show_gizmo_object_scale
     empty = next((obj for obj in bpy.data.objects if obj.type == "EMPTY" and obj.select_get()), None)
     assert empty is not None, "custom pivot created no selected gizmo Empty"
+    assert empty.empty_display_type == "PLAIN_AXES", (
+        f"custom pivot helper draws {empty.empty_display_type} geometry; "
+        "SPHERE creates rotation-like circles")
     empty_name = empty.name
     bpy.ops.object.select_all(action="DESELECT")
     from proteinblender.operators.pivot_operators import custom_pivot_deselection_handler
