@@ -17,6 +17,7 @@ Covered operators:
 import pytest
 import bpy
 import helpers as H
+import harness_contract as HC
 
 # The addon is imported as a top-level package by conftest, so the bend
 # helper module is reachable at proteinblender.dna_builder.bender.
@@ -243,7 +244,7 @@ def test_dna_edit_and_finish_bend():
     try:
         bpy.ops.proteinblender.dna_edit_bend(n_points=bender.RES_DEFAULT)
     except RuntimeError as e:
-        pytest.skip(f"dna_edit_bend needs interactive edit-mode context: {e}")
+        HC.context_unavailable(pytest, f"dna_edit_bend needs interactive edit-mode context: {e}")
 
     selected_nodes = [o for o in bpy.context.selected_objects
                       if "Bend Node" in o.name]
@@ -253,6 +254,6 @@ def test_dna_edit_and_finish_bend():
     try:
         bpy.ops.proteinblender.dna_finish_bend_edit()
     except RuntimeError as e:
-        pytest.skip(f"dna_finish_bend_edit needs interactive context: {e}")
+        HC.context_unavailable(pytest, f"dna_finish_bend_edit needs interactive context: {e}")
 
     assert bpy.context.view_layer.objects.active is dna

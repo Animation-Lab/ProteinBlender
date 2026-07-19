@@ -316,3 +316,64 @@ def test_first_center_last_move_the_pivot_and_land_correctly(scene, sm):
     # no-op was First silently coinciding with a mis-placed default).
     assert (first - default).length > 1e-3, (
         "Set Pivot First did not move the origin")
+
+
+@pytest.mark.integration
+def test_split_domains_first_center_last_respect_domain_residue_ranges(scene, sm):
+    """First/Center/Last must use the selected domain's range, not its chain.
+
+    Exact regression: import 1ATN, split chain A at residues 1-50, select the
+    1-50 domain, and click Last. The broken implementation filtered alpha
+    carbons by chain only and placed Last on chain residue 372, visibly outside
+    the domain. Validate both resulting domains and all three pivot choices
+    against independently parsed PDB coordinates so any domain-range leak
+    fails this one test.
+    """
+    import numpy as np
+
+    mol = sm.molecules[H.import_local("1atn.pdb", "1atn_split_pivots")]
+    scene.selected_molecule_id = mol.identifier
+    original_id = next(domain_id for domain_id, domain in mol.domains.items()
+                       if domain.chain_id == "A")
+    scene.active_splitting_domain_id = ""
+    scene.split_domain_new_start = 1
+    scene.split_domain_new_end = 50
+    assert bpy.ops.molecule.split_domain(domain_id=original_id) == {"FINISHED"}
+    _build_outliner()
+
+    cas = H.pdb_amino_acid_cas("1atn.pdb", "A")
+    domains = sorted(
+        ((domain_id, domain) for domain_id, domain in mol.domains.items()
+         if domain.chain_id == "A"),
+        key=lambda pair: pair[1].start)
+    assert [(domain.start, domain.end) for _, domain in domains] == [
+        (1, 50), (51, 375)]
+
+    for domain_id, domain in domains:
+        row = next(item for item in scene.outliner_items
+                   if item.item_type == "DOMAIN" and item.item_id == domain_id)
+        for item in scene.outliner_items:
+            item.is_selected = item.item_id == row.item_id
+
+        origins = {}
+        for label, operator in (
+            ("first", bpy.ops.proteinblender.set_pivot_first),
+            ("center", bpy.ops.proteinblender.set_pivot_center),
+            ("last", bpy.ops.proteinblender.set_pivot_last),
+        ):
+            assert operator() == {"FINISHED"}
+            bpy.context.view_layer.update()
+            origins[label] = domain.object.matrix_world.translation.copy()
+
+        domain_residues = sorted(
+            residue for residue in cas
+            if domain.start <= residue <= domain.end)
+        assert domain_residues, (
+            f"PDB fixture has no C-alpha residues in {domain.start}-{domain.end}")
+        truth = {
+            "first": cas[domain_residues[0]],
+            "center": tuple(np.mean(
+                [cas[residue] for residue in domain_residues], axis=0)),
+            "last": cas[domain_residues[-1]],
+        }
+        H.assert_world_points_match_residues(origins, truth)

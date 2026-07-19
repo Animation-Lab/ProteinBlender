@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 WORKSPACE_TIMER_INTERVAL = 0.25  # seconds
+_workspace_manager = None
 
 # Track registered classes
 registered_classes: List[Type] = []
@@ -61,14 +62,61 @@ def create_workspace_callback() -> None:
     Returns:
         None to remove the timer.
     """
+    global _workspace_manager
     try:
-        workspace_manager = ProteinWorkspaceManager()
-        workspace_manager.create_custom_workspace()
-        workspace_manager.add_panels_to_workspace()
-        workspace_manager.set_properties_context()
+        _workspace_manager = ProteinWorkspaceManager()
+        _workspace_manager.create_custom_workspace()
+        _workspace_manager.add_panels_to_workspace()
+        _workspace_manager.set_properties_context()
+        # Workspace assignment and its Window->Screen selection settle on the
+        # next UI event-loop turn in Blender 5.2. Rebind then, otherwise the
+        # context change can land on the old Layout screen and Protein Blender
+        # later opens in Object properties with none of our Scene panels.
+        if not bpy.app.timers.is_registered(_finalize_workspace_callback):
+            bpy.app.timers.register(_finalize_workspace_callback,
+                                    first_interval=0.05)
     except Exception as e:
         logger.error(f"Failed to create workspace: {e}")
     return None  # Remove the timer
+
+
+def _finalize_workspace_callback() -> None:
+    global _workspace_manager
+    try:
+        if _workspace_manager is None:
+            _workspace_manager = ProteinWorkspaceManager()
+        _workspace_manager.create_custom_workspace()
+        _workspace_manager.add_panels_to_workspace()
+        _workspace_manager.set_properties_context()
+        if not bpy.app.timers.is_registered(_apply_workspace_context_callback):
+            bpy.app.timers.register(_apply_workspace_context_callback,
+                                    first_interval=0.05)
+    except Exception as e:
+        logger.error(f"Failed to finalize workspace: {e}")
+    return None
+
+
+def _apply_workspace_context_callback() -> None:
+    """Configure the screen selected after workspace activation has settled."""
+    global _workspace_manager
+    try:
+        workspace = bpy.data.workspaces.get("Protein Blender")
+        window = bpy.context.window or next(
+            iter(bpy.context.window_manager.windows), None)
+        if workspace is None or window is None:
+            raise RuntimeError("Protein Blender workspace/window unavailable")
+        if window.workspace != workspace:
+            # Activation has not propagated yet; retry on another UI tick.
+            window.workspace = workspace
+            return 0.05
+        _workspace_manager = ProteinWorkspaceManager()
+        _workspace_manager.workspace = workspace
+        _workspace_manager._bind_workspace_context()
+        _workspace_manager.add_panels_to_workspace()
+        _workspace_manager.set_properties_context()
+    except Exception as e:
+        logger.error(f"Failed to apply workspace Scene context: {e}")
+    return None
 
 def register() -> None:
     """Register the ProteinBlender addon.
@@ -175,6 +223,10 @@ def unregister() -> None:
     # Clear any pending timers
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)
+    if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(_finalize_workspace_callback):
+        bpy.app.timers.unregister(_finalize_workspace_callback)
+    if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(_apply_workspace_context_callback):
+        bpy.app.timers.unregister(_apply_workspace_context_callback)
 
     # Unregister persistent workspace handler
     try:

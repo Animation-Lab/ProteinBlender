@@ -19,6 +19,7 @@ Blender discovery order:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,14 @@ from pathlib import Path
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 RUN_BLENDER = TESTS_DIR / "run_blender.py"
+
+
+def _for_blender(path, blender):
+    """Translate WSL paths when the selected host is Windows Blender."""
+    value = str(path)
+    if os.name == "posix" and str(blender).lower().endswith(".exe") and shutil.which("wslpath"):
+        return subprocess.check_output(["wslpath", "-w", value], text=True).strip()
+    return value
 
 
 def _candidate_blenders():
@@ -55,11 +64,18 @@ def find_blender(explicit=None):
         p = Path(explicit)
         if p.exists():
             return p
+        resolved = shutil.which(explicit)
+        if resolved:
+            return Path(resolved)
         raise SystemExit(f"--blender path does not exist: {explicit}")
     for cand in _candidate_blenders():
         try:
-            if cand.exists() or cand.name == "blender":
+            if cand.exists():
                 return cand
+            if cand.name == "blender":
+                resolved = shutil.which(str(cand))
+                if resolved:
+                    return Path(resolved)
         except Exception:
             continue
     raise SystemExit(
@@ -81,7 +97,8 @@ def main():
         str(blender),
         "--background",
         "--factory-startup",
-        "--python", str(RUN_BLENDER),
+        "--python-exit-code", "17",
+        "--python", _for_blender(RUN_BLENDER, blender),
         "--",
         *pytest_args,
     ]

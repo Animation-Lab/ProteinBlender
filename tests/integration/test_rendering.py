@@ -239,3 +239,31 @@ def test_molecule_renders_after_a_style_change(scene, sm):
 
     if not swapped:
         pytest.skip("update_domain_style could not swap the style node headless")
+
+
+@pytest.mark.integration
+@pytest.mark.visual
+def test_user_visible_styles_produce_distinct_nonempty_images(scene, sm, tmp_path):
+    """Style controls must alter what the user sees, not only stored RNA state.
+
+    This is deliberately a renderer-observed metamorphic test instead of a
+    brittle exact PNG comparison. It is stable across Cycles/platform noise but
+    catches disconnected style nodes, ignored UI properties, and empty output.
+    """
+    mol_id = H.import_local("1ubq.pdb", "visual_styles")
+    scene.selected_molecule_id = mol_id
+    masks = {}
+    for style in ("cartoon", "spheres", "surface"):
+        sentinel = "spheres" if style != "spheres" else "cartoon"
+        scene.molecule_style = sentinel
+        scene.molecule_style = style
+        bpy.context.view_layer.update()
+        masks[style] = H.render_coverage(tmp_path, resolution=128).copy()
+        assert int(masks[style].sum()) > 0, f"{style} rendered no visible pixels"
+
+    for left, right in (("cartoon", "spheres"), ("cartoon", "surface"),
+                        ("spheres", "surface")):
+        changed = int(np.logical_xor(masks[left], masks[right]).sum())
+        assert changed > 0, (
+            f"{left} and {right} renders are visually indistinguishable "
+            f"({changed} pixels differ); style UI may not reach the GN output")

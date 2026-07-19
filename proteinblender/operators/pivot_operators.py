@@ -70,7 +70,8 @@ def _collect_chain_filtered_alphas(targets):
     """Return ``[(world_pos, res_id), ...]`` for every alpha carbon
     across ``targets``, optionally filtered to one chain per target.
 
-    ``targets``: iterable of ``(obj, chain_idx)``. When chain_idx is set
+    ``targets``: iterable of ``(obj, chain_idx, residue_start, residue_end)``.
+    When chain_idx is set
     we restrict to atoms whose ``chain_id`` attribute equals chain_idx —
     essential because every domain object shares the whole molecule's
     mesh, so every chain's atoms live in a domain's mesh. Without
@@ -90,7 +91,7 @@ def _collect_chain_filtered_alphas(targets):
 
     results = []
     counter = 0
-    for obj, chain_idx in targets:
+    for obj, chain_idx, residue_start, residue_end in targets:
         if obj is None:
             continue
         mesh = getattr(obj, "data", None)
@@ -109,6 +110,20 @@ def _collect_chain_filtered_alphas(targets):
                 mesh.attributes["chain_id"].data.foreach_get("value", chain_ids)
                 mask = is_alpha & (chain_ids == chain_idx)
 
+            # Domain objects share the parent molecule's complete raw mesh;
+            # their visible residue range is applied later by geometry nodes.
+            # Filtering only by chain therefore makes a 1-50 domain's Last
+            # pivot land on the chain terminus. Apply the outliner domain bounds
+            # to the raw-mesh alpha carbons before choosing First/Center/Last.
+            res_ids_arr = None
+            if "res_id" in mesh.attributes:
+                res_ids_arr = np.zeros(n, dtype=np.int32)
+                mesh.attributes["res_id"].data.foreach_get("value", res_ids_arr)
+                if residue_start is not None:
+                    mask = mask & (res_ids_arr >= residue_start)
+                if residue_end is not None:
+                    mask = mask & (res_ids_arr <= residue_end)
+
             positions = np.zeros(n * 3)
             mesh.vertices.foreach_get("co", positions)
             positions = positions.reshape(-1, 3)
@@ -118,9 +133,7 @@ def _collect_chain_filtered_alphas(targets):
 
             world = domain_space.local_to_world_many(obj, alpha_positions)
 
-            if "res_id" in mesh.attributes:
-                res_ids_arr = np.zeros(n, dtype=np.int32)
-                mesh.attributes["res_id"].data.foreach_get("value", res_ids_arr)
+            if res_ids_arr is not None:
                 alpha_res_ids = res_ids_arr[mask]
                 for pos, rid in zip(world, alpha_res_ids):
                     results.append((Vector(pos.tolist()), int(rid)))
@@ -135,7 +148,7 @@ def _collect_chain_filtered_alphas(targets):
 
 
 def _resolve_pivot_targets(scene, selected_items):
-    """Map outliner rows to ``[(obj, chain_idx), ...]`` for pivot ops.
+    """Map rows to ``[(obj, chain_idx, range_start, range_end), ...]``.
 
     Skips rows that aren't CHAIN/DOMAIN, lack an ``object_name``, or
     whose object no longer exists in bpy.data.
@@ -149,7 +162,17 @@ def _resolve_pivot_targets(scene, selected_items):
         obj = bpy.data.objects.get(item.object_name)
         if obj is None:
             continue
-        targets.append((obj, _chain_index_for_item(scene, item)))
+        residue_start = residue_end = None
+        if item.item_type == 'DOMAIN':
+            # These fields are populated directly from Domain.start/end when
+            # the outliner hierarchy is built, and copied to puppet references.
+            # Zero is the PropertyGroup sentinel for "not a domain range".
+            start = int(getattr(item, 'domain_start', 0))
+            end = int(getattr(item, 'domain_end', 0))
+            if start > 0 and end >= start:
+                residue_start, residue_end = start, end
+        targets.append((obj, _chain_index_for_item(scene, item),
+                        residue_start, residue_end))
     return targets
 
 
@@ -171,19 +194,21 @@ class PROTEINBLENDER_OT_set_pivot_first(Operator):
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
 
-        alphas = _collect_chain_filtered_alphas(targets)
-        if not alphas:
+        applied = 0
+        for target in targets:
+            alphas = _collect_chain_filtered_alphas([target])
+            if not alphas:
+                continue
+            # min() returns the first occurrence on ties — matches np.argmin.
+            pivot_pos = min(alphas, key=lambda pr: pr[1])[0]
+            if _apply_origin_to_cursor(target[0], pivot_pos):
+                applied += 1
+        if not applied:
             self.report({'WARNING'}, "Could not find alpha carbons")
             return {'CANCELLED'}
 
-        # min() returns the first occurrence on ties — matches np.argmin.
-        pivot_pos = min(alphas, key=lambda pr: pr[1])[0]
-
-        for obj, _ in targets:
-            _apply_origin_to_cursor(obj, pivot_pos)
-
         self.report({'INFO'},
-                    f"Set pivot to first residue for {len(targets)} item(s)")
+                    f"Set pivot to first residue for {applied} item(s)")
         return {'FINISHED'}
 
 class PROTEINBLENDER_OT_set_pivot_last(Operator):
@@ -204,18 +229,20 @@ class PROTEINBLENDER_OT_set_pivot_last(Operator):
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
 
-        alphas = _collect_chain_filtered_alphas(targets)
-        if not alphas:
+        applied = 0
+        for target in targets:
+            alphas = _collect_chain_filtered_alphas([target])
+            if not alphas:
+                continue
+            pivot_pos = max(alphas, key=lambda pr: pr[1])[0]
+            if _apply_origin_to_cursor(target[0], pivot_pos):
+                applied += 1
+        if not applied:
             self.report({'WARNING'}, "Could not find alpha carbons")
             return {'CANCELLED'}
 
-        pivot_pos = max(alphas, key=lambda pr: pr[1])[0]
-
-        for obj, _ in targets:
-            _apply_origin_to_cursor(obj, pivot_pos)
-
         self.report({'INFO'},
-                    f"Set pivot to last residue for {len(targets)} item(s)")
+                    f"Set pivot to last residue for {applied} item(s)")
         return {'FINISHED'}
 
 class PROTEINBLENDER_OT_set_pivot_center(Operator):
@@ -236,28 +263,27 @@ class PROTEINBLENDER_OT_set_pivot_center(Operator):
             self.report({'WARNING'}, "No valid objects found")
             return {'CANCELLED'}
 
-        alphas = _collect_chain_filtered_alphas(targets)
-        if alphas:
-            # All alpha carbons have the same atomic mass (12.01), so a
-            # mass-weighted centroid collapses to a simple mean.
-            pivot_pos = sum((pos for pos, _ in alphas), Vector()) / len(alphas)
-        else:
-            # No alpha carbons in any target — fall back to the combined
-            # bounding-box center.
-            bbox_pts = []
-            for obj, _ in targets:
-                bbox_pts.extend(obj.matrix_world @ Vector(c)
-                                for c in obj.bound_box)
-            if not bbox_pts:
-                self.report({'WARNING'}, "Could not calculate center")
-                return {'CANCELLED'}
-            pivot_pos = sum(bbox_pts, Vector()) / len(bbox_pts)
-
-        for obj, _ in targets:
-            _apply_origin_to_cursor(obj, pivot_pos)
+        applied = 0
+        for target in targets:
+            obj = target[0]
+            alphas = _collect_chain_filtered_alphas([target])
+            if alphas:
+                # All alpha carbons have the same atomic mass (12.01), so a
+                # mass-weighted centroid collapses to a simple mean.
+                pivot_pos = sum((pos for pos, _ in alphas), Vector()) / len(alphas)
+            else:
+                bbox_pts = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+                if not bbox_pts:
+                    continue
+                pivot_pos = sum(bbox_pts, Vector()) / len(bbox_pts)
+            if _apply_origin_to_cursor(obj, pivot_pos):
+                applied += 1
+        if not applied:
+            self.report({'WARNING'}, "Could not calculate center")
+            return {'CANCELLED'}
 
         self.report({'INFO'},
-                    f"Set pivot to center for {len(targets)} item(s)")
+                    f"Set pivot to center for {applied} item(s)")
         return {'FINISHED'}
 
 
@@ -505,5 +531,4 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
                 area.tag_redraw()
         
         return {'FINISHED'}
-
 

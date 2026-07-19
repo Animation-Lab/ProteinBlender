@@ -194,6 +194,18 @@ def get_chain_residue_range(
     return default_range
 
 
+def normalize_domain_residue_range(residue_range: Tuple[int, int]) -> Tuple[int, int]:
+    """Return the residue bounds supported by ProteinBlender's domain UI.
+
+    Imported structures may contain residue-zero or negative-numbered terminal
+    caps (1ATN's ACE 0 is one example).  Domain controls and the initial
+    full-chain domains are intentionally one-based, so every operation that
+    computes user-visible domain complements must apply the same boundary.
+    """
+    start, end = residue_range
+    return max(1, int(start)), int(end)
+
+
 def serialize_chain_mapping(mapping: Dict[int, str]) -> str:
     """Serialize chain mapping to JSON string for storage in PropertyGroup.
 

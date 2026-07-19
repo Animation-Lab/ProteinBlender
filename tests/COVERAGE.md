@@ -272,9 +272,41 @@ the count above was re-run only on 5.2.
 
 ## Bugs this suite surfaced (now fixed - see Behaviour regressions above)
 
-None outstanding. The two `create_domain` / `update_domain_color` bugs this
-suite originally surfaced as xfails are fixed and are now normal passing tests,
-documented under "Behaviour regressions (guard against reintroduction)".
+- **Split-domain dialog cancellation violated Blender's callback contract.**
+  Its `cancel()` returned `{'CANCELLED'}`, which causes an RNA callback error
+  when a real user presses Escape. The foreground UI lane reproduced it; the
+  callback now returns `None` as Blender requires.
+- **Undo left newly created domains in the Python singleton.** Blender restored
+  the PropertyGroup rows and objects, but the still-valid molecule wrapper kept
+  its pre-undo domain dictionary. The undo handler now refreshes existing
+  wrappers from Blender's undo-aware rows, guarded by the foreground domain
+  create/undo/redo scenario.
+- **The UI runner accepted a failed report.** It searched for any literal
+  `"ok": true`, which matched successful individual steps even when the
+  top-level result was false. It now parses JSON and checks the root result.
+- **Artifact tests inherited the developer profile.** The first implementation
+  used a nonexistent umbrella environment override and then discarded enabled
+  preferences with `--factory-startup`. It now isolates Blender's actual config,
+  scripts, datafiles, and extension directories and preserves the install step's
+  enabled state for smoke testing.
+- **Protein Blender workspace existed with no visible add-on panels.** Workspace
+  creation closed editors through stale Blender 5.2 `Area` handles and aborted
+  with `Area not found in screen`; reuse then returned without binding any
+  screen or editor references. Workspace activation also selects its screen
+  asynchronously, so the Scene context was applied to the previous Layout
+  screen. Setup now preserves existing editors, repairs existing workspaces,
+  and reapplies Scene context after the real screen switch settles. The
+  foreground lane now selects the actual Protein Blender workspace and asserts
+  that its own Properties editor is in Scene context before requesting redraw.
+- **Split-domain pivots used the whole chain instead of the domain range.** A
+  selected 1ATN domain spanning residues 1-50 placed Last on chain residue 372;
+  Center was likewise the full-chain centroid. Domain objects share the full
+  raw molecule mesh and are visually masked by Geometry Nodes, so chain-only
+  filtering was insufficient. Pivot targets now include the outliner domain's
+  inclusive start/end bounds, and each selected target receives its own pivot.
+  `test_split_domains_first_center_last_respect_domain_residue_ranges` splits
+  1ATN exactly this way and validates First, Center, and Last for both resulting
+  domains against independently parsed PDB C-alpha coordinates.
 
 ## Modal-dialog operators driven via their execute() path
 
@@ -325,11 +357,20 @@ by passing that state directly (no dialog needed):
   annotation when the array lacks it) and should be picked up with the
   4.2.10 -> 4.5.x sync rather than patched into the vendored copy.
 
-## Deliberately not covered
+## Cross-lane coverage outside background pytest
 
-- **Undo/redo** — the prior audit (ISSUE-1) established addon operations don't
-  fully reverse through Blender's undo stack; driving it from a script is
-  unreliable. Confirm interactively in a fresh session.
-- **Visual/pixel regression** — the `geo_snapshot` fixture + `snapshot_ext.py`
-  are wired for syrupy geometry snapshots, but no image-diff baselines are
-  committed yet. Add per-feature geometry snapshots as styles stabilize.
+- **Undo/redo** — the foreground event-loop lane creates a partial domain,
+  performs undo and redo, drives the add-on reconstruction path, and asserts
+  runtime domain state after both transitions. Extend that scenario list for
+  every new stateful UI workflow.
+- **UI and modal context** — the foreground lane forces all ProteinBlender
+  panels through real redraws, invokes and cancels pose/puppet dialogs via
+  synthetic window events, finalizes a custom pivot through its deselection
+  handler, and enters/exits DNA and membrane edit modes.
+- **Installed package** — the artifact lane validates and installs the built
+  ZIP in an isolated repository, rejects source imports, checks bundled binary
+  dependencies, imports a molecule, and reopens its `.blend` in a second
+  process.
+- **Visual regression** — Cycles tests assert nonempty pixels and distinct
+  masks for cartoon, spheres, and surface styles. This catches blank output and
+  ignored style wiring without imposing device-fragile byte-exact PNGs.

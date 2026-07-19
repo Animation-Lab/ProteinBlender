@@ -19,6 +19,7 @@ Covered operators:
 import pytest
 import bpy
 import helpers as H
+import harness_contract as HC
 
 from proteinblender.utils.animation import (
     ensure_quaternion_mode,
@@ -55,7 +56,7 @@ def _make_brownian_puppet(name="Brownian_Puppet"):
     chain_ids = [it.item_id for it in scene.outliner_items
                  if it.item_type == "CHAIN"]
     if len(chain_ids) < 2:
-        pytest.skip("need at least two chains to form a puppet")
+        HC.context_unavailable(pytest, "need at least two chains to form a puppet")
 
     for it in scene.outliner_items:
         it.is_selected = it.item_id in chain_ids[:2]
@@ -63,7 +64,7 @@ def _make_brownian_puppet(name="Brownian_Puppet"):
     try:
         bpy.ops.proteinblender.create_puppet("EXEC_DEFAULT", puppet_name=name)
     except RuntimeError as e:
-        pytest.skip(f"create_puppet unavailable headless: {e}")
+        HC.context_unavailable(pytest, f"create_puppet unavailable headless: {e}")
 
     puppet = next(
         (it for it in scene.outliner_items
@@ -73,10 +74,10 @@ def _make_brownian_puppet(name="Brownian_Puppet"):
         None,
     )
     if puppet is None or not puppet.controller_object_name:
-        pytest.skip("puppet controller was not created")
+        HC.context_unavailable(pytest, "puppet controller was not created")
     controller = bpy.data.objects.get(puppet.controller_object_name)
     if controller is None:
-        pytest.skip("puppet controller object missing")
+        HC.context_unavailable(pytest, "puppet controller object missing")
 
     # Give the segment a starting (user) keyframe so brownian_settings can
     # find a previous position to jitter around.

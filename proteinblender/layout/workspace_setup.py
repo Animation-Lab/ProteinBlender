@@ -11,9 +11,13 @@ class ProteinWorkspaceManager:
         self.timeline_area = None  # Bottom timeline (was bottom_area)
 
     def create_custom_workspace(self):
-        # Check if workspace already exists
+        # Reuse and repair an existing workspace. Previously this returned
+        # before binding window/screen/area references, so every subsequent
+        # setup method was a no-op on the second Blender launch. Users saw the
+        # Protein Blender tab but no ProteinBlender UI.
         if self.name in bpy.data.workspaces:
             self.workspace = bpy.data.workspaces[self.name]
+            self._bind_workspace_context()
             return self.workspace
 
         original_workspace_names = [ws.name for ws in bpy.data.workspaces]
@@ -26,21 +30,14 @@ class ProteinWorkspaceManager:
         self.workspace.name = self.name
 
         # Store references to window and screen
-        ctx = bpy.context
-        self.window = ctx.window_manager.windows[0]
-        self.screen = ctx.screen
+        self._bind_workspace_context()
 
-        # Remove all areas except the 3D View
-        p_areas = {area for area in self.screen.areas if area.type != 'VIEW_3D'}
-        for area in p_areas:
-            override = {
-                'screen': self.screen,
-                'window': self.window,
-                'area': area
-            }
-            with bpy.context.temp_override(**override):
-                if bpy.ops.screen.area_close.poll():
-                    bpy.ops.screen.area_close()
+        # Keep the duplicated workspace's existing editors. Closing several
+        # areas from a captured collection is unsafe: every area_close mutates
+        # the screen and Blender 5.2 invalidates the remaining Area handles,
+        # aborting setup with "Area not found in screen". The default layout
+        # already supplies Properties and timeline editors; add_panels below
+        # only splits a VIEW_3D when either editor is genuinely absent.
 
         # Restore original workspace names if needed
         for workspace in bpy.data.workspaces:
@@ -53,12 +50,33 @@ class ProteinWorkspaceManager:
         with bpy.context.temp_override(**override):
             bpy.ops.workspace.reorder_to_back()
 
-        # Identify the main 3D view area
-        self.main_area = next((area for area in self.screen.areas if area.type == 'VIEW_3D'), None)
-
         # Remove default objects before returning
         self._remove_default_objects()
         return self.workspace
+
+    def _bind_workspace_context(self):
+        """Activate the managed workspace and discover its editor areas."""
+        ctx = bpy.context
+        self.window = ctx.window or next(iter(ctx.window_manager.windows), None)
+        if self.window is None:
+            raise RuntimeError("Protein Blender workspace setup requires a window")
+        if self.window.workspace != self.workspace:
+            self.window.workspace = self.workspace
+        self.screen = self.window.screen
+        if self.screen is None:
+            raise RuntimeError("Protein Blender workspace has no active screen")
+
+        view_areas = [area for area in self.screen.areas if area.type == 'VIEW_3D']
+        self.main_area = max(
+            view_areas, key=lambda area: area.width * area.height,
+            default=None)
+        self.panel_area = next(
+            (area for area in self.screen.areas if area.type == 'PROPERTIES'),
+            None)
+        self.timeline_area = next(
+            (area for area in self.screen.areas
+             if area.type in {'DOPESHEET_EDITOR', 'TIMELINE'}),
+            None)
 
     def add_panels_to_workspace(self):
         # Ensure we have a main area before proceeding
@@ -66,10 +84,14 @@ class ProteinWorkspaceManager:
             return
 
         # Split vertically: viewport (70%) | panel area (30%)
-        self.panel_area = self._split_area(self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
+        if self.panel_area is None:
+            self.panel_area = self._split_area(
+                self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
 
         # Split the viewport horizontally: timeline (20%) at top | viewport (80%) at bottom
-        self.timeline_area = self._split_area(self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
+        if self.timeline_area is None:
+            self.timeline_area = self._split_area(
+                self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type
@@ -101,7 +123,7 @@ class ProteinWorkspaceManager:
             }
             with bpy.context.temp_override(**override):
                 self.panel_area.type = 'PROPERTIES'
-                self.panel_area.spaces[0].context = 'SCENE'
+                self.panel_area.spaces.active.context = 'SCENE'
 
     def _remove_default_objects(self):
         # Only proceed if there are exactly 3 objects

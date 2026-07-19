@@ -25,6 +25,19 @@ def _first_domain(mol):
     return sorted(mol.domains.keys())[0]
 
 
+def _split_chain_from_outliner(scene, molecule_id, chain_name, start, end):
+    """Perform the same chain split exposed by the Protein Outliner UI."""
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    chain = next(item for item in scene.outliner_items
+                 if item.item_type == "CHAIN" and item.name == chain_name
+                 and item.parent_id == molecule_id)
+    for item in scene.outliner_items:
+        item.is_selected = item.item_id == chain.item_id
+    return bpy.ops.proteinblender.split_domain_popup(
+        "EXEC_DEFAULT", item_id=chain.item_id, item_type="CHAIN",
+        split_start=start, split_end=end)
+
+
 # --------------------------------------------------------------------------
 # Create
 # --------------------------------------------------------------------------
@@ -289,6 +302,41 @@ def test_split_domain_proteinblender_op(scene, sm, multi_chain):
 # --------------------------------------------------------------------------
 # Merge
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_ui_split_1atn_chain_a_does_not_create_residue_zero_domain(scene, sm):
+    """The UI's 1-50 split must not expose 1ATN's ACE cap as domain 0-0.
+
+    Regression for the exact user workflow: import 1ATN, select Chain A in the
+    Protein Outliner, choose Split Domain, and submit residues 1-50.  Chain A's
+    raw atom range starts at residue zero because ACE is a terminal cap, while
+    the user-facing protein domain range starts at residue one.
+    """
+    mid = H.import_local("1atn.pdb", "ui_split_1atn_zero_regression")
+    mol = sm.molecules[mid]
+    scene.selected_molecule_id = mid
+
+    result = _split_chain_from_outliner(scene, mid, "Chain A", 1, 50)
+    assert result == {"FINISHED"}
+
+    runtime_ranges = sorted(
+        (domain.start, domain.end) for domain in mol.domains.values()
+        if domain.chain_id == "A")
+    assert runtime_ranges == [(1, 50), (51, 375)]
+
+    persisted_ranges = sorted(
+        (domain.start, domain.end) for domain in H.list_item(mid).domains
+        if domain.chain_id == "A")
+    assert persisted_ranges == runtime_ranges
+
+    chain_row = next(item for item in scene.outliner_items
+                     if item.item_type == "CHAIN" and item.name == "Chain A"
+                     and item.parent_id == mid)
+    outliner_ranges = sorted(
+        (item.domain_start, item.domain_end) for item in scene.outliner_items
+        if item.item_type == "DOMAIN" and item.parent_id == chain_row.item_id)
+    assert outliner_ranges == runtime_ranges
 
 @pytest.mark.integration
 def test_merge_domains_removes_sources_adds_merged(scene, sm, multi_chain):

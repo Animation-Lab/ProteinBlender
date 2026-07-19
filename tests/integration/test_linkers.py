@@ -200,6 +200,20 @@ def test_update_linker_rebuilds_geometry(scene):
 
 
 @pytest.mark.integration
+def test_update_all_and_select_linker_object(scene):
+    """Bulk refresh and viewport selection are both public panel actions."""
+    mid, puppet, chains = _setup_puppet_two_chains()
+    linker = _add_linker(puppet, chains[0], chains[1])
+    curve_obj = bpy.data.objects.get(linker.curve_object_name)
+    assert curve_obj is not None
+
+    assert bpy.ops.pb2.update_all_linkers() == {"FINISHED"}
+    assert bpy.ops.pb2.select_linker_object(linker_uid=linker.uid) == {"FINISHED"}
+    assert bpy.context.active_object == curve_obj
+    assert curve_obj.select_get()
+
+
+@pytest.mark.integration
 def test_toggle_linker_visibility(scene):
     """toggle_linker_visibility flips the curve hide flags and is_visible."""
     mid, puppet, chains = _setup_puppet_two_chains()

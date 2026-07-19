@@ -18,6 +18,15 @@ python tests/run_tests.py -k linker
 python tests/run_tests.py -m "not network"     # skip tests that fetch from RCSB
 python tests/run_tests.py -m "not slow"         # skip save/load subprocess tests
 
+# high-risk tests, each in a fresh Blender process
+python tests/run_isolated_tests.py
+
+# real foreground window/event loop (use xvfb-run on headless Linux)
+python tests/run_ui_tests.py
+
+# the actual shipped ZIP: build -> validate -> install -> enable -> reopen
+python tests/artifact/run_artifact_tests.py --prepare-wheels
+
 # pin a specific Blender
 python tests/run_tests.py --blender "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe"
 ```
@@ -105,6 +114,37 @@ Prefer driving a new test through the addon's own operator over reaching for a B
 | `roundtrip`   | save/load preservation (spawns a second Blender)    |
 | `network`     | fetches from RCSB/AlphaFold (needs internet)        |
 | `slow`        | more than a couple seconds                          |
+| `visual`      | renderer-observed visual regression                 |
+
+## Release-quality lanes
+
+The suite has deliberately separate trust boundaries:
+
+- **Source suite** — fast pytest feedback from the checked-out package, inside
+  real Blender. This is the main suite described above.
+- **Process isolation** — reruns registration, native-crash, rendering, and
+  save/load tests with one fresh Blender process per selected node id.
+- **Installed artifact** — resolves release wheels, asks Blender to validate
+  and build the extension, installs the ZIP into an isolated local repository,
+  enables it under `bl_ext.pb_test.proteinblender`, imports an offline PDB, and
+  verifies a saved file in a second process. Source-tree imports are rejected.
+- **Foreground UI** — starts Blender with a real window and
+  `--enable-event-simulate`; timer-separated scenarios force panel redraws,
+  assert that the real Protein Blender workspace has a Scene Properties editor
+  and that all nine expected panels are registered, context-compatible, and
+  visible under valid live state; invoke/cancel real dialogs with window events, exercise custom-pivot
+  deselection, enter/leave DNA and membrane edit modes, and drive undo/redo.
+- **Visual** — real Cycles observations prove output is nonempty and that user
+  style choices produce materially different images. These use robust image
+  relationships rather than byte-identical PNGs, which vary across devices.
+
+Set `PB_STRICT_CONTEXT=1` in a canonical environment. Context-sensitive tests
+that are allowed to skip on an arbitrary developer machine then fail instead,
+preventing a product regression from masquerading as a harmless headless skip.
+
+CI definitions live in `.github/workflows/test-blender.yml` (required PR lanes)
+and `test-blender-nightly.yml` (four-platform artifact installation, Blender
+daily API drift, network contracts, and process isolation).
 
 ## Writing a new test
 

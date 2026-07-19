@@ -17,6 +17,7 @@ class MOLECULE_PB_OT_create_domain(Operator):
     bl_idname = "molecule.create_domain"
     bl_label = "Create Domain"
     bl_description = "Create a new domain from the selected residue range"
+    bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         scene = context.scene
@@ -1130,4 +1131,3 @@ class MOLECULE_PB_OT_initialize_domain_temp_name(Operator):
         return {'FINISHED'}
 
 # List of all operator classes in this file
-

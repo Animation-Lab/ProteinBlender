@@ -4,7 +4,11 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
-from ..utils.chain_utils import chain_match_tokens, get_chain_objects
+from ..utils.chain_utils import (
+    chain_match_tokens,
+    get_chain_objects,
+    normalize_domain_residue_range,
+)
 
 
 class PROTEINBLENDER_OT_split_domain_popup(Operator):
@@ -422,7 +426,10 @@ class PROTEINBLENDER_OT_split_domain_popup(Operator):
     def cancel(self, context):
         """Handle cancellation of the operator"""
         self.cleanup_preview_mode(context)
-        return {'CANCELLED'}
+        # Blender's Operator.cancel callback is a notification hook and must
+        # return None. Returning an operator result set makes RNA emit a Python
+        # callback error every time the user presses Escape in this dialog.
+        return None
 
 
 class PROTEINBLENDER_OT_split_domain(Operator):
@@ -758,7 +765,10 @@ class PROTEINBLENDER_OT_split_domain(Operator):
             if (chain_start, chain_end) == (1, 200) and self.chain_id in molecule.chain_residue_ranges:
                 chain_start, chain_end = molecule.chain_residue_ranges[self.chain_id]
         
-        return chain_start, chain_end
+        # The public domain UI is one-based. Imported terminal caps can carry
+        # residue 0 (for example 1ATN Chain A's ACE cap), but they must not
+        # become standalone complementary domains when the user splits 1-N.
+        return normalize_domain_residue_range((chain_start, chain_end))
     
     def auto_generate_domains(self, molecule):
         """Generate domain ranges to cover the full chain"""
@@ -1061,4 +1071,3 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
 
 
 # Operator classes to register
-

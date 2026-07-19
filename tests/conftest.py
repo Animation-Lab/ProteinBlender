@@ -30,6 +30,7 @@ for p in (str(TESTS_DIR), str(REPO_ROOT)):
         sys.path.insert(0, p)
 
 import helpers  # noqa: E402  (path set above)
+import harness_contract as HC  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -68,8 +69,10 @@ def _addon_registered():
 def _clean_scene(_addon_registered):
     """Wipe addon-managed state before and after each test."""
     helpers.reset_scene()
+    HC.assert_clean_scene()
     yield
     helpers.reset_scene()
+    HC.assert_clean_scene()
 
 
 # --------------------------------------------------------------------------
@@ -127,5 +130,6 @@ def pytest_configure(config):
         "roundtrip: save/load or undo/redo state-preservation test",
         "network: fetches data from RCSB/AlphaFold (needs internet)",
         "slow: takes more than a couple seconds",
+        "visual: renderer-observed regression or metamorphic image test",
     ):
         config.addinivalue_line("markers", marker)

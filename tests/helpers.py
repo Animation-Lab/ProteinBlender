@@ -51,7 +51,13 @@ def data_path(name: str) -> str:
 # --------------------------------------------------------------------------
 
 def reset_scene():
-    """Delete everything the addon manages, then flush orphan datablocks."""
+    """Delete everything the addon manages, then flush orphan datablocks.
+
+    Individual removals remain best-effort because Blender can invalidate an
+    RNA wrapper while a deletion cascade is running.  The autouse fixture calls
+    ``harness_contract.assert_clean_scene`` afterwards, so an ignored exception
+    can no longer silently contaminate the next test.
+    """
     import bpy
 
     mgr = sm()

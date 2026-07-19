@@ -1,0 +1,68 @@
+name: Blender Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blender-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-suite:
+    name: Source / Blender ${{ matrix.blender }} / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        # Minimum supported LTS, first 5.x ABI, and current development target.
+        blender: ["4.2", "5.0", "5.2"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: ${{ matrix.blender }}
+      - name: Bootstrap pytest in Blender
+        run: blender --background --factory-startup --python-exit-code 12 --python tests/ci/bootstrap_pytest.py
+      - name: Run complete offline suite
+        env:
+          BLENDER_PATH: blender
+        run: python tests/run_tests.py -m "not network" -v --strict-markers
+
+  artifact:
+    name: Installed extension artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: "5.2"
+      - name: Build, validate, install, enable, and reopen ZIP
+        run: python tests/artifact/run_artifact_tests.py --blender blender --prepare-wheels
+
+  foreground-ui:
+    name: Foreground event-simulation UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: "5.2"
+      - name: Run Blender with a real X display and window event loop
+        env:
+          PB_STRICT_CONTEXT: "1"
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python tests/run_ui_tests.py --blender blender --keep-report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: foreground-ui-report
+          path: ui-test-report.json
+          if-no-files-found: warn

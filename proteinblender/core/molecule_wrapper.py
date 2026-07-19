@@ -672,8 +672,9 @@ class MoleculeWrapper:
             # is_full_chain test, is treated as a partial domain, and is pivoted
             # at its first residue instead of its centre of mass - so "Set Pivot
             # First" then looks like a no-op because the pivot is already there.
-            if chain_min_res == 0:
-                chain_min_res = 1
+            from ..utils.chain_utils import normalize_domain_residue_range
+            chain_min_res, chain_max_res = normalize_domain_residue_range(
+                (chain_min_res, chain_max_res))
             is_full_chain = (start == chain_min_res and end == chain_max_res)
 
             pivot_pos = None

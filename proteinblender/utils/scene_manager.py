@@ -178,9 +178,9 @@ class ProteinBlenderScene:
             if label_asym_id_key in processed_label_asym_ids:
                 continue
 
-            current_min_res = min_res
-            if current_min_res == 0: # Adjusting 0-indexed min_res, though chain_residue_ranges should ideally be 1-indexed from wrapper
-                current_min_res = 1
+            from .chain_utils import normalize_domain_residue_range
+            current_min_res, max_res = normalize_domain_residue_range(
+                (min_res, max_res))
             
             # Get the corresponding integer chain index string for Blender attribute lookups
             int_chain_idx = label_asym_id_to_idx_map.get(label_asym_id_key)
@@ -915,11 +915,12 @@ def _remove_invalid_wrappers(scene_manager, scene) -> List[str]:
             if molecule_id in scene_manager.molecule_manager.molecules:
                 del scene_manager.molecule_manager.molecules[molecule_id]
 
-            # Remove from UI list
-            for i, item in enumerate(scene.molecule_list_items):
-                if item.identifier == molecule_id:
-                    scene.molecule_list_items.remove(i)
-                    break
+            # Do not remove the persisted PropertyGroup here. Blender may have
+            # just replaced the object's RNA wrapper during undo/redo; that row
+            # is the source of truth _reconstruct_wrappers_from_properties()
+            # needs in the very next step. _refresh_molecule_ui() reconciles
+            # genuinely deleted molecules after reconstruction has had a chance
+            # to recover them.
 
     return removed_ids
 
@@ -979,6 +980,25 @@ def _restore_domains_into_wrapper(wrapper, item):
         except Exception as e:
             print(f"_restore_domains_into_wrapper: failed for "
                   f"{wrapper.identifier} / {getattr(d_pg, 'domain_id', '?')}: {e}")
+
+
+def _sync_existing_wrapper_domains_from_properties(scene_manager, scene):
+    """Replace live domain dictionaries with Blender's undo-restored rows.
+
+    Undo can keep the molecule object valid while replacing its domain objects
+    and CollectionProperty contents. In that case wrapper reconstruction never
+    runs, so merely healing object pointers leaves newly-created domains in the
+    Python singleton after Ctrl+Z. The persisted rows are Blender's undo-aware
+    source of truth and must refresh existing wrappers too.
+    """
+    items = {item.identifier: item for item in scene.molecule_list_items
+             if item.identifier}
+    for molecule_id, wrapper in list(scene_manager.molecules.items()):
+        item = items.get(molecule_id)
+        if item is None:
+            continue
+        wrapper.domains.clear()
+        _restore_domains_into_wrapper(wrapper, item)
 
 
 def _reconstruct_wrappers_from_properties(scene_manager, scene) -> List[str]:
@@ -1201,6 +1221,11 @@ def sync_molecule_list_after_undo(*args):
 
         # Step 1: Heal all existing wrapper references
         _heal_all_wrapper_references(scene_manager)
+
+        # Blender may have restored domain PropertyGroups/objects without
+        # invalidating the parent molecule wrapper. Refresh its runtime domain
+        # dictionary before validity pruning or UI reconstruction.
+        _sync_existing_wrapper_domains_from_properties(scene_manager, scene)
 
         # Step 2: Remove wrappers for deleted objects
         removed_ids = _remove_invalid_wrappers(scene_manager, scene)

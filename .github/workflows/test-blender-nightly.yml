@@ -1,0 +1,75 @@
+name: Blender Nightly and Platform Tests
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform-artifact:
+    name: Artifact / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: "5.2"
+      - name: Artifact lifecycle
+        shell: bash
+        run: python tests/artifact/run_artifact_tests.py --blender blender --prepare-wheels
+
+  daily-api-drift:
+    name: Blender daily API drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: daily
+      - name: Bootstrap pytest in Blender
+        run: blender --background --factory-startup --python-exit-code 12 --python tests/ci/bootstrap_pytest.py
+      - name: Run offline suite against daily Blender
+        env:
+          BLENDER_PATH: blender
+        run: python tests/run_tests.py -m "not network" -v --strict-markers
+
+  network-contract:
+    name: External data provider contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: "5.2"
+      - name: Bootstrap pytest in Blender
+        run: blender --background --factory-startup --python-exit-code 12 --python tests/ci/bootstrap_pytest.py
+      - name: Run network-marked tests
+        env:
+          BLENDER_PATH: blender
+        run: python tests/run_tests.py -m network -v --strict-markers
+
+  process-isolation:
+    name: High-risk process isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bradyajohnston/setup-blender@v4
+        with:
+          version: "5.2"
+      - name: Bootstrap pytest in Blender
+        run: blender --background --factory-startup --python-exit-code 12 --python tests/ci/bootstrap_pytest.py
+      - name: Run lifecycle regressions one Blender process at a time
+        env:
+          PB_STRICT_CONTEXT: "1"
+        run: python tests/run_isolated_tests.py --blender blender

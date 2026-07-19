@@ -30,6 +30,7 @@ import bpy
 import pytest
 
 import helpers as H
+import harness_contract as HC
 
 from proteinblender.membrane_builder.membrane_geometry import (
     SHAPE_FLAT,
@@ -222,16 +223,16 @@ def test_edit_and_finish_deform_are_tolerant(scene):
     try:
         res = bpy.ops.proteinblender.membrane_edit_deform()
     except RuntimeError as e:
-        pytest.skip(f"membrane_edit_deform needs interactive edit-mode: {e}")
+        HC.context_unavailable(pytest, f"membrane_edit_deform needs interactive edit-mode: {e}")
     if res != {'FINISHED'}:
-        pytest.skip(f"membrane_edit_deform did not finish headless: {res}")
+        HC.context_unavailable(pytest, f"membrane_edit_deform did not finish headless: {res}")
 
     # If we got here we're in edit mode on the lattice; finish should return
     # focus to the membrane root.
     try:
         bpy.ops.proteinblender.membrane_finish_deform()
     except RuntimeError as e:
-        pytest.skip(f"membrane_finish_deform needs interactive context: {e}")
+        HC.context_unavailable(pytest, f"membrane_finish_deform needs interactive context: {e}")
     assert bpy.context.mode == "OBJECT"
 
 
