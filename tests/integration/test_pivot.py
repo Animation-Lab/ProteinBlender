@@ -335,10 +335,8 @@ def test_split_domains_first_center_last_respect_domain_residue_ranges(scene, sm
     scene.selected_molecule_id = mol.identifier
     original_id = next(domain_id for domain_id, domain in mol.domains.items()
                        if domain.chain_id == "A")
-    scene.active_splitting_domain_id = ""
-    scene.split_domain_new_start = 1
-    scene.split_domain_new_end = 50
-    assert bpy.ops.molecule.split_domain(domain_id=original_id) == {"FINISHED"}
+    assert H.split_domain_from_outliner(
+        mol.identifier, "A", 1, 50, domain_id=original_id) == {"FINISHED"}
     _build_outliner()
 
     cas = H.pdb_amino_acid_cas("1atn.pdb", "A")

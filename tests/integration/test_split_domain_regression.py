@@ -70,9 +70,7 @@ def test_split_domain_after_duplicate_delete(scene, sm, multi_chain):
     split_start, split_end = lo, min(lo + 10, hi - 1)
 
     n_before = len(mol.domains)
-    res = bpy.ops.proteinblender.split_domain(
-        chain_id=str(idx), molecule_id=mid,
-        split_start=split_start, split_end=split_end)
+    res = H.split_domain_from_outliner(mid, author, split_start, split_end)
 
     assert res == {'FINISHED'}
     # The split carved a new sub-domain...
@@ -186,9 +184,8 @@ def test_split_on_a_copy_does_not_move_the_split_chain(scene, sm):
     # Split chain D (1-51) on the COPY.
     scene.selected_molecule_id = copy_id
     key = next(k for k, d in copy.domains.items() if d.chain_id == "D")
-    scene.split_domain_new_start = 1
-    scene.split_domain_new_end = 51
-    assert bpy.ops.molecule.split_domain(domain_id=key) == {"FINISHED"}
+    assert H.split_domain_from_outliner(
+        copy_id, "D", 1, 51, domain_id=key) == {"FINISHED"}
 
     # Every chain of the copy must STILL sit exactly on the original's.
     for ch in chains:

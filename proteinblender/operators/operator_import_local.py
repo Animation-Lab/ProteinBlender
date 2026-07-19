@@ -28,6 +28,10 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         options={'HIDDEN'},
         description="File types to filter in the file browser"
     )
+    identifier_override: StringProperty(
+        options={'HIDDEN'},
+        description="Optional stable identifier for scripted public imports",
+    )
     
     def execute(self, context) -> Set[str]:
         """Execute the local file import operation.
@@ -47,10 +51,11 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         
         # Extract identifier from filename
         filename = os.path.basename(filepath)
-        identifier = os.path.splitext(filename)[0]
+        identifier = self.identifier_override or os.path.splitext(filename)[0]
         
         # Handle compressed files
-        if identifier.endswith('.pdb') or identifier.endswith('.cif'):
+        if not self.identifier_override and (
+                identifier.endswith('.pdb') or identifier.endswith('.cif')):
             # Double extension like file.pdb.gz
             identifier = os.path.splitext(identifier)[0]
         
@@ -69,4 +74,3 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
             logger.error(f"Error importing file {filepath}: {e}")
             self.report({'ERROR'}, f"Error importing file: {str(e)}")
             return {'CANCELLED'}
-

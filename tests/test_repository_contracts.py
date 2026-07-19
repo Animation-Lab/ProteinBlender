@@ -67,3 +67,24 @@ def test_test_data_is_small_and_offline_reproducible():
     assert {path.name for path in fixtures} >= {"1ubq.pdb", "1aki.pdb", "1atn.pdb", "4hhb.pdb"}
     assert all(path.stat().st_size < 5_000_000 for path in fixtures)
 
+
+def test_behavioral_tests_trigger_import_and_split_through_public_ui_operators():
+    """Prevent regressions from silently bypassing the user interaction path."""
+    behavioral_roots = [ROOT / "tests" / "integration",
+                        ROOT / "tests" / "roundtrip",
+                        ROOT / "tests" / "ui",
+                        ROOT / "tests" / "artifact"]
+    forbidden = {
+        "bpy.ops.molecule.split_domain": "use helpers.split_domain_from_outliner",
+        "bpy.ops.proteinblender.split_domain(": "use the public split_domain_popup",
+        ".import_molecule_from_file(": "use bpy.ops.molecule.import_local",
+    }
+    violations = []
+    for root in behavioral_roots:
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            for trigger, replacement in forbidden.items():
+                if trigger in text:
+                    violations.append(
+                        f"{path.relative_to(ROOT)}: {trigger} ({replacement})")
+    assert not violations, "non-UI behavioral triggers found:\n" + "\n".join(violations)

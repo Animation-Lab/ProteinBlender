@@ -109,23 +109,30 @@ def reset_scene():
 def import_local(filename: str, identifier: str | None = None) -> str:
     """Import a bundled local structure (offline). Returns the molecule id.
 
-    Uses the scene-manager's file path directly (bypassing the file-browser
-    operator, which needs interactive context). This is the preferred import
-    in tests — no network, deterministic.
+    Executes the public local-import operator used by the file browser. When a
+    test needs a stable custom identifier, it then uses the public rename
+    operator instead of calling the scene manager directly.
     """
+    import bpy
+
     path = data_path(filename)
     if not os.path.exists(path):
         raise FileNotFoundError(f"test fixture missing: {path}")
-    ident = identifier or os.path.splitext(os.path.basename(filename))[0]
     mgr = sm()
     before = set(mgr.molecules.keys())
-    ok = mgr.import_molecule_from_file(path, ident)
-    if not ok:
-        raise RuntimeError(f"import_molecule_from_file failed for {path}")
+    requested_id = identifier or os.path.splitext(os.path.basename(filename))[0]
+    result = bpy.ops.molecule.import_local(
+        "EXEC_DEFAULT", filepath=path, identifier_override=requested_id)
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"molecule.import_local failed for {path}")
     new = sorted(set(mgr.molecules.keys()) - before)
     if not new:
         raise RuntimeError(f"no new molecule registered for {path}")
-    return new[-1]
+    imported_id = new[-1]
+    if imported_id != requested_id:
+        raise RuntimeError(
+            f"public import returned {imported_id!r}, expected {requested_id!r}")
+    return imported_id
 
 
 def import_pdb(pdb_id: str, fmt: str = "pdb") -> str:
@@ -207,6 +214,37 @@ def select_only(obj):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
+
+
+def split_domain_from_outliner(molecule_id, chain_id, start, end,
+                               domain_id=None):
+    """Split through the operator exposed by the Protein Outliner panel."""
+    import bpy
+
+    scene_manager_module().build_outliner_hierarchy(bpy.context)
+    scene = bpy.context.scene
+    scene.selected_molecule_id = molecule_id
+    target = None
+    if domain_id:
+        target = next((item for item in scene.outliner_items
+                       if item.item_type == "DOMAIN"
+                       and item.item_id == domain_id), None)
+    if target is None:
+        molecule = sm().molecules[molecule_id]
+        accepted_ids = {str(chain_id)}
+        for index, author_id in molecule.chain_mapping.items():
+            if str(author_id) == str(chain_id):
+                accepted_ids.add(str(index))
+        target = next(item for item in scene.outliner_items
+                      if item.item_type == "CHAIN"
+                      and item.parent_id == molecule_id
+                      and (item.chain_id in accepted_ids
+                           or item.name == f"Chain {chain_id}"))
+    for item in scene.outliner_items:
+        item.is_selected = item.item_id == target.item_id
+    return bpy.ops.proteinblender.split_domain_popup(
+        "EXEC_DEFAULT", item_id=target.item_id, item_type=target.item_type,
+        split_start=start, split_end=end)
 
 
 # --------------------------------------------------------------------------

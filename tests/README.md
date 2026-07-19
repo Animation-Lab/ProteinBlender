@@ -75,6 +75,14 @@ Every capability a user needs - select, colour, style, puppet, pose, DNA, keyfra
 If a capability can only be reached through Blender-native UI, that is drift, and these tests are where it should surface.
 Prefer driving a new test through the addon's own operator over reaching for a Blender-native fallback, even when the fallback is shorter.
 
+The operator must also be the one exposed by the panel being tested. Imports
+use `molecule.import_local`; domain splits select the Protein Outliner row and
+invoke `proteinblender.split_domain_popup`. Lower-level methods are acceptable
+for state inspection or narrowly scoped internal invariants, but not as a
+substitute trigger in behavioral regressions. A repository contract prevents
+direct scene-manager imports and lower-level split operators from returning to
+the behavioral lanes.
+
 ## How it works (the non-obvious bits)
 
 - **One long-lived process.** Headless Blender runs every test in a single

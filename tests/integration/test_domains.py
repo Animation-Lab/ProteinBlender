@@ -25,19 +25,6 @@ def _first_domain(mol):
     return sorted(mol.domains.keys())[0]
 
 
-def _split_chain_from_outliner(scene, molecule_id, chain_name, start, end):
-    """Perform the same chain split exposed by the Protein Outliner UI."""
-    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
-    chain = next(item for item in scene.outliner_items
-                 if item.item_type == "CHAIN" and item.name == chain_name
-                 and item.parent_id == molecule_id)
-    for item in scene.outliner_items:
-        item.is_selected = item.item_id == chain.item_id
-    return bpy.ops.proteinblender.split_domain_popup(
-        "EXEC_DEFAULT", item_id=chain.item_id, item_type="CHAIN",
-        split_start=start, split_end=end)
-
-
 # --------------------------------------------------------------------------
 # Create
 # --------------------------------------------------------------------------
@@ -240,7 +227,7 @@ def test_copy_domain_adds_one(scene, sm, multi_chain):
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_split_domain_molecule_op(scene, sm, multi_chain):
+def test_split_domain_from_domain_outliner_row(scene, sm, multi_chain):
     """molecule.split_domain (reads scene.split_domain_new_start/end) turns one
     full-chain domain into two domains covering the original range."""
     mid = multi_chain
@@ -261,7 +248,8 @@ def test_split_domain_molecule_op(scene, sm, multi_chain):
     scene.split_domain_new_end = new_end
 
     before = len(mol.domains)
-    res = bpy.ops.molecule.split_domain(domain_id=did)
+    res = H.split_domain_from_outliner(
+        mid, author, new_start, new_end, domain_id=did)
     assert res == {'FINISHED'}
 
     assert did not in mol.domains          # original consumed by the split
@@ -275,9 +263,8 @@ def test_split_domain_molecule_op(scene, sm, multi_chain):
 
 
 @pytest.mark.integration
-def test_split_domain_proteinblender_op(scene, sm, multi_chain):
-    """proteinblender.split_domain (chain-driven, auto-generates complementary
-    domains) adds one net domain when carving a sub-range off a full chain."""
+def test_split_domain_from_chain_outliner_row(scene, sm, multi_chain):
+    """The public outliner split creates complementary chain domains."""
     mid = multi_chain
     mol = sm.molecules[mid]
     scene.selected_molecule_id = mid
@@ -292,9 +279,8 @@ def test_split_domain_proteinblender_op(scene, sm, multi_chain):
     split_end = d_start + max(1, (d_end - d_start) // 2)
 
     before = len(mol.domains)
-    res = bpy.ops.proteinblender.split_domain(
-        chain_id=author, molecule_id=mid,
-        split_start=split_start, split_end=split_end)
+    res = H.split_domain_from_outliner(
+        mid, author, split_start, split_end, domain_id=did)
     assert res == {'FINISHED'}
     assert len(mol.domains) == before + 1
 
@@ -317,7 +303,7 @@ def test_ui_split_1atn_chain_a_does_not_create_residue_zero_domain(scene, sm):
     mol = sm.molecules[mid]
     scene.selected_molecule_id = mid
 
-    result = _split_chain_from_outliner(scene, mid, "Chain A", 1, 50)
+    result = H.split_domain_from_outliner(mid, "A", 1, 50)
     assert result == {"FINISHED"}
 
     runtime_ranges = sorted(
@@ -356,8 +342,8 @@ def test_merge_domains_removes_sources_adds_merged(scene, sm, multi_chain):
     mid_pt = d_start + max(1, (d_end - d_start) // 2)
 
     # 1) split into two adjacent domains on this chain.
-    bpy.ops.proteinblender.split_domain(
-        chain_id=author, molecule_id=mid, split_start=d_start, split_end=mid_pt)
+    H.split_domain_from_outliner(
+        mid, author, d_start, mid_pt, domain_id=did)
     chain_dids = [d for d, dm in mol.domains.items() if dm.chain_id == author]
     assert len(chain_dids) == 2
 
@@ -404,8 +390,8 @@ def test_merge_domains_cancels_cleanly_when_creation_fails(scene, sm, multi_chai
     d_start, d_end = dom.start, dom.end
     mid_pt = d_start + max(1, (d_end - d_start) // 2)
 
-    bpy.ops.proteinblender.split_domain(
-        chain_id=author, molecule_id=mid, split_start=d_start, split_end=mid_pt)
+    H.split_domain_from_outliner(
+        mid, author, d_start, mid_pt, domain_id=did)
     chain_dids = [d for d, dm in mol.domains.items() if dm.chain_id == author]
     assert len(chain_dids) == 2
 

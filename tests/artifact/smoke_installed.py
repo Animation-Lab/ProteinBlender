@@ -36,7 +36,7 @@ for prop in ("protein_props", "molecule_list_items", "outliner_items"):
 
 scene_manager = __import__(f"{module_name}.utils.scene_manager", fromlist=["*"])
 manager = scene_manager.ProteinBlenderScene.get_instance()
-assert manager.import_molecule_from_file(fixture, "artifact_1ubq")
+assert bpy.ops.molecule.import_local("EXEC_DEFAULT", filepath=fixture) == {"FINISHED"}
 assert manager.molecules, "installed extension imported no molecule"
 mol_id, molecule = next(iter(manager.molecules.items()))
 assert molecule.object is not None and molecule.object.name in bpy.data.objects
