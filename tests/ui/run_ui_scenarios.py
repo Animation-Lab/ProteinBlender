@@ -222,14 +222,34 @@ def invoke_and_cancel_puppet_dialog():
     return "puppet dialog invoked and cancelled through window events"
 
 
-def custom_pivot_lifecycle():
+def start_custom_pivot_from_rotate():
     scene = bpy.context.scene
     chain = next(row for row in scene.outliner_items if row.item_type == "CHAIN")
     for row in scene.outliner_items:
         row.is_selected = row.item_id == chain.item_id
     with ui_override("VIEW_3D"):
+        assert bpy.ops.wm.tool_set_by_id(name="builtin.rotate") == {"FINISHED"}
+        active = bpy.context.workspace.tools.from_space_view3d_mode(
+            "OBJECT", create=False)
+        assert active.idname == "builtin.rotate", active.idname
         result = bpy.ops.proteinblender.set_pivot_custom("EXEC_DEFAULT")
     assert result == {"FINISHED"}, result
+    return "started first custom pivot from Rotate tool"
+
+
+def assert_custom_pivot_uses_translation_and_finish():
+    scene = bpy.context.scene
+    active = bpy.context.workspace.tools.from_space_view3d_mode(
+        "OBJECT", create=False)
+    assert active.idname == "builtin.move", (
+        f"first Custom Pivot click left active tool at {active.idname}")
+    view = next(area for area in active_window().screen.areas
+                if area.type == "VIEW_3D")
+    space = view.spaces.active
+    assert space.show_gizmo and space.show_gizmo_tool
+    assert space.show_gizmo_object_translate
+    assert not space.show_gizmo_object_rotate
+    assert not space.show_gizmo_object_scale
     empty = next((obj for obj in bpy.data.objects if obj.type == "EMPTY" and obj.select_get()), None)
     assert empty is not None, "custom pivot created no selected gizmo Empty"
     empty_name = empty.name
@@ -237,7 +257,7 @@ def custom_pivot_lifecycle():
     from proteinblender.operators.pivot_operators import custom_pivot_deselection_handler
     custom_pivot_deselection_handler(scene)
     assert bpy.data.objects.get(empty_name) is None, "custom pivot gizmo survived finalization"
-    return "custom pivot entered and finalized after deselection"
+    return "first custom pivot displayed translation controls and finalized"
 
 
 def parent_and_domain_pivot_edit_roundtrip():
@@ -405,7 +425,9 @@ steps = [
     ("settle pose modal", lambda: "modal cancellation processed"),
     ("puppet invoke dialog", invoke_and_cancel_puppet_dialog),
     ("settle puppet modal", lambda: "modal cancellation processed"),
-    ("custom pivot lifecycle", custom_pivot_lifecycle),
+    ("start custom pivot from Rotate", start_custom_pivot_from_rotate),
+    ("assert first custom pivot translation gizmo",
+     assert_custom_pivot_uses_translation_and_finish),
     ("parent and domain pivot edit", parent_and_domain_pivot_edit_roundtrip),
     ("split domain invoke dialog", invoke_and_cancel_split_dialog),
     ("settle split modal", lambda: "modal cancellation processed"),

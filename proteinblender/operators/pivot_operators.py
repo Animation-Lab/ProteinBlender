@@ -8,6 +8,39 @@ from bpy.app.handlers import persistent
 from ..core import domain_space
 
 
+def _activate_translation_gizmo(context):
+    """Activate Move in every live 3D viewport with a valid WINDOW context."""
+    screen = context.screen
+    window = context.window
+    if screen is None:
+        return False
+
+    activated = False
+    for area in screen.areas:
+        if area.type != 'VIEW_3D':
+            continue
+        region = next((candidate for candidate in area.regions
+                       if candidate.type == 'WINDOW'), None)
+        if region is None:
+            continue
+        override = {'area': area, 'region': region}
+        if window is not None:
+            override['window'] = window
+            override['screen'] = screen
+        with context.temp_override(**override):
+            result = bpy.ops.wm.tool_set_by_id(name="builtin.move")
+            activated = activated or result == {'FINISHED'}
+
+        space = area.spaces.active
+        space.show_gizmo = True
+        space.show_gizmo_tool = True
+        space.show_gizmo_object_translate = True
+        space.show_gizmo_object_rotate = False
+        space.show_gizmo_object_scale = False
+        area.tag_redraw()
+    return activated
+
+
 def _apply_origin_to_cursor(obj, world_pos):
     """Move ``obj``'s origin to ``world_pos`` (world space).
 
@@ -502,22 +535,8 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         
-        # Force move tool activation
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                # Set the tool directly via the space data
-                override = {'area': area, 'region': area.regions[-1]}
-                with context.temp_override(**override):
-                    bpy.ops.wm.tool_set_by_id(name="builtin.move")
-                
-                # Ensure gizmo settings are correct
-                for space in area.spaces:
-                    if space.type == 'VIEW_3D':
-                        space.show_gizmo = True
-                        space.show_gizmo_object_translate = True
-                        space.show_gizmo_object_rotate = False
-                        space.show_gizmo_object_scale = False
-                break
+        if not _activate_translation_gizmo(context):
+            self.report({'WARNING'}, "Could not activate the Move tool")
         
         # Activate custom pivot mode. The deselection handler that finalises the
         # placement is registered by addon.register(), not appended here.
@@ -527,8 +546,7 @@ class PROTEINBLENDER_OT_set_pivot_custom(Operator):
         
         # Force UI redraw
         for area in context.screen.areas:
-            if area.type == 'PROPERTIES':
+            if area.type in {'PROPERTIES', 'VIEW_3D'}:
                 area.tag_redraw()
         
         return {'FINISHED'}
-
