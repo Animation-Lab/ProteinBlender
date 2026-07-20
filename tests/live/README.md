@@ -161,8 +161,13 @@ Restyling a single domain to `spheres` leaves the render byte-identical (`xor` 0
 Since both domain-level visual properties fail identically while the molecule-level equivalents work, the likely cause is one shared defect in how domain visual updates reach evaluated geometry, not two independent bugs.
 Guarded by `test_live_domains.py::test_changing_one_domain_style_restyles_only_that_domain`.
 
-**`molecule.toggle_domain_expanded` hard-crashes Blender 5.2** with `EXCEPTION_STACK_OVERFLOW`.
-Reduced to a minimal reproduction - import a structure, expand one domain, no rendering involved - it kills the process on both 1ubq and 4hhb, so it is neither fixture-specific nor caused by anything this lane does.
-`EXCEPTION_STACK_OVERFLOW` is unbounded recursion, and the operator writes `scene.split_domain_new_start` / `split_domain_new_end`, whose update callbacks each write back to the very property they are the callback for while clamping against the other.
-That mutual clamp is the first place to look.
-Recorded as a `crasher`-marked test; this lane does not attempt the diagnosis.
+**`molecule.toggle_domain_expanded` hard-crashed Blender 5.2** with `EXCEPTION_STACK_OVERFLOW`. **Fixed.**
+Expanding a domain writes `scene.split_domain_new_start`, whose update callback clamps to `end - 1`; with `end` still at its default of 1 that asks for 0, but the property is declared `min=1`, so Blender stored 1, the callback recomputed 0, and the two fought until the C stack was gone.
+Fixed in `molecule_props.py` by clamping into the range the property can actually hold and suppressing the nested callback around the write.
+Guarded by `test_live_domains.py::test_toggling_domain_expansion_is_a_ui_change_only`, which took the process down before the change and passes after.
+
+**Membranes render nothing.** Root cause confirmed, fix not landed.
+Blender 5.x removed IDProperty support from `NodesModifier`, and both membrane call sites swallowed the resulting `TypeError`, so no modifier input is ever written and the lipid collection never binds.
+Binding it correctly is necessary but not sufficient: the build then hangs.
+The full write-up, including everything ruled out and where to bisect next, is in [../COVERAGE.md](../COVERAGE.md).
+Do not re-attempt the obvious fix without reading it.

@@ -62,17 +62,11 @@ before this lane.
 independent defects; they cluster into a few causes, and several are the lane
 doing its job. They are recorded here rather than fixed.
 
-- **Membranes render nothing at all (20 failures).** A built membrane creates
-  its base patch, lattice, lipid variant objects and a 206-node GN tree, but
-  evaluates to **zero vertices, zero instances and zero covered pixels**. Every
-  read of a modifier input reports `this type doesn't support IDProperties`, and
-  the same message appears in the builder's own output during the build, so the
-  builder is very likely failing to write `Lipid Collection`, `Density` and the
-  rest into the modifier. With no lipid collection bound, Collection Info feeds
-  Instance on Points nothing and the bilayer is empty. The headless membrane
-  tests pass because they assert on structure and node identity, never on
-  output. **Confirm against the deployed extension before treating this as
-  release-blocking**; this session ran the add-on from the working tree.
+- **Membranes render nothing at all (20 failures). Root cause confirmed, fix
+  NOT landed - see below.** A built membrane creates its base patch, lattice,
+  lipid variant objects and a 206-node GN tree, but evaluates to **zero
+  vertices, zero instances and zero covered pixels**. The headless membrane
+  tests pass because they assert on structure and node identity, never output.
 - **`molecule.toggle_domain_expanded` hard-crashes Blender** with
   `EXCEPTION_STACK_OVERFLOW` (see live/README.md). Marked `crasher`, deselected
   by default.
@@ -81,6 +75,55 @@ doing its job. They are recorded here rather than fixed.
   the image byte-identical while updating their model state. The molecule-level
   equivalents (`scene.visual_setup_color`, `scene.molecule_style`) work, which
   is what makes the domain-level pair look like one shared defect.
+#### Membrane: what is known, and why the obvious fix is not enough
+
+Written up in detail because the obvious fix was tried, made things *worse*, and
+was reverted. Do not re-attempt it without reading this.
+
+**The cause is certain.** Blender 5.x removed IDProperty support from
+`NodesModifier`. `mod["Socket_2"] = value` now raises
+`TypeError: id properties not supported for this type`, and both membrane call
+sites (`membrane_operators._set_mod_input`, `force_fields._set_mod_input`)
+wrapped that write in a bare `except: pass`. So on 5.x *every* modifier input
+write fails silently. `Lipid Collection` is never bound, Collection Info feeds
+Instance on Points an empty collection, and the build reports success while
+producing no bilayer. Verified by reading the sockets back after a build: every
+value sits at its socket default and `Lipid Collection` is unset.
+
+**The 5.x API**, established by introspection against 5.2:
+
+    mod.properties                       -> GeometryNodesModifierInterface
+    mod.properties.inputs["Socket_2"]    -> the datablock itself, for ID sockets
+                                            (Collection / Object / Material)
+    mod.properties.inputs["Socket_5"]["value"]  -> for plain value sockets
+
+The two families are not interchangeable, and getting it wrong is silent:
+assigning a Collection into `["value"]` does not raise, it stores `None`.
+
+**Binding it correctly is necessary but not sufficient.** With the collection
+bound through the real builder, `proteinblender.build_membrane` **hangs Blender
+indefinitely**. Established:
+
+- It hangs on a 20 x 20 nm membrane and equally on 4 x 4 nm at density 0.2, so
+  it is not geometry volume.
+- Binding the collection on a bare grid object outside the operator completes in
+  under a second.
+- Binding it by hand on a membrane built by the *old* (non-binding) code also
+  completes, and yields 1240 instances and 51689 covered pixels.
+- Neutralising `force_fields.apply_force_fields_to_membrane` does not help, so
+  the force-field path is not the trigger.
+
+The distinguishing factor between the fast cases and the hanging case is that in
+the hanging case the *other* inputs are also being written for the first time
+(density, bilayer thickness, shape mode, variant count, outer extent, bob, seed,
+FF smoothness). The next step is to bisect those: bind the collection alone,
+then add one input at a time, and find which one makes evaluation diverge. That
+is where the real defect lives - most likely in the GN tree itself, which has
+never once run with its inputs actually set on this Blender version.
+
+The change was reverted rather than shipped: a build that hangs the application
+is worse for a user than one that silently produces nothing.
+
 - **Remaining failures are untriaged** (Brownian bake and frame scrubbing,
   two pivot snap operators, puppet controller and pose round trips, the
   "Multiple" style sentinel, delete-domain coverage). Several assert the same
