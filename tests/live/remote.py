@@ -101,7 +101,16 @@ def reset():
 
     Delegates to the suite's own ``helpers.reset_scene`` so the live lane and
     the headless lane start from an identical scene, then restores the render
-    settings a previous capture may have changed.
+    settings and the add-on's settings that a previous test may have changed.
+
+    Resetting the property groups is not housekeeping, it is a correctness
+    requirement unique to this lane. Every other lane runs in a throwaway
+    Blender, but this one drives the *developer's own session*: a test that
+    sets ``membrane_builder_props.color_head`` and walks away leaves that colour
+    in the panel, and the next membrane the user builds by hand comes out
+    wrong. That happened - a colour test left head and tail at (0.05, 0.05,
+    0.95) and (0.15, 0.15, 0.15), and the resulting blue-and-grey membrane was
+    reported as a product bug.
     """
     import helpers as H
 
@@ -112,8 +121,54 @@ def reset():
         scene.view_settings.view_transform = "AgX"
     except (TypeError, AttributeError):
         pass
+    restored = reset_addon_settings()
     _CAPTURES.clear()
-    return {"objects": len(bpy.data.objects)}
+    return {"objects": len(bpy.data.objects), "settings_restored": restored}
+
+
+def reset_addon_settings():
+    """Return every ProteinBlender settings block to its registered defaults.
+
+    Discovered from the RNA rather than hard-coded, so a property group added
+    later is covered without anyone remembering to update a list.
+    """
+    scene = bpy.context.scene
+    restored = []
+
+    for prop in scene.bl_rna.properties:
+        if prop.type != "POINTER" or prop.identifier == "rna_type":
+            continue
+        fixed = getattr(prop, "fixed_type", None)
+        if fixed is None or not fixed.identifier.startswith(
+                ("Protein", "Membrane", "DNA", "PB", "Molecule", "Brownian")):
+            continue
+        group = getattr(scene, prop.identifier, None)
+        if group is None:
+            continue
+        for field in group.bl_rna.properties:
+            if field.identifier == "rna_type" or field.is_readonly:
+                continue
+            try:
+                group.property_unset(field.identifier)
+            except (TypeError, AttributeError):
+                pass
+        restored.append(prop.identifier)
+
+    # Scene-level singles the add-on registers directly (colour pickers, style
+    # dropdowns, split bounds) rather than inside a group.
+    for name in ("molecule_style", "visual_setup_color", "visual_setup_style",
+                 "temp_domain_color", "temp_domain_start", "temp_domain_end",
+                 "domain_start", "domain_end", "domain_maker_start",
+                 "domain_maker_end", "split_domain_new_start",
+                 "split_domain_new_end", "active_splitting_domain_id",
+                 "show_domain_preview", "selected_molecule_id"):
+        try:
+            scene.property_unset(name)
+            restored.append(name)
+        except (TypeError, AttributeError):
+            pass
+
+    return restored
 
 
 def set_shading(kind: str = "SOLID", color_type: str = "MATERIAL"):
