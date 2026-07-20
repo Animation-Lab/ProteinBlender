@@ -2523,6 +2523,40 @@ class MoleculeWrapper:
             key = (domain.chain_id, res)
             self.residue_assignments[key] = domain.name
 
+    @staticmethod
+    def _write_color_to_active_driver(domain, color: tuple) -> bool:
+        """Set ``color`` on whatever node currently feeds Set Color's Color input.
+
+        Returns True when it handled the write. Only the Visual Set-up path's
+        "Custom Combine Color" node is handled here; the Color Common wiring is
+        left to the caller, which also has to give each domain its own copy of
+        that group first.
+
+        Node lookups are by name and links are compared with ``==``: Blender
+        hands back a fresh wrapper per access, so ``is`` would never match.
+        """
+        tree = getattr(domain, "node_group", None)
+        if tree is None:
+            return False
+
+        set_color = next((n for n in tree.nodes if n.name == "Set Color"), None)
+        if set_color is None:
+            return False
+        color_input = next((s for s in set_color.inputs if "Color" in s.name),
+                           None)
+        if color_input is None:
+            return False
+
+        driver = next((link.from_node for link in tree.links
+                       if link.to_socket == color_input), None)
+        if driver is None or driver.name != "Custom Combine Color":
+            return False
+
+        for channel, value in zip(("Red", "Green", "Blue"), color):
+            if channel in driver.inputs:
+                driver.inputs[channel].default_value = value
+        return True
+
     def update_domain_color(self, domain_id: str, color: tuple) -> bool:
         """Update the color of a domain
 
@@ -2540,6 +2574,19 @@ class MoleculeWrapper:
         try:
             # Update the stored color in the domain object for consistency
             domain.color = color
+
+            # Write the colour where the tree actually reads it.
+            #
+            # There are two colour paths into a domain and they use different
+            # nodes. Import wires "Set Color".Color from the "Color Common"
+            # group, which is what the loop below drives. But the Visual Set-up
+            # picker (panels/visual_setup_panel.apply_color_to_object) builds a
+            # "Custom Combine Color" node and *relinks* Set Color.Color to it,
+            # discarding the Color Common link. From then on this operator was
+            # writing to a node that drives nothing: it reported FINISHED,
+            # updated the domain model, and left the render untouched.
+            if self._write_color_to_active_driver(domain, color):
+                return True
 
             for node in domain.node_group.nodes:
                 if node.name == "Color Common":
