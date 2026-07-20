@@ -588,7 +588,41 @@ def unregister():
     if hasattr(bpy.types.Object, "domain_color"):
         del bpy.types.Object.domain_color
 # --- Update Callbacks for Split Domain Properties ---
+#
+# Writing a property inside its own update callback re-invokes that callback.
+# That is usually harmless - the second pass computes the same value and stops -
+# but both split bounds are declared ``min=1`` while the clamps below can
+# legitimately want 0. Expanding a domain that starts at residue 1 sets
+# ``split_domain_new_start`` while ``split_domain_new_end`` still holds its
+# default of 1, so the clamp asks for ``end - 1`` = 0, Blender stores 1 because
+# of the min, the callback recomputes 0, and the two fight forever. That was an
+# unbounded recursion which took the whole process down with
+# EXCEPTION_STACK_OVERFLOW every time a domain row was expanded in the outliner.
+#
+# Two things are needed, and both matter: clamp into the range the property can
+# actually hold, so the target is reachable at all, and suppress the nested
+# callback, so no future clamp can reintroduce a loop.
+
+_split_clamp_running = False
+
+
+def _write_split_bound(scene, attribute, value):
+    """Write a clamped split bound without re-entering its update callback."""
+    global _split_clamp_running
+
+    value = max(1, int(value))  # the property's own floor; see above
+    if getattr(scene, attribute) == value:
+        return
+    _split_clamp_running = True
+    try:
+        setattr(scene, attribute, value)
+    finally:
+        _split_clamp_running = False
+
+
 def update_split_start(self, context):
+    if _split_clamp_running:
+        return
     scene = context.scene
     if not scene.selected_molecule_id or not hasattr(scene, 'active_splitting_domain_id') or not scene.active_splitting_domain_id:
         return
@@ -606,10 +640,11 @@ def update_split_start(self, context):
     clamped_start = min(clamped_start, scene.split_domain_new_end - 1) # Must be at least 1 less than end
     clamped_start = min(clamped_start, active_domain.end -1) # Cannot exceed domain end -1
 
-    if scene.split_domain_new_start != clamped_start:
-        scene.split_domain_new_start = clamped_start
+    _write_split_bound(scene, "split_domain_new_start", clamped_start)
 
 def update_split_end(self, context):
+    if _split_clamp_running:
+        return
     scene = context.scene
     if not scene.selected_molecule_id or not hasattr(scene, 'active_splitting_domain_id') or not scene.active_splitting_domain_id:
         return
@@ -627,8 +662,7 @@ def update_split_end(self, context):
     clamped_end = max(clamped_end, scene.split_domain_new_start + 1) # Must be at least 1 greater than start
     clamped_end = max(clamped_end, active_domain.start + 1) # Cannot be less than domain start + 1
     
-    if scene.split_domain_new_end != clamped_end:
-        scene.split_domain_new_end = clamped_end
+    _write_split_bound(scene, "split_domain_new_end", clamped_end)
 
 # Callback for domain_color property update
 def update_domain_color(self, context):

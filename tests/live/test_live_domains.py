@@ -504,7 +504,6 @@ def test_moving_a_domain_changes_the_render_and_reset_puts_it_back(
 
 @pytest.mark.live
 @pytest.mark.visual
-@pytest.mark.crasher
 def test_toggling_domain_expansion_is_a_ui_change_only(blender, multi_chain):
     """Expanding an outliner row must not touch the 3D view.
 
@@ -515,27 +514,15 @@ def test_toggling_domain_expansion_is_a_ui_change_only(blender, multi_chain):
     user experiences as clicking a disclosure triangle. An identical render is
     the assertion; a flag flip alone would not notice.
 
-    CURRENTLY THIS DOES NOT GET AS FAR AS THE ASSERTION: the single call to
-    ``molecule.toggle_domain_expanded`` takes Blender 5.2 down with
-    ``EXCEPTION_STACK_OVERFLOW``. Reduced to a minimal reproduction - import a
-    structure, expand one domain, nothing else, no rendering involved - it kills
-    the process on both 1ubq (one chain) and 4hhb (four), so it is neither
-    fixture-specific nor dependent on anything this lane does.
-
-    ``EXCEPTION_STACK_OVERFLOW`` is unbounded recursion. The operator itself is
-    only a few property writes (``domain_operators.py``), but two of them are
-    ``scene.split_domain_new_start`` and ``scene.split_domain_new_end``, and
-    each of those has an update callback that *writes back to the property it is
-    the callback for* while clamping against the other one
-    (``molecule_props.py``, the ``clamped_start`` / ``clamped_end`` pair). Each
-    write re-enters the callback, and the two clamp against each other, which is
-    the shape of a ping-pong that never terminates. That is the first place to
-    look; this test does not attempt the diagnosis.
-
-    Marked ``crasher`` so it is deselected by default: the lane shares a single
-    Blender, and left in the normal run this test would kill the session and
-    turn every later result into noise. Reproduce with
-    ``python tests/run_live_tests.py --include-crashers -k expansion``.
+    It is also a crash regression. This call used to take Blender 5.2 down with
+    ``EXCEPTION_STACK_OVERFLOW`` - reproducibly, on both 1ubq and 4hhb, with no
+    rendering involved. Expanding a domain writes
+    ``scene.split_domain_new_start``, whose update callback clamps the value to
+    ``end - 1``; with ``end`` still at its default of 1 that asks for 0, but the
+    property is declared ``min=1``, so Blender stored 1, the callback recomputed
+    0, and the two fought until the C stack was gone. Fixed in
+    ``molecule_props.py`` by clamping into the range the property can actually
+    hold and suppressing the nested callback around the write.
     """
     _select_molecule(blender, multi_chain)
     target = _domains(blender, multi_chain)[0]

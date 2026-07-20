@@ -80,23 +80,42 @@ def main(argv: list[str] | None = None) -> int:
 
     import pytest
 
-    targets = [a for a in pytest_args if not a.startswith("-")] or [str(LIVE_DIR)]
-    flags = [a for a in pytest_args if a.startswith("-")]
+    # Pass pytest's arguments through in their original order. Splitting them
+    # into "flags" and "targets" silently breaks any option that takes a
+    # separate value: `-k expansion` loses its argument, because `expansion`
+    # does not start with a dash and gets collected as a file path.
+    forwarded = list(pytest_args)
+
+    # Only supply a default target when the caller named none. A bare word is
+    # assumed to belong to the preceding option rather than to be a path.
+    value_taking = {"-k", "-m", "-p", "-n", "--tb", "--maxfail", "--deselect",
+                    "--ignore", "-o"}
+    has_target = False
+    skip_next = False
+    for argument in forwarded:
+        if skip_next:
+            skip_next = False
+            continue
+        if argument in value_taking:
+            skip_next = True
+            continue
+        if not argument.startswith("-"):
+            has_target = True
+    if not has_target:
+        forwarded.append(str(LIVE_DIR))
 
     # The whole lane shares one Blender process, so a test that reliably crashes
     # it does not just fail: it takes every later test down with it and the run
     # reports noise instead of the one real defect. Known crashers are therefore
     # recorded, marked, and deselected by default.
-    if not args.include_crashers and not any(
-            flag.startswith("-m") for flag in flags):
-        flags += ["-m", "not crasher"]
+    if not args.include_crashers and "-m" not in forwarded:
+        forwarded += ["-m", "not crasher"]
 
     return pytest.main([
-        *targets,
         f"--confcutdir={LIVE_DIR}",
         "--rootdir", str(REPO_ROOT),
         "-p", "no:cacheprovider",
-        *flags,
+        *forwarded,
     ])
 
 
