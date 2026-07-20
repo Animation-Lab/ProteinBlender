@@ -729,7 +729,7 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     # so legacy .blend files still get cleaned up.
     for ob in list(bpy.data.objects):
         if (ob.type == "EMPTY"
-                and ob.parent is curve_obj
+                and ob.parent == curve_obj
                 and ("_BendNode" in ob.name or "Bend Node " in ob.name)):
             try:
                 bpy.data.objects.remove(ob, do_unlink=True)

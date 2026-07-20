@@ -247,7 +247,7 @@ def _ensure_ff_anchor(owner_obj: bpy.types.Object) -> Optional[bpy.types.Object]
     # run on an existing anchor too (owner may have been renamed; the
     # mesh may have been rebuilt).
     anchor[_FF_ANCHOR_OWNER_PROP] = owner_obj.name
-    if anchor.parent is not owner_obj:
+    if anchor.parent != owner_obj:
         # Parent the anchor without inheriting the owner's transform
         # twice: matrix_parent_inverse stays identity so anchor.location
         # is read directly as the local offset from the parent's origin.
@@ -358,7 +358,10 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
     mod = _get_gn_modifier(root_obj)
     if mod is None:
         return
-    if mod.node_group is not tree:
+    # != , not `is not` - see the note in membrane_operators. A fresh
+    # wrapper per access makes `is not` always True, and reassigning
+    # node_group wipes the modifier's inputs.
+    if mod.node_group != tree:
         mod.node_group = tree
 
     slots = collect_force_field_slots(scene) if scene is not None else []

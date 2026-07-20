@@ -75,7 +75,7 @@ def _link_to_coll(coll: bpy.types.Collection, obj: bpy.types.Object) -> None:
         coll.objects.link(obj)
     # Best-effort remove from the scene root if it was added there by an op.
     scene_root = bpy.context.scene.collection
-    if obj.name in scene_root.objects and coll is not scene_root:
+    if obj.name in scene_root.objects and coll != scene_root:
         try:
             scene_root.objects.unlink(obj)
         except Exception:
@@ -302,7 +302,12 @@ def _rebuild_hole_assignments(root_obj: bpy.types.Object,
     mod = _get_gn_modifier(root_obj)
     if mod is None:
         return
-    if mod.node_group is not tree:
+    # Compared with != , never `is not`: Blender hands back a fresh
+    # bpy_struct wrapper on every attribute access, so `is not` is always
+    # True and this reassigned node_group on every call. Reassigning the
+    # tree clears the modifier's input values, so each hole rebuild was
+    # silently dropping the Lipid Collection and every other setting.
+    if mod.node_group != tree:
         mod.node_group = tree
     hole_names = list(_iter_hole_names(root_obj))
     tree_holes = int(tree.get("pb_active_holes", MAX_HOLES))

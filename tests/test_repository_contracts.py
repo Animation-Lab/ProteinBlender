@@ -97,3 +97,61 @@ def test_normal_profile_deployer_covers_supported_local_blender_versions():
     assert 'VERSIONS = ("5.2", "5.1")' in deployer
     assert 'extensions_root.glob("*/proteinblender")' in deployer
     assert "filecmp.cmp" in deployer, "deployer must verify copied files"
+
+
+def test_no_identity_comparisons_on_blender_data():
+    """Blender structs must be compared with ``==``, never ``is`` / ``is not``.
+
+    Blender returns a *fresh* ``bpy_struct`` wrapper on every attribute access,
+    so ``a is b`` compares Python wrappers, not data, and is False even for the
+    same datablock. ``bpy_struct`` implements ``__eq__`` for data identity;
+    ``is`` does not.
+
+    This class of bug has bitten this project repeatedly and always silently:
+    ``ensure_pivot_input`` used ``link.to_node is not transform`` and wired a
+    Transform node to its own output, so every imported protein rendered
+    nothing while the whole suite stayed green. ``_rebuild_hole_assignments``
+    used ``mod.node_group is not tree``, which is always True, so it reassigned
+    the node group on every call - and reassigning it clears the modifier's
+    input values.
+
+    Comparisons against None/True/False are fine and are ignored here. So are
+    the handful of places that deliberately compare *Python object* identity
+    rather than Blender data; those are listed explicitly so adding one is a
+    conscious act.
+    """
+    # (path suffix, symbol on the right-hand side) pairs that really do mean
+    # Python-object identity. `_active_instance is self` tracks whether this
+    # very operator instance is the one holding the modal dialog slot.
+    allowed = {
+        ("operators/keyframe_operators.py", "self"),
+    }
+
+    def is_trivial(node):
+        return isinstance(node, ast.Constant) and node.value in (None, True, False)
+
+    violations = []
+    for path in PACKAGE.rglob("*.py"):
+        if "molecularnodes" in path.parts:
+            continue  # embedded upstream package, not ours to police
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        relative = path.relative_to(PACKAGE).as_posix()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            for operator, comparator in zip(node.ops, node.comparators):
+                if not isinstance(operator, (ast.Is, ast.IsNot)):
+                    continue
+                if is_trivial(comparator) or is_trivial(node.left):
+                    continue
+                right = ast.unparse(comparator)
+                if any(relative.endswith(suffix) and right == symbol
+                       for suffix, symbol in allowed):
+                    continue
+                violations.append(
+                    f"{relative}:{node.lineno}: "
+                    f"{ast.unparse(node.left)} is{'' if isinstance(operator, ast.Is) else ' not'} {right}")
+
+    assert not violations, (
+        "identity comparison on Blender data (use == or compare .name):\n  "
+        + "\n  ".join(violations))
