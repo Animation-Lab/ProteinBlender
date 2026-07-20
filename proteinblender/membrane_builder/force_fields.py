@@ -306,8 +306,16 @@ def _remove_orphan_ff_anchors(scene: Optional[bpy.types.Scene] = None) -> None:
 # ---------------------------------------------------------------------------
 
 def iter_active_force_fields(scene: Optional[bpy.types.Scene]
-                              ) -> Iterable[Tuple[bpy.types.Object, float]]:
-    """Yield ``(anchor_object, radius_BU)`` for each FF-enabled object."""
+                              ) -> Iterable[Tuple[bpy.types.Object, float, Vector]]:
+    """Yield ``(anchor_object, radius_BU, world_centre)`` per FF-enabled object.
+
+    ``world_centre`` is the protein's centre in world space, computed here in
+    Python and written straight into the membrane's geometry-nodes tree as a
+    vector. The field's position therefore never depends on the anchor Empty's
+    evaluated transform, which did not reliably flush and left phantom holes.
+    The anchor is still created - it is the visible marker and what the orphan
+    reaper tracks - but the tree no longer reads its transform.
+    """
     for owner in iter_ff_emitter_objects():
         spacing_nm = float(getattr(owner, "pb_force_field_spacing", 1.5))
         radius_bu = compute_force_field_radius_bu(owner, spacing_nm)
@@ -316,13 +324,16 @@ def iter_active_force_fields(scene: Optional[bpy.types.Scene]
         anchor = _ensure_ff_anchor(owner)
         if anchor is None:
             continue
-        yield anchor, radius_bu
+        world_centre = _world_centroid(owner)
+        if world_centre is None:
+            world_centre = owner.matrix_world.translation.copy()
+        yield anchor, radius_bu, world_centre
 
 
 def collect_force_field_slots(scene: Optional[bpy.types.Scene]
-                               ) -> List[Tuple[bpy.types.Object, float]]:
-    """Return up to MAX_PROTEIN_FFS active (anchor, radius) entries."""
-    out: List[Tuple[bpy.types.Object, float]] = []
+                               ) -> List[Tuple[bpy.types.Object, float, Vector]]:
+    """Return up to MAX_PROTEIN_FFS active (anchor, radius, world_centre)."""
+    out: List[Tuple[bpy.types.Object, float, Vector]] = []
     for entry in iter_active_force_fields(scene):
         out.append(entry)
         if len(out) >= MAX_PROTEIN_FFS:
@@ -394,16 +405,26 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
     slots = collect_force_field_slots(scene) if scene is not None else []
     tree_ffs = int(tree.get("pb_active_ffs", MAX_PROTEIN_FFS))
 
+    # The centre is written in the membrane's own local space, because the GN
+    # tree's pusher works in that frame (it used to read Object Info in
+    # RELATIVE space). For a membrane at the origin this is the world centre;
+    # the inverse keeps it correct for a moved membrane.
+    world_to_local = root_obj.matrix_world.inverted_safe()
+
     for i in range(1, tree_ffs + 1):
         if i <= len(slots):
-            obj, radius_bu = slots[i - 1]
+            obj, radius_bu, world_centre = slots[i - 1]
+            local_centre = world_to_local @ world_centre
             _set_mod_input(mod, f"Protein FF {i}", obj)
             _set_mod_input(mod, f"Protein FF {i} Enabled", True)
             _set_mod_input(mod, f"Protein FF {i} Radius", float(radius_bu))
+            _set_mod_input(mod, f"Protein FF {i} Center",
+                           (local_centre.x, local_centre.y, local_centre.z))
         else:
             _set_mod_input(mod, f"Protein FF {i}", None)
             _set_mod_input(mod, f"Protein FF {i} Enabled", False)
             _set_mod_input(mod, f"Protein FF {i} Radius", 0.0)
+            _set_mod_input(mod, f"Protein FF {i} Center", (0.0, 0.0, 0.0))
 
     if not defer_refresh:
         _refresh_modifier(mod)

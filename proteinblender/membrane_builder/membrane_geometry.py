@@ -303,7 +303,16 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        tilt (arccos(1/sqrt(3))) on every instance, both leaflets sheared
 #        sideways by the same wrong offset, and no recognisable bilayer.
 #        Structural change, so the bump is required to rebuild saved trees.
-GN_TREE_VERSION = 32
+#   v33: protein force-field centre passed as a plain vector input
+#        (Protein FF N Center) instead of read from the anchor Empty via an
+#        Object Info node. The Object Info read the anchor's *evaluated*
+#        transform, which did not reliably flush after the anchor moved - an
+#        anchor whose evaluated matrix lagged at the origin carved a phantom
+#        hole in the membrane centre no matter where the protein was, and made
+#        the field ignore the protein's height. A written vector has no
+#        evaluation step, so it is deterministic. Structural change; rebuilds
+#        saved trees.
+GN_TREE_VERSION = 33
 
 
 # ===========================================================================
@@ -487,6 +496,15 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         _new_input(tree, f"Protein FF {i}", "NodeSocketObject")
         _new_input(tree, f"Protein FF {i} Radius", "NodeSocketFloat",
                    default=0.0, min_val=0.0, max_val=50.0)
+        # The force-field centre as a plain vector, in the membrane's local
+        # space. FFs used to read this from the protein's anchor Empty through
+        # an Object Info node, but that reads the anchor's *evaluated*
+        # transform, which does not reliably flush after the anchor is moved -
+        # an anchor whose location was updated but whose evaluated matrix
+        # lagged at the origin carved a phantom hole in the membrane centre,
+        # regardless of where the protein actually was. A vector value the
+        # operator writes directly has no such evaluation step.
+        _new_input(tree, f"Protein FF {i} Center", "NodeSocketVector")
 
     nodes = tree.nodes
     links = tree.links
@@ -727,7 +745,7 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         is_curved = is_curved_node.outputs[0]
 
         def _build_pusher(slot_label, enabled_sock, obj_sock,
-                          radius_source, hy, pos_socket):
+                          radius_source, hy, pos_socket, center_sock=None):
             """Build the per-slot pusher subgraph and return its gated
             displacement vector socket.
 
@@ -738,25 +756,40 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                 graph and returns the resulting Float socket (holes do
                 this — they derive R from Object Info → Scale.x).
 
+            ``center_sock`` optionally supplies the pusher centre as a plain
+            vector (FFs do this). When given, the Object Info Location is not
+            read at all, which is what keeps a protein force field from
+            depending on its anchor Empty's evaluated transform. Holes leave it
+            None and still read the hole controller's live Object Info, because
+            a hole is genuinely a draggable object and also needs its Scale.
+
             ``pos_socket`` is the vector socket carrying the current
             lipid position. For v20's Jacobi iteration, each pass passes
             a different position socket so the pusher subgraph is rebuilt
             and re-evaluated against the position the previous iteration
             left the lipid at.
             """
-            oi = new("GeometryNodeObjectInfo",
-                     name=f"OI {slot_label} L{leaflet_index}")
-            oi.transform_space = "RELATIVE"
-            oi.location = (-1750, hy)
-            links.new(obj_sock, oi.inputs["Object"])
+            # Object Info is still needed for holes (Location + Scale). For FFs
+            # the centre arrives as a vector, so build Object Info only when the
+            # radius derivation needs it (the hole callable form).
+            oi = None
+            if center_sock is None or callable(radius_source):
+                oi = new("GeometryNodeObjectInfo",
+                         name=f"OI {slot_label} L{leaflet_index}")
+                oi.transform_space = "RELATIVE"
+                oi.location = (-1750, hy)
+                links.new(obj_sock, oi.inputs["Object"])
 
-            # sub_vec = point - object.location (3D, used by both paths).
+            center_out = center_sock if center_sock is not None \
+                else oi.outputs["Location"]
+
+            # sub_vec = point - centre (3D, used by both paths).
             sub_vec = new("ShaderNodeVectorMath",
                           name=f"Sub{slot_label} L{leaflet_index}")
             sub_vec.operation = "SUBTRACT"
             sub_vec.location = (-1560, hy)
             links.new(pos_socket, sub_vec.inputs[0])
-            links.new(oi.outputs["Location"], sub_vec.inputs[1])
+            links.new(center_out, sub_vec.inputs[1])
 
             # ============================================================
             # FLAT path: pusher is a vertical column, distance/direction in XY
@@ -806,7 +839,7 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                          name=f"HNorm{slot_label} L{leaflet_index}")
             h_norm.operation = "NORMALIZE"
             h_norm.location = (-1380, hy - 700)
-            links.new(oi.outputs["Location"], h_norm.inputs[0])
+            links.new(center_out, h_norm.inputs[0])
 
             h_surf = new("ShaderNodeVectorMath",
                          name=f"HSurf{slot_label} L{leaflet_index}")
@@ -1024,11 +1057,11 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             weighted_dir = None
 
             def _add_slot(slot_label, enabled_sock, obj_sock,
-                          radius_source, hy):
+                          radius_source, hy, center_sock=None):
                 nonlocal total_w, weighted_dir
                 dist_s, dir_s, radius_s, en_s = _build_pusher(
                     slot_label, enabled_sock, obj_sock,
-                    radius_source, hy, pos_socket)
+                    radius_source, hy, pos_socket, center_sock=center_sock)
 
                 # sdf_i = dist_i - radius_i
                 sdf = new("ShaderNodeMath",
@@ -1109,6 +1142,7 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                     obj_sock=get_in(f"Protein FF {f}"),
                     radius_source=get_in(f"Protein FF {f} Radius"),
                     hy=ff_hy_base - f * 260,
+                    center_sock=get_in(f"Protein FF {f} Center"),
                 )
 
             # ---- Combiner: softmax direction + smin penetration --------

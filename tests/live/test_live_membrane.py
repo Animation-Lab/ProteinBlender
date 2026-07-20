@@ -147,6 +147,20 @@ bpy.context.view_layer.update()
 return True
 """
 
+CENTRE_COVERAGE = """
+# Fraction of the central square of the current viewport render that is
+# covered by geometry. A hole bored in the middle of the membrane shows up
+# here even though it barely moves whole-frame coverage.
+import numpy as np
+rgba = R._render_viewport(500, True, True)
+h, w = rgba.shape[:2]
+half = fraction / 2.0
+y0, y1 = int(h * (0.5 - half)), int(h * (0.5 + half))
+x0, x1 = int(w * (0.5 - half)), int(w * (0.5 + half))
+patch = rgba[y0:y1, x0:x1, 3] > 0.01
+return {"central_coverage": float(patch.mean())}
+"""
+
 NEAR_XY = """
 bpy.context.view_layer.update()
 deps = bpy.context.evaluated_depsgraph_get()
@@ -951,6 +965,61 @@ def test_a_force_field_only_parts_the_membrane_when_it_is_near_it(blender,
         f"{lifted['covered']} lifted vs {embedded['covered']} embedded - the "
         "hole did not close, so the force field is ignoring Z and acting as an "
         "infinite vertical column.")
+
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_a_force_field_does_not_carve_the_membrane_centre_from_afar(blender,
+                                                                    single_chain):
+    """A protein off to one side and high above must not hole the centre.
+
+    This is the exact report: enabling a force field put a hole in the middle
+    of the membrane even though the protein was nowhere near it. The cause was
+    that the field's position came from an anchor Empty whose evaluated
+    transform lagged at the origin, so the field acted from (0, 0, 0) - dead
+    centre, in the membrane plane - no matter where the protein sat. The centre
+    of the sheet must stay covered when the protein is elsewhere.
+    """
+    build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    blender.call("""
+        obj = H.sm().molecules[molecule_id].object
+        obj.hide_viewport = True
+        obj.hide_render = True
+        obj.pb_force_field_enabled = True
+        obj.pb_force_field_spacing = 4.0
+        # Well off-centre in X and far above the sheet.
+        obj.location = (3.0, 0.0, 20.0)
+        bpy.context.view_layer.update()
+        import sys
+        sys.modules["proteinblender.membrane_builder.force_fields"].apply_to_all_membranes(bpy.context.scene)
+        for _ in range(4):
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+        return True
+    """, molecule_id=single_chain)
+
+    # Top-down ortho on the membrane, then measure coverage in the central
+    # fifth of the frame - where a phantom hole would be.
+    blender.call("""
+        from mathutils import Euler
+        window, area, region = R.find_view3d()
+        region_3d = area.spaces.active.region_3d
+        membrane = next(o for o in bpy.data.objects if o.get("pb_is_membrane"))
+        bpy.ops.object.select_all(action="DESELECT")
+        membrane.select_set(True)
+        bpy.context.view_layer.objects.active = membrane
+        with R.view3d_override():
+            bpy.ops.view3d.view_selected()
+        region_3d.view_perspective = "ORTHO"
+        region_3d.view_rotation = Euler((0, 0, 0), "XYZ").to_quaternion()
+        return True
+    """)
+    centre = blender.call(CENTRE_COVERAGE, fraction=0.2)
+
+    assert centre["central_coverage"] > 0.7, (
+        "the membrane centre is mostly empty "
+        f"({centre['central_coverage']:.0%} covered) while the force-field "
+        "protein is off to the side and high above it - a phantom hole has "
+        "been carved where the protein is not.")
 
 
 def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
