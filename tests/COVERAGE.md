@@ -56,73 +56,86 @@ Caveat: DNA, membranes, linkers and puppet controllers are never rendered
 anywhere in the headless suite, so their appearance was entirely unasserted
 before this lane.
 
-### First-run results (Blender 5.2, add-on loaded from source)
+### What the lane found on its first run
 
-119 passed, 34 failed, 2 skipped, 1 deselected. The failures are not 34
-independent defects; they cluster into a few causes, and several are the lane
-doing its job. They are recorded here rather than fixed.
+119 passed, 34 failed. The failures were not 34 independent defects; they
+clustered into a few causes. Fixed since, each guarded by the test that caught
+it:
 
-- **Membranes render nothing at all (20 failures). Root cause confirmed, fix
-  NOT landed - see below.** A built membrane creates its base patch, lattice,
-  lipid variant objects and a 206-node GN tree, but evaluates to **zero
-  vertices, zero instances and zero covered pixels**. The headless membrane
-  tests pass because they assert on structure and node identity, never output.
-- **`molecule.toggle_domain_expanded` hard-crashes Blender** with
-  `EXCEPTION_STACK_OVERFLOW` (see live/README.md). Marked `crasher`, deselected
-  by default.
+- **Membranes rendered nothing, then rendered wrongly (20 failures).** Three
+  separate Blender-5.2 defects, written up below.
+- **`molecule.toggle_domain_expanded` hard-crashed Blender** with
+  `EXCEPTION_STACK_OVERFLOW`. A clamp callback wrote a value the property's own
+  `min=1` forbade, so it re-fired forever. Expanding a domain row in the
+  outliner took the whole application down.
+
+Still open, with red tests in the tree:
+
 - **Domain visual updates do not reach the render.**
   `molecule.update_domain_color` and `molecule.update_domain_style` both leave
   the image byte-identical while updating their model state. The molecule-level
   equivalents (`scene.visual_setup_color`, `scene.molecule_style`) work, which
   is what makes the domain-level pair look like one shared defect.
-#### Membrane: what is known, and why the obvious fix is not enough
+- **Membrane holes and force fields** (`test_a_hole_removes_covered_geometry`,
+  `test_a_bigger_hole_removes_more_lipids`,
+  `test_a_protein_force_field_parts_the_lipids_around_it`). These paths write GN
+  inputs that never once succeeded on 5.2 before the `gn_compat` fix, so they
+  have effectively never run on this Blender version. Untriaged.
+- **Brownian bake and frame scrubbing, two pivot snap operators, puppet and pose
+  round trips, the "Multiple" style sentinel, delete-domain coverage.**
+  Untriaged; several assert the same "a change must reach the render" shape as
+  the confirmed defects above and may share a cause.
 
-Written up in detail because the obvious fix was tried, made things *worse*, and
-was reverted. Do not re-attempt it without reading this.
+#### Membrane: three separate defects, all fixed
 
-**The cause is certain.** Blender 5.x removed IDProperty support from
-`NodesModifier`. `mod["Socket_2"] = value` now raises
-`TypeError: id properties not supported for this type`, and both membrane call
-sites (`membrane_operators._set_mod_input`, `force_fields._set_mod_input`)
-wrapped that write in a bare `except: pass`. So on 5.x *every* modifier input
-write fails silently. `Lipid Collection` is never bound, Collection Info feeds
-Instance on Points an empty collection, and the build reports success while
-producing no bilayer. Verified by reading the sockets back after a build: every
-value sits at its socket default and `Lipid Collection` is unset.
+Membranes rendered nothing on Blender 5.2 while working on 5.1, and once they
+rendered they were not bilayers. Three distinct causes, all found by looking at
+the viewport rather than at state.
 
-**The 5.x API**, established by introspection against 5.2:
+**1. No lipids at all.** Blender 5.2 removed IDProperty support from
+`NodesModifier`, so `mod["Socket_2"] = value` raises `TypeError`. Both membrane
+call sites wrapped that write in a bare `except: pass`, so every modifier input
+write failed silently: `Lipid Collection` never bound, Collection Info fed
+Instance on Points an empty collection, and the build reported success while
+producing no bilayer. 5.1 and earlier still accept the IDProperty form, which is
+exactly why the bug was version-specific. Fixed by `membrane_builder/gn_compat.py`,
+which writes through `mod.properties.inputs[id]["value"]` on 5.2, falls back to
+`mod[id]` for 4.2-5.1, and **raises rather than swallowing** - silent failure is
+what let this ship.
 
-    mod.properties                       -> GeometryNodesModifierInterface
-    mod.properties.inputs["Socket_2"]    -> the datablock itself, for ID sockets
-                                            (Collection / Object / Material)
-    mod.properties.inputs["Socket_5"]["value"]  -> for plain value sockets
+Note the trap inside the trap: `mod.properties.inputs[id]` is an
+`IDPropertyGroup` for *every* socket type, datablock sockets included. Assigning
+a Collection onto the mapping instead of into `["value"]` reads back convincingly
+as the collection and then hangs the process on the next depsgraph evaluation.
 
-The two families are not interchangeable, and getting it wrong is silent:
-assigning a Collection into `["value"]` does not raise, it stores `None`.
+**2. Every lipid mis-oriented.** `Capture Attribute` gained a `Selection` socket
+at index 1 in 5.2, and the normal capture was addressed positionally. The surface
+Normal was therefore written into `Selection` and `Selection` was read back as
+the normal - a boolean, which Blender broadcasts into a vector as `(1, 1, 1)`.
+Every lipid aligned to that diagonal at exactly `arccos(1/sqrt(3))` = 54.7356
+degrees with zero variance, and the half-thickness offset scaled along the same
+diagonal, shearing the leaflets sideways and opening a void. Fixed by addressing
+the socket by the name the code itself assigns (`captured_normal`);
+`GN_TREE_VERSION` bumped to 32 so saved membranes rebuild.
 
-**Binding it correctly is necessary but not sufficient.** With the collection
-bound through the real builder, `proteinblender.build_membrane` **hangs Blender
-indefinitely**. Established:
+This is the third positional-socket-index bug in this file (Random Value, the
+modifier interface, now Capture Attribute). **Address geometry-node sockets by
+name or identity, never by index.**
 
-- It hangs on a 20 x 20 nm membrane and equally on 4 x 4 nm at density 0.2, so
-  it is not geometry volume.
-- Binding the collection on a bare grid object outside the operator completes in
-  under a second.
-- Binding it by hand on a membrane built by the *old* (non-binding) code also
-  completes, and yields 1240 instances and 51689 covered pixels.
-- Neutralising `force_fields.apply_force_fields_to_membrane` does not help, so
-  the force-field path is not the trigger.
+**3. A visible seam down the midplane.** The thickness slider was redefined from
+origin-to-origin to outer-to-outer and defaulted to 5.0 nm, but the SURFACE lipid
+mesh runs ~0.80 nm above its origin and only 1.25-1.65 nm below, so two leaflets
+cannot span 5.0 nm with their tails still touching. Measured across the range:
+4.8 nm leaves a 0.08 nm gap (solid hydrophobic core), 5.0 nm opens it to 0.28 nm
+and reads as a seam. Default changed to 4.8, which also reproduces the 1.6 nm
+half-offset the builder used before the redefinition.
 
-The distinguishing factor between the fast cases and the hanging case is that in
-the hanging case the *other* inputs are also being written for the first time
-(density, bilayer thickness, shape mode, variant count, outer extent, bob, seed,
-FF smoothness). The next step is to bisect those: bind the collection alone,
-then add one input at a time, and find which one makes evaluation diverge. That
-is where the real defect lives - most likely in the GN tree itself, which has
-never once run with its inputs actually set on this Blender version.
-
-The change was reverted rather than shipped: a build that hangs the application
-is worse for a user than one that silently produces nothing.
+Guarded by `test_live_membrane.py`: lipids perpendicular to the plane (naming the
+54.7 degree signature), leaflets opposing each other, leaflets stacked rather than
+laterally sheared, thickness matching the slider with the midplane closed, and
+colour reaching rendered pixels. Gap assertions use the **median** tail tip, not
+the extreme - the variants differ in length, so a global min/max reported 0.06 nm
+on a membrane whose typical gap was 0.28 nm.
 
 - **Remaining failures are untriaged** (Brownian bake and frame scrubbing,
   two pivot snap operators, puppet controller and pose round trips, the

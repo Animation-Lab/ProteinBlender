@@ -131,6 +131,10 @@ Rules, most of which the rest of the suite already follows:
   Absolute coverage numbers vary with GPU and driver; ratios and orderings do not.
 - Assert on an invariant the bug would violate, not on a number you read off the current build.
   A threshold copied from today's output passes whether the code is right or wrong.
+- **Never leave a setting behind.**
+  This lane drives the developer's own Blender, not a disposable one, so a test that writes `membrane_builder_props.color_head` and walks away changes what the next membrane *they* build looks like - and gets reported as a product bug.
+  `R.reset()` returns every ProteinBlender property group to its registered defaults before and after each test, discovered from the RNA so new groups are covered automatically.
+  That is a correctness requirement here, not housekeeping: a colour test once left head and tail at `#3F3FF9` and `#6C6C6C`, and the blue-and-grey membrane that produced was mistaken for a regression.
 
 ## Tests that crash Blender
 
@@ -166,8 +170,7 @@ Expanding a domain writes `scene.split_domain_new_start`, whose update callback 
 Fixed in `molecule_props.py` by clamping into the range the property can actually hold and suppressing the nested callback around the write.
 Guarded by `test_live_domains.py::test_toggling_domain_expansion_is_a_ui_change_only`, which took the process down before the change and passes after.
 
-**Membranes render nothing.** Root cause confirmed, fix not landed.
-Blender 5.x removed IDProperty support from `NodesModifier`, and both membrane call sites swallowed the resulting `TypeError`, so no modifier input is ever written and the lipid collection never binds.
-Binding it correctly is necessary but not sufficient: the build then hangs.
-The full write-up, including everything ruled out and where to bisect next, is in [../COVERAGE.md](../COVERAGE.md).
-Do not re-attempt the obvious fix without reading it.
+**Membranes rendered nothing on Blender 5.2, and then rendered wrongly.** **Fixed.**
+Three separate defects, all found by looking at the viewport rather than at state: modifier inputs never bound (5.2 removed IDProperty support from `NodesModifier`, and the write was swallowed by `except: pass`), every lipid aligned to the (1,1,1) diagonal at a constant 54.7 degrees (`Capture Attribute` gained a `Selection` socket at index 1 and the normal was addressed positionally), and a visible seam down the midplane (the thickness default was larger than two lipid meshes could span).
+The full write-up is in [../COVERAGE.md](../COVERAGE.md).
+The standing lesson: **address geometry-node sockets by name or identity, never by index** - this was the third such bug in one file.
