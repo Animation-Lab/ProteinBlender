@@ -13,6 +13,7 @@ from bpy.types import Operator
 from bpy.props import StringProperty
 from typing import Optional
 
+from . import gn_compat
 from . import lipid_assets
 from . import force_fields
 from .membrane_geometry import (
@@ -108,21 +109,12 @@ def _set_mod_input(mod: bpy.types.Modifier, socket_name: str, value) -> None:
     """Set a value on a GN modifier input socket.
 
     Modifier inputs are addressed by the *interface socket's identifier*
-    (``Socket_N`` strings), not the socket name. We look up the identifier
-    via the modifier's node_group.interface.
+    (``Socket_N`` strings), not the socket name, and where that identifier is
+    written moved in Blender 5.2. See ``gn_compat``, which also explains why a
+    failed write must not be swallowed: it used to be, and every membrane built
+    on 5.2 came out with no lipids at all.
     """
-    ng = mod.node_group
-    if ng is None:
-        return
-    for item in ng.interface.items_tree:
-        if hasattr(item, "in_out") and item.in_out == "INPUT" and item.name == socket_name:
-            try:
-                mod[item.identifier] = value
-                return
-            except Exception as e:
-                print(f"[membrane] Failed to set '{socket_name}': {e}")
-                return
-    # If not found, no-op.
+    gn_compat.set_modifier_input(mod, socket_name, value)
 
 
 def _refresh_modifier(mod: bpy.types.Modifier) -> None:

@@ -51,6 +51,7 @@ from bpy.app.handlers import persistent
 from mathutils import Vector
 from typing import Iterable, List, Optional, Tuple
 
+from . import gn_compat
 from .membrane_geometry import MAX_PROTEIN_FFS, NM_PER_BU
 
 
@@ -307,17 +308,8 @@ def collect_force_field_slots(scene: Optional[bpy.types.Scene]
 # ---------------------------------------------------------------------------
 
 def _set_mod_input(mod: bpy.types.Modifier, socket_name: str, value) -> None:
-    ng = mod.node_group
-    if ng is None:
-        return
-    for item in ng.interface.items_tree:
-        if (hasattr(item, "in_out") and item.in_out == "INPUT"
-                and item.name == socket_name):
-            try:
-                mod[item.identifier] = value
-            except Exception:
-                pass
-            return
+    """Set a GN modifier input. See ``gn_compat`` for the 4.2/5.1 vs 5.2 split."""
+    gn_compat.set_modifier_input(mod, socket_name, value)
 
 
 def _refresh_modifier(mod: bpy.types.Modifier) -> None:
