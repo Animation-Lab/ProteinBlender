@@ -1022,6 +1022,77 @@ def test_a_force_field_does_not_carve_the_membrane_centre_from_afar(blender,
         "been carved where the protein is not.")
 
 
+@pytest.mark.live
+@pytest.mark.visual
+def test_the_hole_follows_the_protein_as_it_moves(blender, single_chain):
+    """Drag the protein across the sheet and the hole must go with it.
+
+    The field reads the protein's live position through an Object Info node, so
+    moving the protein should move the hole. This is the behaviour that a
+    written-vector version silently lost - the vector only tracked when the
+    operator rewrote it, so the hole stayed frozen while the protein slid away.
+
+    The membrane spans about +/-1 unit, so the protein is nudged within it and
+    the covered fraction of a left band and a right band is compared. When the
+    protein sits left, the left band clears relative to the right; when it sits
+    right, the reverse.
+    """
+    build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    blender.call("""
+        obj = H.sm().molecules[molecule_id].object
+        obj.hide_viewport = True
+        obj.hide_render = True
+        obj.pb_force_field_enabled = True
+        obj.pb_force_field_spacing = 5.0
+        return True
+    """, molecule_id=single_chain)
+
+    def bands_with_protein_at(x):
+        blender.call("""
+            obj = H.sm().molecules[molecule_id].object
+            obj.location = (x, 0.0, 0.0)
+            bpy.context.view_layer.update()
+            import sys
+            sys.modules["proteinblender.membrane_builder.force_fields"].apply_to_all_membranes(bpy.context.scene)
+            from mathutils import Euler
+            membrane = next(o for o in bpy.data.objects if o.get("pb_is_membrane"))
+            window, area, region = R.find_view3d()
+            region_3d = area.spaces.active.region_3d
+            bpy.ops.object.select_all(action="DESELECT")
+            membrane.select_set(True)
+            bpy.context.view_layer.objects.active = membrane
+            with R.view3d_override():
+                bpy.ops.view3d.view_selected()
+            region_3d.view_perspective = "ORTHO"
+            region_3d.view_rotation = Euler((0, 0, 0), "XYZ").to_quaternion()
+            for _ in range(4):
+                bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+            return True
+        """, molecule_id=single_chain, x=x)
+        return blender.call("""
+            import numpy as np
+            rgba = R._render_viewport(500, True, True)
+            h, w = rgba.shape[:2]
+            alpha = rgba[:, :, 3] > 0.01
+            band = slice(int(h * 0.38), int(h * 0.62))
+            left = float(alpha[band, int(w * 0.18):int(w * 0.44)].mean())
+            right = float(alpha[band, int(w * 0.56):int(w * 0.82)].mean())
+            return {"left": left, "right": right}
+        """)
+
+    left_side = bands_with_protein_at(-0.5)
+    right_side = bands_with_protein_at(0.5)
+
+    # Protein on the left clears the left band more than the right, and vice
+    # versa. The signed difference must flip.
+    left_bias_when_left = left_side["right"] - left_side["left"]
+    left_bias_when_right = right_side["right"] - right_side["left"]
+    assert left_bias_when_left > left_bias_when_right, (
+        "the hole did not move with the protein: with it on the left the bands "
+        f"read {left_side}, with it on the right {right_side} - the cleared "
+        "side did not switch, so the field is not tracking the protein.")
+
+
 def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
     """Spacing is extra clearance in nm beyond the protein's own radius.
 

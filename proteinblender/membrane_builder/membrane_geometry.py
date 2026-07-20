@@ -304,15 +304,16 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        sideways by the same wrong offset, and no recognisable bilayer.
 #        Structural change, so the bump is required to rebuild saved trees.
 #   v33: protein force-field centre passed as a plain vector input
-#        (Protein FF N Center) instead of read from the anchor Empty via an
-#        Object Info node. The Object Info read the anchor's *evaluated*
-#        transform, which did not reliably flush after the anchor moved - an
-#        anchor whose evaluated matrix lagged at the origin carved a phantom
-#        hole in the membrane centre no matter where the protein was, and made
-#        the field ignore the protein's height. A written vector has no
-#        evaluation step, so it is deterministic. Structural change; rebuilds
-#        saved trees.
-GN_TREE_VERSION = 33
+#        (later reverted in v34). It was an attempt to dodge a flush bug in the
+#        anchor-Empty transform, but a written vector only tracks when the
+#        operator rewrites it, so a moving protein left the hole behind.
+#   v34: force field reads the protein object's live position through an Object
+#        Info node (Protein FF N), exactly as a hole reads its controller. This
+#        tracks the protein as it moves and respects its height, because Object
+#        Info reads the evaluated transform the render uses - no anchor Empty,
+#        no written vector, no Python matrix read to go stale. The per-slot
+#        Center vector input is gone. Structural change; rebuilds saved trees.
+GN_TREE_VERSION = 34
 
 
 # ===========================================================================
@@ -493,18 +494,17 @@ def _build_membrane_gn_tree(num_holes: int = 0,
     for i in range(1, num_ffs + 1):
         _new_input(tree, f"Protein FF {i} Enabled", "NodeSocketBool",
                    default=False)
+        # The object input is the protein/chain the field is on. The pusher
+        # reads its live position through an Object Info node, exactly as a hole
+        # reads its controller, so the field tracks the protein as it moves and
+        # respects its height - Object Info reads the *evaluated* transform,
+        # which is the one the render uses, so there is no Python-side matrix
+        # read to go stale. (An earlier version routed this through a hidden
+        # anchor Empty and a written vector; both introduced flush-timing bugs
+        # that left phantom holes at the origin.)
         _new_input(tree, f"Protein FF {i}", "NodeSocketObject")
         _new_input(tree, f"Protein FF {i} Radius", "NodeSocketFloat",
                    default=0.0, min_val=0.0, max_val=50.0)
-        # The force-field centre as a plain vector, in the membrane's local
-        # space. FFs used to read this from the protein's anchor Empty through
-        # an Object Info node, but that reads the anchor's *evaluated*
-        # transform, which does not reliably flush after the anchor is moved -
-        # an anchor whose location was updated but whose evaluated matrix
-        # lagged at the origin carved a phantom hole in the membrane centre,
-        # regardless of where the protein actually was. A vector value the
-        # operator writes directly has no such evaluation step.
-        _new_input(tree, f"Protein FF {i} Center", "NodeSocketVector")
 
     nodes = tree.nodes
     links = tree.links
@@ -1142,7 +1142,8 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                     obj_sock=get_in(f"Protein FF {f}"),
                     radius_source=get_in(f"Protein FF {f} Radius"),
                     hy=ff_hy_base - f * 260,
-                    center_sock=get_in(f"Protein FF {f} Center"),
+                    # center_sock left None: read the protein's live position
+                    # from Object Info, so the field tracks it as it moves.
                 )
 
             # ---- Combiner: softmax direction + smin penetration --------
