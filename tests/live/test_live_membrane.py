@@ -848,3 +848,260 @@ def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
         f"lipid at {wide['min_distance']:.4f} BU against "
         f"{narrow['min_distance']:.4f} BU before; the spacing slider is not "
         "reaching the membrane")
+
+
+# ---------------------------------------------------------------------------
+# Lipid orientation
+#
+# These exist because the suite once had 16 of 18 membrane tests green over
+# geometry that was obviously wrong to the eye. Every assertion above this point
+# asks whether lipids *exist*, whether shapes *differ*, whether colour *reaches*
+# the render. None of them asked which way a lipid points, so a bilayer whose
+# every lipid lay on the (1,1,1) diagonal, with the two leaflets sheared apart
+# and no membrane to speak of, passed them all.
+#
+# Ground truth here is independent of the add-on: a FLAT membrane lies in the XY
+# plane, so its surface normal is world Z by construction. Nothing below reads
+# the normal the product computed.
+# ---------------------------------------------------------------------------
+
+ORIENTATION = """
+import numpy as np
+
+deps = bpy.context.evaluated_depsgraph_get()
+axes, origins = [], []
+for inst in deps.object_instances:
+    if not inst.is_instance:
+        continue
+    matrix = np.array(inst.matrix_world).reshape(4, 4)
+    axis = matrix[:3, 2]
+    length = float(np.linalg.norm(axis))
+    if length == 0.0:
+        continue
+    axes.append(axis / length)
+    origins.append(float(matrix[2, 3]))
+
+if not axes:
+    raise AssertionError("the membrane evaluated no lipid instances at all")
+
+axes = np.array(axes)
+origins = np.array(origins)
+# Angle away from vertical, ignoring which end is up: a lower-leaflet lipid is
+# the mirror of an upper-leaflet one, and both are correctly oriented.
+tilt = np.degrees(np.arccos(np.clip(np.abs(axes[:, 2]), 0.0, 1.0)))
+return {
+    "count": int(len(axes)),
+    "tilt_mean": float(tilt.mean()),
+    "tilt_max": float(tilt.max()),
+    "tilt_spread": float(tilt.max() - tilt.min()),
+    "pointing_up": float((axes[:, 2] > 0).mean()),
+    "origin_above": float((origins > 0).mean()),
+}
+"""
+
+
+@pytest.mark.live
+def test_lipids_stand_perpendicular_to_the_membrane_plane(blender):
+    """Every lipid must point along the surface normal, not some fixed diagonal.
+
+    A flat membrane lies in XY, so each lipid's long axis should be world Z to
+    within a few degrees. This is the assertion the suite was missing: the
+    Capture Attribute normal was being read out of the wrong socket on Blender
+    5.2, which handed the aligner a boolean broadcast into a vector as (1, 1, 1)
+    and tilted every lipid to exactly arccos(1/sqrt(3)) = 54.7356 degrees.
+
+    54.7 degrees is called out by name below because a *constant* tilt is the
+    real symptom. Randomly scattered lipids would be a different bug; a whole
+    membrane agreeing on one wrong angle to seven significant figures is a
+    mis-wired socket.
+    """
+    blender.call(BUILD, overrides={"shape": "FLAT", "width": 15, "height": 15})
+    stats = blender.call(ORIENTATION)
+
+    assert stats["count"] > 0
+    assert stats["tilt_max"] < 5.0, (
+        f"lipids are not standing up: worst tilt {stats['tilt_max']:.1f} deg "
+        f"from the surface normal (mean {stats['tilt_mean']:.1f}). "
+        "A constant 54.7 deg means the aligner received (1, 1, 1) instead of "
+        "the captured normal - check the Capture Attribute socket lookup."
+    )
+    assert stats["tilt_spread"] < 5.0, (
+        "lipid tilt varies wildly across the sheet "
+        f"(spread {stats['tilt_spread']:.1f} deg)")
+
+
+@pytest.mark.live
+def test_the_two_leaflets_point_away_from_each_other(blender):
+    """A bilayer is two opposed leaflets, not two copies of one.
+
+    Roughly half the lipids must sit above the midplane and half below, and the
+    two halves must point in opposite directions. If the lower leaflet were
+    never negated it would render as a second upward-facing sheet, which looks
+    almost right in a thumbnail and is not a membrane.
+    """
+    blender.call(BUILD, overrides={"shape": "FLAT", "width": 15, "height": 15})
+    stats = blender.call(ORIENTATION)
+
+    assert 0.35 < stats["origin_above"] < 0.65, (
+        "the leaflets are not evenly populated: "
+        f"{stats['origin_above']:.0%} of lipids sit above the midplane")
+    assert 0.35 < stats["pointing_up"] < 0.65, (
+        "the two leaflets do not oppose each other: "
+        f"{stats['pointing_up']:.0%} of lipids point the same way")
+
+
+@pytest.mark.live
+def test_the_two_leaflets_sit_directly_above_each_other(blender):
+    """The leaflets must be stacked, not sheared sideways.
+
+    When the half-thickness offset was scaled along a broken (1, 1, 1) normal
+    it displaced each leaflet diagonally, so the upper sheet slid sideways
+    relative to the lower one by as much as it rose. From directly overhead
+    that is invisible; edge-on it reads as two staggered mats. Comparing the
+    two leaflets' XY centroids catches it without needing a particular view.
+    """
+    blender.call(BUILD, overrides={"shape": "FLAT", "width": 15, "height": 15})
+    offset = blender.call("""
+import numpy as np
+
+deps = bpy.context.evaluated_depsgraph_get()
+upper, lower = [], []
+for inst in deps.object_instances:
+    if not inst.is_instance:
+        continue
+    matrix = np.array(inst.matrix_world).reshape(4, 4)
+    (upper if matrix[2, 3] > 0 else lower).append(matrix[:2, 3])
+
+upper = np.array(upper)
+lower = np.array(lower)
+NM_PER_BU = 10.0
+return {"dx_nm": float(abs(upper[:, 0].mean() - lower[:, 0].mean()) * NM_PER_BU),
+        "dy_nm": float(abs(upper[:, 1].mean() - lower[:, 1].mean()) * NM_PER_BU),
+        "half_width_nm": float(np.abs(upper[:, 0]).max() * NM_PER_BU)}
+""")
+    # Both leaflets sample the same patch, so their centroids coincide to
+    # within sampling noise. The broken offset shifted them by the full
+    # half-thickness, over a nanometre.
+    assert offset["dx_nm"] < 0.3 and offset["dy_nm"] < 0.3, (
+        "the leaflets are laterally offset from each other by "
+        f"({offset['dx_nm']:.2f}, {offset['dy_nm']:.2f}) nm; they should be "
+        "stacked directly on top of one another")
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("requested", [4.0, 4.8])
+def test_the_bilayer_is_as_thick_as_the_slider_says(blender, requested):
+    """Rendered thickness must match the slider, with the tails still meeting.
+
+    Both halves matter. Thickness alone passes even when the leaflets are
+    sheared apart, and a closed midplane alone passes even when the sheet is
+    the wrong size.
+
+    The gap is measured from the *median* tail tip of each leaflet, not the
+    extreme. The lipid variants differ in length (1.25 to 1.65 nm below their
+    origin), so a global min/max is set by whichever single variant reaches
+    furthest and reported a 0.06 nm gap on a membrane whose typical gap was
+    0.28 nm and plainly showed a seam.
+    """
+    blender.call(BUILD, overrides={"shape": "FLAT", "width": 15, "height": 15,
+                                   "bilayer_thickness": requested})
+    span = blender.call("""
+import numpy as np
+
+deps = bpy.context.evaluated_depsgraph_get()
+upper_lo, upper_hi, lower_lo, lower_hi = [], [], [], []
+for inst in deps.object_instances:
+    if not inst.is_instance:
+        continue
+    source = inst.object
+    if source is None or source.type != "MESH" or not len(source.data.vertices):
+        continue
+    coords = np.empty(len(source.data.vertices) * 3, dtype=np.float64)
+    source.data.vertices.foreach_get("co", coords)
+    matrix = np.array(inst.matrix_world).reshape(4, 4)
+    world_z = (coords.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3])[:, 2]
+    if matrix[2, 3] > 0:
+        upper_lo.append(world_z.min()); upper_hi.append(world_z.max())
+    else:
+        lower_lo.append(world_z.min()); lower_hi.append(world_z.max())
+
+NM_PER_BU = 10.0
+return {"visible_nm": float((np.median(upper_hi) - np.median(lower_lo))
+                            * NM_PER_BU),
+        "gap_nm": float((np.median(upper_lo) - np.median(lower_hi))
+                        * NM_PER_BU)}
+""")
+
+    assert abs(span["visible_nm"] - requested) < 0.4, (
+        f"asked for a {requested} nm bilayer, rendered "
+        f"{span['visible_nm']:.2f} nm")
+    assert span["gap_nm"] < 0.15, (
+        f"the leaflets leave a {span['gap_nm']:.2f} nm void down the midplane "
+        "at the default thickness; their tails should meet so the hydrophobic "
+        "core reads as solid")
+
+
+# ---------------------------------------------------------------------------
+# Colour
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_the_surface_style_renders_close_to_its_configured_near_white(blender):
+    """SURFACE is one near-white colour for the whole lipid, and must stay so.
+
+    The default is a deliberate off-white (0.92): light enough to read as a
+    pale membrane behind a coloured protein. A style that silently fell back to
+    an unlit grey, or to the pink head colour, would still render and still
+    pass every other test in this module.
+    """
+    blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
+    blender.call(BUILD, overrides={"shape": "FLAT", "width": 12, "height": 12,
+                                   "render_style": "SURFACE"})
+    blender.call("return R.frame_all()")
+    metrics = blender.call("return R.viewport_metrics(resolution=300)")
+
+    red, green, blue = metrics["mean_rgb"]
+    assert min(red, green, blue) > 0.75, (
+        f"the SURFACE lipids rendered at {metrics['mean_rgb']}, darker than "
+        "the near-white this style configures")
+    assert max(red, green, blue) - min(red, green, blue) < 0.12, (
+        f"the SURFACE lipids rendered tinted ({metrics['mean_rgb']}); this "
+        "style is a single neutral colour")
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.parametrize("style", ["STYLIZED", "BALL_AND_STICK"])
+def test_head_and_tail_colours_reach_the_render(blender, style):
+    """Changing the head colour must change what is on screen, in that channel.
+
+    The two-material styles are the only place head and tail can be told apart,
+    and the property write reaching the material is not the same thing as the
+    material reaching a pixel. This is the assertion the domain-colour bug
+    taught us to write: drive the user-facing property, then look.
+
+    The tail is pinned to a dark neutral both times so the head colour is the
+    only thing that moves between the two builds.
+    """
+    blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
+
+    def build_and_measure(head_colour):
+        blender.call(BUILD, overrides={"shape": "FLAT", "width": 12,
+                                       "height": 12, "render_style": style,
+                                       "color_head": head_colour,
+                                       "color_tail": DARK_GREY})
+        blender.call("return R.frame_all()")
+        return blender.call("return R.viewport_metrics(resolution=300)")
+
+    red = build_and_measure(RED)
+    blue = build_and_measure(BLUE)
+
+    assert red["dominant_channel"] == 0, (
+        f"{style} with a red head rendered dominant channel "
+        f"{red['dominant_channel']} ({red['mean_rgb']})")
+    assert blue["dominant_channel"] == 2, (
+        f"{style} with a blue head rendered dominant channel "
+        f"{blue['dominant_channel']} ({blue['mean_rgb']})")
+    assert red["mean_rgb"][0] > blue["mean_rgb"][0], (
+        "making the head blue did not reduce red in the render")
