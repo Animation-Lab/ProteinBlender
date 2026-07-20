@@ -50,6 +50,17 @@ from .domain_ops import (
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
 )
+from .domain_maker_session import (
+    PB_DomainRangeItem,
+    PB_DomainMakerState,
+    PROTEINBLENDER_OT_domain_maker_session,
+    PROTEINBLENDER_OT_domain_maker_build,
+    PROTEINBLENDER_OT_domain_maker_select,
+    PROTEINBLENDER_OT_domain_maker_create,
+    PROTEINBLENDER_OT_domain_maker_cancel,
+    register_props as domain_maker_session_register_props,
+    unregister_props as domain_maker_session_unregister_props,
+)
 from .keyframe_operators import (
     PuppetKeyframeSettings,  # Must be imported and registered before operators that use it
     PROTEINBLENDER_OT_create_keyframe,
@@ -72,6 +83,9 @@ from .brownian_operators import (
 CLASSES = (
     # PropertyGroups must be registered before operators that use them
     PuppetKeyframeSettings,
+    # Domain Maker session state (item before the state that collects it)
+    PB_DomainRangeItem,
+    PB_DomainMakerState,
     # Operators
     MOLECULE_PB_OT_delete,
     MOLECULE_PB_OT_delete_chain,
@@ -112,6 +126,11 @@ CLASSES = (
     PROTEINBLENDER_OT_split_domain,
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
+    PROTEINBLENDER_OT_domain_maker_session,
+    PROTEINBLENDER_OT_domain_maker_build,
+    PROTEINBLENDER_OT_domain_maker_select,
+    PROTEINBLENDER_OT_domain_maker_create,
+    PROTEINBLENDER_OT_domain_maker_cancel,
     PROTEINBLENDER_OT_create_keyframe,
     PROTEINBLENDER_OT_keyframe_select_all_puppets,
     PROTEINBLENDER_OT_keyframe_select_none_puppets,

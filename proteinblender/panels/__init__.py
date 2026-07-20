@@ -21,6 +21,9 @@ from .domain_maker_panel import (
     register_props as domain_maker_register_props,
     unregister_props as domain_maker_unregister_props
 )
+from .domain_maker_session_panel import (
+    PROTEINBLENDER_PT_domain_maker_session,
+)
 from .group_maker_panel import (
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,
@@ -107,6 +110,9 @@ CLASSES = [
     PROTEINBLENDER_PT_puppet_maker,     # 4: Puppet Maker
     PROTEINBLENDER_PT_pose_library,    # 5: Pose Library
     PROTEINBLENDER_PT_animation,       # 6: Animation
+
+    # Session-window sidebar menu (VIEW_3D / UI), only visible during a session
+    PROTEINBLENDER_PT_domain_maker_session,
 ]
 
 def register():
