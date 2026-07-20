@@ -1,47 +1,47 @@
-import bpy
-import sys  # Add sys import
-# Development loader: build & install all dependencies via Blender's extension build
+"""Development loader: enable ProteinBlender from this source tree.
+
+Run with:  blender --python dev_register.py
+
+Puts the repo root and Blender's user site-packages on sys.path, then enables the
+addon for this session only.
+
+The enable deliberately uses ``addon_utils.enable(default_set=False)`` rather than
+``bpy.ops.preferences.addon_enable``. The operator sets the user preference, and with
+Blender's default "Auto-Save Preferences" that writes ``proteinblender`` into
+userpref.blend permanently. The module lives only in this repo and is only importable
+while this script has run, so every *other* Blender launch would then fail at startup
+with: Add-on not loaded: "proteinblender", cause: No module named 'proteinblender'.
+Loading from source must not leave persistent state in the user's preferences.
+"""
+
 import os
-import site # Import site module to find user site-packages
+import site
+import sys
+import traceback
 
-# Path to your plugin source
+import addon_utils
+
+ADDON = "proteinblender"
+
+# Path to the plugin source (this file lives at the repo root).
 addon_root = os.path.abspath(os.path.dirname(__file__))
-# plugin_dir = os.path.join(addon_root, "proteinblender") # No longer needed for build op
 
-# Add the addon root directory to Python's path
 if addon_root not in sys.path:
     sys.path.append(addon_root)
 
-# Add user site-packages directory to Python's path
+# Blender's Python does not process the user site-packages dir, and install_deps.sh
+# installs the addon's dependencies there (Program Files is read-only).
 user_site_packages = site.getusersitepackages()
 if os.path.exists(user_site_packages) and user_site_packages not in sys.path:
     sys.path.append(user_site_packages)
     print(f"Added user site-packages to sys.path: {user_site_packages}")
 
-
-# Build + install the addon and its wheel dependencies into Blender
-# try: # Remove the failing build call
-#     bpy.ops.extension.build(
-#         source_dir=plugin_dir,
-#         output_dir=".",
-#         split_platforms=False,
-#         install=True,
-#         install_deps=True,
-#     )
-# except Exception as e:
-#     print(f"Extension build/install failed: {e}")
-
-
-# Enable the addon
-try: # Add try/except around enable for better error reporting
-    bpy.ops.preferences.addon_enable(module="proteinblender")
-    print("Successfully enabled 'proteinblender' addon.")
+try:
+    # default_set=False -> do not touch the saved preferences (see module docstring).
+    # persistent=True   -> stay enabled after loading a new file (Ctrl+N).
+    if addon_utils.enable(ADDON, default_set=False, persistent=True) is None:
+        raise RuntimeError(f"addon_utils.enable({ADDON!r}) returned None")
+    print(f"Successfully enabled '{ADDON}' addon.")
 except Exception as e:
-    print(f"Error enabling 'proteinblender' addon: {e}")
-    # Attempt to provide more context if it's a module not found error again
-    import traceback
+    print(f"Error enabling '{ADDON}' addon: {e}")
     traceback.print_exc()
-
-
-# Optionally reset to Blender's default scene
-# bpy.ops.wm.read_homefile(app_template="")  # optional
