@@ -286,7 +286,19 @@ def test_force_field_toggle_creates_anchor_and_flag(scene, sm, single_chain):
     anchor = bpy.data.objects.get(f"{obj.name}.ff_anchor")
     assert anchor is not None, "force-field anchor Empty was not created"
     assert anchor.get("pb_is_ff_anchor", False) is True
-    assert anchor.parent is obj, "anchor is not parented to the FF owner"
+
+    # The anchor is deliberately NOT parented. Parenting a molecule failed to
+    # carry the owner's Z to the child, so a protein lifted off the membrane
+    # still carved a hole; the anchor is repositioned to the owner's world
+    # centre on every FF apply instead. That it actually *tracks* the protein's
+    # height is proven end-to-end by the live lane
+    # (test_a_force_field_only_parts_the_membrane_when_it_is_near_it), through a
+    # render - the only reliable observation, since a just-moved object's
+    # matrix_world does not flush deterministically in a headless --background
+    # session. Here we only assert the design: the anchor is unparented.
+    assert anchor.parent is None, (
+        "the anchor is parented; it must be unparented so it can be driven to "
+        "the owner's world centre, height included")
 
     # Turning it off flips the flag back and sweeps the orphaned anchor.
     res = bpy.ops.proteinblender.toggle_force_fields(target_state="off")
