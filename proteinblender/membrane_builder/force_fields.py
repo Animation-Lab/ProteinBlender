@@ -181,6 +181,26 @@ def _local_centroid(obj: bpy.types.Object) -> Optional[Vector]:
     return Vector((float(mean[0]), float(mean[1]), float(mean[2])))
 
 
+def _world_centroid(obj: bpy.types.Object) -> Optional[Vector]:
+    """Owner's evaluated mesh centroid in WORLD space.
+
+    ``_local_centroid`` gives the centroid in the owner's local frame; mapping
+    it through ``matrix_world`` gives the point in world space, including the
+    owner's height above or below the membrane. That Z is exactly what the FF
+    needs and what parenting failed to deliver.
+    """
+    local = _local_centroid(obj)
+    if local is not None:
+        return obj.matrix_world @ local
+    # A molecule renders as a geometry-nodes point cloud, so its evaluated
+    # *mesh* has zero vertices and _local_centroid measures nothing - which is
+    # why the anchor was never positioned and stayed at the world origin
+    # regardless of where the protein was. The object's origin is a good
+    # stand-in: import centres the atoms on it. What matters most here is that
+    # it carries the object's world Z, so the anchor finally tracks height.
+    return obj.matrix_world.translation.copy()
+
+
 def _local_bbox_extent(obj: bpy.types.Object) -> float:
     """Longest axis of the object's local-space *evaluated* mesh AABB,
     scaled by the world-scale magnitude.
@@ -243,19 +263,26 @@ def _ensure_ff_anchor(owner_obj: bpy.types.Object) -> Optional[bpy.types.Object]
         anchor.hide_render = True
         anchor.hide_select = True
 
-    # Always re-assert owner identity + parenting + centroid; safe to
-    # run on an existing anchor too (owner may have been renamed; the
-    # mesh may have been rebuilt).
+    # Drive the anchor's WORLD position directly to the owner's mesh centroid,
+    # unparented.
+    #
+    # This used to parent the anchor to the owner and store the local centroid,
+    # trusting Blender to propagate the owner's transform to the child. That
+    # silently failed for Z: a molecule object at z = 20 left its parented
+    # anchor evaluated at z = 0 (identity parent-inverse, zero local offset, yet
+    # the child's matrix_world.z stayed 0), so a protein lifted far off the
+    # membrane still carved a hole - the force field behaved as an infinite
+    # vertical column instead of a 3D body. Writing the world position directly
+    # makes the anchor's Z track the protein. apply_to_all_membranes (FF
+    # toggles) and _deferred_membrane_refresh (emitter moves) both re-sync it,
+    # so it follows the owner through ordinary moves and puppet transforms.
     anchor[_FF_ANCHOR_OWNER_PROP] = owner_obj.name
-    if anchor.parent != owner_obj:
-        # Parent the anchor without inheriting the owner's transform
-        # twice: matrix_parent_inverse stays identity so anchor.location
-        # is read directly as the local offset from the parent's origin.
-        anchor.parent = owner_obj
+    if anchor.parent is not None:
+        anchor.parent = None
         anchor.matrix_parent_inverse.identity()
-    centroid = _local_centroid(owner_obj)
-    if centroid is not None:
-        anchor.location = centroid
+    world_centre = _world_centroid(owner_obj)
+    if world_centre is not None:
+        anchor.location = world_centre
     return anchor
 
 
@@ -387,6 +414,25 @@ def apply_to_all_membranes(scene: Optional[bpy.types.Scene] = None) -> None:
     up anchors whose owner is gone or no longer has FF on."""
     if scene is None:
         scene = bpy.context.scene if bpy.context else None
+
+    # Reposition every anchor to its owner's world centre, then flush the
+    # depsgraph BEFORE any membrane reads them. The membrane's Geometry-Nodes
+    # tree reads each anchor through an Object Info node, which sees the
+    # anchor's *evaluated* transform. If the anchor is moved and the membrane
+    # re-evaluated in the same pass without a flush in between, Object Info
+    # reads the anchor's previous position - so a protein that just moved off
+    # the membrane still carved a hole at its old spot for one refresh. Moving
+    # the anchors first and updating the view layer makes the evaluated
+    # transforms current before the membranes consume them.
+    for owner in iter_ff_emitter_objects():
+        _ensure_ff_anchor(owner)
+    try:
+        view_layer = bpy.context.view_layer if bpy.context else None
+        if view_layer is not None:
+            view_layer.update()
+    except Exception:
+        pass
+
     for obj in bpy.data.objects:
         if obj.get("pb_is_membrane", False):
             apply_force_fields_to_membrane(obj, scene)
@@ -418,10 +464,17 @@ def _deferred_ff_reapply():
 
 
 def _deferred_membrane_refresh():
-    """Kick every membrane modifier so Object Info re-reads each anchor's
-    live world transform. Runs outside the depsgraph handler so it can
-    safely mutate modifier state."""
+    """Re-sync every anchor to its owner, then kick every membrane modifier so
+    Object Info re-reads the anchors' live world transforms. Runs outside the
+    depsgraph handler so it can safely mutate object and modifier state.
+
+    The anchor re-sync is what makes a moving protein carry its force field.
+    The anchors are no longer parented (parenting dropped the owner's Z), so a
+    move only reaches them if something repositions them - this is that
+    something, and it runs on the depsgraph handler's movement path."""
     try:
+        for owner in iter_ff_emitter_objects():
+            _ensure_ff_anchor(owner)
         for obj in bpy.data.objects:
             if not obj.get("pb_is_membrane", False):
                 continue

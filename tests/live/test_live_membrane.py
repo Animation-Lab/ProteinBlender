@@ -134,6 +134,37 @@ if xs:
 return stats
 """
 
+SETTLE = """
+# Let the depsgraph and the FF refresh timers catch up after a transform
+# change, the way an interactive redraw would. A membrane refresh repositions
+# the FF anchors and re-reads them in Object Info; without a settle the
+# evaluated geometry can lag a frame behind the move.
+with R.view3d_override():
+    import bpy
+    for _ in range(3):
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+bpy.context.view_layer.update()
+return True
+"""
+
+NEAR_XY = """
+bpy.context.view_layer.update()
+deps = bpy.context.evaluated_depsgraph_get()
+ox, oy = origin[0], origin[1]
+within = 0
+for inst in deps.object_instances:
+    if not inst.is_instance:
+        continue
+    parent = inst.parent
+    if parent is None or parent.original.name != name:
+        continue
+    t = inst.matrix_world.translation
+    d_nm = ((t.x - ox) ** 2 + (t.y - oy) ** 2) ** 0.5 * 10.0
+    if d_nm < radius_nm:
+        within += 1
+return {"within": within}
+"""
+
 SET_PROPS = """
 props = bpy.context.scene.membrane_builder_props
 with R.view3d_override():
@@ -794,21 +825,20 @@ def test_a_protein_force_field_parts_the_lipids_around_it(blender, single_chain)
         if anchor is not None:
             obj.location = obj.location - anchor.matrix_world.translation
             bpy.context.view_layer.update()
+        # The anchor is deliberately NOT parented: parenting a molecule failed
+        # to carry the owner's Z to the child, so the anchor is repositioned to
+        # the owner's world centre on every FF apply / membrane refresh instead.
         return {
             "result": sorted(result),
             "object": obj.name,
             "flag": bool(obj.pb_force_field_enabled),
             "anchor": list(anchor.matrix_world.translation) if anchor else None,
-            "anchor_parented": (anchor.parent.name == obj.name) if anchor else False,
         }
     """, molecule_id=single_chain)
 
     assert enabled["result"] == ["FINISHED"]
     assert enabled["flag"] is True, "the force-field flag did not turn on"
     assert enabled["anchor"] is not None, "no force-field anchor Empty was created"
-    assert enabled["anchor_parented"] is True, (
-        "the anchor is not parented to its owner, so it will not follow the "
-        "protein when it moves")
 
     anchor_point = enabled["anchor"]
     with_field = lipid_stats(blender, root, origin=anchor_point)
@@ -843,6 +873,86 @@ def test_a_protein_force_field_parts_the_lipids_around_it(blender, single_chain)
 
 
 @pytest.mark.live
+@pytest.mark.visual
+def test_a_force_field_only_parts_the_membrane_when_it_is_near_it(blender,
+                                                                  single_chain):
+    """A protein far above or below the sheet must leave the lipids alone.
+
+    A force field is a 3D body: it parts the bilayer when the protein is
+    embedded in it and lets it close as the protein floats away. The FLAT
+    pusher shrinks each hole by the sphere's cross-section at the leaflet's
+    height (radius = sqrt(R**2 - dz**2)), so a protein lifted more than its own
+    radius off the sheet should carve nothing - but only if the force-field
+    anchor carries the protein's Z. It did not: the anchor was never given a
+    height (a molecule renders as a point cloud, so the centroid helper that
+    was meant to place it measured no vertices and left it at the origin), so a
+    protein 200 nm up still bored a hole straight down.
+
+    Observed through a fixed top-down render, not instance matrices: the
+    membrane's evaluated geometry is what the renderer sees, and reading it back
+    as raw instance transforms over the socket does not reliably reflect a
+    just-moved anchor, while a render forces a full evaluation. The protein is
+    hidden so only the membrane, and any hole in it, is measured.
+    """
+    build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+
+    blender.call("""
+        obj = H.sm().molecules[molecule_id].object
+        obj.hide_viewport = True
+        obj.hide_render = True
+        obj.pb_force_field_enabled = True
+        obj.pb_force_field_spacing = 2.0
+        import sys
+        ff = sys.modules["proteinblender.membrane_builder.force_fields"]
+        ff.apply_to_all_membranes(bpy.context.scene)
+        # Drop the protein so its force field sits over the membrane centre.
+        anchor = bpy.data.objects.get(obj.name + ".ff_anchor")
+        if anchor is not None:
+            obj.location = obj.location - anchor.matrix_world.translation
+        bpy.context.view_layer.update()
+        return True
+    """, molecule_id=single_chain)
+
+    # Fix a top-down orthographic view once, so both captures share framing.
+    blender.call("""
+        from mathutils import Euler
+        window, area, region = R.find_view3d()
+        region_3d = area.spaces.active.region_3d
+        with R.view3d_override():
+            bpy.ops.view3d.view_all()
+        region_3d.view_perspective = "ORTHO"
+        region_3d.view_rotation = Euler((0, 0, 0), "XYZ").to_quaternion()
+        return True
+    """)
+
+    def coverage_at_height(z_bu, label):
+        blender.call("""
+            obj = H.sm().molecules[molecule_id].object
+            obj.location = (0.0, 0.0, z_bu)
+            bpy.context.view_layer.update()
+            import sys
+            ff = sys.modules["proteinblender.membrane_builder.force_fields"]
+            ff.apply_to_all_membranes(bpy.context.scene)
+            for _ in range(4):
+                bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+            return True
+        """, molecule_id=single_chain, z_bu=z_bu)
+        return blender.call("return R.capture(label, resolution=420)",
+                            label=label)
+
+    embedded = coverage_at_height(0.0, "ff-embedded")
+    lifted = coverage_at_height(20.0, "ff-lifted")  # 200 nm above
+
+    # Embedded, the field bores a hole, so fewer lipids are on screen. Lifted
+    # far clear, the hole closes and coverage returns. A hole in a 20 nm sheet
+    # is a small fraction of the frame, so the margin is modest but consistent.
+    assert lifted["covered"] > embedded["covered"], (
+        f"a protein 200 nm above the membrane still carved it: coverage "
+        f"{lifted['covered']} lifted vs {embedded['covered']} embedded - the "
+        "hole did not close, so the force field is ignoring Z and acting as an "
+        "infinite vertical column.")
+
+
 def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
     """Spacing is extra clearance in nm beyond the protein's own radius.
 
