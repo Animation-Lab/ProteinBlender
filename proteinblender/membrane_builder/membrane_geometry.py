@@ -295,7 +295,15 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        push the bilayer thinner than the spec. No tree-structure
 #        change — version bump exists to force re-push of the new
 #        extent into existing membranes' modifiers when they upgrade.
-GN_TREE_VERSION = 31
+#   v32: normal capture addressed by socket NAME, not position. Blender
+#        5.2 inserted a Selection socket into Capture Attribute at index 1,
+#        so the surface Normal was being written into Selection and read
+#        back as Selection. A boolean broadcasts into a vector as (1,1,1),
+#        so every lipid aligned to that diagonal: a constant 54.7 degree
+#        tilt (arccos(1/sqrt(3))) on every instance, both leaflets sheared
+#        sideways by the same wrong offset, and no recognisable bilayer.
+#        Structural change, so the bump is required to rebuild saved trees.
+GN_TREE_VERSION = 32
 
 
 # ===========================================================================
@@ -628,19 +636,28 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         capture_n.location = (-2050, y_pos)
         capture_n.capture_items.new("VECTOR", "captured_normal")
         links.new(dist.outputs["Points"], capture_n.inputs["Geometry"])
-        # Inputs: [Geometry, captured_normal (Value)]. Outputs: [Geometry, captured_normal (Attribute)].
-        links.new(dist.outputs["Normal"], capture_n.inputs[1])
+        # Address the captured socket by the name we just gave it, never by
+        # position. On 4.2 the layout was [Geometry, captured_normal], so
+        # index 1 was the value socket; Blender 5.2 inserted a Selection
+        # socket at index 1 and pushed the value to index 2. Writing the
+        # Normal into index 1 therefore fed it to *Selection*, and reading
+        # index 1 back returned Selection rather than the normal - a boolean,
+        # which Blender broadcasts into a vector as (1, 1, 1). Every lipid
+        # then aligned to the (1,1,1) diagonal: a constant 54.7 degree tilt
+        # (arccos(1/sqrt(3))) on every instance, both leaflets sheared
+        # sideways by the same wrong offset vector, and no bilayer.
+        links.new(dist.outputs["Normal"], capture_n.inputs["captured_normal"])
 
         # Get current point position via Input Position.
         pos = new("GeometryNodeInputPosition", name=f"Pos {leaflet_index}")
         pos.location = (-2000, y_pos - 250)
 
-        # Normal is read from the captured attribute output (second output).
+        # Read the captured normal back by name, for the same reason.
         class _NormalProxy:
             """Shim so the rest of the code can use ``normal.outputs[0]``."""
             def __init__(self, sock):
                 self.outputs = [sock]
-        normal = _NormalProxy(capture_n.outputs[1])
+        normal = _NormalProxy(capture_n.outputs["captured_normal"])
 
         # Half thickness (in BU). The shared inset half-thickness sub-graph
         # (see pre-leaflet block) accounts for the rendered lipid mesh
