@@ -131,5 +131,6 @@ def pytest_configure(config):
         "network: fetches data from RCSB/AlphaFold (needs internet)",
         "slow: takes more than a couple seconds",
         "visual: renderer-observed regression or metamorphic image test",
+        "gui: needs a real Blender window/screen; skipped under --background",
     ):
         config.addinivalue_line("markers", marker)

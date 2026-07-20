@@ -73,6 +73,25 @@ def _hole_children(root):
     return [c for c in root.children if c.get("pb_is_membrane_hole", False)]
 
 
+def _lipid_instance_count(root):
+    """Count the lipid instances the membrane GN tree actually emits.
+
+    This is the observable a user sees: the bilayer is a field of GN
+    *instances* distributed onto the surface patch. A membrane whose GN inputs
+    never got set (empty Lipid Collection, zero density) still has a base mesh
+    and a GN modifier, but emits ZERO instances — a bare lattice cage. We count
+    ``depsgraph.object_instances`` whose realized parent is this membrane root,
+    which is ground truth independent of the build operator's own bookkeeping.
+    """
+    deps = bpy.context.evaluated_depsgraph_get()
+    root_eval = root.evaluated_get(deps)
+    n = 0
+    for inst in deps.object_instances:
+        if inst.is_instance and inst.parent == root_eval:
+            n += 1
+    return n
+
+
 # --------------------------------------------------------------------------
 # Build
 # --------------------------------------------------------------------------
@@ -101,6 +120,33 @@ def test_build_membrane_creates_objects_with_geometry(scene):
     # A dedicated lattice child exists for deformation.
     assert any(c.type == "LATTICE" for c in root.children), "no lattice child"
 
+    # The bilayer must actually EXIST: the GN tree has to emit lipid instances
+    # onto the patch. Base-mesh verts + a present modifier are only the
+    # scaffold; a membrane whose GN inputs failed to set renders as a bare
+    # lattice cage with zero lipids while still passing every check above.
+    assert _lipid_instance_count(root) > 0, (
+        "membrane emitted no lipid instances — the GN tree ran with unset "
+        "inputs (empty Lipid Collection / zero density)")
+
+
+@pytest.mark.integration
+def test_build_membrane_emits_lipid_instances(scene):
+    """Regression: on Blender 5.2 the GN modifier input writes silently failed
+    (5.2 moved input storage off the modifier's IDProperties), so Build
+    Membrane produced a bilayer with ZERO lipids — visually a bare lattice
+    cage — while every other membrane test stayed green. Assert on the one
+    observable that separates a real membrane from an empty one: the number of
+    lipid instances the tree emits. 5.1 emitted ~1240 for this patch."""
+    names = H.build_membrane(shape=SHAPE_FLAT, width=20.0, height=20.0)
+    root = _membrane_root(names)
+    assert root is not None
+    count = _lipid_instance_count(root)
+    # A 20x20 nm patch at default density yields hundreds of lipids. Assert a
+    # generous floor so the test tracks "lipids exist", not an exact count.
+    assert count > 100, (
+        f"expected a populated bilayer, got {count} lipid instances "
+        "(GN inputs almost certainly failed to set)")
+
 
 @pytest.mark.integration
 @pytest.mark.parametrize("shape", [SHAPE_FLAT, SHAPE_SPHERE, SHAPE_HEMISPHERE])
@@ -110,6 +156,8 @@ def test_build_membrane_each_shape(scene, shape):
     assert root is not None, f"shape {shape!r} created no membrane root"
     assert root.get("pb_mem_shape") == shape
     assert _base_verts(root) > 0, f"shape {shape!r} base mesh has no vertices"
+    assert _lipid_instance_count(root) > 0, (
+        f"shape {shape!r} emitted no lipid instances")
 
 
 # --------------------------------------------------------------------------

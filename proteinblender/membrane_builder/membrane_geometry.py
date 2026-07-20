@@ -41,6 +41,35 @@ def _socket_by_type(sockets, name, sock_type):
         f"(have {[(s.name, s.type) for s in sockets]})")
 
 
+def set_gn_modifier_input(mod, identifier, value):
+    """Write a value into a Geometry Nodes modifier input, across Blender 5.x.
+
+    Through Blender 5.1 a GN modifier's input values live as IDProperties on
+    the modifier itself, addressed by the interface socket's identifier:
+    ``mod[identifier] = value``. **Blender 5.2 moved that storage.** The
+    modifier no longer supports IDProperty subscripting at all
+    (``mod[identifier] = value`` raises ``TypeError: id properties not
+    supported for this type``); each input is now a per-socket IDPropertyGroup
+    at ``mod.properties.inputs[identifier]`` whose numeric/object value is the
+    ``"value"`` key.
+
+    This helper tries the legacy subscript first (works ≤5.1 and returns), and
+    falls back to the 5.2 ``mod.properties.inputs[identifier]["value"]`` path on
+    the ``TypeError`` the legacy write raises there. It deliberately does NOT
+    swallow failures: a silent write failure here ships a membrane whose GN
+    tree runs with unset inputs — an empty Lipid Collection and zero density,
+    i.e. a bilayer with no lipids (a bare lattice cage). Raising makes that a
+    loud, testable failure instead of an invisible one.
+    """
+    try:
+        mod[identifier] = value
+        return
+    except TypeError:
+        # Blender 5.2+: input storage moved to mod.properties.inputs.
+        pass
+    mod.properties.inputs[identifier]["value"] = value
+
+
 # 1 BU = 10 nm. The MN convention is 1 BU = 100 Å.
 NM_PER_BU = 10.0
 MAX_HOLES = 8

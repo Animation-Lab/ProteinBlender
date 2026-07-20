@@ -51,7 +51,11 @@ from bpy.app.handlers import persistent
 from mathutils import Vector
 from typing import Iterable, List, Optional, Tuple
 
-from .membrane_geometry import MAX_PROTEIN_FFS, NM_PER_BU
+from .membrane_geometry import (
+    MAX_PROTEIN_FFS,
+    NM_PER_BU,
+    set_gn_modifier_input,
+)
 
 
 # Anchors are hidden Empties — one per FF-enabled object — *parented* to
@@ -313,10 +317,10 @@ def _set_mod_input(mod: bpy.types.Modifier, socket_name: str, value) -> None:
     for item in ng.interface.items_tree:
         if (hasattr(item, "in_out") and item.in_out == "INPUT"
                 and item.name == socket_name):
-            try:
-                mod[item.identifier] = value
-            except Exception:
-                pass
+            # Cross-version write (Blender 5.2 moved GN input storage); raises
+            # loudly rather than swallowing, so a failed force-field write can't
+            # silently produce a membrane that ignores the protein.
+            set_gn_modifier_input(mod, item.identifier, value)
             return
 
 

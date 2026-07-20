@@ -283,6 +283,33 @@ def geometry_summary(obj):
     }
 
 
+def renders_geometry(obj):
+    """True iff ``obj``'s evaluated output actually draws something.
+
+    The canonical anti-facade "is this thing visible" check. It deliberately
+    ignores the *base* mesh: molecule / DNA / membrane base meshes always carry
+    their raw atom (or patch) points, so a base-vertex count stays positive even
+    when the style / GN tree emits nothing — that shortcut is exactly what let a
+    zero-lipid membrane and a broken style pass their tests. What a user sees is
+    the evaluated object, which is either *realized* mesh (cartoon / sticks /
+    surface bake to thousands of verts) or geometry-node *instances* (spheres /
+    a membrane bilayer realize 0 verts but emit instances). Count both.
+    """
+    import bpy
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = obj.evaluated_get(deps)
+    realized = 0
+    try:
+        m = ev.to_mesh()
+        realized = len(m.vertices)
+        ev.to_mesh_clear()
+    except Exception:
+        realized = 0
+    instances = sum(1 for inst in deps.object_instances
+                    if inst.is_instance and inst.parent == ev)
+    return realized > 0 or instances > 0
+
+
 # --------------------------------------------------------------------------
 # Independent ground truth (no addon code) for pivot / residue-position tests
 # --------------------------------------------------------------------------

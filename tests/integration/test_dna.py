@@ -32,19 +32,14 @@ STYLE_VALUES = ["ball_and_stick", "cartoon", "spheres", "sticks", "surface"]
 _DNA_COMPLEMENT = {"A": "T", "T": "A", "G": "C", "C": "G"}
 
 
-def _has_geometry(obj):
-    """True if the strand still has geometry.
+def _renders_geometry(obj):
+    """A strand renders iff its style emits realized verts or GN instances.
 
-    Several DNA styles (e.g. 'spheres') render via geometry-node *instances*,
-    which produce 0 *realized* verts when the modifier stack is baked to a mesh
-    — so an evaluated-vertex count is not a reliable "has geometry" signal.
-    The base mesh carries the atom points and persists across style changes, so
-    check that first, falling back to the evaluated count.
+    Thin wrapper over the canonical ``helpers.renders_geometry`` — the base
+    mesh carries the atom points and is NOT a valid "did the style render"
+    signal (that shortcut is what let a zero-lipid membrane pass its tests).
     """
-    data = getattr(obj, "data", None)
-    if data is not None and hasattr(data, "vertices") and len(data.vertices) > 0:
-        return True
-    return H.geometry_summary(obj).get("verts", 0) > 0
+    return H.renders_geometry(obj)
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +55,7 @@ def test_build_double_stranded_dna():
     assert obj.get("pb_nucleic_type") == "DNA"
     assert obj.get("pb_sequence") == "ATCGATCGATCG"
     assert obj.get("pb_double_stranded") is True
-    assert _has_geometry(obj), "double-stranded DNA produced no geometry"
+    assert _renders_geometry(obj), "double-stranded DNA produced no geometry"
 
 
 @pytest.mark.integration
@@ -69,7 +64,7 @@ def test_build_single_stranded_dna():
                       style="ball_and_stick")
     assert obj.get("pb_is_nucleic_acid") is True
     assert obj.get("pb_double_stranded") is False
-    assert _has_geometry(obj)
+    assert _renders_geometry(obj)
 
 
 @pytest.mark.integration
@@ -82,7 +77,7 @@ def test_build_rna():
     # Sequence should have been validated against the RNA alphabet (A U G C).
     seq = obj.get("pb_sequence") or ""
     assert seq and set(seq) <= set("AUGC")
-    assert _has_geometry(obj)
+    assert _renders_geometry(obj)
 
 
 @pytest.mark.integration
@@ -92,7 +87,7 @@ def test_build_each_style(style):
                       style=style)
     assert obj.get("pb_is_nucleic_acid") is True
     assert obj.get("pb_style") == style
-    assert _has_geometry(obj), f"style {style!r} produced no geometry"
+    assert _renders_geometry(obj), f"style {style!r} produced no geometry"
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +146,7 @@ def test_update_dna_style_changes_object(scene):
     H.select_only(obj)
     bpy.ops.proteinblender.update_dna_style(new_style="spheres")
     assert obj.get("pb_style") == "spheres"
-    assert _has_geometry(obj), "strand lost its geometry after style change"
+    assert _renders_geometry(obj), "strand lost its geometry after style change"
 
 
 # ---------------------------------------------------------------------------

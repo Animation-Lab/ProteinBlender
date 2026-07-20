@@ -9,6 +9,9 @@ hands each test an empty scene, and the ``single_chain`` / ``multi_chain``
 fixtures re-import a fresh protein per test.
 """
 
+import contextlib
+import logging
+
 import bpy
 import pytest
 
@@ -35,6 +38,41 @@ def _attr_store_owner():
 
     return next(c for c in databpy.BlenderObject.__mro__
                 if "store_named_attribute" in c.__dict__)
+
+
+class _RecordCatcher(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
+@contextlib.contextmanager
+def _capture_addon_logs():
+    """Capture log records emitted under the ``proteinblender`` logger.
+
+    pytest's ``caplog`` attaches to the ROOT logger and only sees records that
+    propagate there. The addon deliberately sets ``proteinblender.propagate =
+    False`` and installs its own stderr handler (so Blender's console shows add-
+    on logs exactly once), which means caplog captures NOTHING the add-on logs —
+    a test relying on caplog for add-on warnings is a false negative, green or
+    red for the wrong reason. Attach directly to the ``proteinblender`` logger
+    instead, which is where the add-on actually emits, regardless of
+    propagation.
+    """
+    logger = logging.getLogger("proteinblender")
+    catcher = _RecordCatcher()
+    prev_level = logger.level
+    if prev_level > logging.WARNING or prev_level == logging.NOTSET:
+        logger.setLevel(logging.WARNING)
+    logger.addHandler(catcher)
+    try:
+        yield catcher
+    finally:
+        logger.removeHandler(catcher)
+        logger.setLevel(prev_level)
 
 
 def _break_attribute(monkeypatch, attr):
@@ -80,17 +118,23 @@ def test_import_aborts_when_a_critical_attribute_cannot_be_written(
 
 @pytest.mark.integration
 def test_import_survives_a_non_critical_attribute_failure(
-        scene, sm, monkeypatch, caplog):
+        scene, sm, monkeypatch):
     """A non-critical attribute failure degrades the render, so it logs and
-    continues rather than aborting - but it must never be silent."""
+    continues rather than aborting - but it must never be silent.
+
+    Captures on the ``proteinblender`` logger (not caplog/root): the add-on
+    sets ``propagate=False``, so its warnings never reach the root logger caplog
+    watches. Asserting via caplog here failed even though the warning WAS
+    emitted - a false negative that hid nothing but wasted a red."""
     _break_attribute(monkeypatch, "b_factor")
 
-    with caplog.at_level("WARNING"):
+    with _capture_addon_logs() as caught:
         mol_id = H.import_local("1ubq.pdb", "1ubq_partial")
 
     assert mol_id in sm.molecules, "a lost b_factor should not abort the import"
-    assert any("b_factor" in r.getMessage() for r in caplog.records), (
-        "the failure was swallowed: nothing was logged")
+    warnings = [r for r in caught.records if r.levelno >= logging.WARNING]
+    assert any("b_factor" in r.getMessage() for r in warnings), (
+        "the failure was swallowed: no WARNING mentioning b_factor was logged")
 
 
 @pytest.mark.integration

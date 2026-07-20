@@ -3,12 +3,30 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **246 passing, 9 skipped,
-1 xfailed** across 256 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **270 passing, 9 skipped,
+1 xfailed** across the collected tests. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
-was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
-addresses sockets by identity so it stays compatible with those versions, though
-the count above was re-run only on 5.2.
+was previously verified on Blender 5.0 and 5.1; the membrane fixes address
+sockets and modifier inputs by identity / capability so they stay compatible
+with those versions (5.0/5.1 re-verified for the membrane lane).
+
+### Facade-hardening pass (assert observable output, never the scaffold)
+
+The membrane zero-lipid bug (below) slipped past 11 green tests because they
+checked the *base mesh* and *modifier presence*, not the rendered output. A
+sweep for the same shape found and hardened two siblings:
+- **DNA** `_has_geometry` returned True on the base mesh (always populated),
+  so it could not detect a style that renders nothing. Replaced with the
+  canonical `helpers.renders_geometry` (realized verts **or** GN instances,
+  base mesh ignored).
+- **Linker** creation asserted the curve object's existence + type but not
+  that it had control points; an empty curve would have passed. Now asserts
+  real control points via `_curve_signature`.
+
+Protein / domain per-style tests were reviewed and left as-is: their rendering
+is already covered by the real-Cycles `test_rendering.py` /
+`test_domain_geometry_invariants.py` pixel lanes, so the property-mirror tests
+are not blind spots.
 
 ## Lanes
 
@@ -231,6 +249,42 @@ the count above was re-run only on 5.2.
   `test_proteins.py::test_duplicate_preserves_domain_structure` (verified to
   fail on the pre-fix code).
 
+- **Non-critical-attribute log test asserted on the wrong channel (false
+  negative).** `test_import_survives_a_non_critical_attribute_failure` broke the
+  `b_factor` attribute write and asserted a WARNING was logged via pytest's
+  `caplog` — but the add-on sets `proteinblender.propagate = False` and installs
+  its own stderr handler, so add-on logs never reach the root logger caplog
+  watches. The product logged the warning correctly the whole time; the test
+  simply couldn't see it and failed red on 5.0/5.1/5.2 alike. Fixed by capturing
+  on the `proteinblender` logger directly (`_capture_addon_logs`), which is where
+  the add-on actually emits regardless of propagation. Proven non-vacuous:
+  silencing the source logger (simulating a real swallow) makes the capture
+  empty and the test fail. This was the suite's only `caplog` user.
+
+- **Membrane built with ZERO lipids on Blender 5.2 (GN modifier input storage
+  moved).** Every membrane on 5.2 rendered as a bare lattice cage — no lipid
+  bilayer at all — while all 11 membrane tests stayed green. Two compounding
+  causes. (1) **Product:** Blender 5.2 moved geometry-nodes modifier input
+  storage off the modifier's IDProperties; the long-standing
+  `mod[socket.identifier] = value` write now raises
+  `TypeError: id properties not supported for this type` (verified even on a
+  trivial modifier in stock 5.2). Inputs now live at
+  `mod.properties.inputs[identifier]["value"]`. `_set_mod_input` (in both
+  `membrane_operators.py` and `force_fields.py`) wrote the old way inside a
+  bare `except: pass`, so on 5.2 all 14 input writes failed silently — the
+  Lipid Collection stayed unset and the GN tree instanced nothing. Fixed by a
+  shared `membrane_geometry.set_gn_modifier_input`, which tries the legacy
+  subscript (≤5.1) and falls back to the 5.2 `mod.properties.inputs` path, and
+  **raises** instead of swallowing. (2) **Test facade:** `test_membrane.py`
+  asserted only on the *base* patch mesh (`root.data.vertices > 0`) and the
+  modifier's presence — both survive a totally empty tree — never on the
+  instanced output, which its docstring explicitly declined to check. Fixed by
+  `_lipid_instance_count` (counts `depsgraph.object_instances` — ground truth
+  independent of the operator) and a new
+  `test_build_membrane_emits_lipid_instances` plus instance assertions on the
+  build/each-shape tests. Verified red pre-fix on 5.2 (0 instances) and green
+  after (~1240); 5.0/5.1 emit 1240 via the unchanged legacy path.
+
 - **Membrane build crashed on Blender 5.2 (Random Value socket order).** The
   membrane GN builder addressed the Random Value node's float/int Min/Max/Value
   sockets by positional index (`inputs[2]`/`[3]`, `inputs[4]`/`[5]`,
@@ -257,6 +311,26 @@ the count above was re-run only on 5.2.
   in `domain_operators.py` to read `scene.temp_domain_color` and snapshot the
   colour to a plain tuple before applying it. Guarded by
   `test_domains.py::test_update_domain_color_operator_applies_color`.
+
+- **Protein Blender right panel regressed to the stock Layout column (native
+  Outliner on top, narrow Properties).** After the Blender 5.2 fix that stopped
+  `create_custom_workspace` closing a captured set of areas (which invalidated
+  sibling `Area` handles → "Area not found in screen"), the workspace *kept* the
+  duplicated default Layout's editors, so the add-on inherited a native Outliner
+  stacked above a ~0.18-window-wide Properties editor instead of the single
+  full-height ~0.30-wide Properties column it is built around (measured live on
+  5.2: Properties 451/2560 wide). Fixed in `layout/workspace_setup.py` by
+  collapsing the duplicated screen back to one viewport — `_reset_to_single_viewport`
+  closes non-VIEW_3D editors **one at a time, re-scanning after each close** so no
+  stale handle is ever touched — before `add_panels_to_workspace` rebuilds the
+  panel at the intended 0.7 split; an existing regressed workspace is repaired on
+  next launch when a native OUTLINER editor is detected (`_needs_layout_repair`).
+  Guarded by `unit/test_workspace_layout.py` (the repair *decision* — a layout
+  carrying an OUTLINER must be flagged; runs headless) and, for the actual width /
+  position / full-height / no-Outliner geometry, `integration/test_workspace_layout_gui.py`
+  (marked `gui`; skips under `--background` since a headless session has no
+  window/screen, runs in a GUI Blender). Verified live on 5.2: post-fix Properties
+  is 0.298 wide, 0.95 tall, right-aligned, no Outliner.
 
 ## Crash regressions (guard against reintroduction)
 

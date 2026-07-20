@@ -21,6 +21,7 @@ from .membrane_geometry import (
     SHAPE_FLAT,
     SHAPE_MODE_INT,
     get_or_build_membrane_gn_tree,
+    set_gn_modifier_input,
     set_membrane_colors,
     build_membrane_lattice,
     build_membrane_base_mesh,
@@ -116,12 +117,11 @@ def _set_mod_input(mod: bpy.types.Modifier, socket_name: str, value) -> None:
         return
     for item in ng.interface.items_tree:
         if hasattr(item, "in_out") and item.in_out == "INPUT" and item.name == socket_name:
-            try:
-                mod[item.identifier] = value
-                return
-            except Exception as e:
-                print(f"[membrane] Failed to set '{socket_name}': {e}")
-                return
+            # set_gn_modifier_input handles the Blender 5.2 input-storage move
+            # and raises (rather than swallowing) on a real write failure — a
+            # silently-dropped write here ships a membrane with no lipids.
+            set_gn_modifier_input(mod, item.identifier, value)
+            return
     # If not found, no-op.
 
 

@@ -154,6 +154,13 @@ def test_add_linker_creates_definition_and_curve(scene):
     assert curve_obj is not None
     assert curve_obj.type == "CURVE"
 
+    # ...and it actually carries curve geometry. A CURVE object with no splines
+    # or no control points is visually nothing — asserting only the object's
+    # existence and type would pass for an empty curve (a facade). Require real
+    # control points, which is what the linker is for.
+    assert _curve_signature(linker) is not None, (
+        "linker curve object exists but has no control points")
+
 
 @pytest.mark.integration
 def test_add_linker_rejects_same_chain(scene):
