@@ -3,8 +3,8 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **246 passing, 9 skipped,
-1 xfailed** across 256 collected tests. The single xfail is intentional (a
+Current status (Blender 5.2, offline lane): **269 passing, 9 skipped,
+1 xfailed**, no failures. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
 addresses sockets by identity so it stays compatible with those versions, though
