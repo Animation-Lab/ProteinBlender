@@ -108,6 +108,29 @@ if xs:
         stats["min_distance"] = min(
             ((x - ox) ** 2 + (y - oy) ** 2 + (z - oz) ** 2) ** 0.5
             for x, y, z in zip(xs, ys, zs))
+
+    # Clearance around the first hole, in nm. A hole pushes lipids radially
+    # outwards rather than deleting them, so "did the hole work" is a question
+    # about where the lipids are, not how many there are.
+    root_obj = bpy.data.objects.get(name)
+    holes = [child for child in (root_obj.children if root_obj else [])
+             if child.get("pb_is_membrane_hole")]
+    # Measured about the hole when there is one, and about the membrane's own
+    # origin when there is not - which is where a new hole spawns. That keeps
+    # the before and after readings comparable; measuring only when a hole
+    # exists leaves nothing to compare the "solid" state against.
+    if holes:
+        centre = holes[0].matrix_world.translation
+        radius_nm = float(holes[0].scale.x) * 10.0
+    else:
+        centre = root_obj.matrix_world.translation if root_obj else None
+        radius_nm = 0.0
+    if centre is not None:
+        radial = [(((x - centre.x) ** 2 + (y - centre.y) ** 2) ** 0.5) * 10.0
+                  for x, y in zip(xs, ys)]
+        stats["clearance_nm"] = min(radial)
+        stats["hole_radius_nm"] = radius_nm
+        stats["inside_hole"] = sum(1 for d in radial if d < radius_nm * 0.8)
 return stats
 """
 
@@ -430,9 +453,20 @@ def test_a_hole_removes_covered_geometry(blender):
     finally:
         blender.call(RESTORE_VIEW, previous=previous_view)
 
-    assert holed["count"] < solid["count"], (
-        f"adding a hole left the lipid count at {holed['count']} against "
-        f"{solid['count']} before; the hole carved nothing")
+    # A hole does NOT delete lipids, it pushes them radially outwards - see
+    # the GN tree version log, "holes redistribute lipids (radial push)
+    # instead of deleting them". So the count is expected to be unchanged and
+    # asserting on it tests the opposite of the design. What must change is
+    # where the lipids are: the hole has to be empty.
+    assert holed["count"] == solid["count"], (
+        f"the lipid count changed from {solid['count']} to {holed['count']}; "
+        "a hole should displace lipids, not delete them")
+    assert holed["clearance_nm"] > solid["clearance_nm"] + 1.0, (
+        f"the nearest lipid to the hole centre only moved from "
+        f"{solid['clearance_nm']:.2f} nm to {holed['clearance_nm']:.2f} nm; "
+        "the hole is not pushing lipids aside")
+    assert holed["inside_hole"] == 0, (
+        f"{holed['inside_hole']} lipids are still standing inside the hole")
     assert holed_pixels["covered"] < solid_pixels["covered"], (
         f"seen from directly above, the membrane still covers "
         f"{holed_pixels['covered']} pixels against {solid_pixels['covered']} "
@@ -440,12 +474,16 @@ def test_a_hole_removes_covered_geometry(blender):
 
 
 @pytest.mark.live
-def test_a_bigger_hole_removes_more_lipids(blender):
+def test_a_bigger_hole_clears_a_wider_patch(blender):
     """The panel's per-hole radius slider drives the empty's scale.
 
-    Growing the radius must take out more lipids. A radius that is stored on the
-    empty but never read by the geometry-nodes tree gives an unchanged count,
+    Growing the radius must clear a wider patch. A radius stored on the empty
+    but never read by the geometry-nodes tree leaves the clearing the same size,
     which no state-based assertion would notice.
+
+    Measured as the distance from the hole centre to the nearest surviving
+    lipid, because the lipid *count* is deliberately constant: the tree pushes
+    lipids out of the hole rather than deleting them.
     """
     facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
     root = facts["root"]
@@ -465,9 +503,12 @@ def test_a_bigger_hole_removes_more_lipids(blender):
     """, name=blender.call(HOLE_NAMES, name=root)[0])
 
     big = lipid_stats(blender, root)
-    assert big["count"] < small["count"], (
-        f"widening the hole left {big['count']} lipids against {small['count']} "
-        "for the smaller hole; the radius is not reaching the geometry")
+    assert big["clearance_nm"] > small["clearance_nm"] * 1.3, (
+        f"widening the hole moved the nearest lipid from "
+        f"{small['clearance_nm']:.2f} nm to only {big['clearance_nm']:.2f} nm; "
+        "the radius is not reaching the geometry")
+    assert big["count"] == small["count"], (
+        "widening the hole changed the lipid count; it should only move them")
 
 
 @pytest.mark.live
