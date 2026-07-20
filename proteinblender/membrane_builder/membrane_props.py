@@ -154,12 +154,21 @@ class MembraneBuilderProperties(PropertyGroup):
         description=(
             "Visible thickness of the rendered bilayer, in nm — measured "
             "from the top of the upper leaflet's head groups to the "
-            "bottom of the lower leaflet's head groups. Default 5.0 nm "
-            "matches a real fluid PC bilayer. Internally the leaflets are "
-            "inset by the per-style lipid mesh extent so the slider value "
-            "equals what you measure with a ruler"
+            "bottom of the lower leaflet's head groups. Internally the "
+            "leaflets are inset by the per-style lipid mesh extent so the "
+            "slider value equals what you measure with a ruler. Above about "
+            "4.8 nm the leaflets are pushed further apart than the lipid "
+            "meshes are long, which opens a visible void down the midplane"
         ),
-        default=5.0,
+        # 4.8, not the 5.0 of a real fluid PC bilayer. The SURFACE lipid mesh
+        # runs ~0.80 nm above its origin and only 1.25-1.65 nm below, so two
+        # leaflets can span about 4.8 nm before their tails stop meeting.
+        # Measured across the slider range: 4.8 leaves a 0.08 nm midplane gap
+        # (tails touching, reads as a solid hydrophobic core), while 5.0 opens
+        # it to 0.28 nm and shows as a seam down the middle of the membrane.
+        # 4.8 also reproduces the 1.6 nm half-offset this builder used before
+        # the slider was redefined from origin-to-origin to outer-to-outer.
+        default=4.8,
         min=2.0,
         max=15.0,
         soft_max=8.0,
