@@ -18,6 +18,75 @@ the count above was re-run only on 5.2.
 | integration | `tests/integration/` | every registered subsystem operator, driven headless against a real scene |
 | roundtrip | `tests/roundtrip/` | save → reopen (fresh Blender) → state preserved |
 | smoke | `tests/test_harness_smoke.py` | the harness itself (register, reset isolation, import) |
+| live | `tests/live/` | a real, open, windowed Blender observed through its 3D viewport, over the BlenderMCP socket |
+
+## Live lane (`tests/live/`)
+
+The only lane that runs *outside* Blender: system Python attaches to a Blender
+the developer already has open and drives it over the BlenderMCP socket. Run it
+with `python tests/run_live_tests.py`; it skips when nothing is listening, and
+`PB_LIVE_REQUIRED=1` turns that skip into a failure. Full guide in
+[live/README.md](live/README.md).
+
+It exists for the three things `--background` structurally cannot do:
+
+- **See the viewport.** Captures are OpenGL renders of the actual 3D view in the
+  user's shading mode, not a Cycles render through a camera the test invented.
+- **See colour.** Every pixel assertion elsewhere in the suite reduces a render
+  to an alpha mask (`px[:, 3] > 0.01`) and discards RGB, so a domain drawn in the
+  wrong colour, or every domain drawn identically, is invisible to it.
+- **Exercise the deployed add-on** in a normal Blender profile, which is the
+  configuration CLAUDE.md requires a change to be proven in.
+
+| module | what it observes |
+|--------|------------------|
+| `test_live_harness.py` | the lane itself: connection, remote tracebacks, scene isolation, and the calibration that an *empty* scene captures zero covered pixels |
+| `test_live_proteins.py` | import across all four fixtures, one domain per chain (ground truth parsed from the PDB text), duplicate, hide/restore, centre, delete chain, delete, all six styles distinct and reversible |
+| `test_live_domains.py` | split / merge / copy / rename / restyle / reparent / reset-transform / delete, each checked against the render as well as the state |
+| `test_live_pivots.py` | the invariant with real bug history: setting a pivot must not change what is rendered, while rotation about it must |
+| `test_live_visual_color.py` | the colour lane: `visual_setup_color` reaching the render, selection scoping, several colours coexisting, per-style distinctness |
+| `test_live_dna.py` | DNA/RNA build, both windings, all five styles, sequence ops, per-base colours, bend rig |
+| `test_live_membrane.py` | all shapes and render styles, resize, density/thickness, holes, deform reset, delete, colours, force fields |
+| `test_live_puppets_poses.py` | puppet structure and membership, pose round trips that must re-converge on screen |
+| `test_live_animation.py` | keyframes and real F-curves, frame scrubbing that must visibly change the viewport, Brownian bake/reproducibility |
+| `test_live_linkers.py` | linker geometry, styles, behaviours, visibility, cascade deletes, and that a linker renders at all |
+| `test_live_outliner_ui.py` | outliner hierarchy and selection, visibility reaching the renderer, and all nine panels registered with `poll()` accepting a real window |
+
+Caveat: DNA, membranes, linkers and puppet controllers are never rendered
+anywhere in the headless suite, so their appearance was entirely unasserted
+before this lane.
+
+### First-run results (Blender 5.2, add-on loaded from source)
+
+119 passed, 34 failed, 2 skipped, 1 deselected. The failures are not 34
+independent defects; they cluster into a few causes, and several are the lane
+doing its job. They are recorded here rather than fixed.
+
+- **Membranes render nothing at all (20 failures).** A built membrane creates
+  its base patch, lattice, lipid variant objects and a 206-node GN tree, but
+  evaluates to **zero vertices, zero instances and zero covered pixels**. Every
+  read of a modifier input reports `this type doesn't support IDProperties`, and
+  the same message appears in the builder's own output during the build, so the
+  builder is very likely failing to write `Lipid Collection`, `Density` and the
+  rest into the modifier. With no lipid collection bound, Collection Info feeds
+  Instance on Points nothing and the bilayer is empty. The headless membrane
+  tests pass because they assert on structure and node identity, never on
+  output. **Confirm against the deployed extension before treating this as
+  release-blocking**; this session ran the add-on from the working tree.
+- **`molecule.toggle_domain_expanded` hard-crashes Blender** with
+  `EXCEPTION_STACK_OVERFLOW` (see live/README.md). Marked `crasher`, deselected
+  by default.
+- **Domain visual updates do not reach the render.**
+  `molecule.update_domain_color` and `molecule.update_domain_style` both leave
+  the image byte-identical while updating their model state. The molecule-level
+  equivalents (`scene.visual_setup_color`, `scene.molecule_style`) work, which
+  is what makes the domain-level pair look like one shared defect.
+- **Remaining failures are untriaged** (Brownian bake and frame scrubbing,
+  two pivot snap operators, puppet controller and pose round trips, the
+  "Multiple" style sentinel, delete-domain coverage). Several assert the same
+  "a change must reach the render" shape as the confirmed bugs above, so they
+  may share a cause; others may be first-run calibration. Only the protein and
+  domain modules have been calibrated against a real run.
 
 ## Unit lane
 

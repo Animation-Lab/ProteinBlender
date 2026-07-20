@@ -73,7 +73,8 @@ def test_behavioral_tests_trigger_import_and_split_through_public_ui_operators()
     behavioral_roots = [ROOT / "tests" / "integration",
                         ROOT / "tests" / "roundtrip",
                         ROOT / "tests" / "ui",
-                        ROOT / "tests" / "artifact"]
+                        ROOT / "tests" / "artifact",
+                        ROOT / "tests" / "live"]
     forbidden = {
         "bpy.ops.molecule.split_domain": "use helpers.split_domain_from_outliner",
         "bpy.ops.proteinblender.split_domain(": "use the public split_domain_popup",

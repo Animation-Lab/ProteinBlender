@@ -80,3 +80,6 @@ docs/plans/
 [0-9]*.[0-9]*
 extensions/
 proteinblender/.dependency_cache.json
+
+# Live-lane viewport captures (regenerated every run)
+tests/live/_artifacts/

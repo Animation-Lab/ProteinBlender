@@ -1,0 +1,850 @@
+"""The membrane builder, observed on screen.
+
+Membranes are never rendered anywhere else in the suite. The headless lane
+(``tests/integration/test_membrane.py``) says so itself: the geometry-nodes tree
+emits *instances*, so an evaluated ``to_mesh`` contains zero vertices and every
+assertion there falls back to the root's flat base patch. That patch is created
+before a single lipid is placed. It survives a lipid collection that never
+loads, a render style that never binds, a colour that never reaches a material,
+a hole that carves nothing, and a force field that pushes nothing aside.
+
+This module measures the lipids themselves, two ways, both independent of the
+add-on's own reporting:
+
+  * **Instances, straight from the depsgraph.** ``LIPID_STATS`` walks
+    ``depsgraph.object_instances`` and counts the lipids Blender actually
+    evaluated, with their world positions. That is Blender's answer to "what is
+    in this scene", not ProteinBlender's.
+  * **Pixels.** Renders of the viewport, compared against each other.
+
+Assertions are relational and monotonic - more density means more lipids, a
+thicker bilayer spans more Z, a hole removes lipids and a bigger hole removes
+more - so they hold on any GPU and cannot be satisfied by a number copied from
+today's build.
+"""
+
+from __future__ import annotations
+
+import itertools
+
+import pytest
+
+
+# Values of MembraneBuilderProperties.shape (membrane_props.py).
+SHAPES = ["FLAT", "SPHERE", "HEMISPHERE"]
+
+# lipid_assets.RENDER_STYLE_ITEMS. SURFACE is DEFAULT_STYLE.
+RENDER_STYLES = ["SURFACE", "STYLIZED", "BALL_AND_STICK"]
+
+# membrane_geometry.MAX_HOLES, restated here rather than imported so the cap
+# test measures the documented contract instead of whatever the constant
+# happens to say.
+MAX_HOLES = 8
+
+RED = [0.95, 0.05, 0.05, 1.0]
+BLUE = [0.05, 0.05, 0.95, 1.0]
+DARK_GREY = [0.15, 0.15, 0.15, 1.0]
+
+
+# ---------------------------------------------------------------------------
+# Blender-side snippets
+#
+# Anything that drives an operator runs under ``R.view3d_override()``: calls
+# arrive on a timer callback with no editor area, while building a membrane
+# appends node groups and lipid collections, which needs a real VIEW_3D context
+# just as a click on the panel button would have.
+# ---------------------------------------------------------------------------
+
+BUILD = """
+with R.view3d_override():
+    names = H.build_membrane(**overrides)
+root = None
+for candidate in names:
+    obj = bpy.data.objects.get(candidate)
+    if obj is not None and obj.get("pb_is_membrane", False):
+        root = obj
+        break
+if root is None:
+    raise RuntimeError("build_membrane created no pb_is_membrane root: %r" % (names,))
+return {
+    "root": root.name,
+    "created": names,
+    "children": sorted(c.name for c in root.children),
+    "child_types": sorted({c.type for c in root.children}),
+    "shape": root.get("pb_mem_shape"),
+    "render_style": root.get("pb_mem_render_style"),
+    "base_verts": len(root.data.vertices),
+    "modifiers": [m.name for m in root.modifiers if m.type == "NODES"],
+}
+"""
+
+# What Blender evaluated, not what the add-on says it built.
+#
+# The membrane's lipids exist only as geometry-nodes instances, so this is the
+# only honest count of them. ``origin`` is optional: pass a world point to also
+# get the distance from it to the nearest lipid, which is how "the membrane
+# parts around this protein" becomes measurable.
+LIPID_STATS = """
+bpy.context.view_layer.update()
+deps = bpy.context.evaluated_depsgraph_get()
+xs, ys, zs = [], [], []
+for inst in deps.object_instances:
+    if not inst.is_instance:
+        continue
+    parent = inst.parent
+    if parent is None or parent.original.name != name:
+        continue
+    translation = inst.matrix_world.translation
+    xs.append(translation.x)
+    ys.append(translation.y)
+    zs.append(translation.z)
+stats = {"count": len(xs)}
+if xs:
+    stats["x_extent"] = max(xs) - min(xs)
+    stats["y_extent"] = max(ys) - min(ys)
+    stats["z_extent"] = max(zs) - min(zs)
+    if origin:
+        ox, oy, oz = origin
+        stats["min_distance"] = min(
+            ((x - ox) ** 2 + (y - oy) ** 2 + (z - oz) ** 2) ** 0.5
+            for x, y, z in zip(xs, ys, zs))
+return stats
+"""
+
+SET_PROPS = """
+props = bpy.context.scene.membrane_builder_props
+with R.view3d_override():
+    for key, value in settings.items():
+        setattr(props, key, value)
+return {key: str(getattr(props, key)) for key in settings}
+"""
+
+# An orthographic view straight down the Z axis. A flat bilayer seen from above
+# is the one framing in which "a hole removes covered geometry" means what it
+# says: the gap has nothing behind it to fill in.
+TOP_VIEW = """
+window, area, region = R.find_view3d()
+region_3d = area.spaces.active.region_3d
+previous = {"perspective": region_3d.view_perspective,
+            "rotation": list(region_3d.view_rotation)}
+region_3d.view_perspective = "ORTHO"
+region_3d.view_rotation = (1.0, 0.0, 0.0, 0.0)
+return previous
+"""
+
+# The live Blender is a long-lived session shared by the whole lane, so a test
+# that changes the user's view puts it back.
+RESTORE_VIEW = """
+window, area, region = R.find_view3d()
+region_3d = area.spaces.active.region_3d
+region_3d.view_perspective = previous["perspective"]
+region_3d.view_rotation = previous["rotation"]
+return previous["perspective"]
+"""
+
+HOLE_NAMES = """
+root = bpy.data.objects[name]
+return sorted(c.name for c in root.children
+              if c.get("pb_is_membrane_hole", False))
+"""
+
+ACTIVATE = """
+with R.view3d_override():
+    H.select_only(bpy.data.objects[name])
+return bpy.context.view_layer.objects.active.name
+"""
+
+
+def build_membrane(blender, **overrides):
+    """Build one membrane through the public operator; return its facts dict."""
+    overrides.setdefault("shape", "FLAT")
+    overrides.setdefault("width", 20.0)
+    overrides.setdefault("height", 20.0)
+    return blender.call(BUILD, overrides=overrides)
+
+
+def lipid_stats(blender, root, origin=None):
+    """Depsgraph-evaluated lipid instances for one membrane root."""
+    return blender.call(LIPID_STATS, name=root, origin=origin)
+
+
+def delete_membrane(blender, root):
+    return blender.call("""
+        with R.view3d_override():
+            return sorted(bpy.ops.proteinblender.delete_membrane(
+                membrane_name=name))
+    """, name=root)
+
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_a_built_membrane_is_visible_and_carries_lipids(blender, shot):
+    """The baseline: a membrane must render, and must render lipids.
+
+    Both halves matter. The headless lane can prove the base patch exists; only
+    a render can prove anything was drawn, and only the instance count can prove
+    the thing drawn was a bilayer rather than a bare grid.
+    """
+    facts = build_membrane(blender)
+    assert facts["base_verts"] > 0, "membrane base mesh has no vertices"
+    assert facts["modifiers"], "membrane has no geometry-nodes modifier"
+    assert "LATTICE" in facts["child_types"], (
+        f"no lattice deformer child; children are {facts['children']}")
+
+    stats = lipid_stats(blender, facts["root"])
+    assert stats["count"] > 0, (
+        "the membrane evaluated zero lipid instances; the base patch exists "
+        "but no bilayer was built on it")
+
+    metrics = shot("built")
+    assert metrics["covered"] > 0, "a built membrane rendered nothing"
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_shape_renders_lipids(blender, shot, shape):
+    """Sheet, vesicle and bowl each have their own base-mesh generator."""
+    facts = build_membrane(blender, shape=shape, radius=15.0)
+    assert facts["shape"] == shape
+
+    stats = lipid_stats(blender, facts["root"])
+    assert stats["count"] > 0, f"shape {shape!r} placed no lipids"
+
+    metrics = shot(shape)
+    assert metrics["covered"] > 0, f"shape {shape!r} rendered nothing"
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.slow
+def test_the_three_shapes_are_visually_distinct(blender):
+    """A sheet, a sphere and a bowl cannot look the same.
+
+    Each membrane is deleted before the next is built, and the view is framed
+    once and then left alone, so the only variable between the three captures is
+    the shape. A shape enum that is recorded but never reaches the base-mesh
+    generator produces three identical pictures and is caught here; the headless
+    lane checks ``pb_mem_shape`` and would stay green.
+    """
+    first = build_membrane(blender, shape=SHAPES[0], radius=15.0)
+    blender.call("return R.frame_all()")
+    blender.call("return R.capture(label=shape)", shape=SHAPES[0])
+    delete_membrane(blender, first["root"])
+
+    for shape in SHAPES[1:]:
+        facts = build_membrane(blender, shape=shape, radius=15.0)
+        metrics = blender.call("return R.capture(label=shape)", shape=shape)
+        assert metrics["covered"] > 0, f"shape {shape!r} rendered nothing"
+        delete_membrane(blender, facts["root"])
+
+    for left, right in itertools.combinations(SHAPES, 2):
+        diff = blender.call("return R.compare(left, right)",
+                            left=left, right=right)
+        assert not diff["identical"], (
+            f"shapes {left!r} and {right!r} rendered identical images")
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.parametrize("render_style", RENDER_STYLES)
+def test_every_render_style_renders_lipids(blender, shot, render_style):
+    """Each style feeds the modifier from a different lipid collection.
+
+    A style whose collection fails to append leaves the modifier with an empty
+    Lipid Collection input: the base patch is untouched, the operator reports
+    success, and nothing is drawn. That is invisible to a vertex count and
+    obvious in a render.
+    """
+    facts = build_membrane(blender, render_style=render_style)
+    assert facts["render_style"] == render_style
+
+    stats = lipid_stats(blender, facts["root"])
+    assert stats["count"] > 0, (
+        f"render style {render_style!r} placed no lipid instances")
+
+    metrics = shot(render_style)
+    assert metrics["covered"] > 0, (
+        f"render style {render_style!r} rendered nothing")
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.slow
+def test_render_styles_are_visually_distinct(blender):
+    """Surface, stylized and ball-and-stick draw the same lipid three ways.
+
+    Same shape, same size, same framing throughout, so identical captures can
+    only mean the style never changed which collection was instanced.
+    """
+    first = build_membrane(blender, render_style=RENDER_STYLES[0])
+    blender.call("return R.frame_all()")
+    blender.call("return R.capture(label=style)", style=RENDER_STYLES[0])
+    delete_membrane(blender, first["root"])
+
+    for style in RENDER_STYLES[1:]:
+        facts = build_membrane(blender, render_style=style)
+        metrics = blender.call("return R.capture(label=style)", style=style)
+        assert metrics["covered"] > 0, f"style {style!r} rendered nothing"
+        delete_membrane(blender, facts["root"])
+
+    for left, right in itertools.combinations(RENDER_STYLES, 2):
+        diff = blender.call("return R.compare(left, right)",
+                            left=left, right=right)
+        assert not diff["identical"], (
+            f"render styles {left!r} and {right!r} rendered identical images")
+
+
+# ---------------------------------------------------------------------------
+# Size, density, thickness
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_resize_widens_the_evaluated_membrane(blender):
+    """Widening the patch must move lipids, not just the invisible base grid.
+
+    The headless lane measures the base mesh, which the resize operator rebuilds
+    directly. Measuring the evaluated lipid instances instead means the
+    assertion only passes if the change propagated all the way through the
+    geometry-nodes tree to the things a user can see, and the render has to move
+    with it.
+    """
+    facts = build_membrane(blender, width=20.0, height=20.0)
+    root = facts["root"]
+    before = lipid_stats(blender, root)
+    assert before["count"] > 0
+    blender.call("return R.frame_all()")
+    blender.call('return R.capture("narrow")')
+
+    resized = blender.call("""
+        with R.view3d_override():
+            H.select_only(bpy.data.objects[name])
+            bpy.context.scene.membrane_builder_props.width = 40.0
+            return sorted(bpy.ops.proteinblender.resize_membrane())
+    """, name=root)
+    assert resized == ["FINISHED"], f"resize_membrane returned {resized}"
+
+    after = lipid_stats(blender, root)
+    assert after["x_extent"] > before["x_extent"] * 1.5, (
+        f"doubling the width moved the lipid field from {before['x_extent']:.3f} "
+        f"to {after['x_extent']:.3f} BU; the resize did not reach the lipids")
+    assert after["y_extent"] == pytest.approx(before["y_extent"], rel=0.15), (
+        f"the height was left alone but the lipid field's Y extent moved from "
+        f"{before['y_extent']:.3f} to {after['y_extent']:.3f}")
+
+    blender.call('return R.capture("wide")')
+    diff = blender.call('return R.compare("narrow", "wide")')
+    assert not diff["identical"], "resizing the membrane did not change the render"
+
+
+@pytest.mark.live
+def test_higher_density_packs_in_more_lipids(blender):
+    """Density is lipids per nm squared, so raising it must add lipids.
+
+    Monotonicity is the whole claim, and it is a property of the physical
+    quantity the slider names. No absolute count is asserted, because the exact
+    number depends on the point-distribution seed.
+    """
+    facts = build_membrane(blender, density=0.5)
+    root = facts["root"]
+    sparse = lipid_stats(blender, root)
+    assert sparse["count"] > 0
+
+    blender.call(ACTIVATE, name=root)
+    blender.call(SET_PROPS, settings={"density": 2.5})
+    dense = lipid_stats(blender, root)
+
+    assert dense["count"] > sparse["count"], (
+        f"raising density from 0.5 to 2.5 lipids/nm^2 changed the instance "
+        f"count from {sparse['count']} to {dense['count']}; the slider is not "
+        "reaching the distribution")
+
+
+@pytest.mark.live
+def test_a_thicker_bilayer_spans_more_z(blender):
+    """Thickness is measured head-group to head-group, so it is a Z span.
+
+    The two leaflets are what separate, so the invariant is the Z extent of the
+    lipid field. A thickness value that is stored but never fed to the leaflet
+    offset leaves the span unchanged.
+    """
+    facts = build_membrane(blender, bilayer_thickness=3.0)
+    root = facts["root"]
+    thin = lipid_stats(blender, root)
+    assert thin["count"] > 0
+
+    blender.call(ACTIVATE, name=root)
+    blender.call(SET_PROPS, settings={"bilayer_thickness": 9.0})
+    thick = lipid_stats(blender, root)
+
+    assert thick["z_extent"] > thin["z_extent"], (
+        f"tripling the bilayer thickness left the lipid field spanning "
+        f"{thick['z_extent']:.4f} BU against {thin['z_extent']:.4f} before; "
+        "the slider is not separating the leaflets")
+
+
+# ---------------------------------------------------------------------------
+# Holes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_a_hole_removes_covered_geometry(blender):
+    """A hole must take lipids out of the membrane, and out of the picture.
+
+    Framed orthographically from straight above, a flat bilayer covers a solid
+    block of pixels and a hole is a genuine gap with nothing behind it, so
+    covered pixels have to fall. The lipid instance count has to fall with them:
+    a hole that only hides lipids from one viewing angle would satisfy the pixel
+    check alone.
+
+    This is the assertion the headless lane cannot make at all. Holes are carved
+    inside the geometry-nodes tree, so the base mesh it measures is byte
+    identical before and after.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+    previous_view = blender.call(TOP_VIEW)
+    try:
+        blender.call("return R.frame_all()")
+
+        solid_pixels = blender.call('return R.capture("solid")')
+        solid = lipid_stats(blender, root)
+        assert solid_pixels["covered"] > 0 and solid["count"] > 0
+
+        added = blender.call("""
+            with R.view3d_override():
+                H.select_only(bpy.data.objects[name])
+                return sorted(bpy.ops.proteinblender.membrane_add_hole())
+        """, name=root)
+        assert added == ["FINISHED"], f"membrane_add_hole returned {added}"
+        assert len(blender.call(HOLE_NAMES, name=root)) == 1
+
+        holed_pixels = blender.call('return R.capture("holed")')
+        holed = lipid_stats(blender, root)
+    finally:
+        blender.call(RESTORE_VIEW, previous=previous_view)
+
+    assert holed["count"] < solid["count"], (
+        f"adding a hole left the lipid count at {holed['count']} against "
+        f"{solid['count']} before; the hole carved nothing")
+    assert holed_pixels["covered"] < solid_pixels["covered"], (
+        f"seen from directly above, the membrane still covers "
+        f"{holed_pixels['covered']} pixels against {solid_pixels['covered']} "
+        "before the hole; the hole is not visible")
+
+
+@pytest.mark.live
+def test_a_bigger_hole_removes_more_lipids(blender):
+    """The panel's per-hole radius slider drives the empty's scale.
+
+    Growing the radius must take out more lipids. A radius that is stored on the
+    empty but never read by the geometry-nodes tree gives an unchanged count,
+    which no state-based assertion would notice.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+    blender.call("""
+        with R.view3d_override():
+            H.select_only(bpy.data.objects[name])
+            bpy.ops.proteinblender.membrane_add_hole()
+    """, name=root)
+    small = lipid_stats(blender, root)
+
+    blender.call("""
+        hole = bpy.data.objects[name]
+        radius = hole.scale.x * 1.8
+        hole.scale = (radius, radius, radius)
+        bpy.context.view_layer.update()
+        return radius
+    """, name=blender.call(HOLE_NAMES, name=root)[0])
+
+    big = lipid_stats(blender, root)
+    assert big["count"] < small["count"], (
+        f"widening the hole left {big['count']} lipids against {small['count']} "
+        "for the smaller hole; the radius is not reaching the geometry")
+
+
+@pytest.mark.live
+def test_holes_can_be_added_selected_and_removed(blender):
+    """The full hole lifecycle, ending where it started.
+
+    Removing the hole must restore the lipid field exactly: the distribution is
+    seeded rather than random, so a leftover difference means the removal left
+    the hole's slot still carving.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+    pristine = lipid_stats(blender, root)
+
+    for _ in range(2):
+        blender.call("""
+            with R.view3d_override():
+                H.select_only(bpy.data.objects[owner])
+                bpy.ops.proteinblender.membrane_add_hole()
+        """, owner=root)
+    holes = blender.call(HOLE_NAMES, name=root)
+    assert len(holes) == 2, f"expected two holes, got {holes}"
+
+    # Never hold an object across an operator call: names are captured, the
+    # operator runs, and the state is re-read afterwards.
+    active = blender.call("""
+        with R.view3d_override():
+            bpy.ops.proteinblender.membrane_select_hole(hole_name=hole)
+            obj = bpy.context.view_layer.objects.active
+            return {"active": obj.name if obj else "",
+                    "selected": obj.select_get() if obj else False}
+    """, hole=holes[0])
+    assert active["active"] == holes[0], (
+        f"selecting hole {holes[0]!r} made {active['active']!r} active instead")
+    assert active["selected"] is True
+
+    for hole in holes:
+        blender.call("""
+            with R.view3d_override():
+                H.select_only(bpy.data.objects[owner])
+                bpy.ops.proteinblender.membrane_remove_hole(hole_name=hole)
+        """, owner=root, hole=hole)
+
+    assert blender.call(HOLE_NAMES, name=root) == []
+    restored = lipid_stats(blender, root)
+    assert restored["count"] == pristine["count"], (
+        f"after removing both holes the membrane has {restored['count']} "
+        f"lipids against {pristine['count']} before they were added; a removed "
+        "hole is still carving")
+
+
+@pytest.mark.live
+@pytest.mark.slow
+def test_the_hole_cap_is_enforced(blender):
+    """Eight holes fit; the ninth must be refused, not silently dropped.
+
+    The geometry-nodes tree has a fixed number of hole slots, so a ninth hole
+    that appeared to be created would be a controller carving nothing - worse
+    than a refusal, because the panel would count it.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=30.0, height=30.0)
+    root = facts["root"]
+
+    results = []
+    for _ in range(MAX_HOLES + 1):
+        results.append(blender.call("""
+            with R.view3d_override():
+                H.select_only(bpy.data.objects[owner])
+                return sorted(bpy.ops.proteinblender.membrane_add_hole())
+        """, owner=root))
+
+    assert results[:MAX_HOLES] == [["FINISHED"]] * MAX_HOLES, (
+        f"the first {MAX_HOLES} holes were not all accepted: {results}")
+    assert results[MAX_HOLES] == ["CANCELLED"], (
+        f"hole number {MAX_HOLES + 1} returned {results[MAX_HOLES]} instead of "
+        "being refused")
+    assert len(blender.call(HOLE_NAMES, name=root)) == MAX_HOLES
+
+
+# ---------------------------------------------------------------------------
+# Deformation reset
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_reset_deform_returns_the_membrane_to_its_rest_shape(blender):
+    """Reset must undo a lattice deformation all the way to the pixels.
+
+    The lattice point is displaced directly, which is what grabbing it in
+    lattice edit mode does. The proof that reset worked is that the render
+    matches the pre-deformation capture again, not that ``co_deform`` was
+    reassigned - a reset that fixed the lattice data while leaving the modifier
+    stale would pass the data check and still look wrong.
+
+    The deformed capture in the middle is what stops this being vacuous: if the
+    lattice never bent the membrane in the first place, there was nothing to
+    reset and the two matching captures would prove nothing.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+    blender.call("return R.frame_all()")
+    blender.call('return R.capture("rest")')
+
+    blender.call("""
+        root = bpy.data.objects[name]
+        lattice = next(c for c in root.children if c.type == "LATTICE")
+        point = lattice.data.points[0]
+        point.co_deform = (point.co[0], point.co[1], point.co[2] + 2.0)
+        bpy.context.view_layer.update()
+        return lattice.name
+    """, name=root)
+    blender.call('return R.capture("deformed")')
+
+    bent = blender.call('return R.compare("rest", "deformed")')
+    assert not bent["identical"], (
+        "displacing a lattice point did not change the render, so this test "
+        "cannot show that reset undid anything")
+
+    result = blender.call("""
+        with R.view3d_override():
+            H.select_only(bpy.data.objects[name])
+            return sorted(bpy.ops.proteinblender.membrane_reset_deform())
+    """, name=root)
+    assert result == ["FINISHED"]
+
+    at_rest = blender.call("""
+        root = bpy.data.objects[name]
+        lattice = next(c for c in root.children if c.type == "LATTICE")
+        return max(max(abs(d - c) for d, c in zip(p.co_deform, p.co))
+                   for p in lattice.data.points)
+    """, name=root)
+    assert at_rest == pytest.approx(0.0, abs=1e-5), (
+        f"a lattice point is still {at_rest} from its rest position after reset")
+
+    blender.call('return R.capture("restored")')
+    restored = blender.call('return R.compare("rest", "restored")')
+    assert restored["iou"] > 0.999 and restored["rgb_delta"] < 0.01, (
+        f"after reset the membrane does not render as it did at rest "
+        f"(iou {restored['iou']}, rgb delta {restored['rgb_delta']})")
+
+
+# ---------------------------------------------------------------------------
+# Colour
+#
+# The headless lane cannot check any of this: it reduces every render to an
+# alpha mask and throws the RGB channels away.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_the_lipid_surface_colour_reaches_the_render(blender):
+    """A red membrane must read redder than a blue one.
+
+    Two membranes built in turn at the same place with the same framing, so the
+    only difference is the colour that was asked for. Only the ordering of the
+    channels is asserted, never their values, so viewport lighting cannot make
+    or break it.
+    """
+    blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
+
+    facts = build_membrane(blender, render_style="SURFACE", color_surface=RED)
+    blender.call("return R.frame_all()")
+    red = blender.call('return R.capture("red")')
+    delete_membrane(blender, facts["root"])
+
+    build_membrane(blender, render_style="SURFACE", color_surface=BLUE)
+    blue = blender.call('return R.capture("blue")')
+
+    assert red["covered"] > 0 and blue["covered"] > 0
+    assert red["mean_rgb"][0] > red["mean_rgb"][2], (
+        f"a membrane asked to be red rendered mean RGB {red['mean_rgb']}")
+    assert blue["mean_rgb"][2] > blue["mean_rgb"][0], (
+        f"a membrane asked to be blue rendered mean RGB {blue['mean_rgb']}")
+
+    diff = blender.call('return R.compare("red", "blue")')
+    assert diff["rgb_delta"] > 0.0, (
+        "the lipid colour never reached the rendered membrane")
+
+
+@pytest.mark.live
+@pytest.mark.visual
+@pytest.mark.slow
+def test_head_and_tail_colours_each_reach_the_render(blender):
+    """Head and tail are separately coloured in the stylized style.
+
+    Each swatch is varied on its own against a dark constant for the other, so a
+    head colour wired to the tail material, or to nothing, cannot hide behind
+    the other swatch changing at the same time.
+    """
+    blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
+
+    for index, (label, settings) in enumerate([
+        ("head-red", {"color_head": RED, "color_tail": DARK_GREY}),
+        ("head-blue", {"color_head": BLUE, "color_tail": DARK_GREY}),
+        ("tail-red", {"color_head": DARK_GREY, "color_tail": RED}),
+        ("tail-blue", {"color_head": DARK_GREY, "color_tail": BLUE}),
+    ]):
+        facts = build_membrane(blender, render_style="STYLIZED", **settings)
+        if index == 0:
+            blender.call("return R.frame_all()")
+        metrics = blender.call("return R.capture(label=label)", label=label)
+        assert metrics["covered"] > 0, f"{label} rendered nothing"
+        delete_membrane(blender, facts["root"])
+
+    for part in ("head", "tail"):
+        diff = blender.call("return R.compare(left, right)",
+                            left=f"{part}-red", right=f"{part}-blue")
+        assert diff["rgb_delta"] > 0.0, (
+            f"changing only the lipid {part} colour from red to blue left the "
+            "render unchanged; that swatch is not connected to a material")
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_deleting_a_membrane_clears_it_from_the_scene_and_the_screen(blender,
+                                                                     shot):
+    """Delete must take the root, its children and every pixel with it.
+
+    An empty scene renders zero covered pixels - that is the calibration
+    ``test_live_harness`` establishes - so returning to zero is a complete
+    statement that nothing was left behind, including instanced lipids that
+    never appear in ``bpy.data.objects`` at all.
+    """
+    facts = build_membrane(blender)
+    root, children = facts["root"], facts["children"]
+    assert children, "membrane had no children to check the cascade against"
+    assert shot("built")["covered"] > 0
+
+    result = delete_membrane(blender, root)
+    assert result == ["FINISHED"], f"delete_membrane returned {result}"
+
+    survivors = blender.call("""
+        return [n for n in [root] + children if bpy.data.objects.get(n) is not None]
+    """, root=root, children=children)
+    assert survivors == [], f"these objects survived the delete: {survivors}"
+
+    empty = shot("deleted", frame=False)
+    assert empty["covered"] == 0, (
+        f"after deleting the membrane the viewport still shows "
+        f"{empty['covered']} covered pixels")
+
+
+# ---------------------------------------------------------------------------
+# Per-protein force fields
+# ---------------------------------------------------------------------------
+
+@pytest.mark.live
+@pytest.mark.visual
+def test_a_protein_force_field_parts_the_lipids_around_it(blender, single_chain):
+    """The claim the feature makes: the bilayer parts around the protein.
+
+    Measured as the distance from the force-field anchor to the nearest lipid
+    Blender actually evaluated. With the field on that distance must be larger
+    than with it off, which is what "parts around it" means and what neither the
+    ``pb_force_field_enabled`` flag nor the anchor's existence can tell you.
+
+    The anchor's world position is read once, while the field is on, and reused
+    as the reference point for both measurements, so the two numbers are
+    distances to the same place.
+
+    The protein is first dragged onto the bilayer midplane, the way a user
+    would, by offsetting its location so the anchor lands at the world origin.
+    An imported structure sits wherever its PDB coordinates put it, which may be
+    clear of the membrane entirely, and a force field that never overlaps any
+    lipid would leave nothing to measure.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+
+    enabled = blender.call("""
+        scene = bpy.context.scene
+        for item in scene.outliner_items:
+            item.is_selected = (item.item_type == "PROTEIN"
+                                and item.item_id == molecule_id)
+        with R.view3d_override():
+            result = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+        obj = H.sm().molecules[molecule_id].object
+        anchor = bpy.data.objects.get(obj.name + ".ff_anchor")
+        if anchor is not None:
+            obj.location = obj.location - anchor.matrix_world.translation
+            bpy.context.view_layer.update()
+        return {
+            "result": sorted(result),
+            "object": obj.name,
+            "flag": bool(obj.pb_force_field_enabled),
+            "anchor": list(anchor.matrix_world.translation) if anchor else None,
+            "anchor_parented": (anchor.parent.name == obj.name) if anchor else False,
+        }
+    """, molecule_id=single_chain)
+
+    assert enabled["result"] == ["FINISHED"]
+    assert enabled["flag"] is True, "the force-field flag did not turn on"
+    assert enabled["anchor"] is not None, "no force-field anchor Empty was created"
+    assert enabled["anchor_parented"] is True, (
+        "the anchor is not parented to its owner, so it will not follow the "
+        "protein when it moves")
+
+    anchor_point = enabled["anchor"]
+    with_field = lipid_stats(blender, root, origin=anchor_point)
+
+    disabled = blender.call("""
+        scene = bpy.context.scene
+        for item in scene.outliner_items:
+            item.is_selected = (item.item_type == "PROTEIN"
+                                and item.item_id == molecule_id)
+        with R.view3d_override():
+            result = bpy.ops.proteinblender.toggle_force_fields(target_state="off")
+        obj = H.sm().molecules[molecule_id].object
+        return {
+            "result": sorted(result),
+            "flag": bool(obj.pb_force_field_enabled),
+            "anchor_left": bpy.data.objects.get(obj.name + ".ff_anchor") is not None,
+        }
+    """, molecule_id=single_chain)
+
+    assert disabled["result"] == ["FINISHED"]
+    assert disabled["flag"] is False, "the force-field flag did not turn off"
+    assert disabled["anchor_left"] is False, (
+        "the anchor Empty survived after the force field was disabled")
+
+    without_field = lipid_stats(blender, root, origin=anchor_point)
+
+    assert with_field["min_distance"] > without_field["min_distance"], (
+        f"with the force field on the nearest lipid sits "
+        f"{with_field['min_distance']:.4f} BU from the protein, against "
+        f"{without_field['min_distance']:.4f} BU with it off; the membrane is "
+        "not parting around the protein")
+
+
+@pytest.mark.live
+def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
+    """Spacing is extra clearance in nm beyond the protein's own radius.
+
+    More clearance must push the nearest lipid further away. Both measurements
+    are taken against the same anchor point with the field on throughout, so the
+    only variable is the slider.
+    """
+    facts = build_membrane(blender, shape="FLAT", width=20.0, height=20.0)
+    root = facts["root"]
+
+    anchor_point = blender.call("""
+        scene = bpy.context.scene
+        for item in scene.outliner_items:
+            item.is_selected = (item.item_type == "PROTEIN"
+                                and item.item_id == molecule_id)
+        with R.view3d_override():
+            bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+        obj = H.sm().molecules[molecule_id].object
+        obj.pb_force_field_spacing = 1.0
+        anchor = bpy.data.objects.get(obj.name + ".ff_anchor")
+        if anchor is None:
+            return None
+        # Drag the protein onto the bilayer midplane so the field has lipids
+        # to act on, exactly as a user positions a membrane protein.
+        obj.location = obj.location - anchor.matrix_world.translation
+        bpy.context.view_layer.update()
+        return list(anchor.matrix_world.translation)
+    """, molecule_id=single_chain)
+    assert anchor_point is not None, "no force-field anchor to measure against"
+
+    narrow = lipid_stats(blender, root, origin=anchor_point)
+
+    blender.call("""
+        obj = H.sm().molecules[molecule_id].object
+        obj.pb_force_field_spacing = 6.0
+        bpy.context.view_layer.update()
+        return obj.pb_force_field_spacing
+    """, molecule_id=single_chain)
+
+    wide = lipid_stats(blender, root, origin=anchor_point)
+
+    assert wide["min_distance"] > narrow["min_distance"], (
+        f"raising the force-field spacing from 1 nm to 6 nm left the nearest "
+        f"lipid at {wide['min_distance']:.4f} BU against "
+        f"{narrow['min_distance']:.4f} BU before; the spacing slider is not "
+        "reaching the membrane")

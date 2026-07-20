@@ -45,8 +45,15 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra --tb=short"
 # The vendored MolecularNodes ships its own tests; they are not part of this suite.
+#
+# tests/live is excluded from ordinary discovery on purpose. That lane runs in
+# system Python and attaches to a Blender the developer already has open; if the
+# headless suite collected it, a background test run would reach out over the
+# socket and drive the user's live session. Run it deliberately, through
+# tests/run_live_tests.py.
 norecursedirs = [
     "proteinblender/utils/molecularnodes",
+    "tests/live",
     "*.egg", "dist", "build", ".git",
 ]
 

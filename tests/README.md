@@ -24,6 +24,10 @@ python tests/run_isolated_tests.py
 # real foreground window/event loop (use xvfb-run on headless Linux)
 python tests/run_ui_tests.py
 
+# a Blender you already have open, observed through its viewport
+python tests/run_live_tests.py --preflight
+python tests/run_live_tests.py -v
+
 # the actual shipped ZIP: build -> validate -> install -> enable -> reopen
 python tests/artifact/run_artifact_tests.py --prepare-wheels
 
@@ -82,7 +86,13 @@ tests/
   unit/              # pure logic — no scene needed (chain maths, DNA sequence, catenary, geometry)
   integration/       # operator-driven — one module per subsystem
   roundtrip/         # save/load state preservation (spawns a fresh Blender to reopen)
+  live/              # drives a Blender you already have open, over the BlenderMCP socket
 ```
+
+The `live/` lane is the one exception to "runs inside Blender": it runs in
+system Python and attaches to an open, windowed Blender, so it can observe the
+actual viewport and, uniquely in this suite, assert on **color**. See
+[live/README.md](live/README.md). It skips when no Blender is listening.
 
 ## Design goal these tests protect
 
@@ -139,6 +149,7 @@ the behavioral lanes.
 | `network`     | fetches from RCSB/AlphaFold (needs internet)        |
 | `slow`        | more than a couple seconds                          |
 | `visual`      | renderer-observed visual regression                 |
+| `live`        | drives an already-open, windowed Blender over MCP   |
 
 ## Release-quality lanes
 
@@ -161,6 +172,11 @@ The suite has deliberately separate trust boundaries:
 - **Visual** — real Cycles observations prove output is nonempty and that user
   style choices produce materially different images. These use robust image
   relationships rather than byte-identical PNGs, which vary across devices.
+- **Live viewport** — attaches to an open, windowed Blender running the
+  *deployed* add-on and observes its 3D viewport directly. This is the only lane
+  that can see the shading path a user looks at, and the only one that asserts
+  on colour rather than an alpha mask. Skips when no Blender is listening; set
+  `PB_LIVE_REQUIRED=1` to make that a failure instead.
 
 Set `PB_STRICT_CONTEXT=1` in a canonical environment. Context-sensitive tests
 that are allowed to skip on an arbitrary developer machine then fail instead,
