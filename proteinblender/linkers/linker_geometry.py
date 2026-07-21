@@ -10,6 +10,7 @@ domains within a puppet. The linker behaves like a string/tube:
 
 import bpy
 import math
+import zlib
 from mathutils import Vector
 from typing import List, Optional
 import logging
@@ -23,18 +24,14 @@ ANGSTROM_PER_RESIDUE = 3.5
 MN_SCALE = 0.01  # MolecularNodes scale: 1 BU = 100 Angstroms
 BU_PER_RESIDUE = ANGSTROM_PER_RESIDUE * MN_SCALE  # 0.035 BU per residue
 
-# Random-coil appearance.
-# The coil is modelled as multi-octave 3D noise (several sinusoids at ~1/f
-# amplitudes in randomized directions) so it kinks and coils stochastically
-# like a disordered chain rather than tracing a regular spring. The base
-# frequency scales with the slack the coil must absorb, which keeps the
-# amplitude gentle even when the two endpoints are close together — the case
-# where a fixed low cycle count degenerates into a sharp large-amplitude wave.
-DEFAULT_COIL_WIDTH = 0.03   # BU — feature scale of the coil (user-tunable)
-MIN_COIL_TURNS = 1.5        # min primary cycles (keeps some wiggle when taut)
-MAX_COIL_TURNS = 24.0       # cap so control-point count stays bounded
-# Cap on random-coil sample points (bezier control points) for performance.
-MAX_COIL_SAMPLES = 256
+# Random-coil wiggle density: base number of coils ≈ residues * this factor
+# (~a gentle turn every ~3 residues). Scaling the coil count with the residue
+# count lets a longer / slacker linker absorb its excess length as many small
+# waves instead of a few big ones.
+COILS_PER_RESIDUE = 0.3
+MIN_COIL_CYCLES = 2.0
+MAX_COIL_CYCLES = 12.0
+MAX_COIL_SAMPLES = 128
 
 
 # ---------------------------------------------------------------------------
@@ -496,30 +493,41 @@ def _arc_length(points: List[Vector]) -> float:
     return length
 
 
-def _generate_coil_shape(start: Vector, end: Vector, amplitude: float,
-                         num_samples: int, freqs: List[float], amps: List[float],
-                         dirs: List[Vector], phases: List[float]) -> List[Vector]:
-    """Generate a stochastic coil path by summing several noise octaves.
-
-    Each octave is a sinusoid at its own frequency, amplitude, random 3D
-    direction and phase. Summed together they read as an irregular,
-    self-kinking, disordered chain (an intrinsically disordered region) rather
-    than a regular spring. The whole offset is tapered to zero at both ends so
-    the chain meets the endpoints cleanly, and scaled by ``amplitude`` (found by
-    the caller to hit the target arc length).
-    """
-    amp_sum = sum(amps) or 1.0
+def _generate_random_coil_shape(start: Vector, end: Vector,
+                                 amplitude: float,
+                                 num_samples: int,
+                                 perp1: Vector, perp2: Vector,
+                                 freqs: List[float], amps: List[float],
+                                 phase_offsets: List[float]) -> List[Vector]:
+    """Generate the pre-regression smooth coil at an amplitude scale."""
+    amp_sum = sum(amps)
     points = []
     for i in range(num_samples):
         t = i / max(num_samples - 1, 1)
         base = start.lerp(end, t)
-        envelope = math.sin(math.pi * t)  # zero at ends, 1 in the middle
-        off = Vector((0.0, 0.0, 0.0))
+        envelope = 4.0 * t * (1.0 - t)
+        offset1 = 0.0
+        offset2 = 0.0
         for k in range(len(freqs)):
-            off += dirs[k] * (amps[k] * math.sin(2.0 * math.pi * freqs[k] * t + phases[k]))
-        off = off * (amplitude / amp_sum) * envelope
-        points.append(base + off)
+            angle1 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k]
+            angle2 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k + 3]
+            offset1 += amps[k] * math.sin(angle1)
+            offset2 += amps[k] * math.cos(angle2)
+        # Slowly vary the coil radius to break up the repeating, heartbeat-like
+        # silhouette while preserving the smooth pre-regression path.
+        size_variation = 1.0 + 0.18 * math.sin(
+            2.0 * math.pi * 0.73 * t + phase_offsets[0] * 0.37
+        )
+        scale = (amplitude / amp_sum) * envelope * size_variation
+        offset1 *= scale
+        offset2 *= scale
+        points.append(base + perp1 * offset1 + perp2 * offset2)
     return points
+
+
+def _stable_coil_seed(uid: str) -> int:
+    """Return the same compact coil seed in every Blender process."""
+    return zlib.crc32(uid.encode("utf-8")) & 0xFFFF
 
 
 def compute_random_coil_points(start: Vector, end: Vector,
@@ -527,76 +535,59 @@ def compute_random_coil_points(start: Vector, end: Vector,
                                 num_residues: int = 10,
                                 seed: int = 0,
                                 coil_width: float = None) -> List[Vector]:
-    """Compute points along a stochastic random-coil path whose arc length
-    matches total_length.
-
-    Models an intrinsically disordered region as multi-octave 3D noise: several
-    sinusoids at ~1/f amplitudes in randomized directions, so the chain kinks
-    and coils irregularly instead of forming a regular spring. The base
-    frequency scales with the slack (sqrt(L^2 - D^2) / coil_width), so when the
-    endpoints are close the coil packs into many small gentle kinks instead of
-    ballooning into a sharp large-amplitude wave (the failure mode of a low
-    number of cycles).
-
-    ``coil_width`` sets the feature scale: smaller = more, tighter kinks; larger
-    = fewer, looser loops. The seed (from the linker UID) keeps each linker's
-    shape deterministic but distinct. When taut, returns a straight line.
-    """
-    import random
-
+    """Compute the pre-regression smooth random-coil path."""
     D = (end - start).length
     L = total_length
-    width = coil_width if (coil_width and coil_width > 0) else DEFAULT_COIL_WIDTH
+    import random
 
-    # Taut / nearly taut: straight line.
-    if L <= 1e-9 or D >= L * 0.99:
-        n = 16
-        return [start.lerp(end, i / (n - 1)) for i in range(n)]
-
-    # Primary feature count scales with the slack the coil must absorb and
-    # inversely with the feature width. More slack (endpoints close) or a
-    # smaller width => more, finer kinks, so the amplitude stays gentle.
-    coil_span = math.sqrt(max(L * L - D * D, 0.0))
-    base_cycles = coil_span / (2.0 * math.pi * width)
-    base_cycles = max(MIN_COIL_TURNS, min(MAX_COIL_TURNS, base_cycles))
-
-    # Fractal-ish octave stack: irregular frequency ratios + ~1/f amplitude
-    # falloff give a mix of broad coils and sharp kinks.
-    octave_ratios = [1.0, 1.9, 3.3, 5.7, 9.1]
-    octave_amps = [1.0, 0.72, 0.5, 0.34, 0.22]
-    freqs = [base_cycles * r for r in octave_ratios]
-    amps = list(octave_amps)
-
-    # Random 3D directions + phases per octave (deterministic per linker) — this
-    # is what makes the path wander stochastically rather than trace a helix.
+    base_cycles = min(MAX_COIL_CYCLES,
+                      max(MIN_COIL_CYCLES,
+                          num_residues * COILS_PER_RESIDUE))
     rng = random.Random(seed)
-    dirs = []
-    for _ in range(len(freqs)):
-        v = Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1)))
-        if v.length < 1e-6:
-            v = Vector((1.0, 0.0, 0.0))
-        dirs.append(v.normalized())
-    phases = [rng.uniform(0, 2.0 * math.pi) for _ in freqs]
+    # Slight per-linker detuning prevents the same three wave components from
+    # falling into an obvious repeating beat. Keep it subtle so the known-good
+    # smooth character remains intact.
+    ratios = [1.0, 1.7, 2.7]
+    freqs = [base_cycles * ratio * rng.uniform(0.94, 1.06)
+             for ratio in ratios]
+    amps = [1.0, 0.5 * rng.uniform(0.9, 1.1),
+            0.25 * rng.uniform(0.9, 1.1)]
+    num_samples = max(
+        9, min(MAX_COIL_SAMPLES, int(freqs[-1] * 5) + 1)
+    )
 
-    # Enough samples to resolve the highest-frequency octave.
-    num_samples = max(16, min(MAX_COIL_SAMPLES, int(freqs[-1] * 6) + 1))
+    if D >= L * 0.99 or D < 1e-6:
+        return [start.lerp(end, t / max(num_samples - 1, 1))
+                for t in range(num_samples)]
 
-    # Binary-search the overall amplitude so the polyline arc length equals L.
-    lo, hi = 0.0, L
-    best = None
+    direction = (end - start).normalized()
+    perp1 = direction.cross(Vector((0, 0, 1)))
+    if perp1.length < 0.1:
+        perp1 = direction.cross(Vector((0, 1, 0)))
+    perp1 = perp1.normalized()
+    perp2 = direction.cross(perp1).normalized()
+
+    phi = 1.6180339887
+    phase_offsets = [seed * phi * (k + 1) for k in range(6)]
+
+    amp_lo = 0.0
+    amp_hi = L
+    best_points = None
     for _ in range(30):
-        mid = (lo + hi) / 2.0
-        pts = _generate_coil_shape(start, end, mid, num_samples,
-                                   freqs, amps, dirs, phases)
+        amp_mid = (amp_lo + amp_hi) / 2.0
+        pts = _generate_random_coil_shape(
+            start, end, amp_mid, num_samples,
+            perp1, perp2, freqs, amps, phase_offsets
+        )
         arc = _arc_length(pts)
-        best = pts
-        if abs(arc - L) < L * 0.002:
+        best_points = pts
+        if abs(arc - L) < L * 0.001:
             break
         if arc < L:
-            lo = mid
+            amp_lo = amp_mid
         else:
-            hi = mid
-    return best
+            amp_hi = amp_mid
+    return best_points
 
 
 def _solve_catenary_parameter(h_dist: float, L_target: float,
@@ -767,7 +758,7 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
         elif behavior == 'RANDOM_COIL':
             catenary_points = compute_random_coil_points(
                 start_pos, end_pos, total_length, linker_def.length_residues,
-                seed=hash(linker_def.uid) & 0xFFFF,
+                seed=_stable_coil_seed(linker_def.uid),
                 coil_width=getattr(linker_def, 'coil_width', None),
             )
         else:
@@ -907,7 +898,7 @@ def update_linker_curve(linker_def) -> bool:
     elif behavior == 'RANDOM_COIL':
         catenary_points = compute_random_coil_points(
             start_pos, end_pos, total_length, linker_def.length_residues,
-            seed=hash(linker_def.uid) & 0xFFFF,
+            seed=_stable_coil_seed(linker_def.uid),
             coil_width=getattr(linker_def, 'coil_width', None),
         )
     else:

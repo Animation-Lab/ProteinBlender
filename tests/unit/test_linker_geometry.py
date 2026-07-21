@@ -153,11 +153,39 @@ def test_random_coil_deterministic_for_seed():
 
 
 @pytest.mark.unit
+def test_random_coil_seed_varies_shape_without_moving_endpoints():
+    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
+    a = lg.compute_random_coil_points(start, end, 3.0,
+                                      num_residues=30, seed=7)
+    b = lg.compute_random_coil_points(start, end, 3.0,
+                                      num_residues=30, seed=8)
+    assert _vclose(a[0], start) and _vclose(a[-1], end)
+    assert _vclose(b[0], start) and _vclose(b[-1], end)
+    assert any(not _vclose(pa, pb) for pa, pb in zip(a[1:-1], b[1:-1]))
+
+
+@pytest.mark.unit
 def test_random_coil_taut_is_straight():
     start, end = Vector((0, 0, 0)), Vector((3, 0, 0))
     pts = lg.compute_random_coil_points(start, end, total_length=3.0,
                                         num_residues=30, seed=1)
     assert _is_collinear(pts, tol=1e-4)
+
+
+@pytest.mark.unit
+def test_random_coil_never_doubles_back_along_endpoint_axis():
+    """Noise may wander sideways, but must progress monotonically end to end."""
+    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
+    pts = lg.compute_random_coil_points(start, end, total_length=3.0,
+                                        num_residues=86, seed=7)
+    axial = [(point - start).dot((end - start).normalized()) for point in pts]
+    assert all(b >= a for a, b in zip(axial, axial[1:]))
+
+
+@pytest.mark.unit
+def test_stable_coil_seed_is_repeatable_and_uid_specific():
+    assert lg._stable_coil_seed("linker-one") == lg._stable_coil_seed("linker-one")
+    assert lg._stable_coil_seed("linker-one") != lg._stable_coil_seed("linker-two")
 
 
 # ---------------------------------------------------------------------------
