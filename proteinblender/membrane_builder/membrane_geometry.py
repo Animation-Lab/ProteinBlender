@@ -313,7 +313,18 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        Info reads the evaluated transform the render uses - no anchor Empty,
 #        no written vector, no Python matrix read to go stale. The per-slot
 #        Center vector input is gone. Structural change; rebuilds saved trees.
-GN_TREE_VERSION = 34
+#   v35: multi-field combiner no longer carves a phantom hole. The penetration
+#        was smin_sdf = -ln(Σ w_i)/α (log-sum-exp), which is biased below the
+#        true minimum by ln(N)/α: N force fields stacked at the same XY - each
+#        already Z-attenuated to radius 0 because the protein floats far above
+#        the sheet - summed to total_w ≈ N and produced ln(N)/α (~0.69 BU at
+#        N=4, α=2) of penetration from overlap alone, boring a hole no matter
+#        how high the protein was lifted (enabling the field on a whole protein
+#        AND each of its chains stacks exactly such fields). Replaced with the
+#        softmax-weighted mean smin_sdf = Σ(w_i·sdf_i)/Σ w_i, which is bounded by
+#        the individual sdfs, so out-of-reach fields carve nothing. Single-field
+#        behaviour is unchanged (the weights cancel). Structural; rebuilds trees.
+GN_TREE_VERSION = 35
 
 
 # ===========================================================================
@@ -1024,19 +1035,21 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                 sdf_i = dist_i - radius_i
                 w_i   = enabled_i · exp(−α · sdf_i)
 
-            then combine across slots with log-sum-exp / weighted-mean:
+            then combine across slots with softmax-weighted means:
 
                 total      = Σ w_i
                 grad       = Σ w_i · dir_i / total
-                smin_sdf   = −ln(total) / α
+                smin_sdf   = Σ w_i · sdf_i / total
                 push_mag   = max(0, −smin_sdf)
                 disp       = grad · push_mag
 
             This is a single pass; no Jacobi loop. For 1 active slot it
             collapses to the exact clamp-to-boundary push (w_1 cancels in
-            the grad division; smin_sdf = sdf_1). For ≥2 overlapping
-            slots it is the polynomial smooth-min, so the combined exit
-            surface naturally bulges into a single smooth boundary.
+            both weighted-mean divisions; smin_sdf = sdf_1). For ≥2
+            overlapping slots the weighted mean is a smooth soft-minimum
+            that stays bounded by the individual sdfs, so the combined exit
+            surface blends into one boundary WITHOUT ever pushing past the
+            deepest single field (which the old −ln(total)/α form did).
             """
             alpha_sock = get_in("FF Smoothness")
             neg_alpha = new("ShaderNodeMath",
@@ -1046,19 +1059,13 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             neg_alpha.location = (-2400, y_pos + 350)
             links.new(alpha_sock, neg_alpha.inputs[0])
 
-            inv_alpha = new("ShaderNodeMath",
-                            name=f"InvAlpha L{leaflet_index}")
-            inv_alpha.operation = "DIVIDE"
-            inv_alpha.inputs[0].default_value = 1.0
-            inv_alpha.location = (-2400, y_pos + 200)
-            links.new(alpha_sock, inv_alpha.inputs[1])
-
             total_w = None
             weighted_dir = None
+            weighted_sdf = None
 
             def _add_slot(slot_label, enabled_sock, obj_sock,
                           radius_source, hy, center_sock=None):
-                nonlocal total_w, weighted_dir
+                nonlocal total_w, weighted_dir, weighted_sdf
                 dist_s, dir_s, radius_s, en_s = _build_pusher(
                     slot_label, enabled_sock, obj_sock,
                     radius_source, hy, pos_socket, center_sock=center_sock)
@@ -1102,9 +1109,23 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                 links.new(dir_s, contrib.inputs[0])
                 links.new(w.outputs[0], contrib.inputs["Scale"])
 
+                # wsdf_i = w_i · sdf_i (scalar, for the weighted_sdf sum). The
+                # combined penetration is the softmax-weighted MEAN of the
+                # per-slot sdfs (Σ w·sdf / Σ w), NOT log-sum-exp. See the
+                # combiner note below for why: the mean stays within the range
+                # of the individual sdfs, so N overlapping fields can never
+                # manufacture penetration none of them has on its own.
+                wsdf = new("ShaderNodeMath",
+                           name=f"WSdf{slot_label} L{leaflet_index}")
+                wsdf.operation = "MULTIPLY"
+                wsdf.location = (820, hy - 150)
+                links.new(w.outputs[0], wsdf.inputs[0])
+                links.new(sdf.outputs[0], wsdf.inputs[1])
+
                 if total_w is None:
                     total_w = w.outputs[0]
                     weighted_dir = contrib.outputs[0]
+                    weighted_sdf = wsdf.outputs[0]
                     return
 
                 w_acc = new("ShaderNodeMath",
@@ -1122,6 +1143,14 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                 links.new(weighted_dir, d_acc.inputs[0])
                 links.new(contrib.outputs[0], d_acc.inputs[1])
                 weighted_dir = d_acc.outputs[0]
+
+                s_acc = new("ShaderNodeMath",
+                            name=f"Sacc{slot_label} L{leaflet_index}")
+                s_acc.operation = "ADD"
+                s_acc.location = (1000, hy - 300)
+                links.new(weighted_sdf, s_acc.inputs[0])
+                links.new(wsdf.outputs[0], s_acc.inputs[1])
+                weighted_sdf = s_acc.outputs[0]
 
             # ---- Hole slots ----------------------------------------------
             for h in range(1, num_holes + 1):
@@ -1146,11 +1175,11 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                     # from Object Info, so the field tracks it as it moves.
                 )
 
-            # ---- Combiner: softmax direction + smin penetration --------
+            # ---- Combiner: softmax direction + softmax-weighted-mean sdf --
             # When the lipid is far outside every pusher, every w_i ≈ 0;
-            # total_w is then near-zero but nonzero floats (no NaN from
-            # the divide) and ln(total) is very negative, so push_mag
-            # clamps to 0 and disp = 0.
+            # total_w is then near-zero but nonzero floats (no NaN from the
+            # divide), and the weighted-mean sdf below stays ≈ the (positive)
+            # individual sdf, so push_mag clamps to 0 and disp = 0.
             #
             # combined_dir = weighted_dir / total_w
             inv_total = new("ShaderNodeMath",
@@ -1167,28 +1196,30 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             links.new(weighted_dir, combined_dir.inputs[0])
             links.new(inv_total.outputs[0], combined_dir.inputs["Scale"])
 
-            # smin_sdf = -ln(total_w) / α   (negative inside the combined
-            # surface, positive outside, zero on the smooth boundary)
-            ln_total = new("ShaderNodeMath",
-                            name=f"LnTotal L{leaflet_index}")
-            ln_total.operation = "LOGARITHM"
-            ln_total.inputs[1].default_value = 2.718281828459045
-            ln_total.location = (1300, y_pos - 480)
-            links.new(total_w, ln_total.inputs[0])
-
-            neg_ln = new("ShaderNodeMath",
-                          name=f"NegLn L{leaflet_index}")
-            neg_ln.operation = "MULTIPLY"
-            neg_ln.inputs[1].default_value = -1.0
-            neg_ln.location = (1480, y_pos - 480)
-            links.new(ln_total.outputs[0], neg_ln.inputs[0])
-
+            # smin_sdf = Σ(w_i · sdf_i) / Σ w_i   — the softmax-weighted MEAN
+            # of the per-slot signed distances (weights w_i = exp(-α·sdf_i)
+            # concentrate on the nearest/deepest field, so this is a smooth
+            # soft-minimum). Crucially it is bounded: min_i sdf_i ≤ smin_sdf ≤
+            # max_i sdf_i, so if every field is out of reach (all sdf_i > 0)
+            # the combined sdf is > 0 and nothing is carved.
+            #
+            # This replaces the previous log-sum-exp form smin_sdf =
+            # -ln(Σ w_i)/α, which is biased BELOW the true minimum by
+            # ln(N)/α: N fields stacked at the same spot, each with weight ≈ 1
+            # (e.g. all Z-attenuated to radius 0 when the protein floats far
+            # above the sheet), summed to total_w ≈ N and produced a phantom
+            # penetration of ln(N)/α (≈ 0.69 BU for N=4 at α=2) - a hole
+            # carved from overlap alone, with no field actually reaching the
+            # membrane. Enabling the force field on a whole protein AND each of
+            # its chains stacks exactly such fields, so the bilayer was bored
+            # through no matter how high the protein was lifted. The weighted
+            # mean cannot exceed the individual sdfs, so that can't happen.
             smin_sdf = new("ShaderNodeMath",
                             name=f"SminSdf L{leaflet_index}")
             smin_sdf.operation = "MULTIPLY"
             smin_sdf.location = (1660, y_pos - 480)
-            links.new(neg_ln.outputs[0], smin_sdf.inputs[0])
-            links.new(inv_alpha.outputs[0], smin_sdf.inputs[1])
+            links.new(weighted_sdf, smin_sdf.inputs[0])
+            links.new(inv_total.outputs[0], smin_sdf.inputs[1])
 
             # push_mag = max(0, -smin_sdf)  (= penetration depth)
             neg_smin = new("ShaderNodeMath",

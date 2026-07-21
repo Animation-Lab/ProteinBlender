@@ -176,6 +176,30 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Overlapping membrane force fields carved a phantom hole, ignoring Z.** A
+  protein lifted far above the sheet still bored a hole straight down, at any
+  height, as long as it overlapped in XY. It was NOT the per-field Z-attenuation
+  (a *single* field correctly closes its hole once its centre clears the sheet by
+  its radius). The cause was the multi-field combiner in
+  `membrane_geometry._compute_sdf_displacement`: it formed the combined
+  penetration as `smin_sdf = -ln(Σ w_i)/α` (log-sum-exp), which is biased below
+  the true minimum by `ln(N)/α`. N fields stacked at the same XY, each already
+  Z-attenuated to radius 0 (so `sdf_i ≈ dist_flat`, and `≈ 0` for lipids right
+  under the shared centre), summed to `total_w ≈ N` and produced `ln(N)/α`
+  (~0.69 BU for N=4 at α=2) of penetration - a hole conjured from overlap with no
+  field actually reaching the membrane. Enabling the force field on a whole
+  protein AND each of its chains (the toggle sets the flag on all of them) stacks
+  exactly such fields. Fixed by replacing the penetration with the
+  softmax-weighted mean `smin_sdf = Σ(w_i·sdf_i)/Σ w_i`, which is bounded by the
+  individual sdfs (`min ≤ smin ≤ max`), so out-of-reach fields carve nothing and
+  a single field is unchanged (weights cancel). `GN_TREE_VERSION` 34 -> 35.
+  Guarded by
+  `test_membrane.py::test_stacked_force_fields_do_not_carve_a_hole_from_afar`
+  (verified red pre-fix: four fields 50 nm above the sheet carved it completely,
+  341 -> 0 lipids), which also asserts the field still carves when embedded.
+  Root-caused live over the BlenderMCP socket against the user's actual scene,
+  where the field was enabled on the molecule plus all three chains.
+
 - **"Set Pivot Last" landed in the centre of the chain, not the C-terminus.**
   A bound metal ion whose atom name is "CA" (a calcium ion - element Ca, e.g.
   the Ca(2+) in actin, 1ATN chain A res 373) was flagged `is_alpha_carbon`,

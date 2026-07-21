@@ -306,3 +306,93 @@ def test_force_field_toggle_creates_anchor_and_flag(scene, sm, single_chain):
     assert obj.pb_force_field_enabled is False
     assert bpy.data.objects.get(f"{obj.name}.ff_anchor") is None, \
         "anchor Empty survived FF disable"
+
+
+# --------------------------------------------------------------------------
+# Multiple overlapping force fields must not conjure a hole from thin air
+# --------------------------------------------------------------------------
+
+def _lipid_density(root, center_xy, r_bu):
+    """Count evaluated lipid instances within r_bu of center_xy (world)."""
+    import numpy as np
+    deps = bpy.context.evaluated_depsgraph_get()
+    pts = [[i.matrix_world.translation.x, i.matrix_world.translation.y]
+           for i in deps.object_instances
+           if i.is_instance and i.parent and i.parent.original == root]
+    if not pts:
+        return 0
+    d = np.linalg.norm(np.array(pts) - np.array(center_xy), axis=1)
+    return int((d < r_bu).sum())
+
+
+def _make_ff_cube(name, location, size=0.3, spacing=6.0):
+    """A small mesh object that emits a membrane force field, at `location`."""
+    me = bpy.data.meshes.new(name + "_m")
+    import bmesh
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=size)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    o.location = location
+    o.pb_force_field_enabled = True
+    o.pb_force_field_spacing = spacing
+    return o
+
+
+def test_stacked_force_fields_do_not_carve_a_hole_from_afar(scene):
+    """Several force fields overlapping in XY but all far above the membrane in
+    Z must leave the bilayer intact - the field is a 3D body, and none of these
+    bodies touches the sheet.
+
+    The bug: the multi-field combiner formed the combined penetration as
+    ``smin_sdf = -ln(Σ w_i)/α`` (log-sum-exp), which is biased below the true
+    minimum by ``ln(N)/α``. N fields stacked at the same XY, each already
+    Z-attenuated to radius 0 because it floats far above the sheet, still summed
+    to ``total_w ≈ N`` and produced ``ln(N)/α`` (~0.69 BU for N=4 at α=2) of
+    penetration - a hole carved from overlap alone. Enabling a force field on a
+    whole protein AND each of its chains stacks exactly such fields, so the
+    bilayer was bored through no matter how high the protein was lifted.
+
+    This is observed the way a user would see it: the lipids that actually
+    survive in the evaluated geometry. Ground truth is physical - four small
+    bodies 5 BU (50 nm) above a flat sheet cannot displace it - and independent
+    of the combiner code. A control run with the same fields lowered into the
+    sheet proves the field still works.
+    """
+    H.build_membrane(shape=SHAPE_FLAT, width=40.0, height=40.0)
+    root = next(o for o in bpy.data.objects if o.get("pb_is_membrane", False))
+    import sys
+    ff = sys.modules["proteinblender.membrane_builder.force_fields"]
+
+    baseline = _lipid_density(root, (0.0, 0.0), 0.6)
+    assert baseline > 20, f"membrane too sparse to measure a hole: {baseline}"
+
+    # Four overlapping FF emitters, all stacked at the same XY, 5 BU up.
+    cubes = [_make_ff_cube(f"pb_ff_cube_{i}", (0.0, 0.0, 5.0)) for i in range(4)]
+    single_radius = ff.compute_force_field_radius_bu(cubes[0], 1.5)
+    assert single_radius < 5.0, (
+        f"emitter radius {single_radius:.2f} BU reaches a sheet 5 BU away; the "
+        "test geometry no longer isolates the phantom-hole path")
+    ff.apply_to_all_membranes(bpy.context.scene)
+    bpy.context.view_layer.update()
+    far = _lipid_density(root, (0.0, 0.0), 0.6)
+
+    # Now drop them into the sheet: the field must genuinely carve here.
+    for c in cubes:
+        c.location = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    ff.apply_to_all_membranes(bpy.context.scene)
+    bpy.context.view_layer.update()
+    embedded = _lipid_density(root, (0.0, 0.0), 0.6)
+
+    # Far above: the sheet is untouched (a phantom hole would drop this count).
+    assert far > baseline * 0.9, (
+        f"four force fields 5 BU (50 nm) above the membrane still carved it: "
+        f"{baseline} lipids under them at rest, {far} with the fields on - a "
+        "hole conjured from overlap alone")
+    # Embedded: the field still does its job.
+    assert embedded < far * 0.5, (
+        f"the force field no longer carves when embedded: {far} lipids far, "
+        f"{embedded} embedded - expected the sheet to part")
