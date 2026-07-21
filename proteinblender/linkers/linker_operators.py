@@ -63,11 +63,25 @@ def _build_chain_items_for_puppet(context, puppet_id: str):
             break
 
         member_ids = [m.strip() for m in puppet_item.puppet_memberships.split(',') if m.strip()]
+        outliner = context.scene.outliner_items
         for member_id in member_ids:
-            for item in context.scene.outliner_items:
-                if item.item_id == member_id:
-                    items.append((member_id, item.name, f"{item.name} in {puppet_item.name}"))
-                    break
+            member = next((it for it in outliner if it.item_id == member_id), None)
+            if member is None:
+                continue
+            # A chain split into two or more domains contributes those domains
+            # as the linkable endpoints, not the chain as a whole: linkers
+            # attach to the individual domain objects, so a user who splits a
+            # chain to hinge its domains can connect them. An unsplit chain (its
+            # whole-chain auto-domain has no separate DOMAIN row) stays itself.
+            domain_children = [it for it in outliner
+                               if it.item_type == 'DOMAIN' and it.parent_id == member_id]
+            if member.item_type == 'CHAIN' and len(domain_children) >= 2:
+                for dom in domain_children:
+                    items.append((dom.item_id, dom.name,
+                                  f"{dom.name} in {puppet_item.name}"))
+            else:
+                items.append((member_id, member.name,
+                              f"{member.name} in {puppet_item.name}"))
         break
 
     if not items:

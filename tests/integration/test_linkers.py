@@ -123,6 +123,41 @@ def _add_linker(puppet, chain_a, chain_b, **overrides):
     return scene.pb2_linkers[-1]
 
 
+def _setup_chain_puppet_split_into_domains(name="DomainHingePuppet"):
+    """Reproduce the user's workflow: import 1atn, split chain A into two domains
+    (1-50, 51-end), then puppet the *Chain A row itself* (not the domain rows).
+
+    This is the natural "create a puppet with chain A" path. Returns
+    ``(mid, puppet_id, [domain_id_lo, domain_id_hi])`` where the domain ids come
+    from the molecule model (independent of the linker code under test).
+    """
+    mid = H.import_local("1atn.pdb", "1atn_linker_hinge")
+    bpy.context.scene.selected_molecule_id = mid
+    res = H.split_domain_from_outliner(mid, "A", 1, 50)
+    assert res == {"FINISHED"}
+    _build_outliner()
+
+    # Ground truth: the two chain-A domains, straight from the molecule model.
+    sm = H.sm()
+    chain_a_dids = sorted(
+        (dm.start, d) for d, dm in sm.molecules[mid].domains.items()
+        if dm.chain_id == "A")
+    assert len(chain_a_dids) == 2, "chain A should split into exactly two domains"
+    domain_ids = [d for _start, d in chain_a_dids]
+
+    # Select the CHAIN A row (fresh, post-rebuild) and puppet it.
+    chain_a_id = next(it.item_id for it in bpy.context.scene.outliner_items
+                      if it.item_type == "CHAIN" and it.name == "Chain A"
+                      and it.parent_id == mid)
+    for it in bpy.context.scene.outliner_items:
+        it.is_selected = (it.item_id == chain_a_id)
+    bpy.ops.proteinblender.create_puppet('EXEC_DEFAULT', puppet_name=name)
+
+    puppet = next((p for p in _puppets() if p.name == name), None)
+    assert puppet is not None, "chain-puppet setup failed"
+    return mid, puppet.item_id, domain_ids
+
+
 def _curve_signature(linker):
     """Deterministic signature of a linker curve's control points."""
     obj = bpy.data.objects.get(linker.curve_object_name)
@@ -135,6 +170,60 @@ def _curve_signature(linker):
 # --------------------------------------------------------------------------
 # Tests
 # --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_split_chain_puppet_exposes_domains_as_linker_endpoints(scene):
+    """A puppet made from a chain split into domains must offer those domains as
+    linker endpoints.
+
+    Regression for the reported bug: import 1atn, split chain A into 1-50 /
+    51-end, puppet *Chain A*, then open Create Linker. Before the fix the
+    endpoint dropdown listed only the single chain member, so both endpoints
+    defaulted to it and add_linker failed with "Start and end must be different
+    chains". The endpoint list must instead expose the two domains.
+    """
+    from proteinblender.linkers.linker_operators import _build_chain_items_for_puppet
+
+    mid, puppet_id, domain_ids = _setup_chain_puppet_split_into_domains()
+
+    # The endpoint enum is built from this helper. Strip the 'NONE' placeholder.
+    endpoint_ids = {item_id for item_id, _label, _desc
+                    in _build_chain_items_for_puppet(bpy.context, puppet_id)
+                    if item_id != 'NONE'}
+    # Ground truth (domain_ids) comes from the molecule model, not this helper.
+    assert endpoint_ids == set(domain_ids), (
+        "linker endpoints for a split-chain puppet should be its two domains, "
+        f"got {endpoint_ids}")
+
+
+@pytest.mark.integration
+def test_add_linker_between_two_domains_of_split_chain_puppet(scene):
+    """The full user flow succeeds: link the two domains of a chain-puppet."""
+    mid, puppet_id, domain_ids = _setup_chain_puppet_split_into_domains()
+
+    scene_ = bpy.context.scene
+    n_before = len(scene_.pb2_linkers)
+    bpy.ops.pb2.add_linker(
+        'EXEC_DEFAULT',
+        puppet_selector=puppet_id,
+        endpoint_a_item=f"A_{domain_ids[0]}",
+        endpoint_a_residue=40,   # within domain 1 (1-50)
+        endpoint_b_item=f"B_{domain_ids[1]}",
+        endpoint_b_residue=60,   # within domain 2 (51-375)
+        linker_name="HingeLink",
+        length_residues=30,
+        style="TUBE",
+        rendering_mode="QUICK",
+    )
+    assert len(scene_.pb2_linkers) == n_before + 1, "linker definition was not added"
+
+    linker = scene_.pb2_linkers[-1]
+    assert linker.endpoint_a_item_id == domain_ids[0]
+    assert linker.endpoint_b_item_id == domain_ids[1]
+    assert linker.is_valid is True
+    curve_obj = bpy.data.objects.get(linker.curve_object_name)
+    assert curve_obj is not None and curve_obj.type == "CURVE"
+
 
 @pytest.mark.integration
 def test_add_linker_creates_definition_and_curve(scene):

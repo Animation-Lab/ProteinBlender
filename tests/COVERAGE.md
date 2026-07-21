@@ -176,6 +176,14 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **A linker could not connect two domains of a chain when the puppet was made from the chain.**
+  Reported workflow: import 1atn, split chain A into domains 1-50 / 51-end, create a puppet from *Chain A* (the natural action, not selecting the two domain rows), then Create Linker.
+  The endpoint dropdown is built by `linker_operators._build_chain_items_for_puppet`, which listed one entry per puppet member.
+  A chain-with-domains puppet has the chain as its single member, so both endpoints defaulted to it and `add_linker` failed with "Start and end must be different chains".
+  Fixed by expanding a chain member into its DOMAIN children when the chain has been split into two or more domains, so the domains become the linkable endpoints (linkers attach to the domain objects).
+  An unsplit chain (whose whole-chain auto-domain has no separate DOMAIN row) is unchanged, and puppeting the domain rows directly already worked.
+  Guarded by `test_linkers.py::test_split_chain_puppet_exposes_domains_as_linker_endpoints` (endpoint list must equal the two domain ids taken from the molecule model) and `test_add_linker_between_two_domains_of_split_chain_puppet` (the full create flow); both verified red pre-fix.
+
 - **Overlapping membrane force fields carved a phantom hole, ignoring Z.** A
   protein lifted far above the sheet still bored a hole straight down, at any
   height, as long as it overlapped in XY. It was NOT the per-field Z-attenuation
