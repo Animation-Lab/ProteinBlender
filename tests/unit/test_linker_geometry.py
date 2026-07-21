@@ -165,6 +165,29 @@ def test_random_coil_seed_varies_shape_without_moving_endpoints():
 
 
 @pytest.mark.unit
+def test_random_coil_size_bump_is_local_and_smooth():
+    args = (
+        Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0, 101,
+        Vector((0, 1, 0)), Vector((0, 0, 1)),
+        [2.0, 3.4, 5.4], [1.0, 0.5, 0.25], [0.0] * 6,
+    )
+    plain = lg._generate_random_coil_shape(*args)
+    bumped = lg._generate_random_coil_shape(
+        *args, size_bumps=[(0.5, 0.05, 1.6)]
+    )
+    # Endpoints and regions far from the chosen central turn stay unchanged.
+    assert _vclose(plain[0], bumped[0])
+    assert _vclose(plain[-1], bumped[-1])
+    assert _vclose(plain[10], bumped[10], tol=1e-4)
+    # The selected region grows, with no discontinuous point-to-point jump.
+    assert (bumped[50] - Vector((0.5, 0, 0))).length > \
+        (plain[50] - Vector((0.5, 0, 0))).length
+    steps = [(bumped[i + 1] - bumped[i]).length
+             for i in range(len(bumped) - 1)]
+    assert max(steps) < 0.5
+
+
+@pytest.mark.unit
 def test_random_coil_taut_is_straight():
     start, end = Vector((0, 0, 0)), Vector((3, 0, 0))
     pts = lg.compute_random_coil_points(start, end, total_length=3.0,

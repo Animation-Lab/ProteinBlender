@@ -498,7 +498,8 @@ def _generate_random_coil_shape(start: Vector, end: Vector,
                                  num_samples: int,
                                  perp1: Vector, perp2: Vector,
                                  freqs: List[float], amps: List[float],
-                                 phase_offsets: List[float]) -> List[Vector]:
+                                 phase_offsets: List[float],
+                                 size_bumps=None) -> List[Vector]:
     """Generate the pre-regression smooth coil at an amplitude scale."""
     amp_sum = sum(amps)
     points = []
@@ -518,6 +519,13 @@ def _generate_random_coil_shape(start: Vector, end: Vector,
         size_variation = 1.0 + 0.18 * math.sin(
             2.0 * math.pi * 0.73 * t + phase_offsets[0] * 0.37
         )
+        # Enlarge a sparse, deterministic selection of central turns. Gaussian
+        # bumps avoid hard scale changes that would make the Bezier path kink.
+        for center, width, gain in size_bumps or ():
+            distance = (t - center) / width
+            size_variation *= 1.0 + (gain - 1.0) * math.exp(
+                -0.5 * distance * distance
+            )
         scale = (amplitude / amp_sum) * envelope * size_variation
         offset1 *= scale
         offset2 *= scale
@@ -552,6 +560,20 @@ def compute_random_coil_points(start: Vector, end: Vector,
              for ratio in ratios]
     amps = [1.0, 0.5 * rng.uniform(0.9, 1.1),
             0.25 * rng.uniform(0.9, 1.1)]
+
+    # Randomly enlarge about 20% of the turns in the middle half. Use one
+    # smooth bump per selected turn, ranging from its normal size to 1.6x.
+    coil_count = max(1, round(base_cycles))
+    central_turns = [i for i in range(coil_count)
+                     if 0.25 <= (i + 0.5) / coil_count <= 0.75]
+    bump_count = min(len(central_turns),
+                     max(1, round(coil_count * 0.2)))
+    selected_turns = rng.sample(central_turns, bump_count)
+    bump_width = 0.28 / coil_count
+    size_bumps = [
+        ((turn + 0.5) / coil_count, bump_width, rng.uniform(1.0, 1.6))
+        for turn in selected_turns
+    ]
     num_samples = max(
         9, min(MAX_COIL_SAMPLES, int(freqs[-1] * 5) + 1)
     )
@@ -577,7 +599,7 @@ def compute_random_coil_points(start: Vector, end: Vector,
         amp_mid = (amp_lo + amp_hi) / 2.0
         pts = _generate_random_coil_shape(
             start, end, amp_mid, num_samples,
-            perp1, perp2, freqs, amps, phase_offsets
+            perp1, perp2, freqs, amps, phase_offsets, size_bumps
         )
         arc = _arc_length(pts)
         best_points = pts
