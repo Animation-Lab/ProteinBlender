@@ -178,6 +178,13 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **The add-on failed to load on Windows when a bundled wheel was only partially extracted.**
+  Blender's extension installer occasionally extracts a bundled wheel WITHOUT its sibling `<pkg>.libs` folder - the OpenBLAS (scipy) / Arrow (pandas/pyarrow) DLLs, which are not listed in the wheel's RECORD.
+  The package then imports at top level but its compiled submodules raise `ImportError: DLL load failed` (e.g. `scipy.linalg._fblas`), so scipy / MDAnalysis / starfile break; `_can_import_core_packages()` returns False, the daily cache blocks a pip retry, and even a retry into user-site is shadowed by the broken `.local`, leaving the add-on dead with an unhelpful "Dependencies failed to install".
+  Root-caused live on Blender 5.2: the installed alpha extension's `.local` had scipy and pandas each missing only their large `.libs` DLL (a 0-byte leftover `.whl` in site-packages confirmed a partial/interrupted extraction); a direct test of Blender's `wheel_manager` proved it extracts `.libs` correctly when it runs cleanly, so the corruption is an intermittent Windows extraction failure, not a repo/wheel defect (the bundled scipy wheel does carry its 20 MB openblas DLL).
+  Fixed by `__init__._repair_partial_wheels` (core `_restore_missing_libs`), which - before importing any compiled dep - re-extracts just the missing `.libs` members from the matching bundled wheel into the site-packages that has the partial install. Offline, deterministic, idempotent (no-op once healthy), and not rate-limited by the dependency cache.
+  Guarded by `tests/unit/test_wheel_repair.py` (synthetic wheels as independent ground truth: restores the exact DLL bytes, leaves a healthy install untouched, respects the Python ABI tag, skips uninstalled packages). Verified end-to-end on real Blender 5.2: a broken `.local` that previously failed to load now self-heals and the pivot flow returns FINISHED.
+
 - **Every pivot operator was broken on Blender 5.1 and earlier (5.0, 4.2): all returned `CANCELLED`.**
   Blender 5.2 replaced the long-standing geometry-nodes modifier-input subscript (`modifier[identifier]`) with a typed `modifier.properties.inputs` interface; on 5.1 the subscript is the only API and `modifier.properties` does not exist.
   `core/domain_space.set_pivot_local` / `get_pivot` used only `getattr(mod.properties.inputs, identifier).value`, so on 5.1 `set_pivot_local` raised `AttributeError` (caught -> returned False) and every First/Center/Last/Snap/Center-protein operator cancelled with "Could not find alpha carbons" / "No valid objects".

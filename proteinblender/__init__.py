@@ -507,6 +507,102 @@ def _update_dependency_cache():
     except Exception as e:
         logger.debug(f"Could not update dependency cache: {e}")
 
+
+def _restore_missing_libs(wheels_dir, site_dirs, pytag):
+    """Extract missing ``<pkg>.libs`` folders from bundled win wheels.
+
+    Core of :func:`_repair_partial_wheels`, split out with no platform
+    assumptions so it is unit-testable on any OS. For each ``*win_amd64`` wheel
+    matching ``pytag`` that ships a ``<pkg>.libs`` directory, look in every
+    ``site_dirs`` entry that already has the package installed but is missing
+    that ``.libs`` sibling, and extract the wheel's ``.libs`` members there.
+
+    Returns a list of ``(libs_root, site_dir)`` for each restored folder.
+    """
+    import glob
+    import zipfile
+
+    repaired = []
+    for whl in glob.glob(os.path.join(wheels_dir, "*win_amd64.whl")):
+        base = os.path.basename(whl)
+        if pytag not in base:
+            continue
+        dist = base.split("-", 1)[0]  # e.g. "scipy", "pandas"
+        try:
+            with zipfile.ZipFile(whl) as zf:
+                libs_members = [
+                    n for n in zf.namelist()
+                    if "/" in n and n.split("/")[0].endswith(".libs")
+                ]
+                if not libs_members:
+                    continue  # pure/compiled-without-external-DLLs wheel
+                libs_root = libs_members[0].split("/")[0]  # e.g. "scipy.libs"
+                for site in site_dirs:
+                    installed = (
+                        os.path.isdir(os.path.join(site, dist)) or
+                        glob.glob(os.path.join(site, dist + "-*.dist-info")))
+                    if not installed:
+                        continue
+                    if os.path.isdir(os.path.join(site, libs_root)):
+                        continue  # healthy - .libs already present
+                    for member in libs_members:
+                        zf.extract(member, site)
+                    repaired.append((libs_root, site))
+                    logger.warning(
+                        "Repaired partial install: restored %s in %s from the "
+                        "bundled wheel", libs_root, site)
+        except Exception as e:
+            logger.debug("Wheel repair check skipped for %s: %s", base, e)
+    return repaired
+
+
+def _repair_partial_wheels() -> bool:
+    """Restore missing ``<pkg>.libs`` DLL folders from the bundled wheels.
+
+    Blender's extension installer occasionally leaves a bundled wheel only
+    partially extracted on Windows: the package's ``.py`` / ``.pyd`` files land
+    but the sibling ``<pkg>.libs`` directory - which holds the OpenBLAS (scipy)
+    and Arrow (pandas/pyarrow) DLLs, and is NOT listed in the wheel's RECORD -
+    is dropped. The package then imports at top level but its compiled
+    submodules raise ``ImportError: DLL load failed`` (e.g. ``scipy.linalg
+    ._fblas``), so scipy / MDAnalysis / starfile break and the add-on refuses to
+    load with an unhelpful "Dependencies failed to install".
+
+    Detect that exact state and re-extract just the ``.libs`` members from the
+    matching bundled wheel into that same site-packages directory.
+    Filesystem-only, offline (the wheels ship with the add-on), and run BEFORE
+    any compiled dependency is imported so scipy's ``_distributor_init``
+    registers the restored DLL directory. Best-effort: every failure is
+    swallowed so this can never block a healthy load. Returns True if anything
+    was repaired.
+    """
+    if sys.platform != "win32":
+        return False
+
+    wheels_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "wheels"))
+    if not os.path.isdir(wheels_dir):
+        return False
+    pytag = "cp{}{}".format(sys.version_info.major, sys.version_info.minor)
+
+    # site-packages directories actually on the import path (the extension
+    # ".local", the user site, Blender's bundled one). Only these can shadow.
+    site_dirs = [
+        p for p in sys.path
+        if p and os.path.isdir(p) and os.path.basename(p) == "site-packages"
+    ]
+    if not site_dirs:
+        return False
+
+    repaired = _restore_missing_libs(wheels_dir, site_dirs, pytag)
+    for libs_root, site in repaired:
+        # Make the restored DLLs discoverable even if the package was already
+        # imported (its _distributor_init ran before the folder existed).
+        try:
+            os.add_dll_directory(os.path.join(site, libs_root))
+        except Exception:
+            pass
+    return bool(repaired)
+
 # Normal mode: avoid pip operations when the packages already work (running
 # pip during an addon update triggers Windows permission errors).
 #
@@ -517,6 +613,15 @@ def _update_dependency_cache():
 # dependencies_installed True and the addon carried on into
 # `from .addon import register`, which then died on ImportError with no
 # warning shown to the user.
+# Repair a partially-extracted bundled wheel (missing '<pkg>.libs' DLLs) before
+# importing anything - this is offline and always safe, and unlike the pip
+# fallback below it is NOT rate-limited by the daily cache, because a broken
+# .libs never fixes itself and repairing it is cheap and deterministic.
+try:
+    _repair_partial_wheels()
+except Exception as _repair_exc:  # never let repair block a load
+    logger.debug("Wheel repair pass failed: %s", _repair_exc)
+
 if _can_import_core_packages():
     logger.info("All core packages importable, skipping installation")
     dependencies_installed = True
