@@ -217,6 +217,26 @@ def main():
                 )
                 extensions.append(entry)
 
+    # Blender's repository index expects ONE entry per extension id + platform:
+    # the single version it should offer. Emitting every past release's zip as
+    # its own entry makes Blender's updater resolve to whichever entry lands
+    # last in the array - the oldest here - so it offered a downgrade
+    # (e.g. installed 1.0.8 -> "update" to 1.0.7). Collapse to the highest
+    # version per (id, platform).
+    def _version_key(version):
+        key = []
+        for part in str(version).split("."):
+            key.append(int(part) if part.isdigit() else 0)
+        return tuple(key)
+
+    best_by_key = {}
+    for entry in extensions:
+        key = (entry["id"], tuple(entry.get("platforms", [])))
+        current = best_by_key.get(key)
+        if current is None or _version_key(entry["version"]) > _version_key(current["version"]):
+            best_by_key[key] = entry
+    extensions = list(best_by_key.values())
+
     # Group entries into channels by extension id, then write one index.json per
     # channel. Unknown ids fall back to the release channel so nothing is lost.
     channels = {subdir: [] for subdir in set(CHANNELS.values()) | {DEFAULT_CHANNEL_SUBDIR}}
