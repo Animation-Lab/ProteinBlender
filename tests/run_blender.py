@@ -41,8 +41,70 @@ def _bootstrap_paths():
             sys.path.insert(0, p)
 
 
+# The addon's runtime dependencies. Import name first; the pip name (when it
+# differs) is only used in the error hint. Mirrors __init__._can_import_core_packages.
+_CORE_DEPS = (
+    ("numpy", None), ("scipy", None), ("biotite", None), ("databpy", None),
+    ("MDAnalysis", None), ("mrcfile", None), ("starfile", None),
+    ("yaml", "PyYAML"), ("msgpack", None),
+)
+
+
+def _preflight_core_deps():
+    """Fail loudly and clearly if the addon's runtime deps can't import here.
+
+    Without this, a broken or incomplete dependency install surfaces only as a
+    cryptic error deep in collection (``KeyError:
+    proteinblender.utils.scene_manager``), which makes a broken *environment*
+    look like a broken *test* - and does so differently on each Blender version.
+    The failure mode that motivated this: on Windows a wheel unpacked without
+    its sibling ``*.libs`` folder (the OpenBLAS / Arrow DLLs) leaves scipy /
+    MDAnalysis / starfile raising ``ImportError: DLL load failed`` while every
+    other package imports fine, so the addon quietly refuses to load.
+
+    Import every core dependency up front and, on any failure, print an
+    actionable message naming the package(s) and how to repair the env, then
+    exit with a distinct code. Set ``PB_SKIP_DEP_CHECK=1`` to bypass.
+    """
+    if os.environ.get("PB_SKIP_DEP_CHECK"):
+        return
+    import importlib
+
+    broken = []
+    for import_name, pip_name in _CORE_DEPS:
+        try:
+            importlib.import_module(import_name)
+        except Exception as exc:  # ModuleNotFoundError OR DLL/other ImportError
+            broken.append((import_name, pip_name or import_name,
+                           f"{type(exc).__name__}: {exc}"))
+    if not broken:
+        return
+
+    out = ["", "=" * 70,
+           "[run_blender] ProteinBlender runtime dependencies are not usable "
+           "in this Blender's Python:"]
+    for import_name, _pip, err in broken:
+        out.append(f"  - {import_name}: {err}")
+    out += [
+        "",
+        "This is an ENVIRONMENT problem, not a test failure. The most common "
+        "cause on Windows is a wheel installed/unpacked without its sibling "
+        "'<pkg>.libs' folder (missing OpenBLAS/Arrow DLLs), which breaks scipy "
+        "/ MDAnalysis / starfile while leaving pure-Python packages importable.",
+        "",
+        "Repair the deps for THIS Blender version, then re-run the suite:",
+        "  ./dev/install_deps.sh [blender-version]        # dev helper",
+        "  # or force-reinstall the pinned wheels into this Blender's python.",
+        "",
+        "Set PB_SKIP_DEP_CHECK=1 to bypass this preflight (not recommended).",
+        "=" * 70, ""]
+    sys.stderr.write("\n".join(out) + "\n")
+    sys.exit(4)
+
+
 def main():
     _bootstrap_paths()
+    _preflight_core_deps()
 
     try:
         import pytest
