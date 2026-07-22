@@ -43,6 +43,8 @@ from typing import Optional
 import bpy
 from mathutils import Matrix, Vector
 
+from ..utils import gn_compat
+
 logger = logging.getLogger(__name__)
 
 # The geometry-nodes modifiers ProteinBlender puts on molecule/domain objects.
@@ -205,9 +207,12 @@ def get_pivot(obj) -> Vector:
     socket = _pivot_socket(mod.node_group)
     if socket is None:
         return ZERO.copy()
+    value = gn_compat.read_modifier_socket(mod, socket.identifier, default=None)
+    if value is None:
+        return ZERO.copy()
     try:
-        return Vector(getattr(mod.properties.inputs, socket.identifier).value)
-    except (AttributeError, TypeError):
+        return Vector(value)
+    except (TypeError, ValueError):
         return ZERO.copy()
 
 
@@ -216,6 +221,13 @@ def set_pivot_local(obj, pivot) -> bool:
 
     This moves the geometry. Use :func:`set_pivot_world` to move the pivot
     without moving what the user sees.
+
+    Reads/writes go through ``utils.gn_compat`` because Blender 5.2 moved where
+    a geometry-nodes modifier keeps its socket values: 4.2 - 5.1 store them as
+    IDProperties under ``mod[identifier]``, 5.2 under
+    ``mod.properties.inputs[identifier]["value"]``, and the two APIs reject each
+    other's access. Using only the 5.2 path here silently cancelled every pivot
+    operator on 5.1 and earlier.
     """
     mod = pb_modifier(obj)
     if mod is None:
@@ -224,8 +236,8 @@ def set_pivot_local(obj, pivot) -> bool:
     if identifier is None:
         return False
     try:
-        getattr(mod.properties.inputs, identifier).value = tuple(pivot)
-    except (AttributeError, TypeError) as e:
+        gn_compat.write_modifier_socket(mod, identifier, tuple(pivot))
+    except (RuntimeError, KeyError, TypeError, AttributeError) as e:
         logger.warning("Could not set pivot on %r: %s", obj.name, e)
         return False
     return True

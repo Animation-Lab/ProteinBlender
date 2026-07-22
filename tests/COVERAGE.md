@@ -98,7 +98,9 @@ call sites wrapped that write in a bare `except: pass`, so every modifier input
 write failed silently: `Lipid Collection` never bound, Collection Info fed
 Instance on Points an empty collection, and the build reported success while
 producing no bilayer. 5.1 and earlier still accept the IDProperty form, which is
-exactly why the bug was version-specific. Fixed by `membrane_builder/gn_compat.py`,
+exactly why the bug was version-specific. Fixed by `utils/gn_compat.py`
+(originally under `membrane_builder/`; promoted to `utils/` so `core` can share
+it - see the pivot regression below),
 which writes through `mod.properties.inputs[id]["value"]` on 5.2, falls back to
 `mod[id]` for 4.2-5.1, and **raises rather than swallowing** - silent failure is
 what let this ship.
@@ -175,6 +177,22 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Every pivot operator was broken on Blender 5.1 and earlier (5.0, 4.2): all returned `CANCELLED`.**
+  Blender 5.2 replaced the long-standing geometry-nodes modifier-input subscript (`modifier[identifier]`) with a typed `modifier.properties.inputs` interface; on 5.1 the subscript is the only API and `modifier.properties` does not exist.
+  `core/domain_space.set_pivot_local` / `get_pivot` used only `getattr(mod.properties.inputs, identifier).value`, so on 5.1 `set_pivot_local` raised `AttributeError` (caught -> returned False) and every First/Center/Last/Snap/Center-protein operator cancelled with "Could not find alpha carbons" / "No valid objects".
+  Root-caused live on Blender 5.1: alpha carbons were found (76 for 1ubq chain A) but `domain_space.set_pivot_world` returned False because `mod.properties` is absent there; a minimal modifier probe confirmed `mod[identifier]` works on 5.1 and raises "id properties not supported" on 5.2, the mirror image.
+  Fixed by routing `domain_space` reads/writes through the shared `utils/gn_compat.py` (the same 5.2-vs-4.2/5.1 split the membrane builder already relied on; it was promoted from `membrane_builder/` to `utils/` so `core` could share it instead of duplicating the version logic).
+  This is exactly why the pivot/domain-geometry/rendering suite showed 16 failures on 5.1 and none on 5.2; the headless `source-suite` CI matrix omitted 5.1 (now added: 4.2/5.0/5.1/5.2).
+  Guarded by the existing `tests/integration/test_pivot.py`, `test_domain_geometry_invariants.py`, `test_domains.py::test_snap_pivot_to_residue`, `test_operator_surface.py::test_snap_parent_pivot_center_is_finite`, `test_proteins.py::test_center_protein_moves_to_origin`, and `test_rendering.py` pivot cases; verified red on 5.1 pre-fix (16 failed) and green post-fix (276 passed, 0 failed).
+
+- **The Protein Blender workspace loaded a stock "Scene Collection" Outliner above the Protein Outliner.**
+  The workspace is built by duplicating Blender's default "Layout", whose right column is an Outliner editor stacked above Properties.
+  `set_properties_context` switched Properties to Scene context (where the Protein Outliner panel renders) but nothing removed the Outliner editor, so users saw the stock Scene-Collection tree sitting directly above the Protein Outliner.
+  The area-closing loop that used to strip non-viewport editors had been deleted because closing areas from a captured collection crashes on Blender 5.2 ("Area not found in screen" - each `area_close` invalidates the remaining Area handles); the deletion over-corrected and kept *all* editors.
+  Fixed by `workspace_setup._close_extra_editors`, which closes every editor outside the canonical set (VIEW_3D / PROPERTIES / DOPESHEET / TIMELINE) one at a time, re-reading `screen.areas` after each close and bounding the loop by the area count, then re-resolving the managed area handles.
+  Reproduced identically on Blender 5.0, 5.1 and 5.2 - not version-specific; the sole workspace-layout job ran only on 5.2 and never asserted the Outliner was absent.
+  Guarded by `tests/ui/run_ui_scenarios.py::verify_workspace_ui` (asserts no OUTLINER editor and nothing stacked above the panel column), now run by the `foreground-ui` CI job across Blender 5.0/5.1/5.2; verified red pre-fix with "still shows a stock Outliner editor (1 found)".
 
 - **A linker could not connect two domains of a chain when the puppet was made from the chain.**
   Reported workflow: import 1atn, split chain A into domains 1-50 / 51-end, create a puppet from *Chain A* (the natural action, not selecting the two domain rows), then Create Linker.

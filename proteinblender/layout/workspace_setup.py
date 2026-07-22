@@ -66,6 +66,15 @@ class ProteinWorkspaceManager:
         if self.screen is None:
             raise RuntimeError("Protein Blender workspace has no active screen")
 
+        self._discover_editor_areas()
+
+    def _discover_editor_areas(self):
+        """(Re)resolve the managed editor-area handles from the live screen.
+
+        Must be re-run after any ``screen.area_close`` / ``area_split``: those
+        reallocate the area collection and invalidate previously captured
+        ``Area`` handles.
+        """
         view_areas = [area for area in self.screen.areas if area.type == 'VIEW_3D']
         self.main_area = max(
             view_areas, key=lambda area: area.width * area.height,
@@ -78,7 +87,61 @@ class ProteinWorkspaceManager:
              if area.type in {'DOPESHEET_EDITOR', 'TIMELINE'}),
             None)
 
+    # Editors that make up the canonical Protein Blender layout: the 3D
+    # viewport, the Properties editor that hosts every add-on panel (including
+    # the Protein Outliner), and the bottom timeline. Everything else the
+    # duplicated default workspace ships - notably the Scene-Collection
+    # Outliner in the right column - is closed on setup.
+    _CANONICAL_EDITOR_TYPES = {
+        'VIEW_3D', 'PROPERTIES', 'DOPESHEET_EDITOR', 'TIMELINE'}
+
+    def _close_extra_editors(self):
+        """Close editors that aren't part of the canonical layout.
+
+        The default workspace's right column is an Outliner stacked above
+        Properties. Duplicating it and only setting Properties to Scene context
+        leaves that Outliner showing "Scene Collection" directly above the
+        Protein Outliner panel - which is not the intended UI.
+
+        Close them one at a time, re-reading ``screen.areas`` on every pass:
+        each ``area_close`` mutates the screen and invalidates every other
+        ``Area`` handle, so iterating a captured collection aborts with "Area
+        not found in screen" on Blender 5.2. The loop is bounded by the current
+        area count so a non-closable editor (``area_close.poll()`` False) can
+        never spin forever.
+        """
+        if not self.screen or not self.window:
+            return
+        for _ in range(len(self.screen.areas)):
+            target = next(
+                (area for area in self.screen.areas
+                 if area.type not in self._CANONICAL_EDITOR_TYPES),
+                None)
+            if target is None:
+                return
+            before = len(self.screen.areas)
+            override = {
+                'window': self.window,
+                'screen': self.screen,
+                'area': target,
+            }
+            with bpy.context.temp_override(**override):
+                if not bpy.ops.screen.area_close.poll():
+                    return
+                bpy.ops.screen.area_close()
+            if len(self.screen.areas) >= before:
+                # The close polled true but the join was refused (geometry
+                # wouldn't collapse); stop rather than loop on it forever.
+                return
+
     def add_panels_to_workspace(self):
+        # Strip editors that aren't part of the canonical layout (e.g. the
+        # default workspace's Scene-Collection Outliner) before arranging the
+        # panel/timeline split, then re-resolve area handles since area_close
+        # invalidates the ones bound earlier.
+        self._close_extra_editors()
+        self._discover_editor_areas()
+
         # Ensure we have a main area before proceeding
         if not self.main_area:
             return

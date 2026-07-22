@@ -140,8 +140,26 @@ def setup():
 
 def verify_workspace_ui():
     area = protein_workspace_panel_area()
-    assert len(active_window().screen.areas) == state["workspace_area_count"], (
+    screen = active_window().screen
+    assert len(screen.areas) == state["workspace_area_count"], (
         "deferred/repeated workspace setup duplicated editor areas")
+    # The Protein Outliner is a panel inside this Scene Properties editor. The
+    # duplicated default workspace ships a Scene-Collection Outliner editor in
+    # the right column, directly above Properties. If setup leaves it in place
+    # the user sees the stock "Scene Collection" tree stacked above the Protein
+    # Outliner. The canonical layout has no Outliner editor at all.
+    outliners = [a for a in screen.areas if a.type == "OUTLINER"]
+    assert not outliners, (
+        "Protein Blender workspace still shows a stock Outliner editor "
+        f"({len(outliners)} found) above the Protein Outliner; "
+        f"areas={sorted(a.type for a in screen.areas)}")
+    # Nothing may sit above the panel editor in its own column: the Protein
+    # Outliner must be the top of the right-hand column.
+    column = [a for a in screen.areas if abs(a.x - area.x) <= 2]
+    above = [a for a in column if a.y > area.y + 2]
+    assert not above, (
+        "editors stacked above the Protein Blender panel column: "
+        f"{[a.type for a in above]}")
     return f"Scene Properties editor ready ({area.width}x{area.height})"
 
 

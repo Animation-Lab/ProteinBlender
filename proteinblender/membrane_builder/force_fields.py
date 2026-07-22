@@ -51,7 +51,7 @@ from bpy.app.handlers import persistent
 from mathutils import Vector
 from typing import Iterable, List, Optional, Tuple
 
-from . import gn_compat
+from ..utils import gn_compat
 from .membrane_geometry import MAX_PROTEIN_FFS, NM_PER_BU
 
 
