@@ -11,6 +11,12 @@ broke.
 # whole suite (auto-discovers Blender)
 python tests/run_tests.py -v
 
+# the whole suite on EVERY installed Blender (5.0 / 5.1 / 5.2), one summary
+python tests/run_all_versions.py
+python tests/run_all_versions.py --ui            # also the foreground UI suite
+python tests/run_all_versions.py --bootstrap     # install pytest/deps into each first
+python tests/run_all_versions.py --only 5.1 5.2  # limit to some versions
+
 # a single lane / module / keyword
 python tests/run_tests.py tests/unit
 python tests/run_tests.py tests/integration/test_domains.py
