@@ -160,7 +160,17 @@ def verify_workspace_ui():
     assert not above, (
         "editors stacked above the Protein Blender panel column: "
         f"{[a.type for a in above]}")
-    return f"Scene Properties editor ready ({area.width}x{area.height})"
+    # The panel column must be the intended ~30% of the window, not Blender's
+    # narrow ~18% default Properties column (which the setup reused before the
+    # layout was rebuilt from a single viewport). Assert clearly wider than that
+    # default so a regression to the reused column fails here.
+    win_w = active_window().width
+    frac = area.width / win_w if win_w else 0
+    assert frac >= 0.25, (
+        "Protein Blender panel column is too narrow: "
+        f"{area.width}px = {frac:.0%} of {win_w}px (expected ~30%)")
+    return (f"Scene Properties editor ready ({area.width}x{area.height}, "
+            f"{frac:.0%} width)")
 
 
 def assert_proteinblender_ui_loaded():
