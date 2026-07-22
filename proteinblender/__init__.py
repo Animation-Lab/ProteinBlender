@@ -461,7 +461,9 @@ REQUIRED_PACKAGES = {
     # MolecularNodes imports at module scope. Without the cap this fallback
     # "repairs" a broken install by fetching the one version guaranteed to break.
     "biotite": ">=1.1,<1.7",
-    "databpy": ">=0.0.18",
+    # Capped below 0.8: databpy 0.8.0 imports bpy.types.Float4Attribute at
+    # module scope, which only exists in Blender 5.2+. 0.7.x works on 5.0-5.2.
+    "databpy": ">=0.0.18,<0.8",
     "MDAnalysis": ">=2.7.0",
 
     # File format handlers

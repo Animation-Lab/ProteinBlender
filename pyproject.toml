@@ -7,7 +7,13 @@ readme = "README.md"
 # platform) pair, so an open upper bound resolves to a different release per pair
 # and ships several versions of one package in a single build.
 dependencies = [
-    "databpy>=0.0.18",
+    # Capped below 0.8: databpy 0.8.0's attribute.py references
+    # bpy.types.Float4Attribute at module scope, a type that only exists in
+    # Blender 5.2+. On 5.0/5.1 importing databpy raises AttributeError, so the
+    # add-on fails to load. 1.0.9 shipped 0.8.0 and broke on 5.0/5.1. The cap
+    # (rather than an exact pin) keeps the newest 0.7.x, which works on all of
+    # 5.0/5.1/5.2 (it uses only pre-5.2 attribute types).
+    "databpy>=0.0.18,<0.8",
     "MDAnalysis>=2.7.0",
     # Capped below 1.7: the embedded MolecularNodes imports
     # biotite.structure.connect_via_residue_names at module scope
