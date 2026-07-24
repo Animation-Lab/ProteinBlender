@@ -247,6 +247,18 @@ class PB2_LinkerDefinition(PropertyGroup):
         max=10
     )
 
+    # Rest chord direction (unit vector, world space), captured when the linker
+    # is created. Anchors the random-coil's perpendicular frame so the coil does
+    # not flip as the endpoints orbit each other. (0,0,0) means "not yet set" -
+    # lazily initialised from the current chord on first geometry update.
+    rest_direction: FloatVectorProperty(
+        name="Rest Direction",
+        description="Chord direction at creation; anchors the coil frame",
+        size=3,
+        subtype='XYZ',
+        default=(0.0, 0.0, 0.0),
+    )
+
     # Blender object reference (by name, not pointer)
     curve_object_name: StringProperty(
         name="Curve Object",

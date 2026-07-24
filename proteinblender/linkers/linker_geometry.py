@@ -581,7 +581,13 @@ def _band_noise(n: int, corr: int, rng, octaves: int = 2) -> np.ndarray:
 
 
 def _coil_perp_axes(direction: np.ndarray):
-    """Two unit vectors spanning the plane perpendicular to ``direction``."""
+    """Two unit vectors spanning the plane perpendicular to ``direction``.
+
+    Built from a fixed world axis, so the frame flips whenever ``direction``
+    sweeps through that axis (a coil orbiting one endpoint around the other
+    would suddenly rotate 180 deg there). Use ``_transport_perp_axes`` with a
+    stable reference direction instead when one is available.
+    """
     perp1 = np.cross(direction, np.array([0.0, 0.0, 1.0]))
     if np.linalg.norm(perp1) < 0.1:
         perp1 = np.cross(direction, np.array([0.0, 1.0, 0.0]))
@@ -591,11 +597,50 @@ def _coil_perp_axes(direction: np.ndarray):
     return perp1, perp2
 
 
+def _transport_perp_axes(rest: np.ndarray, direction: np.ndarray):
+    """Perpendicular frame carried from a rest orientation to ``direction``.
+
+    Builds a canonical frame once at the rest chord direction, then rotates it
+    by the shortest arc that maps ``rest`` onto the current ``direction``. The
+    frame is then continuous as the endpoints swing around - the single
+    unavoidable singularity (a frame field on the sphere must have one) sits at
+    ``-rest``, the pose 180 deg opposite where the linker was created, which
+    ordinary animation never reaches. This replaces the fixed-world-axis frame
+    whose singularity sat at world +-Z and flipped the coil during a vertical
+    orbit.
+    """
+    r = rest / np.linalg.norm(rest)
+    # Canonical perpendicular basis at the rest direction.
+    helper = (np.array([0.0, 0.0, 1.0]) if abs(r[2]) < 0.9
+              else np.array([1.0, 0.0, 0.0]))
+    p1 = np.cross(r, helper)
+    p1 /= np.linalg.norm(p1)
+    p2 = np.cross(r, p1)
+
+    # Shortest-arc rotation rest -> direction, applied to the basis.
+    axis = np.cross(r, direction)
+    s = float(np.linalg.norm(axis))
+    c = float(np.dot(r, direction))
+    if s < 1e-8:
+        # Aligned (c>0) -> identity; antipode (c<0) -> the lone singularity,
+        # return a defined (flipped) frame rather than a NaN.
+        return (p1, p2) if c > 0 else (-p1, p2)
+    axis /= s
+    ang = math.atan2(s, c)
+    ca, sa = math.cos(ang), math.sin(ang)
+
+    def _rot(v):
+        return v * ca + np.cross(axis, v) * sa + axis * (axis @ v) * (1.0 - ca)
+
+    return _rot(p1), _rot(p2)
+
+
 def compute_random_coil_points(start: Vector, end: Vector,
                                 total_length: float,
                                 num_residues: int = 10,
                                 seed: int = 0,
-                                coil_width: float = None) -> List[Vector]:
+                                coil_width: float = None,
+                                ref_direction: Vector = None) -> List[Vector]:
     """Compute a "confused fly" random-coil path between two fixed endpoints.
 
     The curve leaves the straight chord and wanders in the perpendicular plane
@@ -604,6 +649,10 @@ def compute_random_coil_points(start: Vector, end: Vector,
     length equals ``total_length`` (the residue count). ``coil_width`` sets the
     characteristic loop radius: larger = fewer, looser loops; smaller = more,
     tighter loops.
+
+    ``ref_direction`` is the linker's rest chord direction; when given, the
+    perpendicular frame is rotation-transported from it so the coil does not
+    flip as the endpoints orbit (see ``_transport_perp_axes``).
     """
     A = np.array([start.x, start.y, start.z], dtype=float)
     B = np.array([end.x, end.y, end.z], dtype=float)
@@ -620,7 +669,15 @@ def compute_random_coil_points(start: Vector, end: Vector,
         return [start.lerp(end, float(tt)) for tt in t]
 
     direction = (B - A) / D
-    perp1, perp2 = _coil_perp_axes(direction)
+    if ref_direction is not None:
+        ref = np.array([ref_direction[0], ref_direction[1], ref_direction[2]],
+                       dtype=float)
+        if np.linalg.norm(ref) > 1e-6:
+            perp1, perp2 = _transport_perp_axes(ref, direction)
+        else:
+            perp1, perp2 = _coil_perp_axes(direction)
+    else:
+        perp1, perp2 = _coil_perp_axes(direction)
 
     # Loop count is a *fixed* property of the linker - NOT a function of the
     # endpoint distance. This is what stops the coil corkscrewing: as the
@@ -674,6 +731,29 @@ def compute_random_coil_points(start: Vector, end: Vector,
     best[0] = A                    # pin endpoints exactly
     best[-1] = B
     return [Vector((float(x), float(y), float(z))) for x, y, z in best]
+
+
+def _coil_ref_direction(linker_def, start_pos: Vector,
+                        end_pos: Vector) -> Optional[Vector]:
+    """The linker's rest chord direction, lazily captured on first use.
+
+    Anchors the random-coil frame (see ``_transport_perp_axes``) so the coil
+    does not flip as the endpoints orbit. Stored once on the linker at creation
+    and never changed, so it is deterministic (not path-dependent). Legacy
+    linkers with no stored direction adopt their current chord the first time
+    they are rebuilt.
+    """
+    rest = tuple(getattr(linker_def, 'rest_direction', (0.0, 0.0, 0.0)))
+    if rest == (0.0, 0.0, 0.0):
+        d = end_pos - start_pos
+        if d.length <= 1e-6:
+            return None
+        rest = tuple(d.normalized())
+        try:
+            linker_def.rest_direction = rest
+        except (AttributeError, TypeError):
+            pass
+    return Vector(rest)
 
 
 def _solve_catenary_parameter(h_dist: float, L_target: float,
@@ -846,6 +926,7 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
                 start_pos, end_pos, total_length, linker_def.length_residues,
                 seed=_stable_coil_seed(linker_def.uid),
                 coil_width=getattr(linker_def, 'coil_width', None),
+                ref_direction=_coil_ref_direction(linker_def, start_pos, end_pos),
             )
         else:
             catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
@@ -991,6 +1072,7 @@ def update_linker_curve(linker_def) -> bool:
             start_pos, end_pos, total_length, linker_def.length_residues,
             seed=_stable_coil_seed(linker_def.uid),
             coil_width=getattr(linker_def, 'coil_width', None),
+            ref_direction=_coil_ref_direction(linker_def, start_pos, end_pos),
         )
     else:
         catenary_points = compute_catenary_points(start_pos, end_pos, total_length)

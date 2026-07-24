@@ -224,6 +224,36 @@ def test_random_coil_winding_is_distance_invariant_no_corkscrew():
 
 
 @pytest.mark.unit
+def test_random_coil_frame_does_not_flip_when_endpoints_orbit():
+    """Orbiting one endpoint around the other must not flip the coil.
+
+    Sweep the chord direction through world +Z - where the old fixed-world-axis
+    frame flipped the whole coil 180 deg (user report: a sudden flip at one
+    clock position). With a rest-direction anchor the perpendicular frame is
+    rotation-transported, so consecutive coils differ by only the small amount
+    the endpoint actually moved - never a jump. The rest anchor is +X, so the
+    lone remaining singularity is at -X, which this sweep avoids.
+    """
+    L, radius, center = 1.0, 0.6, Vector((0, 0, 0))
+    rest = Vector((1.0, 0.0, 0.0))
+    prev, max_jump = None, 0.0
+    N = 90
+    for i in range(N + 1):
+        th = 0.05 + (math.pi - 0.20) * i / N     # +X .. +Z (mid) .. toward -X
+        d = Vector((math.cos(th), 0.0, math.sin(th)))
+        pts = lg.compute_random_coil_points(
+            center, center + d * radius, L, num_residues=28, seed=7,
+            coil_width=0.03, ref_direction=rest)
+        if prev is not None:
+            jump = max((a - b).length for a, b in zip(pts, prev))
+            max_jump = max(max_jump, jump)
+        prev = pts
+    # Endpoint moves ~0.02/step; a 180 deg frame flip would move mid-coil points
+    # by ~2x the offset amplitude (an order of magnitude more).
+    assert max_jump < 0.06
+
+
+@pytest.mark.unit
 def test_random_coil_endpoints_exact_and_absorbs_slack():
     start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
     L = 3.0
