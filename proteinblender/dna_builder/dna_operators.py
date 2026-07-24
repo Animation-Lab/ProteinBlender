@@ -170,6 +170,10 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
                 text="Stylised flat ladder. Backbone is not atomically valid here.",
                 icon="INFO",
             )
+        elif nt == "DNA":
+            # Canonical helix form only applies to a wound DNA helix; RNA is
+            # always A-form, and LADDER ignores form.
+            wind_box.prop(props, "helix_form", expand=True)
 
     # ---- Collapsible colour section ----------------------------------
     color_box = layout.box()
@@ -388,6 +392,7 @@ def _build_dna_from_props(operator, context, identifier):
             sequence=seq,
             nucleic_type=nucleic_type,
             double_stranded=props.double_stranded,
+            form=props.helix_form,
             wound_mask=primary_mask,
             schematic=schematic,
             realistic_atoms=realistic,
@@ -411,6 +416,7 @@ def _build_dna_from_props(operator, context, identifier):
     obj["pb_double_stranded"] = props.double_stranded
     obj["pb_style"] = props.style
     obj["pb_winding_mode"] = props.winding_mode
+    obj["pb_helix_form"] = props.helix_form
     obj["pb_ladder_uniform"] = bool(props.ladder_uniform)
     obj["pb_ladder_realistic"] = bool(realistic)
 
