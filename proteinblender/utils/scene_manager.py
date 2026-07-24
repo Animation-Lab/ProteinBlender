@@ -347,6 +347,17 @@ class ProteinBlenderScene:
                 # scene.show_domain_preview = False # This relates to a different feature
                 scene.edit_molecule_identifier = ""
 
+            # Deleting a molecule can leave puppets whose members all belonged
+            # to it, plus pose-library entries that still point at those
+            # puppets. The outliner rebuild below drops the orphaned puppet
+            # ROWS but not their poses, so the Protein Pose Library kept listing
+            # poses for puppets/proteins that no longer exist. Clean them up
+            # here, while the puppet rows still exist to be resolved.
+            try:
+                self._cleanup_orphaned_puppets(scene)
+            except Exception as e:
+                print(f"delete_molecule: orphaned-puppet cleanup failed: {e}")
+
             # Rebuild the outliner so chain/domain rows for the deleted
             # molecule are dropped immediately. Without this the outliner
             # carries orphan rows until the next sync (e.g. a reload), which
@@ -361,6 +372,50 @@ class ProteinBlenderScene:
 
             return True
         return False
+
+    def _cleanup_orphaned_puppets(self, scene):
+        """Delete puppets left with no surviving members, and clear the pose-
+        library entries that only referenced them.
+
+        A puppet is orphaned when none of its members resolve to a live object
+        (their molecule was deleted). We route each through the normal
+        ``delete_puppet`` operator so the controller Empty, member linkers and
+        pose transforms are all torn down the same way a manual delete would,
+        then prune any pose that is now empty. Puppets that still span a
+        surviving molecule are left untouched.
+        """
+        from ..utils.chain_utils import get_puppet_member_objects
+
+        orphaned = []
+        for item in scene.outliner_items:
+            if item.item_type == 'PUPPET' and item.item_id != 'puppets_separator':
+                if not get_puppet_member_objects(scene, self, item):
+                    orphaned.append(item.item_id)
+
+        if not orphaned:
+            return
+
+        for pid in orphaned:
+            try:
+                bpy.ops.proteinblender.delete_puppet('EXEC_DEFAULT', puppet_id=pid)
+            except Exception as e:
+                print(f"_cleanup_orphaned_puppets: delete_puppet({pid}) failed: {e}")
+                try:
+                    from ..panels.group_maker_panel import _strip_puppet_from_pose_library
+                    _strip_puppet_from_pose_library(scene, pid)
+                except Exception:
+                    pass
+
+        # Prune poses that only referenced the orphaned puppets and are now
+        # empty, so the library reflects reality after the model is gone.
+        if hasattr(scene, 'pose_library'):
+            for i in range(len(scene.pose_library) - 1, -1, -1):
+                pose = scene.pose_library[i]
+                if len(pose.transforms) == 0 and not pose.puppet_ids:
+                    scene.pose_library.remove(i)
+            if hasattr(scene, 'active_pose_index') and \
+                    scene.active_pose_index >= len(scene.pose_library):
+                scene.active_pose_index = max(0, len(scene.pose_library) - 1)
 
     def _refresh_ui(self):
         """Force a redraw of all UI areas"""
@@ -1433,6 +1488,19 @@ def build_outliner_hierarchy(context=None):
             # print(f"Molecule {getattr(molecule, 'name', molecule.identifier)} has chains: {chain_ids}")
             # print(f"Chain mapping: {getattr(molecule, 'chain_mapping', getattr(molecule, 'idx_to_label_asym_id_map', 'None'))}")
             
+            # Custom chain names the user assigned via the Rename button live on
+            # the persistent list item as a JSON {chain_index: name} map; apply
+            # them over the default "Chain <letter>" names below.
+            import json as _json
+            _custom_chain_names = {}
+            _mol_list_item = next((it for it in scene.molecule_list_items
+                                   if it.identifier == molecule.identifier), None)
+            if _mol_list_item and _mol_list_item.chain_custom_names:
+                try:
+                    _custom_chain_names = _json.loads(_mol_list_item.chain_custom_names)
+                except Exception:
+                    _custom_chain_names = {}
+
             # Add chain items
             for chain_id in chain_ids:
                 chain_item = scene.outliner_items.add()
@@ -1464,6 +1532,10 @@ def build_outliner_hierarchy(context=None):
                     chain_item.name = strand_labels.get(chain_id, f"Strand {chain_name}")
                 else:
                     chain_item.name = f"Chain {chain_name}"
+                # User-assigned name wins over the auto-generated default.
+                _override = _custom_chain_names.get(str(chain_id))
+                if _override:
+                    chain_item.name = _override
                 chain_item.chain_id = str(chain_id)
                 chain_item.indent_level = 1
                 chain_item.icon = 'LINKED'
@@ -1632,16 +1704,32 @@ def build_outliner_hierarchy(context=None):
                         # Extract meaningful domain name
                         # Use the domain's actual name property first
                         domain_display_name = domain.name
-                        
-                        # For copies, the name already includes the copy number (e.g., "Chain A 1")
-                        # For non-copies, show the residue range if available
+
+                        # For copies, the name already includes the copy number
+                        # (e.g., "Chain A 1"). For non-copies, normalise an
+                        # auto-generated name to the canonical
+                        # "Chain <id>: Residues N-M" form - naming both the chain
+                        # and the residue range - but keep a name the user set
+                        # via Rename. A name counts as auto-generated when it's
+                        # blank or matches any default form the create/split
+                        # paths have produced ("Residues N-M", "Chain X",
+                        # "Chain X: N-M", or the canonical form itself); anything
+                        # else is a deliberate rename and must survive the rebuild.
                         if not (hasattr(domain, 'is_copy') and domain.is_copy):
                             if hasattr(domain, 'start') and hasattr(domain, 'end'):
-                                # Only override with residue range for non-copies
-                                # Check if name ends with a number (copy format)
-                                if not re.search(r'\s+\d+$', domain.name):
-                                    domain_display_name = f"Residues {domain.start}-{domain.end}"
-                        
+                                name = (domain.name or "").strip()
+                                is_auto_name = (
+                                    not name
+                                    or re.match(r'^Residues\s+\d+-\d+$', name)
+                                    or re.match(r'^Chain\s+\S+$', name)
+                                    or re.match(r'^Chain\s+\S+:\s*\d+-\d+$', name)
+                                    or re.match(r'^Chain\s+\S+:\s*Residues\s+\d+-\d+$', name)
+                                )
+                                if is_auto_name:
+                                    domain_display_name = (
+                                        f"Chain {domain.chain_id}: "
+                                        f"Residues {domain.start}-{domain.end}")
+
                         domain_item.name = domain_display_name
 
                         # Safely get object name - handle case where object is freed/invalid

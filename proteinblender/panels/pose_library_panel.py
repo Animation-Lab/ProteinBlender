@@ -65,74 +65,32 @@ def capture_controller_transform(context, pose, puppet_id, controller_obj):
 # ---------------------------------------------------------------------------
 
 def get_puppet_objects(context, puppet_id):
-    """Get all objects that belong to a puppet (for validation)"""
-    objects = []
-    
-    # Find the puppet item
+    """Get all objects that belong to a puppet (for pose capture/validation).
+
+    Delegates to the canonical :func:`get_puppet_member_objects` so pose
+    capture resolves membership through exactly the same rules as keyframing
+    and selection sync. Crucially, that helper resolves a CHAIN member via
+    ``get_chain_objects``, which collects EVERY domain object of a chain that
+    has been split into pieces - so a chain split AFTER the puppet was built
+    still contributes all of its chunks to the pose. The previous local
+    resolver matched split-domain keys (chain LETTER) against the member's
+    chain INDEX and captured at most one piece, silently dropping the rest.
+    """
+    from ..utils.scene_manager import ProteinBlenderScene
+    from ..utils.chain_utils import get_puppet_member_objects
+
     puppet_item = None
     if hasattr(context.scene, 'outliner_items'):
         for item in context.scene.outliner_items:
             if item.item_id == puppet_id and item.item_type == 'PUPPET':
                 puppet_item = item
                 break
-    
+
     if not puppet_item or not puppet_item.puppet_memberships:
-        return objects
-    
-    # Import scene manager
-    from ..utils.scene_manager import ProteinBlenderScene
+        return []
+
     scene_manager = ProteinBlenderScene.get_instance()
-    
-    # Parse member IDs
-    member_ids = puppet_item.puppet_memberships.split(',')
-    
-    for member_id in member_ids:
-        if '_' not in member_id:
-            continue
-            
-        # Parse member_id to find molecule and domain
-        if '_chain_' in member_id:
-            parts = member_id.rsplit('_chain_', 1)
-            mol_id = parts[0]
-            domain_id = 'chain_' + parts[1]
-        else:
-            import re
-            match = re.match(r'^(.+?_\d+)_(.+)$', member_id)
-            if match:
-                mol_id = match.group(1)
-                domain_id = match.group(2)
-            else:
-                parts = member_id.rsplit('_', 1)
-                if len(parts) == 2:
-                    mol_id = parts[0]
-                    domain_id = parts[1]
-                else:
-                    continue
-        
-        # Find the domain object
-        if mol_id in scene_manager.molecules:
-            molecule = scene_manager.molecules[mol_id]
-            if domain_id in molecule.domains:
-                domain = molecule.domains[domain_id]
-                if domain.object:
-                    objects.append(domain.object)
-            elif domain_id.startswith('chain_'):
-                chain_index = domain_id.replace('chain_', '')
-                for dom_id, dom in molecule.domains.items():
-                    if dom_id.startswith(f"{mol_id}_{chain_index}_"):
-                        if dom.object:
-                            objects.append(dom.object)
-                        break
-        
-        # Fallback: check outliner items
-        for item in context.scene.outliner_items:
-            if item.item_id == member_id and item.object_name:
-                obj = bpy.data.objects.get(item.object_name)
-                if obj and obj not in objects:
-                    objects.append(obj)
-                break
-    
-    return objects
+    return get_puppet_member_objects(context.scene, scene_manager, puppet_item)
 
 def capture_pose_preview(context, pose):
     """Capture a preview image for the pose"""

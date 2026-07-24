@@ -514,3 +514,27 @@ def test_toggle_domain_expanded_flips_flag(scene, sm, multi_chain):
         domain_id=did, is_expanded=not before)
     assert res == {'FINISHED'}
     assert bool(dom.object["domain_expanded"]) == (not before)
+
+
+@pytest.mark.integration
+def test_split_domain_default_name_includes_chain_and_residues(scene, sm, multi_chain):
+    """A freshly split domain's outliner row names both the chain and the
+    residue range, e.g. "Chain A: Residues 1-50" - not just the residues.
+
+    Ground truth for the chain letter and range comes from the split we drive
+    here (chain A, 1-50), independent of the naming code under test.
+    """
+    mid = multi_chain
+    scene.selected_molecule_id = mid
+    assert H.split_domain_from_outliner(mid, "A", 1, 50) == {"FINISHED"}
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+
+    dom_rows = [it for it in scene.outliner_items if it.item_type == "DOMAIN"]
+    names = {it.name for it in dom_rows}
+    assert "Chain A: Residues 1-50" in names, \
+        f"expected a 'Chain A: Residues 1-50' row, got {sorted(names)}"
+    # The complementary piece is named the same way.
+    assert any(n.startswith("Chain A: Residues ") for n in names)
+    # And none fall back to the bare residue-only form.
+    assert not any(n.startswith("Residues ") for n in names), \
+        f"a domain row still uses the residue-only name: {sorted(names)}"

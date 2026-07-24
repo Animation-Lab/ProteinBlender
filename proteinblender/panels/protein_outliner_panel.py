@@ -169,6 +169,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     if copy_op:
                         copy_op.domain_id = primary_domain_id
 
+                    # Rename — set a custom display name for the chain
+                    rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
+                    if rename_op:
+                        rename_op.target_item_id = item.item_id
+                        rename_op.item_type = 'CHAIN'
+
                     # Delete — a copy deletes itself; a real chain deletes the chain
                     if is_chain_copy:
                         delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
@@ -196,6 +202,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
                         copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
                         if copy_op:
                             copy_op.domain_id = domain_id
+
+                        # Add rename button
+                        rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
+                        if rename_op:
+                            rename_op.target_item_id = domain_id
+                            rename_op.item_type = 'DOMAIN'
 
                         # Add delete button for all domains
                         delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)

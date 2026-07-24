@@ -250,6 +250,19 @@ class MoleculeListItem(PropertyGroup):
     
     domains: CollectionProperty(type=Domain)
 
+    # Custom chain display names the user set via the outliner's Rename button,
+    # as a JSON object mapping the chain index (string) to its name, e.g.
+    # {"0": "Heavy chain"}. Chain rows are rebuilt from auth_chain_id_map on
+    # every outliner refresh, so a rename has to live here to survive the
+    # rebuild and a .blend save (domains persist via `domains` above; chains
+    # have no per-chain record, hence this compact store). Empty means "no
+    # overrides - use the default Chain <letter> names".
+    chain_custom_names: StringProperty(
+        name="Custom Chain Names",
+        description="JSON map of chain index -> user-assigned chain name",
+        default=""
+    )
+
     # NOTE: per-protein membrane force field was removed in favour of
     # per-object flags (``Object.pb_force_field_enabled`` /
     # ``Object.pb_force_field_spacing``) registered by the membrane

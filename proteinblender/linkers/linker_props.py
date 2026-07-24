@@ -218,11 +218,11 @@ class PB2_LinkerDefinition(PropertyGroup):
         name="Behavior",
         description="How the linker responds to slack (excess length beyond the endpoint distance)",
         items=[
+            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
         ],
-        default='GRAVITY'
+        default='RANDOM_COIL'
     )
 
     # Random-coil appearance: radius of the coil loops. Smaller = more, tighter
@@ -231,8 +231,8 @@ class PB2_LinkerDefinition(PropertyGroup):
         name="Coil Width",
         description="Radius of the random-coil loops. Smaller = more, tighter "
                     "coils; larger = fewer, looser loops",
-        default=0.03,
-        min=0.005, soft_max=0.1, max=0.3,
+        default=0.06,
+        min=0.005, soft_max=0.15, max=0.3,
         step=0.1,
         unit='LENGTH',
         update=_on_linker_coil_update,
