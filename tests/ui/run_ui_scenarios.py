@@ -140,9 +140,37 @@ def setup():
 
 def verify_workspace_ui():
     area = protein_workspace_panel_area()
-    assert len(active_window().screen.areas) == state["workspace_area_count"], (
+    screen = active_window().screen
+    assert len(screen.areas) == state["workspace_area_count"], (
         "deferred/repeated workspace setup duplicated editor areas")
-    return f"Scene Properties editor ready ({area.width}x{area.height})"
+    # The Protein Outliner is a panel inside this Scene Properties editor. The
+    # duplicated default workspace ships a Scene-Collection Outliner editor in
+    # the right column, directly above Properties. If setup leaves it in place
+    # the user sees the stock "Scene Collection" tree stacked above the Protein
+    # Outliner. The canonical layout has no Outliner editor at all.
+    outliners = [a for a in screen.areas if a.type == "OUTLINER"]
+    assert not outliners, (
+        "Protein Blender workspace still shows a stock Outliner editor "
+        f"({len(outliners)} found) above the Protein Outliner; "
+        f"areas={sorted(a.type for a in screen.areas)}")
+    # Nothing may sit above the panel editor in its own column: the Protein
+    # Outliner must be the top of the right-hand column.
+    column = [a for a in screen.areas if abs(a.x - area.x) <= 2]
+    above = [a for a in column if a.y > area.y + 2]
+    assert not above, (
+        "editors stacked above the Protein Blender panel column: "
+        f"{[a.type for a in above]}")
+    # The panel column must be the intended ~30% of the window, not Blender's
+    # narrow ~18% default Properties column (which the setup reused before the
+    # layout was rebuilt from a single viewport). Assert clearly wider than that
+    # default so a regression to the reused column fails here.
+    win_w = active_window().width
+    frac = area.width / win_w if win_w else 0
+    assert frac >= 0.25, (
+        "Protein Blender panel column is too narrow: "
+        f"{area.width}px = {frac:.0%} of {win_w}px (expected ~30%)")
+    return (f"Scene Properties editor ready ({area.width}x{area.height}, "
+            f"{frac:.0%} width)")
 
 
 def assert_proteinblender_ui_loaded():

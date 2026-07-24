@@ -225,3 +225,56 @@ def test_parent_pivot_matches_its_domains(scene, sm):
                 f"domain {d.name} draws it at {tuple(dom_world)} ({sep:.6f} "
                 f"apart). Any domain created from this parent inherits the "
                 f"parent's pivot and will land in the wrong place.")
+
+
+@pytest.mark.integration
+def test_split_preserves_a_moved_and_rotated_chain(scene, sm):
+    """Move + rotate a chain, then split it: the pieces must stay where the
+    chain was, not snap back to the imported pose.
+
+    Reported (Janet, Blender 5.2): move and rotate a chain in the Domain Maker,
+    split it, and it jumps back to its original location. Cause: each split
+    piece is a fresh copy of the parent MOLECULE object, so it takes the
+    molecule's transform and drops the chain object's move/rotate entirely.
+
+    Ground truth is where the chain drew atom 0 AFTER the user moved it,
+    computed here from ``matrix_world`` and the modifier pivot (``_render_world``)
+    - independent of the split code. Every piece must draw that same atom at the
+    same world point, i.e. still sit where the user left the chain.
+    """
+    import math
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    scene.selected_molecule_id = mid
+    mol = sm.molecules[mid]
+
+    chain_a_did = next(d for d, dm in mol.domains.items() if dm.chain_id == "A")
+    chain_obj = mol.domains[chain_a_did].object
+    co0 = chain_obj.data.vertices[0].co.copy()
+
+    imported_world = _render_world(chain_obj, co0)
+
+    # Move and rotate the chain, as a user would in the viewport.
+    chain_obj.rotation_euler = (math.radians(40), 0, 0)
+    chain_obj.location = (chain_obj.location.x + 12.0,
+                          chain_obj.location.y + 4.0,
+                          chain_obj.location.z - 3.0)
+    bpy.context.view_layer.update()
+    moved_world = _render_world(chain_obj, co0)
+
+    # Sanity: the move actually shifted atom 0 well away from the import pose.
+    assert (moved_world - imported_world).length > 10.0
+
+    assert H.split_domain_from_outliner(mid, "A", 1, 50) == {"FINISHED"}
+
+    pieces = [dm for _d, dm in mol.domains.items()
+              if dm.chain_id == "A" and dm.object]
+    assert len(pieces) == 2, f"chain A should split into two pieces, got {len(pieces)}"
+
+    for dm in pieces:
+        piece_world = _render_world(dm.object, co0)
+        drift = (piece_world - moved_world).length
+        assert drift < 1e-3, (
+            f"piece {dm.start}-{dm.end} drew atom 0 at {tuple(piece_world)}, "
+            f"{drift:.4f} away from where the moved chain drew it "
+            f"{tuple(moved_world)} - the split snapped it back")

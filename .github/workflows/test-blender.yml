@@ -21,8 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Minimum supported LTS, first 5.x ABI, and current development target.
-        blender: ["4.2", "5.0", "5.2"]
+        # Minimum supported LTS, first 5.x ABI, the interim 5.1 release (whose
+        # pre-5.2 geometry-nodes modifier-input API differs), and the current
+        # development target.
+        blender: ["4.2", "5.0", "5.1", "5.2"]
     steps:
       - uses: actions/checkout@v4
       - uses: bradyajohnston/setup-blender@v4
@@ -48,14 +50,23 @@ jobs:
         run: python tests/artifact/run_artifact_tests.py --blender blender --prepare-wheels
 
   foreground-ui:
-    name: Foreground event-simulation UI
+    name: Foreground event-simulation UI / Blender ${{ matrix.blender }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # The workspace-layout assertions (verify_workspace_ui) only run here,
+        # so exercise the same ABIs the source suite covers - the first 5.x
+        # (5.0), the release users are on (5.1), and the dev target (5.2).
+        # A stray Scene-Collection Outliner in the panel column regressed
+        # identically on every version; a single-version job never caught it.
+        blender: ["5.0", "5.1", "5.2"]
     steps:
       - uses: actions/checkout@v4
       - uses: bradyajohnston/setup-blender@v4
         with:
-          version: "5.2"
+          version: ${{ matrix.blender }}
       - name: Run Blender with a real X display and window event loop
         env:
           PB_STRICT_CONTEXT: "1"
@@ -63,6 +74,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: foreground-ui-report
+          name: foreground-ui-report-${{ matrix.blender }}
           path: ui-test-report.json
           if-no-files-found: warn

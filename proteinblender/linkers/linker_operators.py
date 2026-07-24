@@ -65,24 +65,41 @@ def _build_chain_items_for_puppet(context, puppet_id: str):
 
         member_ids = [m.strip() for m in puppet_item.puppet_memberships.split(',') if m.strip()]
         outliner = context.scene.outliner_items
+        # De-duplicate by endpoint id: a split chain and its own domains can both
+        # be in the membership (selecting the chain cascades to its domains), and
+        # the chain expands to those same domains below - without this guard each
+        # domain is listed twice AND the two enum entries share an identifier,
+        # which Blender does not allow.
+        seen = set()
+
+        def _add(item_id, label):
+            if item_id in seen:
+                return
+            seen.add(item_id)
+            items.append((item_id, label, f"{label} in {puppet_item.name}"))
+
         for member_id in member_ids:
             member = next((it for it in outliner if it.item_id == member_id), None)
             if member is None:
                 continue
-            # A chain split into two or more domains contributes those domains
-            # as the linkable endpoints, not the chain as a whole: linkers
-            # attach to the individual domain objects, so a user who splits a
-            # chain to hinge its domains can connect them. An unsplit chain (its
-            # whole-chain auto-domain has no separate DOMAIN row) stays itself.
-            domain_children = [it for it in outliner
-                               if it.item_type == 'DOMAIN' and it.parent_id == member_id]
-            if member.item_type == 'CHAIN' and len(domain_children) >= 2:
+            # A chain that has been split contributes its DOMAIN pieces as the
+            # linkable endpoints, never the chain as a whole. Linkers attach to
+            # the individual domain objects; the parent chain's own object was
+            # deleted by the split, so listing it gives an endpoint that resolves
+            # to no residues ("Valid range: 1-999", residue 1 doesn't exist) and
+            # every create fails with "Could not find residue". Expand on ANY
+            # domain child - even one, e.g. after the sibling piece was deleted.
+            # An unsplit chain (its whole-chain auto-domain has no separate
+            # DOMAIN row) stays itself.
+            domain_children = sorted(
+                (it for it in outliner
+                 if it.item_type == 'DOMAIN' and it.parent_id == member_id),
+                key=lambda it: it.item_id)
+            if member.item_type == 'CHAIN' and domain_children:
                 for dom in domain_children:
-                    items.append((dom.item_id, dom.name,
-                                  f"{dom.name} in {puppet_item.name}"))
+                    _add(dom.item_id, dom.name)
             else:
-                items.append((member_id, member.name,
-                              f"{member.name} in {puppet_item.name}"))
+                _add(member_id, member.name)
         break
 
     if not items:
@@ -114,6 +131,38 @@ def _strip_endpoint_prefix(value: str) -> str:
     return value
 
 
+def _endpoint_first_residue(endpoint_value: str):
+    """The first residue that actually exists in an endpoint item, or None.
+
+    Endpoints that have been split off a chain start partway through the
+    protein (e.g. residues 51-198), so residue 1 does not exist there. This
+    returns the low end of the endpoint's real residue range so defaults land
+    on a residue that exists instead of the hard-coded 1."""
+    real = _strip_endpoint_prefix(endpoint_value or "")
+    if not real or real == 'NONE':
+        return None
+    lo, hi = get_residue_range_for_item(real, get_chain_letter_for_item(real))
+    # (1, 999) is the "couldn't resolve" fallback - don't trust it as a real
+    # first residue.
+    if (lo, hi) == (1, 999):
+        return None
+    return lo
+
+
+def _update_endpoint_a_residue(self, context):
+    """When endpoint A changes, snap its residue to the first one that exists."""
+    lo = _endpoint_first_residue(self.endpoint_a_item)
+    if lo is not None:
+        self.endpoint_a_residue = lo
+
+
+def _update_endpoint_b_residue(self, context):
+    """When endpoint B changes, snap its residue to the first one that exists."""
+    lo = _endpoint_first_residue(self.endpoint_b_item)
+    if lo is not None:
+        self.endpoint_b_residue = lo
+
+
 def get_chain_letter_for_item(item_id: str) -> str:
     """Extract the chain letter from an outliner item.
 
@@ -124,14 +173,25 @@ def get_chain_letter_for_item(item_id: str) -> str:
     if not hasattr(scene, 'outliner_items'):
         return ""
 
+    # A DOMAIN item's chain letter is authoritative in the molecule model - read
+    # it there rather than parsing the display name (which is now "Chain A:
+    # Residues 51-198" and would parse to "A:").
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    for molecule in scene_manager.molecules.values():
+        domain = getattr(molecule, 'domains', {}).get(item_id)
+        if domain is not None and getattr(domain, 'chain_id', ''):
+            return str(domain.chain_id)
+
     for item in scene.outliner_items:
         if item.item_id == item_id:
-            # Try to get from item name (often "Chain A", "Chain B", etc.)
+            # Try to get from item name (often "Chain A", "Chain B", etc.).
+            # Strip a trailing ":" so "Chain A: Residues 51-198" yields "A".
             name = item.name
             if "Chain " in name:
                 parts = name.split("Chain ")
                 if len(parts) > 1:
-                    return parts[-1].strip().split()[0]
+                    return parts[-1].strip().split()[0].rstrip(':')
 
             # Try to get from the object's chain_id attribute
             obj = bpy.data.objects.get(item.object_name)
@@ -158,6 +218,19 @@ def get_residue_range_for_item(item_id: str, chain_id: str) -> tuple:
         (min_residue, max_residue), or (1, 999) as fallback
     """
     from ..utils.chain_utils import get_chain_mapping_from_object
+
+    # A DOMAIN endpoint carries its own residue range in the molecule model. Use
+    # it directly: the domain object shares the whole-molecule mesh (masked to a
+    # range inside geometry nodes), so reading res_id off the mesh would report
+    # the parent chain's full span (e.g. 1-141) instead of the domain's 51-198 -
+    # which then defaults the endpoint residue to 1, a residue outside the
+    # domain the user picked.
+    from ..utils.scene_manager import ProteinBlenderScene
+    scene_manager = ProteinBlenderScene.get_instance()
+    for molecule in scene_manager.molecules.values():
+        domain = getattr(molecule, 'domains', {}).get(item_id)
+        if domain is not None and hasattr(domain, 'start') and hasattr(domain, 'end'):
+            return (domain.start, domain.end)
 
     obj = get_object_for_item(item_id)
     if not obj or not obj.data or not hasattr(obj.data, 'attributes'):
@@ -347,7 +420,8 @@ class PB2_OT_add_linker(Operator):
     endpoint_a_item: EnumProperty(
         name="Start Chain",
         description="Chain/domain for start endpoint",
-        items=get_chain_items_a
+        items=get_chain_items_a,
+        update=_update_endpoint_a_residue
     )
 
     endpoint_a_residue: IntProperty(
@@ -360,7 +434,8 @@ class PB2_OT_add_linker(Operator):
     endpoint_b_item: EnumProperty(
         name="End Chain",
         description="Chain/domain for end endpoint",
-        items=get_chain_items_b
+        items=get_chain_items_b,
+        update=_update_endpoint_b_residue
     )
 
     endpoint_b_residue: IntProperty(
@@ -455,9 +530,9 @@ class PB2_OT_add_linker(Operator):
         name="Behavior",
         description="How the linker responds to slack",
         items=[
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
         ],
         default='RANDOM_COIL'
     )
@@ -478,8 +553,12 @@ class PB2_OT_add_linker(Operator):
     )
 
     def invoke(self, context, event):
-        # Default endpoint B to a different chain than A when possible
+        # Default the two endpoints to different items when possible, then snap
+        # each residue to the first one that actually exists there (assigning
+        # the endpoint items fires the update callbacks that do the snapping).
         items = _build_chain_items_for_puppet(context, self.puppet_selector)
+        if items and items[0][0] != 'NONE':
+            self.endpoint_a_item = f"A_{items[0][0]}"
         if len(items) >= 2:
             self.endpoint_b_item = f"B_{items[1][0]}"
         return context.window_manager.invoke_props_dialog(self, width=450)
@@ -525,13 +604,26 @@ class PB2_OT_add_linker(Operator):
             self.report({'ERROR'}, "Cannot link a residue to itself")
             return {'CANCELLED'}
 
-        # Get endpoint positions
+        # Get endpoint positions. If the requested residue doesn't exist in the
+        # endpoint (typically the default 1 on a domain that starts at 51),
+        # retry at the endpoint's first real residue rather than hard-failing.
         start_pos = get_residue_position_from_item(
             item_a, chain_a, self.endpoint_a_residue
         )
+        if start_pos is None:
+            lo_a = _endpoint_first_residue(self.endpoint_a_item)
+            if lo_a is not None and lo_a != self.endpoint_a_residue:
+                self.endpoint_a_residue = lo_a
+                start_pos = get_residue_position_from_item(item_a, chain_a, lo_a)
+
         end_pos = get_residue_position_from_item(
             item_b, chain_b, self.endpoint_b_residue
         )
+        if end_pos is None:
+            lo_b = _endpoint_first_residue(self.endpoint_b_item)
+            if lo_b is not None and lo_b != self.endpoint_b_residue:
+                self.endpoint_b_residue = lo_b
+                end_pos = get_residue_position_from_item(item_b, chain_b, lo_b)
 
         if start_pos is None:
             self.report({'ERROR'}, f"Could not find residue {chain_a}:{self.endpoint_a_residue}")
@@ -766,9 +858,9 @@ class PB2_OT_edit_linker(Operator):
     behavior: EnumProperty(
         name="Behavior",
         items=[
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
         ],
         default='RANDOM_COIL'
     )

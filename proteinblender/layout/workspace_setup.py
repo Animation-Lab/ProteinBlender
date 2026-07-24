@@ -1,5 +1,11 @@
 import bpy
 
+# Width of the right-hand ProteinBlender panel column as a fraction of the
+# window. Matches the 0.7 viewport split (30% panel) the setup uses when it has
+# to create the panel from scratch.
+PANEL_WIDTH_FRACTION = 0.30
+
+
 class ProteinWorkspaceManager:
     def __init__(self, name="Protein Blender"):
         self.name = name
@@ -66,6 +72,15 @@ class ProteinWorkspaceManager:
         if self.screen is None:
             raise RuntimeError("Protein Blender workspace has no active screen")
 
+        self._discover_editor_areas()
+
+    def _discover_editor_areas(self):
+        """(Re)resolve the managed editor-area handles from the live screen.
+
+        Must be re-run after any ``screen.area_close`` / ``area_split``: those
+        reallocate the area collection and invalidate previously captured
+        ``Area`` handles.
+        """
         view_areas = [area for area in self.screen.areas if area.type == 'VIEW_3D']
         self.main_area = max(
             view_areas, key=lambda area: area.width * area.height,
@@ -78,20 +93,91 @@ class ProteinWorkspaceManager:
              if area.type in {'DOPESHEET_EDITOR', 'TIMELINE'}),
             None)
 
+    def _reduce_to_main_viewport(self):
+        """Close every editor except the largest 3D viewport.
+
+        The duplicated default workspace ships four editors (viewport, an
+        Outliner stacked over Properties in the narrow right column, and a
+        timeline). Reusing that Properties editor as our panel leaves it at
+        Blender's default ~18% width; ``area_move`` cannot widen it because its
+        left edge borders two neighbours (viewport and timeline). So collapse to
+        a single viewport and rebuild the panel/timeline at the intended
+        proportions.
+
+        Close one area per pass, re-reading ``screen.areas`` each time: every
+        ``area_close`` mutates the screen and invalidates every other ``Area``
+        handle, so iterating a captured collection aborts with "Area not found
+        in screen" on Blender 5.2. Bounded by the area count so a non-closable
+        editor (``area_close.poll()`` False) can never spin forever.
+        """
+        if not self.screen or not self.window:
+            return
+        for _ in range(len(self.screen.areas)):
+            self._discover_editor_areas()
+            keep = self.main_area
+            target = next(
+                (area for area in self.screen.areas if area != keep), None)
+            if target is None:
+                return
+            before = len(self.screen.areas)
+            override = {
+                'window': self.window,
+                'screen': self.screen,
+                'area': target,
+            }
+            with bpy.context.temp_override(**override):
+                if not bpy.ops.screen.area_close.poll():
+                    return
+                bpy.ops.screen.area_close()
+            if len(self.screen.areas) >= before:
+                # The close polled true but the join was refused (geometry
+                # wouldn't collapse); stop rather than loop on it forever.
+                return
+
+    def _layout_is_canonical(self):
+        """True when the screen already holds exactly the canonical layout with
+        the panel at (near) its intended width - so setup can no-op on repeat
+        calls instead of tearing the layout down and rebuilding it every time."""
+        if not self.window or not self.screen:
+            return False
+        types = sorted(area.type for area in self.screen.areas)
+        if types != ['DOPESHEET_EDITOR', 'PROPERTIES', 'VIEW_3D']:
+            return False
+        self._discover_editor_areas()
+        if not self.panel_area or self.window.width <= 0:
+            return False
+        target = int(self.window.width * PANEL_WIDTH_FRACTION)
+        return self.panel_area.width >= int(target * 0.85)
+
     def add_panels_to_workspace(self):
-        # Ensure we have a main area before proceeding
+        self._discover_editor_areas()
+        if not self.main_area:
+            return
+        # Idempotent: if the canonical three-editor layout is already in place
+        # at the right width, leave it be (the load flow calls setup 2-3 times).
+        if self._layout_is_canonical():
+            return
+
+        # Otherwise rebuild from a single viewport so the panel and timeline get
+        # their intended proportions regardless of what the duplicated default
+        # layout supplied. Re-resolve area handles after every split: area_split
+        # reallocates the area collection just like area_close.
+        self._reduce_to_main_viewport()
+        self._discover_editor_areas()
         if not self.main_area:
             return
 
-        # Split vertically: viewport (70%) | panel area (30%)
-        if self.panel_area is None:
-            self.panel_area = self._split_area(
-                self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
+        # Viewport (70%) | panel (30%), full height.
+        self.panel_area = self._split_area(
+            self.main_area, 'VERTICAL', 0.7, 'PROPERTIES')
+        self._discover_editor_areas()
+        if not self.main_area:
+            return
 
-        # Split the viewport horizontally: timeline (20%) at top | viewport (80%) at bottom
-        if self.timeline_area is None:
-            self.timeline_area = self._split_area(
-                self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
+        # Timeline (20%) along the bottom of the viewport column.
+        self.timeline_area = self._split_area(
+            self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
+        self._discover_editor_areas()
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type

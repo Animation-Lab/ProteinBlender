@@ -218,9 +218,9 @@ class PB2_LinkerDefinition(PropertyGroup):
         name="Behavior",
         description="How the linker responds to slack (excess length beyond the endpoint distance)",
         items=[
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
         ],
         default='RANDOM_COIL'
     )

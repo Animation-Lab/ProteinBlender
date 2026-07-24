@@ -98,6 +98,20 @@ class DNABuilderProperties(PropertyGroup):
         default="HELIX",
     )
 
+    # Canonical helix form for DNA (RNA always builds as A-form). Selects the
+    # fiber-diffraction reference model in fiber_data.py.
+    helix_form: EnumProperty(
+        name="Form",
+        description="Canonical helix form (DNA only; RNA is always A-form)",
+        items=[
+            ("B", "B-DNA", "Right-handed B-DNA (physiological; 10 bp/turn, "
+             "rise 3.38 Å). The usual choice."),
+            ("A", "A-DNA", "Right-handed A-DNA (dehydrated / protein-bound; "
+             "11 bp/turn, rise 2.56 Å, bases displaced off-axis)."),
+        ],
+        default="B",
+    )
+
     # Hidden: kept unchecked. Functionality is preserved but no longer
     # exposed in the UI.
     ladder_uniform: BoolProperty(
@@ -257,6 +271,10 @@ def sync_props_from_object(props, obj) -> bool:
     lu = obj.get("pb_ladder_uniform")
     if lu is not None:
         _set("ladder_uniform", bool(lu))
+
+    hf = obj.get("pb_helix_form")
+    if hf in ("A", "B"):
+        _set("helix_form", hf)
 
     for key, prop_name in (
         ("a", "color_a"), ("t", "color_t"), ("g", "color_g"),

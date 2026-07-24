@@ -11,6 +11,13 @@ from ..utils.chain_utils import (
 )
 
 
+def _is_identity_matrix(m, tol=1e-6):
+    """True if 4x4 matrix *m* is within *tol* of the identity (a no-op delta)."""
+    from mathutils import Matrix
+    ident = Matrix.Identity(4)
+    return all(abs(m[i][j] - ident[i][j]) < tol for i in range(4) for j in range(4))
+
+
 class PROTEINBLENDER_OT_split_domain_popup(Operator):
     """Split domain/chain with popup for range selection"""
     bl_idname = "proteinblender.split_domain_popup"
@@ -552,6 +559,16 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         # Track the parent domain's style before removal
         parent_domain_style = None
 
+        # Capture how the object being split maps its atoms into the world -
+        # its matrix_world AND its geometry-nodes pivot. The user may have
+        # moved/rotated the chain in the viewport; the new pieces are fresh
+        # copies of the MOLECULE object and would snap back to the imported pose
+        # unless we carry that mapping onto them. We keep the pivot too because a
+        # domain's world mapping is `matrix_world @ (co - pivot)`, and matching
+        # only matrix_world would leave pieces off by the pivot difference.
+        split_source_matrix_world = None
+        split_source_pivot = None
+
         print(f"Looking for domains to remove for chain {self.chain_id}, split range {self.split_start}-{self.split_end}")
 
         for domain_id, domain in molecule.domains.items():
@@ -582,6 +599,13 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                             if actual_style:
                                 parent_domain_style = actual_style
                                 print(f"Read actual style '{parent_domain_style}' from parent domain's geometry nodes")
+
+                        # This domain is the one being split - remember how it
+                        # maps atoms to the world so the pieces inherit its pose.
+                        if domain.object and split_source_matrix_world is None:
+                            from ..core import domain_space
+                            split_source_matrix_world = domain.object.matrix_world.copy()
+                            split_source_pivot = domain_space.get_pivot(domain.object)
 
                         domains_to_remove.append(domain_id)
                         print(f"Will remove domain that contains split range: {domain.name} ({domain.start}-{domain.end})")
@@ -695,22 +719,83 @@ class PROTEINBLENDER_OT_split_domain(Operator):
                 else:
                     self.report({'WARNING'}, f"Failed to create domain {start}-{end}")
         
+        # Reference for the move/rotate transfer below: how a FRESH piece maps
+        # atoms to the world before we touch its pivots. Every piece is an
+        # identical copy of the molecule object, so any one of them defines the
+        # "imported pose" mapping we need to compare the split source against.
+        split_ref_matrix_world = None
+        split_ref_pivot = None
+        if split_source_matrix_world is not None and all_created_domain_ids:
+            from ..core import domain_space
+            ref_domain = molecule.domains.get(all_created_domain_ids[0])
+            if ref_domain and ref_domain.object:
+                split_ref_matrix_world = ref_domain.object.matrix_world.copy()
+                split_ref_pivot = domain_space.get_pivot(ref_domain.object)
+
         # Set intelligent pivots for the split domains
         if len(all_created_domain_ids) >= 2:
             print(f"Setting intelligent pivots for {len(all_created_domain_ids)} split domains")
             molecule.set_domain_split_pivots(bpy.context, all_created_domain_ids, self.chain_id)
 
+        # Carry the split chain's move/rotate onto the new pieces. A domain maps
+        # a mesh coord to the world as `matrix_world @ (co - pivot)`, so the
+        # rigid delta that takes a fresh piece's mapping to the split source's
+        # mapping is
+        #     delta = (src_mw @ T(-src_pivot)) @ (ref_mw @ T(-ref_pivot))^-1
+        # Computing it in this render space (not from matrix_world alone) makes
+        # it EXACTLY identity when the source draws its atoms where a fresh piece
+        # would - e.g. an unmoved chain, or a chain on a re-centred copy whose
+        # matrix_world differs but whose rendered position matches. It is the
+        # genuine move+rotate only when the user actually moved the chain.
+        # Applied AFTER the pivots are set, as a rigid premultiply, it preserves
+        # each piece's pivot-based rendering and just relocates it as a unit.
+        if (split_source_matrix_world is not None and split_ref_matrix_world is not None):
+            from mathutils import Matrix
+            from ..core import domain_space
+            src_map = split_source_matrix_world @ Matrix.Translation(-split_source_pivot)
+            ref_map = split_ref_matrix_world @ Matrix.Translation(-split_ref_pivot)
+            delta = src_map @ ref_map.inverted()
+            if not _is_identity_matrix(delta):
+                bpy.context.view_layer.update()
+                for domain_id in all_created_domain_ids:
+                    domain = molecule.domains.get(domain_id)
+                    if domain and domain.object:
+                        domain.object.matrix_world = delta @ domain.object.matrix_world
+                        # Refresh the reset-transform baseline to the moved pose.
+                        domain.object["initial_matrix_local"] = [
+                            list(row) for row in domain.object.matrix_local]
+                bpy.context.view_layer.update()
+
         # Update group memberships BEFORE rebuilding outliner
         # IMPORTANT: We keep the chain in the group, not individual domains
-        # The hierarchy will show domains under the chain
+        # The hierarchy will show domains under the chain.
+        #
+        # The chain ROW stays a member, but the chain's single object that was
+        # parented to the puppet controller has just been deleted and replaced
+        # by the new split-piece objects (parented to the molecule). Unless we
+        # re-parent those pieces to the controller, moving the puppet moves only
+        # the chains that were never split - the split pieces stay put. Re-parent
+        # each new piece with keep-transform, exactly as create_puppet does, so
+        # the whole chain follows the puppet again.
         if chain_groups:
             print(f"Found {len(chain_groups)} groups containing the chain")
-            print(f"Chain will remain in groups, with domains shown as children")
+            for puppet_item in chain_groups:
+                controller = bpy.data.objects.get(puppet_item.controller_object_name)
+                if controller is None:
+                    print(f"  Puppet '{puppet_item.name}' has no controller object; "
+                          f"cannot re-parent split pieces")
+                    continue
+                for domain_id in all_created_domain_ids:
+                    domain = molecule.domains.get(domain_id)
+                    obj = domain.object if domain else None
+                    if obj is None or obj.parent == controller:
+                        continue
+                    world = obj.matrix_world.copy()
+                    obj.parent = controller
+                    obj.matrix_world = world  # keep_transform: stay put on re-parent
+                    print(f"  Re-parented split piece '{obj.name}' to controller "
+                          f"'{controller.name}'")
 
-            # We don't need to update group memberships here because:
-            # 1. The chain stays in the group
-            # 2. The domains will be shown as children of the chain in the group view
-        
         # Rebuild outliner to show new domains and updated groups
         build_outliner_hierarchy(context)
         
@@ -1002,61 +1087,118 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
 
 
 class PROTEINBLENDER_OT_rename_domain(Operator):
-    """Rename selected domain"""
+    """Rename a chain or domain from the Protein Outliner"""
     bl_idname = "proteinblender.rename_domain"
-    bl_label = "Rename Domain"
+    bl_label = "Rename"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     new_name: StringProperty(
         name="New Name",
-        description="New name for the domain"
+        description="New name for the chain or domain"
     )
-    
+
+    # Outliner item_id to rename, and its type. When empty, invoke() falls back
+    # to the selected CHAIN/DOMAIN row so the operator still works from a menu.
+    target_item_id: StringProperty()
+    item_type: StringProperty(default="")
+    # Back-compat alias: older callers passed the domain_id directly.
     domain_id: StringProperty()
-    
+
+    def _find_row(self, scene, item_id):
+        return next((it for it in scene.outliner_items
+                     if it.item_id == item_id), None)
+
+    def _selected_row(self, scene):
+        return next((it for it in scene.outliner_items
+                     if it.is_selected and it.item_type in ('CHAIN', 'DOMAIN')),
+                    None)
+
     def invoke(self, context, event):
         scene = context.scene
-        
-        # Find selected domain
-        for item in scene.outliner_items:
-            if item.is_selected and item.item_type == 'DOMAIN':
-                self.domain_id = item.item_id
-                self.new_name = item.name
-                break
-        
-        if not self.domain_id:
-            self.report({'WARNING'}, "Please select a domain to rename")
+        wanted = self.target_item_id or self.domain_id
+        row = self._find_row(scene, wanted) if wanted else self._selected_row(scene)
+        if row is not None:
+            self.target_item_id = row.item_id
+            if not self.item_type:
+                self.item_type = row.item_type
+            self.new_name = row.name
+        elif wanted:
+            # A domain id with no outliner row (a full-chain auto-domain renders
+            # as its CHAIN row, not its own DOMAIN row) - still renameable.
+            self.target_item_id = wanted
+            if not self.item_type:
+                self.item_type = 'DOMAIN'
+        else:
+            self.report({'WARNING'}, "Please select a chain or domain to rename")
             return {'CANCELLED'}
-        
         return context.window_manager.invoke_props_dialog(self)
-    
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "new_name")
-    
-    def execute(self, context):
-        scene = context.scene
 
-        # Update domain name in outliner
-        for item in scene.outliner_items:
-            if item.item_id == self.domain_id:
-                item.name = self.new_name
-                break
+    def _rename_chain(self, scene, item):
+        """Persist a chain rename on the molecule's list item as JSON so it
+        survives the outliner rebuild and a .blend save."""
+        import json
+        list_item = next((it for it in scene.molecule_list_items
+                          if it.identifier == item.parent_id), None)
+        if list_item is None:
+            return
+        try:
+            names = json.loads(list_item.chain_custom_names) if list_item.chain_custom_names else {}
+        except Exception:
+            names = {}
+        key = str(item.chain_id)
+        if self.new_name.strip():
+            names[key] = self.new_name
+        else:
+            names.pop(key, None)  # blank restores the default Chain <letter>
+        list_item.chain_custom_names = json.dumps(names)
 
-        # Update the wrapper's domain.name so the rename survives a
-        # save/load cycle (and matches what UI re-reads from the wrapper).
+    def _rename_domain(self, domain_id):
+        """Persist a domain rename on the wrapper so it survives save/load."""
         scene_manager = ProteinBlenderScene.get_instance()
         for molecule in scene_manager.molecules.values():
-            domain = getattr(molecule, 'domains', {}).get(self.domain_id)
+            domain = getattr(molecule, 'domains', {}).get(domain_id)
             if domain is not None:
                 domain.name = self.new_name
-                # Mirror into the persisted PG so a subsequent save sees it.
                 if hasattr(molecule, '_mirror_domains_to_property_group'):
                     try:
                         molecule._mirror_domains_to_property_group()
                     except Exception:
                         pass
                 break
+
+    def execute(self, context):
+        scene = context.scene
+        target_id = self.target_item_id or self.domain_id
+        if not target_id:
+            row = self._selected_row(scene)
+            if row is None:
+                self.report({'ERROR'}, "No chain or domain to rename")
+                return {'CANCELLED'}
+            target_id = row.item_id
+        row = self._find_row(scene, target_id)
+        item_type = self.item_type or (row.item_type if row else 'DOMAIN')
+
+        # Persist to the underlying model first (chains and domains store their
+        # names in different places). A full-chain auto-domain has no DOMAIN row
+        # (it shows as the CHAIN row), so the domain path works off the id alone.
+        if item_type == 'CHAIN':
+            if row is None:
+                self.report({'ERROR'}, "Chain not found")
+                return {'CANCELLED'}
+            self._rename_chain(scene, row)
+        else:
+            self._rename_domain(target_id)
+
+        # Reflect on any outliner row(s) with this id so the change shows
+        # immediately (there may be none for a full-chain auto-domain).
+        if self.new_name.strip():
+            for it in scene.outliner_items:
+                if it.item_id == target_id:
+                    it.name = self.new_name
 
         # Redraw UI. context.area is None when called from a script/MCP/
         # headless context — fall back to tagging every 3D view.

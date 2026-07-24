@@ -11,6 +11,12 @@ broke.
 # whole suite (auto-discovers Blender)
 python tests/run_tests.py -v
 
+# the whole suite on EVERY installed Blender (5.0 / 5.1 / 5.2), one summary
+python tests/run_all_versions.py
+python tests/run_all_versions.py --ui            # also the foreground UI suite
+python tests/run_all_versions.py --bootstrap     # install pytest/deps into each first
+python tests/run_all_versions.py --only 5.1 5.2  # limit to some versions
+
 # a single lane / module / keyword
 python tests/run_tests.py tests/unit
 python tests/run_tests.py tests/integration/test_domains.py
@@ -72,6 +78,38 @@ The suite needs `pytest` and `syrupy` in **Blender's** Python
 The addon's scientific dependencies (numpy, biotite, MDAnalysis, databpy, …)
 are already present in Blender's Python via the addon wheels, so there's
 nothing else to install.
+
+## Running across Blender versions (5.0 / 5.1 / 5.2)
+
+The suite is meant to pass identically on every supported Blender. Two
+cross-version traps have bitten this project, so the runner now guards against
+both:
+
+- **Geometry-nodes modifier-input API changed in 5.2.** 4.2-5.1 store socket
+  values at `mod[identifier]`; 5.2 moved them to
+  `mod.properties.inputs[identifier]["value"]` and rejects the old subscript.
+  All such access goes through `proteinblender/utils/gn_compat.py`, which
+  supports both. Never read/write a modifier input directly - use that helper.
+
+- **A broken dependency install fails cleanly, not cryptically.** Before
+  collecting tests, `run_blender.py` imports every core dependency and, on any
+  failure, aborts with an actionable message (which package, what error, how to
+  repair) instead of a confusing downstream error. The classic failure is a
+  Windows wheel unpacked without its sibling `<pkg>.libs` folder (missing
+  OpenBLAS/Arrow DLLs), which makes `scipy` / `MDAnalysis` / `starfile` raise
+  `ImportError: DLL load failed` while pure-Python packages still import - so
+  the addon silently refuses to load. If you see this, repair that Blender's
+  deps (see the dev helper `dev/install_deps.sh [version]`, which force-
+  reinstalls the pinned wheels and then verifies imports inside Blender). Set
+  `PB_SKIP_DEP_CHECK=1` to bypass the preflight.
+
+  On Windows, a stale **installed** copy of the add-on (its `extensions/.local`
+  deps) can shadow a good user-site install with a partial one. When testing
+  from source, either keep that `.local` healthy or don't have the add-on
+  installed as an extension in the Blender you test against.
+
+CI runs the offline suite on 4.2/5.0/5.1/5.2 and the foreground-UI suite on
+5.0/5.1/5.2 (`.github/workflows/test-blender.yml`).
 
 ## Layout
 
