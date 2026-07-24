@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "proteinblender"
-version = "1.0.11"
+version = "1.0.12"
 name = "ProteinBlender"
 tagline = "Visualize proteins in Blender"
 maintainer = "Dillon Lee <dlee123@gmail.com>"
@@ -142,7 +142,7 @@ wheels = [
 	"./wheels/starfile-0.5.13-py3-none-any.whl",
 	"./wheels/starfile-0.5.4-py3-none-any.whl",
 	"./wheels/threadpoolctl-3.6.0-py3-none-any.whl",
-	"./wheels/tqdm-4.69.0-py3-none-any.whl",
+	"./wheels/tqdm-4.69.1-py3-none-any.whl",
 	"./wheels/typing_extensions-4.16.0-py3-none-any.whl",
 	"./wheels/tzdata-2026.3-py2.py3-none-any.whl",
 ]
