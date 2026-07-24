@@ -16,6 +16,7 @@ from .linker_geometry import (
     toggle_linker_visibility,
     get_residue_position_from_item,
     get_object_for_item,
+    get_backbone_object_for_item,
     get_backbone_direction,
     compute_min_distance,
     _get_numeric_chain_id_from_item,
@@ -456,9 +457,9 @@ class PB2_OT_add_linker(Operator):
         items=[
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
         ],
-        default='GRAVITY'
+        default='RANDOM_COIL'
     )
 
     coil_width: FloatProperty(
@@ -548,9 +549,11 @@ class PB2_OT_add_linker(Operator):
         if self.length_residues < min_residues:
             self.length_residues = min_residues
 
-        # Get backbone directions for rigid binding zones
-        obj_a = get_object_for_item(item_a)
-        obj_b = get_object_for_item(item_b)
+        # Get backbone directions for rigid binding zones. Resolve via the
+        # residue so a split-chain endpoint (chain row owns no object) lands on
+        # the domain object that holds the residue.
+        obj_a = get_backbone_object_for_item(item_a, chain_a, self.endpoint_a_residue)
+        obj_b = get_backbone_object_for_item(item_b, chain_b, self.endpoint_b_residue)
         num_chain_a = _get_numeric_chain_id_from_item(item_a)
         num_chain_b = _get_numeric_chain_id_from_item(item_b)
         start_dir = get_backbone_direction(obj_a, chain_a, self.endpoint_a_residue,
@@ -765,8 +768,9 @@ class PB2_OT_edit_linker(Operator):
         items=[
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
-        ]
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
+        ],
+        default='RANDOM_COIL'
     )
     coil_width: FloatProperty(
         name="Coil Width", default=0.03, min=0.005, soft_max=0.1, max=0.3,
@@ -876,8 +880,12 @@ class PB2_OT_edit_linker(Operator):
                 )
 
                 if start_pos and end_pos:
-                    obj_a = get_object_for_item(linker.endpoint_a_item_id)
-                    obj_b = get_object_for_item(linker.endpoint_b_item_id)
+                    obj_a = get_backbone_object_for_item(
+                        linker.endpoint_a_item_id, linker.endpoint_a_chain,
+                        linker.endpoint_a_residue)
+                    obj_b = get_backbone_object_for_item(
+                        linker.endpoint_b_item_id, linker.endpoint_b_chain,
+                        linker.endpoint_b_residue)
                     num_chain_a = _get_numeric_chain_id_from_item(linker.endpoint_a_item_id)
                     num_chain_b = _get_numeric_chain_id_from_item(linker.endpoint_b_item_id)
                     start_dir = get_backbone_direction(

@@ -176,6 +176,22 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **A linker with an endpoint on a split chain was silently never created.**
+  Reported: import 1atn, make a domain on chain A, puppet the chain, Create Linker with the chain as an endpoint -> nothing appears (log: `No object found for item ..._chain_0`, then `Could not find residue A:1`).
+  Root cause: once a chain is split into domains its CHAIN outliner row owns no object (`object_name == ''`) by design - the residues live in the domain objects. `linker_geometry.get_residue_position_from_item` bailed the moment the chain's own object was missing (no fallback), so `add_linker` reported "Could not find residue" and `return {'CANCELLED'}` before creating anything. Pre-existing on `alpha`.
+  Fixed by `_objects_for_item` / `_resolve_residue`: when a CHAIN row has no object, resolve residues via its DOMAIN children's objects. Backbone-direction resolution (`get_backbone_object_for_item`) was routed the same way at all four call sites (add/edit/handler/update) so rigid zones still align.
+  Guarded by `test_linkers.py::test_split_chain_endpoint_resolves_residue_via_domain_objects` (chain-row resolution must match the independent domain-row path; verified red - returned `None` pre-fix).
+
+- **The random-coil linker looked like a jagged EKG trace / a regular telephone-cord spiral.**
+  The old `compute_random_coil_points` summed a few sine waves and bisected their amplitude to hit the arc length; the result had sharp cusps (turning >70 deg between control points) and an obviously periodic silhouette (tester feedback via Janet: wanted "gently rounding curves, but not regular spirals").
+  Rebuilt as a "confused fly" wander: the path leaves the straight chord by two channels of smooth band-limited (low-pass) noise in the perpendicular plane, with a steady handedness precession for coil character; an envelope pins both endpoints and the offset amplitude is solved for the arc length. Fully vectorised (no per-step Python loop) so it still rebuilds every linker every frame in ~0.3 ms.
+  `RANDOM_COIL` is now the default behaviour.
+  Guarded by `test_linker_geometry.py::test_random_coil_turns_are_gently_rounded_not_jagged` (max turn <45 deg on a moderate-slack linker; the old code cusped at ~75 deg, verified red) plus `_is_three_dimensional_not_a_flat_ribbon`, `_endpoints_exact_and_absorbs_slack`, `_deterministic_for_seed`, and `_taut_is_straight`.
+
+- **The random-coil linker corkscrewed as the endpoints moved.**
+  Tester report: moving the two connected chunks closer/further made the coil wind up and unwind, as if the ends were twisting - unnatural. Cause: the loop count was `(L - D) / (2*pi*coil_width)`, i.e. a function of the endpoint distance `D`, and it drove the precession angle, so changing `D` changed the number of turns. Fixed by making the loop count a *fixed* property of the linker (`COIL_REST_SLACK * L / (2*pi*coil_width)`, anchored to a half-slack resting pose); moving the endpoints now only breathes the offset amplitude, like a spring at a fixed turn count.
+  Guarded by `test_linker_geometry.py::test_random_coil_winding_is_distance_invariant_no_corkscrew` (total angle swept around the chord axis must match at two endpoint distances; verified red - it scaled ~2x with distance pre-fix).
+
 - **A linker could not connect two domains of a chain when the puppet was made from the chain.**
   Reported workflow: import 1atn, split chain A into domains 1-50 / 51-end, create a puppet from *Chain A* (the natural action, not selecting the two domain rows), then Create Linker.
   The endpoint dropdown is built by `linker_operators._build_chain_items_for_puppet`, which listed one entry per puppet member.

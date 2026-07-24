@@ -226,6 +226,47 @@ def test_add_linker_between_two_domains_of_split_chain_puppet(scene):
 
 
 @pytest.mark.integration
+def test_split_chain_endpoint_resolves_residue_via_domain_objects(scene):
+    """A linker endpoint on a chain split into domains still resolves positions.
+
+    Reported bug: after splitting chain A into a domain, creating a linker with
+    that chain as an endpoint silently produced nothing. Root cause: a split
+    chain's CHAIN outliner row owns no object (``object_name == ''``) - its
+    residues live in the domain objects - and ``get_residue_position_from_item``
+    bailed the instant the chain's own object was missing, so ``add_linker``
+    reported "Could not find residue A:N" and created no linker. The resolver
+    must fall back to the chain's domain objects.
+    """
+    from proteinblender.linkers.linker_geometry import (
+        get_residue_position_from_item,
+    )
+
+    mid, _puppet_id, domain_ids = _setup_chain_puppet_split_into_domains()
+
+    chain_a_id = next(it.item_id for it in bpy.context.scene.outliner_items
+                      if it.item_type == "CHAIN" and it.name == "Chain A"
+                      and it.parent_id == mid)
+    chain_item = next(it for it in bpy.context.scene.outliner_items
+                      if it.item_id == chain_a_id)
+    # Precondition that triggers the bug: the split chain row owns no object.
+    assert chain_item.object_name == "", \
+        "expected a split chain row to own no object"
+
+    # Residue 40 lives in the first domain (1-50). Ground truth comes from an
+    # independent working path: resolving it straight from that domain row,
+    # which has a real object of its own.
+    via_domain = get_residue_position_from_item(domain_ids[0], "A", 40)
+    assert via_domain is not None, "domain-object resolution should work"
+
+    # The chain row must resolve the same residue by falling back to its domains.
+    via_chain = get_residue_position_from_item(chain_a_id, "A", 40)
+    assert via_chain is not None, \
+        "split-chain endpoint failed to resolve residue (the reported bug)"
+    assert (via_chain - via_domain).length < 1e-4, \
+        "chain fallback resolved a different point than the domain path"
+
+
+@pytest.mark.integration
 def test_add_linker_creates_definition_and_curve(scene):
     """add_linker adds a definition, a backing curve object, and is_valid True."""
     mid, puppet, chains = _setup_puppet_two_chains()
