@@ -18,6 +18,7 @@ from .linker_geometry import (
     create_linker_curve,
     get_residue_position_from_item,
     get_object_for_item,
+    get_backbone_object_for_item,
     get_backbone_direction,
     _get_numeric_chain_id_from_item,
     BU_PER_RESIDUE,
@@ -251,9 +252,13 @@ def _reconnect_linker_geometry(linker) -> bool:
     if start_pos and end_pos:
         logger.info(f"Recreating geometry for linker: {linker.name}")
 
-        # Get backbone directions
-        obj_a = get_object_for_item(linker.endpoint_a_item_id)
-        obj_b = get_object_for_item(linker.endpoint_b_item_id)
+        # Get backbone directions (split-chain-aware object resolution)
+        obj_a = get_backbone_object_for_item(
+            linker.endpoint_a_item_id, linker.endpoint_a_chain,
+            linker.endpoint_a_residue)
+        obj_b = get_backbone_object_for_item(
+            linker.endpoint_b_item_id, linker.endpoint_b_chain,
+            linker.endpoint_b_residue)
         num_chain_a = _get_numeric_chain_id_from_item(linker.endpoint_a_item_id)
         num_chain_b = _get_numeric_chain_id_from_item(linker.endpoint_b_item_id)
         start_dir = get_backbone_direction(

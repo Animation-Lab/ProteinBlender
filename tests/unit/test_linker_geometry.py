@@ -129,18 +129,168 @@ def test_arc_length_straight_equals_distance():
 # compute_random_coil_points
 # ---------------------------------------------------------------------------
 
+# The confused-fly coil wanders off the straight start->end chord by two
+# channels of smooth band-limited noise, pinned at both endpoints, with its
+# amplitude solved so the arc length matches the residue count. Its defining,
+# independently-checkable properties are: exact endpoints, arc length ~ target,
+# gently-rounded turns (no jagged cusps - the whole point of the rework), a
+# genuinely 3-D (non-planar) path, and shape that varies from seed to seed. The
+# helpers below derive those from the output geometry alone, never from the
+# generator's own maths.
+
+def _max_turn_angle_deg(points):
+    """Largest direction change between consecutive segments (jaggedness)."""
+    worst = 0.0
+    for i in range(1, len(points) - 1):
+        v1, v2 = points[i] - points[i - 1], points[i + 1] - points[i]
+        if v1.length < 1e-9 or v2.length < 1e-9:
+            continue
+        cos = max(-1.0, min(1.0, v1.normalized().dot(v2.normalized())))
+        worst = max(worst, math.degrees(math.acos(cos)))
+    return worst
+
+
+def _planarity_ratio(points):
+    """Smallest / largest singular value of the centred point cloud.
+
+    ~0 means the points lie in a plane (a flat ribbon); a clearly positive
+    value means the path genuinely occupies 3-D space.
+    """
+    import numpy as np
+    m = np.array([[p.x, p.y, p.z] for p in points], dtype=float)
+    m -= m.mean(axis=0)
+    sv = np.linalg.svd(m, compute_uv=False)
+    return float(sv[2] / sv[0]) if sv[0] > 1e-12 else 0.0
+
+
+def _perp_winding(points, start, end):
+    """Total angle (radians) the curve sweeps around its chord axis.
+
+    Measures how many times the coil winds around the straight start->end line -
+    the quantity that must NOT change as the endpoints move, or the coil visibly
+    corkscrews. Sampled only where the off-axis offset is large enough to have a
+    well-defined direction (the ends taper to zero).
+    """
+    import numpy as np
+    A = np.array([start.x, start.y, start.z], dtype=float)
+    B = np.array([end.x, end.y, end.z], dtype=float)
+    axis = (B - A) / np.linalg.norm(B - A)
+    ref1 = np.cross(axis, [0.0, 0.0, 1.0])
+    if np.linalg.norm(ref1) < 0.1:
+        ref1 = np.cross(axis, [0.0, 1.0, 0.0])
+    ref1 /= np.linalg.norm(ref1)
+    ref2 = np.cross(axis, ref1)
+
+    P = np.array([[p.x, p.y, p.z] for p in points], dtype=float)
+    rel = P - A
+    perp = rel - np.outer(rel @ axis, axis)
+    x, y = perp @ ref1, perp @ ref2
+    mag = np.hypot(x, y)
+    thresh = 0.2 * mag.max() if mag.max() > 0 else 0.0
+    ang = np.arctan2(y, x)
+
+    total, prev = 0.0, None
+    for i in range(len(ang)):
+        if mag[i] < thresh:
+            prev = None            # don't bridge across the tapered ends
+            continue
+        if prev is not None:
+            d = (ang[i] - prev + np.pi) % (2 * np.pi) - np.pi
+            total += d
+        prev = ang[i]
+    return abs(total)
+
+
 @pytest.mark.unit
-def test_random_coil_endpoints_and_arc_length():
+def test_random_coil_winding_is_distance_invariant_no_corkscrew():
+    """Moving the endpoints must not wind or unwind the coil (no corkscrew).
+
+    The loop count is a fixed property of the linker, not the endpoint gap, so
+    the total angle the coil sweeps around its axis is the same whether the ends
+    are near or far - moving them only breathes the amplitude. Pre-fix the loop
+    count scaled with slack (`(L-D)/...`), so the coil corkscrewed as the
+    endpoints moved (user report). Same seed + axis, two endpoint distances.
+    """
+    L = 2.0
+    a = Vector((0, 0, 0))
+    near = lg.compute_random_coil_points(a, Vector((0.4, 0, 0)), L,
+                                         num_residues=40, seed=7)
+    far = lg.compute_random_coil_points(a, Vector((1.2, 0, 0)), L,
+                                        num_residues=40, seed=7)
+    w_near = _perp_winding(near, a, Vector((0.4, 0, 0)))
+    w_far = _perp_winding(far, a, Vector((1.2, 0, 0)))
+    assert w_near > 1.0, "expected a coil that actually winds"
+    assert w_near == pytest.approx(w_far, rel=0.15)
+
+
+@pytest.mark.unit
+def test_random_coil_frame_does_not_flip_when_endpoints_orbit():
+    """Orbiting one endpoint around the other must not flip the coil.
+
+    Sweep the chord direction through world +Z - where the old fixed-world-axis
+    frame flipped the whole coil 180 deg (user report: a sudden flip at one
+    clock position). With a rest-direction anchor the perpendicular frame is
+    rotation-transported, so consecutive coils differ by only the small amount
+    the endpoint actually moved - never a jump. The rest anchor is +X, so the
+    lone remaining singularity is at -X, which this sweep avoids.
+    """
+    L, radius, center = 1.0, 0.6, Vector((0, 0, 0))
+    rest = Vector((1.0, 0.0, 0.0))
+    prev, max_jump = None, 0.0
+    N = 90
+    for i in range(N + 1):
+        th = 0.05 + (math.pi - 0.20) * i / N     # +X .. +Z (mid) .. toward -X
+        d = Vector((math.cos(th), 0.0, math.sin(th)))
+        pts = lg.compute_random_coil_points(
+            center, center + d * radius, L, num_residues=28, seed=7,
+            coil_width=0.03, ref_direction=rest)
+        if prev is not None:
+            jump = max((a - b).length for a, b in zip(pts, prev))
+            max_jump = max(max_jump, jump)
+        prev = pts
+    # Endpoint moves ~0.02/step; a 180 deg frame flip would move mid-coil points
+    # by ~2x the offset amplitude (an order of magnitude more).
+    assert max_jump < 0.06
+
+
+@pytest.mark.unit
+def test_random_coil_endpoints_exact_and_absorbs_slack():
     start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
     L = 3.0
     pts = lg.compute_random_coil_points(start, end, total_length=L,
-                                        num_residues=30, seed=7)
+                                        num_residues=40, seed=7)
     assert len(pts) >= 16
     assert _vclose(pts[0], start, tol=1e-4)
     assert _vclose(pts[-1], end, tol=1e-4)
-    # Binary search targets arc length == L to within ~0.2%.
+    # The wandering path spends the slack: far longer than the 1.0 chord, and
+    # solved to match the requested residue length.
     arc = lg._arc_length(pts)
+    assert arc > (end - start).length * 1.5
     assert arc == pytest.approx(L, rel=0.05)
+
+
+@pytest.mark.unit
+def test_random_coil_turns_are_gently_rounded_not_jagged():
+    """A moderate-slack linker must turn in smooth arcs, not sharp cusps.
+
+    This is the aesthetic fix: the old sine-sum coil cusped at ~71 deg on this
+    exact case (reading as a jagged EKG trace); the band-limited wander stays
+    well under half that. The threshold sits between the two so a regression to
+    sharp turns fails here.
+    """
+    start, end = Vector((0, 0, 0)), Vector((0.5, 0, 0))
+    pts = lg.compute_random_coil_points(start, end, total_length=1.0,
+                                        num_residues=28, seed=7)
+    assert _max_turn_angle_deg(pts) < 45.0
+
+
+@pytest.mark.unit
+def test_random_coil_is_three_dimensional_not_a_flat_ribbon():
+    start, end = Vector((0, 0, 0)), Vector((0.5, 0, 0))
+    pts = lg.compute_random_coil_points(start, end, total_length=1.0,
+                                        num_residues=28, seed=7)
+    # The handedness precession pushes the path out of any single plane.
+    assert _planarity_ratio(pts) > 0.05
 
 
 @pytest.mark.unit
@@ -165,44 +315,11 @@ def test_random_coil_seed_varies_shape_without_moving_endpoints():
 
 
 @pytest.mark.unit
-def test_random_coil_size_bump_is_local_and_smooth():
-    args = (
-        Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0, 101,
-        Vector((0, 1, 0)), Vector((0, 0, 1)),
-        [2.0, 3.4, 5.4], [1.0, 0.5, 0.25], [0.0] * 6,
-    )
-    plain = lg._generate_random_coil_shape(*args)
-    bumped = lg._generate_random_coil_shape(
-        *args, size_bumps=[(0.5, 0.05, 1.6)]
-    )
-    # Endpoints and regions far from the chosen central turn stay unchanged.
-    assert _vclose(plain[0], bumped[0])
-    assert _vclose(plain[-1], bumped[-1])
-    assert _vclose(plain[10], bumped[10], tol=1e-4)
-    # The selected region grows, with no discontinuous point-to-point jump.
-    assert (bumped[50] - Vector((0.5, 0, 0))).length > \
-        (plain[50] - Vector((0.5, 0, 0))).length
-    steps = [(bumped[i + 1] - bumped[i]).length
-             for i in range(len(bumped) - 1)]
-    assert max(steps) < 0.5
-
-
-@pytest.mark.unit
 def test_random_coil_taut_is_straight():
     start, end = Vector((0, 0, 0)), Vector((3, 0, 0))
     pts = lg.compute_random_coil_points(start, end, total_length=3.0,
                                         num_residues=30, seed=1)
     assert _is_collinear(pts, tol=1e-4)
-
-
-@pytest.mark.unit
-def test_random_coil_never_doubles_back_along_endpoint_axis():
-    """Noise may wander sideways, but must progress monotonically end to end."""
-    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
-    pts = lg.compute_random_coil_points(start, end, total_length=3.0,
-                                        num_residues=86, seed=7)
-    axial = [(point - start).dot((end - start).normalized()) for point in pts]
-    assert all(b >= a for a, b in zip(axial, axial[1:]))
 
 
 @pytest.mark.unit

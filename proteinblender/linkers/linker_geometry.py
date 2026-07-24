@@ -11,6 +11,7 @@ domains within a puppet. The linker behaves like a string/tube:
 import bpy
 import math
 import zlib
+import numpy as np
 from mathutils import Vector
 from typing import List, Optional
 import logging
@@ -24,26 +25,90 @@ ANGSTROM_PER_RESIDUE = 3.5
 MN_SCALE = 0.01  # MolecularNodes scale: 1 BU = 100 Angstroms
 BU_PER_RESIDUE = ANGSTROM_PER_RESIDUE * MN_SCALE  # 0.035 BU per residue
 
-# Random-coil wiggle density: base number of coils ≈ residues * this factor
-# (~a gentle turn every ~3 residues). Scaling the coil count with the residue
-# count lets a longer / slacker linker absorb its excess length as many small
-# waves instead of a few big ones.
-COILS_PER_RESIDUE = 0.3
-MIN_COIL_CYCLES = 2.0
-MAX_COIL_CYCLES = 12.0
-MAX_COIL_SAMPLES = 128
+# Random-coil ("confused fly") generation. The path wanders off the straight
+# start->end chord by two channels of smooth, band-limited (low-pass) noise in
+# the perpendicular plane, so it turns in gentle rounding curves with no sharp
+# jags. A steady precession of the offset direction gives it one-handed coil
+# character (like a fly that can't stop banking one way) while the noisy radius
+# keeps it from reading as a regular telephone-cord spiral. An envelope pins
+# both endpoints, and the offset amplitude is solved so the arc length matches
+# the residue count. Fully vectorised over the sample array: no per-step Python
+# loop, so it is cheap enough to rebuild every linker on every frame change.
+MAX_COIL_SAMPLES = 128           # output control points (upper bound)
+COIL_SAMPLES_PER_RESIDUE = 4     # output points scale with linker length
+COIL_HANDEDNESS = 0.35           # 0 = planar wander, 1 = full one-handed coil
+COIL_MAX_LOOPS = 10.0            # cap on loops (bounds tightness / jaggedness)
+COIL_REST_SLACK = 0.5           # slack fraction the fixed loop count is tuned for
+COIL_MIN_CORR = 8               # min noise correlation length (samples): smoothness floor
+DEFAULT_COIL_WIDTH = 0.03        # fallback characteristic loop radius (BU)
+COIL_AMP_BISECT_ITERS = 30       # amplitude solve steps to hit the arc length
 
 
 # ---------------------------------------------------------------------------
 # Residue position helpers
 # ---------------------------------------------------------------------------
 
+def _objects_for_item(item_id: str) -> List[bpy.types.Object]:
+    """Live Blender objects an outliner item's residues can be read from.
+
+    Normally a single object. A chain that has been *split into domains* owns
+    no object of its own - its outliner row keeps an empty ``object_name`` and
+    each domain owns its own object (see ``chain_utils.get_chain_objects``). So
+    when the row itself has no object, fall back to the chain's DOMAIN children,
+    which is where the residues actually live. Without this, a linker endpoint
+    placed on a split chain resolves to nothing and the linker is never built.
+    """
+    scene = bpy.context.scene
+    objs: List[bpy.types.Object] = []
+    seen = set()
+
+    def _add(name: str) -> None:
+        obj = bpy.data.objects.get(name or "")
+        if obj is not None and obj.name not in seen:
+            seen.add(obj.name)
+            objs.append(obj)
+
+    if not hasattr(scene, 'outliner_items'):
+        return objs
+    item = next((it for it in scene.outliner_items if it.item_id == item_id), None)
+    if item is None:
+        return objs
+
+    _add(getattr(item, 'object_name', ''))
+    if not objs and item.item_type == 'CHAIN':
+        for child in scene.outliner_items:
+            if child.item_type == 'DOMAIN' and child.parent_id == item_id:
+                _add(getattr(child, 'object_name', ''))
+    return objs
+
+
+def _resolve_residue(item_id: str, chain_id: str,
+                     residue_num: int) -> tuple:
+    """Return ``(object, world_position)`` for a residue, or ``(None, None)``.
+
+    Searches every object the item can resolve to (its own, or - for a split
+    chain - its domain objects), preferring the alpha carbon, and falling back
+    to the parent molecule object when a domain object lacks the residue.
+    """
+    numeric_chain_id = _get_numeric_chain_id_from_item(item_id)
+    for obj in _objects_for_item(item_id):
+        pos = _get_residue_position_from_object(
+            obj, chain_id, residue_num, numeric_chain_id=numeric_chain_id)
+        if pos is None and obj.parent:
+            pos = _get_residue_position_from_object(
+                obj.parent, chain_id, residue_num,
+                numeric_chain_id=numeric_chain_id)
+        if pos is not None:
+            return obj, pos
+    return None, None
+
+
 def get_residue_position_from_item(item_id: str, chain_id: str,
                                     residue_num: int) -> Optional[Vector]:
     """Get world position of a residue from an outliner item.
 
-    Resolves the outliner item to a Blender object and searches its
-    mesh attributes for the residue's alpha carbon position.
+    Resolves the outliner item to a Blender object (or, for a split chain, its
+    domain objects) and searches mesh attributes for the residue's alpha carbon.
 
     Args:
         item_id: Outliner item_id (e.g., "mol123_chain_A")
@@ -53,30 +118,23 @@ def get_residue_position_from_item(item_id: str, chain_id: str,
     Returns:
         World position Vector or None if not found
     """
-    obj = get_object_for_item(item_id)
-    if not obj:
-        logger.warning(f"No object found for item {item_id}")
-        return None
-
-    # Get the numeric chain_id from the outliner item itself.
-    # This is more reliable than chain_mapping_str on the mesh (which may not exist).
-    numeric_chain_id = _get_numeric_chain_id_from_item(item_id)
-
-    logger.info(f"Resolving position: item={item_id} -> obj='{obj.name}' "
-                f"chain={chain_id} numeric_chain={numeric_chain_id} res={residue_num}")
-
-    pos = _get_residue_position_from_object(obj, chain_id, residue_num,
-                                             numeric_chain_id=numeric_chain_id)
-
-    # If position not found on the item's own object (e.g., single-chain domain
-    # object that doesn't contain the requested chain), try the parent molecule
-    # object which may contain all chains.
-    if pos is None and obj.parent:
-        logger.info(f"  Not found on '{obj.name}', trying parent '{obj.parent.name}'")
-        pos = _get_residue_position_from_object(obj.parent, chain_id, residue_num,
-                                                 numeric_chain_id=numeric_chain_id)
-
+    _obj, pos = _resolve_residue(item_id, chain_id, residue_num)
+    if pos is None:
+        logger.warning(f"No residue position for item {item_id} "
+                       f"chain {chain_id} res {residue_num}")
     return pos
+
+
+def get_backbone_object_for_item(item_id: str, chain_id: str,
+                                 residue_num: int) -> Optional[bpy.types.Object]:
+    """The object that actually contains the residue, for backbone direction.
+
+    Resolves split chains to the specific domain object holding the residue, so
+    the rigid binding zone aligns correctly even when the endpoint is a chain
+    whose row owns no object.
+    """
+    obj, _pos = _resolve_residue(item_id, chain_id, residue_num)
+    return obj
 
 
 def _get_numeric_chain_id_from_item(item_id: str) -> Optional[int]:
@@ -493,123 +551,209 @@ def _arc_length(points: List[Vector]) -> float:
     return length
 
 
-def _generate_random_coil_shape(start: Vector, end: Vector,
-                                 amplitude: float,
-                                 num_samples: int,
-                                 perp1: Vector, perp2: Vector,
-                                 freqs: List[float], amps: List[float],
-                                 phase_offsets: List[float],
-                                 size_bumps=None) -> List[Vector]:
-    """Generate the pre-regression smooth coil at an amplitude scale."""
-    amp_sum = sum(amps)
-    points = []
-    for i in range(num_samples):
-        t = i / max(num_samples - 1, 1)
-        base = start.lerp(end, t)
-        envelope = 4.0 * t * (1.0 - t)
-        offset1 = 0.0
-        offset2 = 0.0
-        for k in range(len(freqs)):
-            angle1 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k]
-            angle2 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k + 3]
-            offset1 += amps[k] * math.sin(angle1)
-            offset2 += amps[k] * math.cos(angle2)
-        # Slowly vary the coil radius to break up the repeating, heartbeat-like
-        # silhouette while preserving the smooth pre-regression path.
-        size_variation = 1.0 + 0.18 * math.sin(
-            2.0 * math.pi * 0.73 * t + phase_offsets[0] * 0.37
-        )
-        # Enlarge a sparse, deterministic selection of central turns. Gaussian
-        # bumps avoid hard scale changes that would make the Bezier path kink.
-        for center, width, gain in size_bumps or ():
-            distance = (t - center) / width
-            size_variation *= 1.0 + (gain - 1.0) * math.exp(
-                -0.5 * distance * distance
-            )
-        scale = (amplitude / amp_sum) * envelope * size_variation
-        offset1 *= scale
-        offset2 *= scale
-        points.append(base + perp1 * offset1 + perp2 * offset2)
-    return points
-
-
 def _stable_coil_seed(uid: str) -> int:
     """Return the same compact coil seed in every Blender process."""
     return zlib.crc32(uid.encode("utf-8")) & 0xFFFF
+
+
+def _band_noise(n: int, corr: int, rng, octaves: int = 2) -> np.ndarray:
+    """Smooth band-limited noise in [-1, 1] - a cheap 1-D Perlin stand-in.
+
+    Sums a few octaves of Gaussian white noise, each smoothed with a Hann
+    window whose width halves per octave, so the result varies gently over a
+    correlation length of ``corr`` samples rather than jittering every step.
+    """
+    out = np.zeros(n)
+    amp, tot = 1.0, 0.0
+    # Kernel width must stay under the signal length, or np.convolve(..., 'same')
+    # returns the kernel length instead of n.
+    k_cap = max(2, (n - 1) // 2)
+    for o in range(octaves):
+        k = min(k_cap, max(2, int(corr / 2 ** o)))
+        ker = np.hanning(2 * k + 1)
+        ker /= ker.sum()
+        sm = np.convolve(rng.normal(size=n), ker, 'same')
+        out += amp * sm / (sm.std() or 1.0)
+        tot += amp
+        amp *= 0.5
+    out /= (tot or 1.0)
+    return np.clip(out / 2.5, -1.0, 1.0)
+
+
+def _coil_perp_axes(direction: np.ndarray):
+    """Two unit vectors spanning the plane perpendicular to ``direction``.
+
+    Built from a fixed world axis, so the frame flips whenever ``direction``
+    sweeps through that axis (a coil orbiting one endpoint around the other
+    would suddenly rotate 180 deg there). Use ``_transport_perp_axes`` with a
+    stable reference direction instead when one is available.
+    """
+    perp1 = np.cross(direction, np.array([0.0, 0.0, 1.0]))
+    if np.linalg.norm(perp1) < 0.1:
+        perp1 = np.cross(direction, np.array([0.0, 1.0, 0.0]))
+    perp1 /= np.linalg.norm(perp1)
+    perp2 = np.cross(direction, perp1)
+    perp2 /= np.linalg.norm(perp2)
+    return perp1, perp2
+
+
+def _transport_perp_axes(rest: np.ndarray, direction: np.ndarray):
+    """Perpendicular frame carried from a rest orientation to ``direction``.
+
+    Builds a canonical frame once at the rest chord direction, then rotates it
+    by the shortest arc that maps ``rest`` onto the current ``direction``. The
+    frame is then continuous as the endpoints swing around - the single
+    unavoidable singularity (a frame field on the sphere must have one) sits at
+    ``-rest``, the pose 180 deg opposite where the linker was created, which
+    ordinary animation never reaches. This replaces the fixed-world-axis frame
+    whose singularity sat at world +-Z and flipped the coil during a vertical
+    orbit.
+    """
+    r = rest / np.linalg.norm(rest)
+    # Canonical perpendicular basis at the rest direction.
+    helper = (np.array([0.0, 0.0, 1.0]) if abs(r[2]) < 0.9
+              else np.array([1.0, 0.0, 0.0]))
+    p1 = np.cross(r, helper)
+    p1 /= np.linalg.norm(p1)
+    p2 = np.cross(r, p1)
+
+    # Shortest-arc rotation rest -> direction, applied to the basis.
+    axis = np.cross(r, direction)
+    s = float(np.linalg.norm(axis))
+    c = float(np.dot(r, direction))
+    if s < 1e-8:
+        # Aligned (c>0) -> identity; antipode (c<0) -> the lone singularity,
+        # return a defined (flipped) frame rather than a NaN.
+        return (p1, p2) if c > 0 else (-p1, p2)
+    axis /= s
+    ang = math.atan2(s, c)
+    ca, sa = math.cos(ang), math.sin(ang)
+
+    def _rot(v):
+        return v * ca + np.cross(axis, v) * sa + axis * (axis @ v) * (1.0 - ca)
+
+    return _rot(p1), _rot(p2)
 
 
 def compute_random_coil_points(start: Vector, end: Vector,
                                 total_length: float,
                                 num_residues: int = 10,
                                 seed: int = 0,
-                                coil_width: float = None) -> List[Vector]:
-    """Compute the pre-regression smooth random-coil path."""
-    D = (end - start).length
-    L = total_length
-    import random
+                                coil_width: float = None,
+                                ref_direction: Vector = None) -> List[Vector]:
+    """Compute a "confused fly" random-coil path between two fixed endpoints.
 
-    base_cycles = min(MAX_COIL_CYCLES,
-                      max(MIN_COIL_CYCLES,
-                          num_residues * COILS_PER_RESIDUE))
-    rng = random.Random(seed)
-    # Slight per-linker detuning prevents the same three wave components from
-    # falling into an obvious repeating beat. Keep it subtle so the known-good
-    # smooth character remains intact.
-    ratios = [1.0, 1.7, 2.7]
-    freqs = [base_cycles * ratio * rng.uniform(0.94, 1.06)
-             for ratio in ratios]
-    amps = [1.0, 0.5 * rng.uniform(0.9, 1.1),
-            0.25 * rng.uniform(0.9, 1.1)]
+    The curve leaves the straight chord and wanders in the perpendicular plane
+    by two channels of smooth band-limited noise, with a steady precession that
+    lends one-handed coil character. The offset amplitude is solved so the arc
+    length equals ``total_length`` (the residue count). ``coil_width`` sets the
+    characteristic loop radius: larger = fewer, looser loops; smaller = more,
+    tighter loops.
 
-    # Randomly enlarge about 20% of the turns in the middle half. Use one
-    # smooth bump per selected turn, ranging from its normal size to 1.6x.
-    coil_count = max(1, round(base_cycles))
-    central_turns = [i for i in range(coil_count)
-                     if 0.25 <= (i + 0.5) / coil_count <= 0.75]
-    bump_count = min(len(central_turns),
-                     max(1, round(coil_count * 0.2)))
-    selected_turns = rng.sample(central_turns, bump_count)
-    bump_width = 0.28 / coil_count
-    size_bumps = [
-        ((turn + 0.5) / coil_count, bump_width, rng.uniform(1.0, 1.6))
-        for turn in selected_turns
-    ]
-    num_samples = max(
-        9, min(MAX_COIL_SAMPLES, int(freqs[-1] * 5) + 1)
-    )
+    ``ref_direction`` is the linker's rest chord direction; when given, the
+    perpendicular frame is rotation-transported from it so the coil does not
+    flip as the endpoints orbit (see ``_transport_perp_axes``).
+    """
+    A = np.array([start.x, start.y, start.z], dtype=float)
+    B = np.array([end.x, end.y, end.z], dtype=float)
+    D = float(np.linalg.norm(B - A))
+    L = float(total_length)
 
+    r_min = coil_width if coil_width else DEFAULT_COIL_WIDTH
+    num_out = int(max(24, min(MAX_COIL_SAMPLES,
+                              num_residues * COIL_SAMPLES_PER_RESIDUE)))
+    t = np.linspace(0.0, 1.0, num_out)
+
+    # Taut or degenerate: a straight line, matching the other behaviours.
     if D >= L * 0.99 or D < 1e-6:
-        return [start.lerp(end, t / max(num_samples - 1, 1))
-                for t in range(num_samples)]
+        return [start.lerp(end, float(tt)) for tt in t]
 
-    direction = (end - start).normalized()
-    perp1 = direction.cross(Vector((0, 0, 1)))
-    if perp1.length < 0.1:
-        perp1 = direction.cross(Vector((0, 1, 0)))
-    perp1 = perp1.normalized()
-    perp2 = direction.cross(perp1).normalized()
+    direction = (B - A) / D
+    if ref_direction is not None:
+        ref = np.array([ref_direction[0], ref_direction[1], ref_direction[2]],
+                       dtype=float)
+        if np.linalg.norm(ref) > 1e-6:
+            perp1, perp2 = _transport_perp_axes(ref, direction)
+        else:
+            perp1, perp2 = _coil_perp_axes(direction)
+    else:
+        perp1, perp2 = _coil_perp_axes(direction)
 
-    phi = 1.6180339887
-    phase_offsets = [seed * phi * (k + 1) for k in range(6)]
+    # Loop count is a *fixed* property of the linker - NOT a function of the
+    # endpoint distance. This is what stops the coil corkscrewing: as the
+    # endpoints move, only the offset amplitude below changes (the coil breathes
+    # in and out like a spring) instead of the turns winding up and unwinding.
+    # It is anchored to the count a half-slack linker (its typical resting pose)
+    # would show at a loop radius near coil_width, which reads as gentle rather
+    # than densely coiled.
+    n_loops = float(np.clip(COIL_REST_SLACK * L / (2.0 * np.pi * r_min),
+                            1.0, COIL_MAX_LOOPS))
+    # Correlation length: keep enough samples per undulation that even the
+    # finest noise octave stays well above the sampling limit, so turns round
+    # off instead of cusping. Falls back to a hard floor for busy (high-loop)
+    # coils where the sample budget can't cover every loop smoothly.
+    corr = max(COIL_MIN_CORR, int(num_out / (2.0 * n_loops)))
 
-    amp_lo = 0.0
-    amp_hi = L
-    best_points = None
-    for _ in range(30):
-        amp_mid = (amp_lo + amp_hi) / 2.0
-        pts = _generate_random_coil_shape(
-            start, end, amp_mid, num_samples,
-            perp1, perp2, freqs, amps, phase_offsets, size_bumps
-        )
-        arc = _arc_length(pts)
-        best_points = pts
+    rng = np.random.default_rng(seed)
+    o1 = _band_noise(num_out, corr, rng)
+    o2 = _band_noise(num_out, corr, rng)
+
+    # Precess the offset direction steadily around the chord: a persistent,
+    # one-handed bank (the coil character) whose radius still wanders with the
+    # noise, so it never collapses into a regular spiral.
+    ang = 2.0 * np.pi * n_loops * COIL_HANDEDNESS * t
+    ca, sa = np.cos(ang), np.sin(ang)
+    w1 = o1 * ca - o2 * sa
+    w2 = o1 * sa + o2 * ca
+
+    # Envelope vanishes at both ends -> endpoints stay pinned with no kink.
+    envelope = 4.0 * t * (1.0 - t)
+    base = A[None, :] + np.outer(t, B - A)
+    shape1 = (envelope * w1)[:, None] * perp1[None, :]
+    shape2 = (envelope * w2)[:, None] * perp2[None, :]
+
+    # Solve the offset amplitude so the arc length matches L (bisection: arc
+    # length grows monotonically with amplitude).
+    lo, hi = 0.0, L
+    best = base
+    for _ in range(COIL_AMP_BISECT_ITERS):
+        amp = 0.5 * (lo + hi)
+        pts = base + amp * (shape1 + shape2)
+        arc = float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
+        best = pts
         if abs(arc - L) < L * 0.001:
             break
         if arc < L:
-            amp_lo = amp_mid
+            lo = amp
         else:
-            amp_hi = amp_mid
-    return best_points
+            hi = amp
+
+    best[0] = A                    # pin endpoints exactly
+    best[-1] = B
+    return [Vector((float(x), float(y), float(z))) for x, y, z in best]
+
+
+def _coil_ref_direction(linker_def, start_pos: Vector,
+                        end_pos: Vector) -> Optional[Vector]:
+    """The linker's rest chord direction, lazily captured on first use.
+
+    Anchors the random-coil frame (see ``_transport_perp_axes``) so the coil
+    does not flip as the endpoints orbit. Stored once on the linker at creation
+    and never changed, so it is deterministic (not path-dependent). Legacy
+    linkers with no stored direction adopt their current chord the first time
+    they are rebuilt.
+    """
+    rest = tuple(getattr(linker_def, 'rest_direction', (0.0, 0.0, 0.0)))
+    if rest == (0.0, 0.0, 0.0):
+        d = end_pos - start_pos
+        if d.length <= 1e-6:
+            return None
+        rest = tuple(d.normalized())
+        try:
+            linker_def.rest_direction = rest
+        except (AttributeError, TypeError):
+            pass
+    return Vector(rest)
 
 
 def _solve_catenary_parameter(h_dist: float, L_target: float,
@@ -782,6 +926,7 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
                 start_pos, end_pos, total_length, linker_def.length_residues,
                 seed=_stable_coil_seed(linker_def.uid),
                 coil_width=getattr(linker_def, 'coil_width', None),
+                ref_direction=_coil_ref_direction(linker_def, start_pos, end_pos),
             )
         else:
             catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
@@ -891,9 +1036,14 @@ def update_linker_curve(linker_def) -> bool:
     if dist > total_length and dist > 1e-6:
         end_pos = start_pos + (end_pos - start_pos).normalized() * total_length
 
-    # Get backbone directions
-    obj_a = get_object_for_item(linker_def.endpoint_a_item_id)
-    obj_b = get_object_for_item(linker_def.endpoint_b_item_id)
+    # Get backbone directions. Resolve via the residue so a split-chain endpoint
+    # (whose chain row owns no object) lands on the domain object that holds it.
+    obj_a = get_backbone_object_for_item(
+        linker_def.endpoint_a_item_id, linker_def.endpoint_a_chain,
+        linker_def.endpoint_a_residue)
+    obj_b = get_backbone_object_for_item(
+        linker_def.endpoint_b_item_id, linker_def.endpoint_b_chain,
+        linker_def.endpoint_b_residue)
 
     # Pass numeric_chain_id like every other get_backbone_direction call site
     # (add_linker, edit_linker, linker_handlers). It is the resolver's most
@@ -922,6 +1072,7 @@ def update_linker_curve(linker_def) -> bool:
             start_pos, end_pos, total_length, linker_def.length_residues,
             seed=_stable_coil_seed(linker_def.uid),
             coil_width=getattr(linker_def, 'coil_width', None),
+            ref_direction=_coil_ref_direction(linker_def, start_pos, end_pos),
         )
     else:
         catenary_points = compute_catenary_points(start_pos, end_pos, total_length)

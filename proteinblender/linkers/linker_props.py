@@ -220,9 +220,9 @@ class PB2_LinkerDefinition(PropertyGroup):
         items=[
             ('GRAVITY', "Gravity", "Catenary droop — linker sags downward like a hanging chain"),
             ('ZERO_G', "Zero-G", "No gravity — slack distributes as a smooth arc with no preferred direction"),
-            ('RANDOM_COIL', "Random Coil", "Wiggly disordered path — realistic intrinsically disordered region"),
+            ('RANDOM_COIL', "Random Coil", "Wandering, gently-rounded disordered path - realistic intrinsically disordered region"),
         ],
-        default='GRAVITY'
+        default='RANDOM_COIL'
     )
 
     # Random-coil appearance: radius of the coil loops. Smaller = more, tighter
@@ -245,6 +245,18 @@ class PB2_LinkerDefinition(PropertyGroup):
         default=3,
         min=1,
         max=10
+    )
+
+    # Rest chord direction (unit vector, world space), captured when the linker
+    # is created. Anchors the random-coil's perpendicular frame so the coil does
+    # not flip as the endpoints orbit each other. (0,0,0) means "not yet set" -
+    # lazily initialised from the current chord on first geometry update.
+    rest_direction: FloatVectorProperty(
+        name="Rest Direction",
+        description="Chord direction at creation; anchors the coil frame",
+        size=3,
+        subtype='XYZ',
+        default=(0.0, 0.0, 0.0),
     )
 
     # Blender object reference (by name, not pointer)
