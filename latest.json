@@ -1,49 +1,49 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-07-23T03:40:21+00:00",
+  "generated_at": "2026-07-24T03:39:20+00:00",
   "summary": {
-    "views": 28,
+    "views": 39,
     "visitors": 13,
-    "clones": 247,
-    "cloners": 89
+    "clones": 282,
+    "cloners": 102
   },
   "all_time": {
-    "views": 536,
-    "visitors": 259,
-    "clones": 3251,
-    "cloners": 1489,
-    "days_tracked": 127
+    "views": 548,
+    "visitors": 261,
+    "clones": 3300,
+    "cloners": 1510,
+    "days_tracked": 128
   },
   "current_day": {
+    "date": "2026-07-22",
+    "views": 12,
+    "visitors": 2,
+    "clones": 49,
+    "cloners": 21
+  },
+  "previous_day": {
     "date": "2026-07-21",
     "views": 8,
     "visitors": 2,
     "clones": 16,
     "cloners": 8
   },
-  "previous_day": {
-    "date": "2026-07-20",
-    "views": 2,
-    "visitors": 2,
-    "clones": 47,
-    "cloners": 10
-  },
   "delta_since_previous_day": {
-    "views": 6,
+    "views": 4,
     "visitors": 0,
-    "clones": -31,
-    "cloners": -2
+    "clones": 33,
+    "cloners": 13
   },
   "referrers": [
     {
       "referrer": "github.com",
-      "count": 10,
-      "uniques": 2
+      "count": 13,
+      "uniques": 3
     },
     {
       "referrer": "animation-lab.github.io",
-      "count": 9,
-      "uniques": 9
+      "count": 8,
+      "uniques": 8
     },
     {
       "referrer": "Bing",
@@ -55,25 +55,25 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 17,
+      "count": 20,
       "uniques": 11
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/actions",
-      "title": "/actions",
-      "count": 3,
+      "path": "/Animation-Lab/ProteinBlender/releases/new",
+      "title": "/releases/new",
+      "count": 5,
       "uniques": 1
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 2,
+      "count": 4,
       "uniques": 2
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/releases/new",
-      "title": "/releases/new",
-      "count": 2,
+      "path": "/Animation-Lab/ProteinBlender/actions",
+      "title": "/actions",
+      "count": 4,
       "uniques": 1
     },
     {
@@ -89,8 +89,20 @@
       "uniques": 1
     },
     {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/alpha-1.0.8",
+      "title": "/releases/tag/alpha-1.0.8",
+      "count": 1,
+      "uniques": 1
+    },
+    {
       "path": "/Animation-Lab/ProteinBlender/tags",
       "title": "/tags",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/tree/alpha-1.0.7",
+      "title": "/tree/alpha-1.0.7",
       "count": 1,
       "uniques": 1
     },
