@@ -13,7 +13,7 @@ from bpy.types import Operator
 from bpy.props import StringProperty
 from typing import Optional
 
-from . import gn_compat
+from ..utils import gn_compat
 from . import lipid_assets
 from . import force_fields
 from .membrane_geometry import (

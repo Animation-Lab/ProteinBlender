@@ -43,6 +43,8 @@ from typing import Optional
 import bpy
 from mathutils import Matrix, Vector
 
+from ..utils.gn_compat import read_modifier_socket, write_modifier_socket
+
 logger = logging.getLogger(__name__)
 
 # The geometry-nodes modifiers ProteinBlender puts on molecule/domain objects.
@@ -205,9 +207,14 @@ def get_pivot(obj) -> Vector:
     socket = _pivot_socket(mod.node_group)
     if socket is None:
         return ZERO.copy()
+    # Read across Blender versions: 5.2 keeps the value under
+    # mod.properties.inputs[id]["value"]; 4.2-5.1 keep it at mod[id].
+    value = read_modifier_socket(mod, socket.identifier, default=None)
+    if value is None:
+        return ZERO.copy()
     try:
-        return Vector(getattr(mod.properties.inputs, socket.identifier).value)
-    except (AttributeError, TypeError):
+        return Vector(value)
+    except (TypeError, ValueError):
         return ZERO.copy()
 
 
@@ -223,9 +230,11 @@ def set_pivot_local(obj, pivot) -> bool:
     identifier = ensure_pivot_input(mod.node_group)
     if identifier is None:
         return False
+    # Write across Blender versions (5.2 vs 4.2-5.1); see gn_compat. Without the
+    # 4.2-5.1 fallback the write silently failed there and pivots never moved.
     try:
-        getattr(mod.properties.inputs, identifier).value = tuple(pivot)
-    except (AttributeError, TypeError) as e:
+        write_modifier_socket(mod, identifier, tuple(pivot))
+    except (RuntimeError, TypeError) as e:
         logger.warning("Could not set pivot on %r: %s", obj.name, e)
         return False
     return True

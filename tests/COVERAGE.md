@@ -98,10 +98,24 @@ call sites wrapped that write in a bare `except: pass`, so every modifier input
 write failed silently: `Lipid Collection` never bound, Collection Info fed
 Instance on Points an empty collection, and the build reported success while
 producing no bilayer. 5.1 and earlier still accept the IDProperty form, which is
-exactly why the bug was version-specific. Fixed by `membrane_builder/gn_compat.py`,
+exactly why the bug was version-specific. Fixed by `utils/gn_compat.py`,
 which writes through `mod.properties.inputs[id]["value"]` on 5.2, falls back to
 `mod[id]` for 4.2-5.1, and **raises rather than swallowing** - silent failure is
 what let this ship.
+
+#### Pivots: the same version split, the other way round (fixed)
+
+Every pivot / domain-geometry / protein-centering / rendering test that touched
+a pivot failed on Blender 5.0 and 5.1 (16 tests) while passing on 5.2 - the
+mirror of the membrane bug. `core/domain_space.py` read and wrote the `Pivot`
+modifier input through `mod.properties.inputs[...]` **only** (the 5.2 API), which
+does not exist on 5.0/5.1, so `set_pivot_local` returned False, the snap-pivot
+operators cancelled, and pivots stayed at the origin. Fixed by routing both the
+read and the write through the shared `gn_compat` helpers (relocated
+`membrane_builder/gn_compat.py` -> `utils/gn_compat.py`, since `core` must not
+depend on a feature package). Verified: the 16 failures go green on 5.0 and 5.1
+and 5.2 stays green. These tests are the regression guard - they were red on
+5.0/5.1 before the fix.
 
 Note the trap inside the trap: `mod.properties.inputs[id]` is an
 `IDPropertyGroup` for *every* socket type, datablock sockets included. Assigning
