@@ -165,26 +165,96 @@ def test_random_coil_seed_varies_shape_without_moving_endpoints():
 
 
 @pytest.mark.unit
-def test_random_coil_size_bump_is_local_and_smooth():
-    args = (
-        Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0, 101,
-        Vector((0, 1, 0)), Vector((0, 0, 1)),
-        [2.0, 3.4, 5.4], [1.0, 0.5, 0.25], [0.0] * 6,
-    )
-    plain = lg._generate_random_coil_shape(*args)
-    bumped = lg._generate_random_coil_shape(
-        *args, size_bumps=[(0.5, 0.05, 1.6)]
-    )
-    # Endpoints and regions far from the chosen central turn stay unchanged.
-    assert _vclose(plain[0], bumped[0])
-    assert _vclose(plain[-1], bumped[-1])
-    assert _vclose(plain[10], bumped[10], tol=1e-4)
-    # The selected region grows, with no discontinuous point-to-point jump.
-    assert (bumped[50] - Vector((0.5, 0, 0))).length > \
-        (plain[50] - Vector((0.5, 0, 0))).length
-    steps = [(bumped[i + 1] - bumped[i]).length
-             for i in range(len(bumped) - 1)]
-    assert max(steps) < 0.5
+def test_random_coil_shape_is_smooth_and_taper_bounded():
+    """The offset is value noise windowed to zero at both ends: endpoints sit on
+    the chord, the deviation is smooth (no point-to-point jumps), and the outer
+    fraction stays much closer to the axis than the middle."""
+    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
+    perp1, perp2 = Vector((0, 1, 0)), Vector((0, 0, 1))
+    n = 101
+    nodes1 = [0.0, 0.4, -0.9, 0.7, -0.3, 0.0]
+    nodes2 = [0.0, -0.6, 0.5, -0.8, 0.2, 0.0]
+    pts = lg._generate_random_coil_shape(start, end, 0.3, n, perp1, perp2,
+                                         nodes1, nodes2)
+
+    assert _vclose(pts[0], start)
+    assert _vclose(pts[-1], end)
+    devs = [(pts[i] - start.lerp(end, i / (n - 1))).length for i in range(n)]
+    peak = max(devs)
+    assert peak > 0.05, "expected an off-axis meander"
+    # Ends stay near the axis thanks to the window.
+    assert devs[5] < 0.25 * peak and devs[-6] < 0.25 * peak
+    # Smooth: no discontinuous jump between adjacent samples.
+    steps = [(pts[i + 1] - pts[i]).length for i in range(len(pts) - 1)]
+    assert max(steps) < 0.1
+
+
+@pytest.mark.unit
+def test_random_coil_loops_vary_in_size():
+    """Loop amplitudes must differ - a disordered chain, not a uniform 'EKG'
+    ripple where every hump is the same height."""
+    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
+    pts = lg.compute_random_coil_points(start, end, total_length=3.0,
+                                        num_residues=40, seed=11)
+    axis = (end - start).normalized()
+    devs = [(p - start).cross(axis).length for p in pts]
+    # Collect local maxima of the off-axis deviation (the individual loops).
+    peaks = [devs[i] for i in range(1, len(devs) - 1)
+             if devs[i] >= devs[i - 1] and devs[i] >= devs[i + 1]]
+    peaks = [p for p in peaks if p > 1e-4]
+    assert len(peaks) >= 3, "expected several loops along the coil"
+    mean = sum(peaks) / len(peaks)
+    spread = max(peaks) - min(peaks)
+    assert spread > 0.25 * mean, \
+        "loop sizes are too uniform - reads as a regular ripple"
+
+
+@pytest.mark.unit
+def test_coil_frame_is_continuous_through_vertical():
+    """With a cache key the perpendicular frame is parallel-transported, so as
+    the chord sweeps through vertical the frame turns only a little each step -
+    no sudden flip (the 'clock hand' bug). Without a key it is deterministic."""
+    key = "orbit-test"
+    lg._coil_frame_cache.pop(key, None)
+    prev1, _ = lg._coil_frame(Vector((1, 0, 0)), cache_key=key)
+    max_jump = 0.0
+    steps = 180
+    for i in range(1, steps + 1):
+        # Sweep the chord in the X-Z plane, straight through vertical (+Z).
+        ang = math.pi * i / steps
+        direction = Vector((math.cos(ang), 0.0, math.sin(ang)))
+        p1, p2 = lg._coil_frame(direction, cache_key=key)
+        # Frame stays orthonormal and perpendicular to the chord.
+        assert abs(p1.dot(direction)) < 1e-5
+        assert abs(p1.dot(p2)) < 1e-5
+        # And it moves smoothly - consecutive perp1 differ by a small angle.
+        jump = (p1 - prev1).length
+        max_jump = max(max_jump, jump)
+        prev1 = p1
+    # A hard flip would jump ~sqrt(2) (90 deg) or 2 (180 deg) in one step.
+    assert max_jump < 0.1, f"frame flipped abruptly (max step {max_jump:.3f})"
+
+    # No cache key -> deterministic world-up frame, same every call.
+    a1, a2 = lg._coil_frame(Vector((1, 0, 0)))
+    b1, b2 = lg._coil_frame(Vector((1, 0, 0)))
+    assert _vclose(a1, b1) and _vclose(a2, b2)
+
+
+@pytest.mark.unit
+def test_random_coil_leaves_endpoints_straight():
+    """Kinks avoid the end margins, so the path stays near the axis at both
+    ends and only deviates through the middle (fewer kinks near the ends)."""
+    start, end = Vector((0, 0, 0)), Vector((1, 0, 0))
+    pts = lg.compute_random_coil_points(start, end, total_length=3.0,
+                                        num_residues=40, seed=3)
+    n = len(pts)
+    devs = [(pts[i] - start.lerp(end, i / (n - 1))).length for i in range(n)]
+    peak = max(devs)
+    assert peak > 1e-3, "expected the slack to produce some off-axis deviation"
+    end_devs = [devs[i] for i in range(n)
+                if i / (n - 1) < 0.12 or i / (n - 1) > 0.88]
+    assert max(end_devs) < 0.25 * peak, \
+        "the ends should stay much straighter than the middle"
 
 
 @pytest.mark.unit

@@ -24,14 +24,35 @@ ANGSTROM_PER_RESIDUE = 3.5
 MN_SCALE = 0.01  # MolecularNodes scale: 1 BU = 100 Angstroms
 BU_PER_RESIDUE = ANGSTROM_PER_RESIDUE * MN_SCALE  # 0.035 BU per residue
 
-# Random-coil wiggle density: base number of coils ≈ residues * this factor
-# (~a gentle turn every ~3 residues). Scaling the coil count with the residue
-# count lets a longer / slacker linker absorb its excess length as many small
-# waves instead of a few big ones.
-COILS_PER_RESIDUE = 0.3
-MIN_COIL_CYCLES = 2.0
-MAX_COIL_CYCLES = 12.0
 MAX_COIL_SAMPLES = 128
+# Reference coil width the wave count is calibrated against. coil_width scales
+# the wave count inversely (wider => fewer, longer loops), so the "Coil Width"
+# slider loosens/tightens the path. Keep at the historical value as the anchor.
+COIL_WIDTH_REF = 0.03
+
+# Random-coil shape: the path is the straight chord plus a smooth, non-periodic
+# meander built from value noise in the two directions perpendicular to the
+# chord. Independent noise on each perpendicular axis makes the chain wander
+# through the full 3D tube (never a flat, repeating wave), and each loop takes
+# its own random size - so the silhouette reads as a disordered chain rather
+# than a regular spring or a uniform "EKG" ripple. A window tapers the offset to
+# zero at both ends (the linker always leaves each endpoint straight, whatever
+# the endpoint distance), and the amplitude is fitted so the contour length
+# matches the requested slack.
+WAVES_PER_RESIDUE = 0.35    # loops along the coil scale with the residue count
+MIN_WAVES = 3.0
+MAX_WAVES = 14.0
+COIL_END_TAPER = 0.28       # offset ramps 0 -> full over this fraction at each end
+COIL_NODE_MIN_MAG = 0.4     # keep loop nodes off the axis => no flat straight runs
+
+# Per-linker cache of the last perpendicular frame (keyed by coil seed). The
+# coil is regenerated from scratch on every domain move; carrying the previous
+# frame and parallel-transporting it onto the new chord keeps the coil's
+# orientation continuous, so orbiting one domain around another swings the coil
+# smoothly instead of snapping when the chord passes through vertical. Purely an
+# in-session smoothing aid - it need not survive save/load, so it lives in
+# module memory rather than on the linker property group.
+_coil_frame_cache = {}
 
 
 # ---------------------------------------------------------------------------
@@ -493,43 +514,92 @@ def _arc_length(points: List[Vector]) -> float:
     return length
 
 
+def _smooth_noise(t: float, nodes: List[float]) -> float:
+    """Value noise: smoothstep-interpolate a list of random node values.
+
+    ``nodes`` are evenly spaced across ``t`` in [0, 1]. Smoothstep between
+    neighbours gives a continuous, gently curving signal (C1 at the nodes) with
+    no sharp corners - the building block for an organic, non-periodic meander.
+    """
+    segs = len(nodes) - 1
+    if segs <= 0:
+        return nodes[0] if nodes else 0.0
+    x = t * segs
+    i = int(x)
+    if i >= segs:
+        return nodes[segs]
+    f = x - i
+    f = f * f * (3.0 - 2.0 * f)  # smoothstep
+    return nodes[i] * (1.0 - f) + nodes[i + 1] * f
+
+
+def _coil_end_taper(t: float, margin: float = COIL_END_TAPER) -> float:
+    """Window that is 0 at both ends and 1 across the middle.
+
+    Squared smootherstep ramps, so the offset leaves and re-enters the axis very
+    flatly - the linker approaches each endpoint straight no matter how close the
+    two endpoints are (a fixed *parametric* margin would collapse to nothing in
+    world space when the endpoints are near each other, which let the coil erupt
+    right at the domain surface)."""
+    if t < margin:
+        u = t / margin
+    elif t > 1.0 - margin:
+        u = (1.0 - t) / margin
+    else:
+        return 1.0
+    s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)  # smootherstep
+    return s * s
+
+
+def _coil_frame(direction: Vector, cache_key=None):
+    """Return two unit vectors perpendicular to ``direction``.
+
+    When ``cache_key`` is given and a previous frame is cached, the previous
+    first-perpendicular is parallel-transported onto the new chord (its
+    component along ``direction`` removed, then renormalized). Across a domain
+    drag the chord turns only a little each update, so the frame follows
+    continuously - even through vertical - instead of the fast spin/flip a
+    world-locked ``direction x Z`` frame shows near the pole. Without a cached
+    frame (first update, or the pure ``compute_random_coil_points`` used by
+    tests) it falls back to a deterministic world-up frame."""
+    perp1 = None
+    if cache_key is not None:
+        prev = _coil_frame_cache.get(cache_key)
+        if prev is not None:
+            projected = prev - direction * prev.dot(direction)
+            if projected.length > 1e-4:
+                perp1 = projected.normalized()
+    if perp1 is None:
+        perp1 = direction.cross(Vector((0, 0, 1)))
+        if perp1.length < 1e-3:
+            perp1 = direction.cross(Vector((0, 1, 0)))
+        perp1 = perp1.normalized()
+    perp2 = direction.cross(perp1).normalized()
+    if cache_key is not None:
+        _coil_frame_cache[cache_key] = perp1
+    return perp1, perp2
+
+
 def _generate_random_coil_shape(start: Vector, end: Vector,
                                  amplitude: float,
                                  num_samples: int,
                                  perp1: Vector, perp2: Vector,
-                                 freqs: List[float], amps: List[float],
-                                 phase_offsets: List[float],
-                                 size_bumps=None) -> List[Vector]:
-    """Generate the pre-regression smooth coil at an amplitude scale."""
-    amp_sum = sum(amps)
+                                 nodes1: List[float],
+                                 nodes2: List[float]) -> List[Vector]:
+    """Sample the meandering path at a given deviation amplitude.
+
+    At each ``t`` the point is the straight chord plus an off-axis offset:
+    independent value noise on ``perp1`` and ``perp2`` (so the path wanders in
+    3D), windowed to zero at both ends. ``amplitude`` scales the whole offset;
+    the caller fits it so the contour length matches the requested slack."""
     points = []
     for i in range(num_samples):
         t = i / max(num_samples - 1, 1)
         base = start.lerp(end, t)
-        envelope = 4.0 * t * (1.0 - t)
-        offset1 = 0.0
-        offset2 = 0.0
-        for k in range(len(freqs)):
-            angle1 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k]
-            angle2 = 2.0 * math.pi * freqs[k] * t + phase_offsets[k + 3]
-            offset1 += amps[k] * math.sin(angle1)
-            offset2 += amps[k] * math.cos(angle2)
-        # Slowly vary the coil radius to break up the repeating, heartbeat-like
-        # silhouette while preserving the smooth pre-regression path.
-        size_variation = 1.0 + 0.18 * math.sin(
-            2.0 * math.pi * 0.73 * t + phase_offsets[0] * 0.37
-        )
-        # Enlarge a sparse, deterministic selection of central turns. Gaussian
-        # bumps avoid hard scale changes that would make the Bezier path kink.
-        for center, width, gain in size_bumps or ():
-            distance = (t - center) / width
-            size_variation *= 1.0 + (gain - 1.0) * math.exp(
-                -0.5 * distance * distance
-            )
-        scale = (amplitude / amp_sum) * envelope * size_variation
-        offset1 *= scale
-        offset2 *= scale
-        points.append(base + perp1 * offset1 + perp2 * offset2)
+        scale = amplitude * _coil_end_taper(t)
+        off1 = _smooth_noise(t, nodes1) * scale
+        off2 = _smooth_noise(t, nodes2) * scale
+        points.append(base + perp1 * off1 + perp2 * off2)
     return points
 
 
@@ -542,55 +612,58 @@ def compute_random_coil_points(start: Vector, end: Vector,
                                 total_length: float,
                                 num_residues: int = 10,
                                 seed: int = 0,
-                                coil_width: float = None) -> List[Vector]:
-    """Compute the pre-regression smooth random-coil path."""
+                                coil_width: float = None,
+                                frame_key=None) -> List[Vector]:
+    """Compute a smooth, disordered random-coil path.
+
+    The excess length (``total_length`` beyond the endpoint distance) is absorbed
+    by a non-periodic 3D meander built from value noise, tapered to zero at both
+    ends. Loop count follows the residue count and the Coil Width slider (both
+    constant during a drag, so the path morphs smoothly rather than popping);
+    loop sizes vary independently, so no two loops match and the silhouette never
+    reads as a uniform ripple. ``frame_key`` opts the caller into the
+    parallel-transported frame cache for flicker-free live updates; the pure
+    function (no key) stays deterministic for a given seed."""
     D = (end - start).length
     L = total_length
     import random
 
-    base_cycles = min(MAX_COIL_CYCLES,
-                      max(MIN_COIL_CYCLES,
-                          num_residues * COILS_PER_RESIDUE))
     rng = random.Random(seed)
-    # Slight per-linker detuning prevents the same three wave components from
-    # falling into an obvious repeating beat. Keep it subtle so the known-good
-    # smooth character remains intact.
-    ratios = [1.0, 1.7, 2.7]
-    freqs = [base_cycles * ratio * rng.uniform(0.94, 1.06)
-             for ratio in ratios]
-    amps = [1.0, 0.5 * rng.uniform(0.9, 1.1),
-            0.25 * rng.uniform(0.9, 1.1)]
 
-    # Randomly enlarge about 20% of the turns in the middle half. Use one
-    # smooth bump per selected turn, ranging from its normal size to 1.6x.
-    coil_count = max(1, round(base_cycles))
-    central_turns = [i for i in range(coil_count)
-                     if 0.25 <= (i + 0.5) / coil_count <= 0.75]
-    bump_count = min(len(central_turns),
-                     max(1, round(coil_count * 0.2)))
-    selected_turns = rng.sample(central_turns, bump_count)
-    bump_width = 0.28 / coil_count
-    size_bumps = [
-        ((turn + 0.5) / coil_count, bump_width, rng.uniform(1.0, 1.6))
-        for turn in selected_turns
-    ]
-    num_samples = max(
-        9, min(MAX_COIL_SAMPLES, int(freqs[-1] * 5) + 1)
-    )
+    # Fewer, longer loops for wider coil_width (the slider loosens toward
+    # straight); more loops for a longer linker. Independent of the endpoint
+    # distance so the loop count - and thus the point count - is stable while a
+    # domain is dragged, letting the shape morph smoothly instead of popping.
+    width = coil_width if (coil_width and coil_width > 1e-6) else COIL_WIDTH_REF
+    width_factor = COIL_WIDTH_REF / width
+    n_waves = num_residues * WAVES_PER_RESIDUE * width_factor
+    n_waves = max(MIN_WAVES, min(MAX_WAVES, n_waves))
+    num_nodes = max(3, int(round(n_waves)) + 1)
+
+    # Enough samples to render each loop smoothly (~10 per node span).
+    num_samples = max(9, min(MAX_COIL_SAMPLES, (num_nodes - 1) * 10 + 1))
 
     if D >= L * 0.99 or D < 1e-6:
         return [start.lerp(end, t / max(num_samples - 1, 1))
                 for t in range(num_samples)]
 
     direction = (end - start).normalized()
-    perp1 = direction.cross(Vector((0, 0, 1)))
-    if perp1.length < 0.1:
-        perp1 = direction.cross(Vector((0, 1, 0)))
-    perp1 = perp1.normalized()
-    perp2 = direction.cross(perp1).normalized()
+    perp1, perp2 = _coil_frame(direction, cache_key=frame_key)
 
-    phi = 1.6180339887
-    phase_offsets = [seed * phi * (k + 1) for k in range(6)]
+    # Independent value-noise nodes per perpendicular axis. Interior nodes keep
+    # a minimum magnitude (random sign) so the path never flattens into a
+    # straight run mid-coil, while their varied sizes keep every loop distinct;
+    # the end nodes are zeroed (belt-and-braces with the taper).
+    def _make_nodes():
+        vals = []
+        for _ in range(num_nodes):
+            mag = rng.uniform(COIL_NODE_MIN_MAG, 1.0)
+            vals.append(mag if rng.random() < 0.5 else -mag)
+        vals[0] = 0.0
+        vals[-1] = 0.0
+        return vals
+    nodes1 = _make_nodes()
+    nodes2 = _make_nodes()
 
     amp_lo = 0.0
     amp_hi = L
@@ -598,8 +671,7 @@ def compute_random_coil_points(start: Vector, end: Vector,
     for _ in range(30):
         amp_mid = (amp_lo + amp_hi) / 2.0
         pts = _generate_random_coil_shape(
-            start, end, amp_mid, num_samples,
-            perp1, perp2, freqs, amps, phase_offsets, size_bumps
+            start, end, amp_mid, num_samples, perp1, perp2, nodes1, nodes2
         )
         arc = _arc_length(pts)
         best_points = pts
@@ -782,6 +854,7 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
                 start_pos, end_pos, total_length, linker_def.length_residues,
                 seed=_stable_coil_seed(linker_def.uid),
                 coil_width=getattr(linker_def, 'coil_width', None),
+                frame_key=linker_def.uid,
             )
         else:
             catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
@@ -922,6 +995,7 @@ def update_linker_curve(linker_def) -> bool:
             start_pos, end_pos, total_length, linker_def.length_residues,
             seed=_stable_coil_seed(linker_def.uid),
             coil_width=getattr(linker_def, 'coil_width', None),
+            frame_key=linker_def.uid,
         )
     else:
         catenary_points = compute_catenary_points(start_pos, end_pos, total_length)
@@ -1284,6 +1358,9 @@ def delete_linker_geometry(linker_def) -> None:
 
     linker_def.curve_object_name = ""
 
+    # Drop the cached coil frame so it can't leak past the linker's lifetime.
+    _coil_frame_cache.pop(linker_def.uid, None)
+
 
 def toggle_linker_visibility(linker_def, visible: bool) -> None:
     """Toggle linker visibility. Flips all three Blender hide flags so the
@@ -1309,4 +1386,4 @@ def register():
 
 def unregister():
     """Unregister geometry-related items."""
-    pass
+    _coil_frame_cache.clear()
