@@ -1,43 +1,43 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-07-25T03:34:09+00:00",
+  "generated_at": "2026-07-26T03:51:49+00:00",
   "summary": {
-    "views": 36,
-    "visitors": 12,
-    "clones": 276,
+    "views": 45,
+    "visitors": 11,
+    "clones": 293,
     "cloners": 103
   },
   "all_time": {
-    "views": 551,
-    "visitors": 263,
-    "clones": 3314,
-    "cloners": 1517,
-    "days_tracked": 129
+    "views": 562,
+    "visitors": 264,
+    "clones": 3339,
+    "cloners": 1524,
+    "days_tracked": 130
   },
   "current_day": {
+    "date": "2026-07-24",
+    "views": 11,
+    "visitors": 1,
+    "clones": 25,
+    "cloners": 7
+  },
+  "previous_day": {
     "date": "2026-07-23",
     "views": 3,
     "visitors": 2,
     "clones": 14,
     "cloners": 7
   },
-  "previous_day": {
-    "date": "2026-07-22",
-    "views": 12,
-    "visitors": 2,
-    "clones": 49,
-    "cloners": 21
-  },
   "delta_since_previous_day": {
-    "views": -9,
-    "visitors": 0,
-    "clones": -35,
-    "cloners": -14
+    "views": 8,
+    "visitors": -1,
+    "clones": 11,
+    "cloners": 0
   },
   "referrers": [
     {
       "referrer": "github.com",
-      "count": 16,
+      "count": 18,
       "uniques": 4
     },
     {
@@ -50,25 +50,25 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 15,
-      "uniques": 9
+      "count": 14,
+      "uniques": 8
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/actions",
+      "title": "/actions",
+      "count": 12,
+      "uniques": 1
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 6,
+      "count": 8,
       "uniques": 3
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases/new",
       "title": "/releases/new",
       "count": 5,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/actions",
-      "title": "/actions",
-      "count": 4,
       "uniques": 1
     },
     {
