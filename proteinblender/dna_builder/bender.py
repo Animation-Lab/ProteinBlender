@@ -34,6 +34,8 @@ from bpy.types import Operator
 from mathutils import Vector
 from mathutils.geometry import interpolate_bezier
 
+from ..core import domain_space
+
 
 # Custom property keys on the DNA object
 BEND_CURVE_PROP = "pb_bend_curve_name"
@@ -58,56 +60,55 @@ RES_DEFAULT = 3
 
 
 # ---------------------------------------------------------------------------
-# Mesh pivot helpers
+# Origin helpers
 # ---------------------------------------------------------------------------
+#
+# A molecule's origin is not its *mesh* origin. MolecularNodes' modifier
+# translates every atom by ``-Pivot``, so the strand the user sees sits at
+# ``matrix_world @ (co - pivot)`` (see core/domain_space). The whole bend rig
+# lives downstream of that modifier - the Curve modifier deforms the geometry
+# the node tree emits - so every coordinate here is in *pivot-applied* object
+# space, and the origin is moved by moving the pivot, never the mesh.
+#
+# Reading raw ``mesh.vertices`` z values as if they were object space is what
+# put the control nodes half a helix above the strand.
 
 
-def _mesh_z_extent(obj):
+def _strand_z_extent(obj):
+    """Object-space Z extent of the rendered strand (pivot applied)."""
     mesh = obj.data
     if not mesh or not mesh.vertices:
         return None
-    z_vals = [v.co.z for v in mesh.vertices]
+    pivot_z = domain_space.get_pivot(obj).z
+    z_vals = [v.co.z - pivot_z for v in mesh.vertices]
     return min(z_vals), max(z_vals)
 
 
-def shift_origin_to_bottom(obj) -> float:
-    """Move mesh data so its lowest atom sits at object-space z = 0.
-    Compensates the object's location so visual position is unchanged."""
-    extent = _mesh_z_extent(obj)
+def _move_origin_to(obj, z_local) -> bool:
+    """Move the origin to object-space height *z_local* along the strand's
+    axis. The atoms stay exactly where they are - only the origin (and with
+    it the object's location) moves. Returns True if it moved."""
+    if abs(z_local) < 1e-6:
+        return False
+    return domain_space.set_pivot_world(
+        obj, obj.matrix_world @ Vector((0.0, 0.0, z_local)))
+
+
+def shift_origin_to_bottom(obj) -> None:
+    """Put the origin on the strand's lowest atom, so the whole strand lives
+    in +Z of the origin - the space the bend curve is built in."""
+    extent = _strand_z_extent(obj)
     if extent is None:
-        return 0.0
-    z_min, _ = extent
-    if abs(z_min) < 1e-6:
-        return 0.0
-
-    mesh = obj.data
-    for v in mesh.vertices:
-        v.co.z -= z_min
-    mesh.update()
-
-    world_offset = obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, z_min))
-    obj.location = obj.location + world_offset
-    obj[PIVOT_SHIFTED_PROP] = True
-    return z_min
+        return
+    if _move_origin_to(obj, extent[0]):
+        obj[PIVOT_SHIFTED_PROP] = True
 
 
 def restore_origin_to_centre(obj) -> None:
-    extent = _mesh_z_extent(obj)
+    extent = _strand_z_extent(obj)
     if extent is None:
         return
-    z_min, z_max = extent
-    z_mid = 0.5 * (z_min + z_max)
-    if abs(z_mid) < 1e-6:
-        obj.pop(PIVOT_SHIFTED_PROP, None)
-        return
-
-    mesh = obj.data
-    for v in mesh.vertices:
-        v.co.z -= z_mid
-    mesh.update()
-
-    world_offset = obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, z_mid))
-    obj.location = obj.location + world_offset
+    _move_origin_to(obj, 0.5 * (extent[0] + extent[1]))
     obj.pop(PIVOT_SHIFTED_PROP, None)
 
 
@@ -711,7 +712,7 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
     # blindly rescaling the existing handles can leave them overshooting
     # adjacent control points, which makes the Curve modifier compress or
     # loop the strand even though the control points are correctly placed.
-    extent = _mesh_z_extent(new_dna_obj)
+    extent = _strand_z_extent(new_dna_obj)
     if extent is not None:
         new_height = extent[1] - extent[0]
         old_z_max = max(bp.co.z for bp in spline.bezier_points)
@@ -799,12 +800,12 @@ class PROTEINBLENDER_OT_dna_add_bend(Operator):
 
         shift_origin_to_bottom(dna)
 
-        extent = _mesh_z_extent(dna)
+        extent = _strand_z_extent(dna)
         if extent is None:
             self.report({"ERROR"}, "DNA mesh has no vertices.")
             return {"CANCELLED"}
-        _, z_max = extent
-        height = z_max
+        z_min, z_max = extent
+        height = z_max - z_min
         if height <= 0:
             self.report({"ERROR"}, "DNA helix has zero height — nothing to bend.")
             return {"CANCELLED"}

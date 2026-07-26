@@ -257,3 +257,157 @@ def test_dna_edit_and_finish_bend():
         HC.context_unavailable(pytest, f"dna_finish_bend_edit needs interactive context: {e}")
 
     assert bpy.context.view_layer.objects.active is dna
+
+
+# ---------------------------------------------------------------------------
+# Bend-rig alignment
+# ---------------------------------------------------------------------------
+
+def _visible_strand_z_extent(obj):
+    """World-space Z extent of what the user actually sees.
+
+    Ground truth for the bend-rig alignment tests: it is read from the
+    *evaluated* object, so it already carries the geometry-nodes pivot and
+    every modifier. Nothing in ``bender`` contributes to it.
+    """
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = obj.evaluated_get(deps)
+    mesh = ev.to_mesh()
+    try:
+        assert len(mesh.vertices) > 0, "strand evaluated to no geometry"
+        matrix = ev.matrix_world
+        zs = [(matrix @ v.co).z for v in mesh.vertices]
+        return min(zs), max(zs)
+    finally:
+        ev.to_mesh_clear()
+
+
+def _assert_nodes_span_strand(dna, context=""):
+    """The first and last control node sit on the ends of the visible strand.
+
+    A rig shifted along the helix axis moves both ends by the same amount, so
+    each end is checked independently against the evaluated geometry.
+    """
+    lo, hi = _visible_strand_z_extent(dna)
+    height = hi - lo
+    assert height > 0
+    tol = 0.05 * height
+
+    node_zs = [n.matrix_world.translation.z for n in bender.get_bend_nodes(dna)]
+    assert len(node_zs) >= 2, f"{context}no bend control nodes"
+
+    assert abs(min(node_zs) - lo) < tol, (
+        f"{context}bottom bend node at z={min(node_zs):.4f} is off the strand "
+        f"(bottom z={lo:.4f}, height={height:.4f})"
+    )
+    assert abs(max(node_zs) - hi) < tol, (
+        f"{context}top bend node at z={max(node_zs):.4f} is off the strand "
+        f"(top z={hi:.4f}, height={height:.4f})"
+    )
+
+
+@pytest.mark.integration
+def test_dna_bend_nodes_align_with_the_strand():
+    """The control nodes must sit *on* the strand, spanning end to end.
+
+    Regression: the bend rig was built from raw mesh coordinates, but a
+    molecule's geometry-nodes pivot is applied inside the modifier
+    (``world(co) = matrix_world @ (co - pivot)``). The nodes therefore
+    floated above the strand by exactly the pivot - half the helix length
+    for a strand whose pivot is its centre of mass.
+    """
+    dna = _build_bendable_dna("DNA_ALIGN")
+    bpy.context.view_layer.update()
+    before_lo, before_hi = _visible_strand_z_extent(dna)
+    height = before_hi - before_lo
+    assert height > 0
+
+    bpy.ops.proteinblender.dna_add_bend()
+    bpy.context.view_layer.update()
+
+    # Adding the rig must not move the strand itself.
+    after_lo, after_hi = _visible_strand_z_extent(dna)
+    tol = 0.05 * height
+    assert abs(after_lo - before_lo) < tol and abs(after_hi - before_hi) < tol, (
+        f"adding the bend moved the strand: {(before_lo, before_hi)} -> "
+        f"{(after_lo, after_hi)}"
+    )
+
+    _assert_nodes_span_strand(dna)
+
+
+@pytest.mark.integration
+def test_dna_bend_deforms_the_half_of_the_strand_its_node_owns():
+    """Dragging the *top* node must bend the top of the strand, not the middle.
+
+    Node placement and deformation are two halves of the same alignment: the
+    Curve modifier runs after the geometry-nodes pivot, so a rig built in
+    un-pivoted space also maps each node onto the wrong slice of the helix.
+    Pulling the last node sideways is the end-user gesture that exposes it.
+    """
+    dna = _build_bendable_dna("DNA_DEFORM")
+    bpy.context.view_layer.update()
+    lo, hi = _visible_strand_z_extent(dna)
+    height = hi - lo
+
+    bpy.ops.proteinblender.dna_add_bend()
+    bpy.context.view_layer.update()
+
+    nodes = bender.get_bend_nodes(dna)
+    assert len(nodes) >= 3
+
+    def _x_extremes():
+        deps = bpy.context.evaluated_depsgraph_get()
+        ev = dna.evaluated_get(deps)
+        mesh = ev.to_mesh()
+        try:
+            matrix = ev.matrix_world
+            pts = [matrix @ v.co for v in mesh.vertices]
+            mid = 0.5 * (lo + hi)
+            bottom = max(abs(p.x) for p in pts if p.z < mid - 0.25 * height)
+            top = max(abs(p.x) for p in pts if p.z > mid + 0.25 * height)
+            return bottom, top
+        finally:
+            ev.to_mesh_clear()
+
+    bottom_before, top_before = _x_extremes()
+
+    # Drag the topmost node sideways by a quarter of the strand's length.
+    pull = 0.25 * height
+    nodes[-1].location.x += pull
+    bpy.context.view_layer.update()
+
+    bottom_after, top_after = _x_extremes()
+
+    assert top_after - top_before > 0.3 * pull, (
+        f"pulling the top node barely moved the top of the strand "
+        f"({top_before:.4f} -> {top_after:.4f}, pull={pull:.4f})"
+    )
+    assert top_after - top_before > 2 * (bottom_after - bottom_before), (
+        f"the top node dragged the bottom of the strand about as much as the "
+        f"top (bottom {bottom_before:.4f} -> {bottom_after:.4f}, "
+        f"top {top_before:.4f} -> {top_after:.4f})"
+    )
+
+
+@pytest.mark.integration
+def test_dna_bend_nodes_stay_aligned_after_a_sequence_edit():
+    """Editing the sequence rebuilds the strand and re-attaches the rig.
+
+    ``reattach_after_rebuild`` moves the origin of the *new* strand, so it
+    has to reason in the same pivot-applied space as ``dna_add_bend``.
+    """
+    dna = _build_bendable_dna("DNA_REBUILD")
+    bpy.ops.proteinblender.dna_add_bend()
+    bpy.context.view_layer.update()
+    _assert_nodes_span_strand(dna, context="before edit: ")
+
+    identifier = dna.name
+    props = bpy.context.scene.dna_builder_props
+    props.sequence = "ATCGATCGATCGATCGATCGATCG"  # longer than the original
+    bpy.ops.proteinblender.build_dna(molecule_id_to_update=identifier)
+    bpy.context.view_layer.update()
+
+    rebuilt = bpy.data.objects.get(identifier)
+    assert rebuilt is not None, "rebuild did not keep the strand's identifier"
+    _assert_nodes_span_strand(rebuilt, context="after edit: ")
