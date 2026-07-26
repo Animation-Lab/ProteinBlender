@@ -92,9 +92,21 @@ def test_behavioral_tests_trigger_import_and_split_through_public_ui_operators()
 
 
 def test_normal_profile_deployer_covers_supported_local_blender_versions():
+    """The deployer must reach every Blender the add-on is developed against.
+
+    Asserted per version rather than against the literal tuple: pinning the
+    exact source line made *adding* a supported version (5.0) fail this test,
+    which says nothing about coverage. Dropping one still fails, which is the
+    contract worth keeping.
+    """
     deployer = (ROOT / "scripts" / "deploy_normal_blender.py").read_text(
         encoding="utf-8")
-    assert 'VERSIONS = ("5.2", "5.1")' in deployer
+    versions = ast.literal_eval(
+        re.search(r"^VERSIONS\s*=\s*(\([^)]*\))", deployer, re.MULTILINE).group(1))
+    for version in ("5.2", "5.1", "5.0"):
+        assert version in versions, (
+            f"deployer must install into the Blender {version} profile; "
+            f"it covers {versions}")
     assert 'extensions_root.glob("*/proteinblender")' in deployer
     assert "filecmp.cmp" in deployer, "deployer must verify copied files"
 
