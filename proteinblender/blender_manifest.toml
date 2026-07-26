@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "proteinblender"
-version = "1.0.12"
+version = "1.0.13"
 name = "ProteinBlender"
 tagline = "Visualize proteins in Blender"
 maintainer = "Dillon Lee <dlee123@gmail.com>"
@@ -121,7 +121,7 @@ wheels = [
 	"./wheels/pillow-12.3.0-cp313-cp313-win_amd64.whl",
 	"./wheels/pyparsing-3.3.2-py3-none-any.whl",
 	"./wheels/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
-	"./wheels/pytz-2026.2-py2.py3-none-any.whl",
+	"./wheels/pytz-2026.3.post1-py2.py3-none-any.whl",
 	"./wheels/pyyaml-6.0.3-cp311-cp311-macosx_10_13_x86_64.whl",
 	"./wheels/pyyaml-6.0.3-cp311-cp311-macosx_11_0_arm64.whl",
 	"./wheels/pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
