@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "proteinblender"
-VERSIONS = ("5.2", "5.1")
+VERSIONS = ("5.2", "5.1", "5.0")
 
 
 def default_user_root() -> Path:
