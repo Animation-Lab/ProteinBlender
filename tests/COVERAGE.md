@@ -308,6 +308,19 @@ on a membrane whose typical gap was 0.28 nm.
   Fixed with `bender.capture_bend_animation` / `restore_bend_animation`: the strand's and each node's action is held (with a fake user) across the rebuild and re-bound afterwards, matching nodes by bezier-point order and binding the action slot explicitly when the 4.4+ slotted-action auto-bind comes up empty.
   Guarded by `test_keyframes.py::test_re_editing_a_dna_strand_preserves_its_bend_animation` (verified red pre-fix - the rebuilt node had no keyframes at all).
 
+- **Membrane head / tail lipid colours never reached the membrane.**
+  Reported (Janet): "changing the lipid colors in the membrane can be buggy (if you change representations, change colors, repeat) especially when trying to change the color of head domains. This doesn't seem to work for me."
+  `color_head` and `color_tail` were the only membrane properties declared without an `update=_sync_to_active_membrane` callback, so setting them left the value in the scene props and never touched the membrane or its shared materials.
+  Two consequences: no live preview (every other membrane control previews as you drag it), and - because the pick lived nowhere but the props - the object->props msgbus sync that fires on any active-object change replaced it with the membrane's stale stored colour. Every in-dialog button (Add Hole, Edit Deformation, Select Hole) changes the active object, so touching one after picking a colour silently reverted the pick, and OK then re-applied the old value. That is the "change representations, change colors, repeat" path.
+  Fixed by giving both props the same `update` callback as the rest.
+  Guarded by `test_membrane.py::test_head_and_tail_colors_write_through_to_the_active_membrane` (asserts the Principled BSDF base colour on the shared material, against a colour constant the test picks) and `::test_head_color_survives_an_in_dialog_action` (builds with an explicit baseline colour so the resync has something to clobber, and asserts the setup baseline so the case cannot pass vacuously). Both verified red pre-fix.
+
+- **Nothing could be imported or built while a membrane's deformer was in edit mode.**
+  Reported (Janet): "I can't seem to download a protein after creating and editing a membrane."
+  `membrane_edit_deform` parks the user in Lattice edit mode by design so they can drag deformation points. MolecularNodes appends its style node groups with `bpy.ops.wm.append` and the builders call `bpy.ops.object.select_all`, neither of which polls outside Object mode, so protein import died with "context is incorrect" and no molecule appeared. The DNA builder and a second membrane build failed identically - the add-on put the user in the one state where its own creation paths could not run.
+  Fixed with `utils.blender_utils.ensure_object_mode`, called at the top of `create_molecule_from_id`, `import_molecule_from_file`, `build_dna.execute` and `build_membrane.execute`. Fixing it at the creation sites covers every edit mode, not just the membrane lattice.
+  Guarded by `test_membrane.py::test_import_protein_works_after_editing_membrane_deformation` and `::test_builders_work_after_editing_membrane_deformation` (ground truth is the molecule registry plus real Blender objects with vertices). Both verified red pre-fix with the real `bpy.ops.wm.append.poll() failed` signature.
+
 - **Overlapping membrane force fields carved a phantom hole, ignoring Z.** A
   protein lifted far above the sheet still bored a hole straight down, at any
   height, as long as it overlapped in XY. It was NOT the per-field Z-attenuation

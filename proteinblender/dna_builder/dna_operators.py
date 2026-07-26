@@ -532,6 +532,12 @@ class PROTEINBLENDER_OT_build_dna(Operator):
 
     def execute(self, context):
         from ..utils.scene_manager import ProteinBlenderScene
+        from ..utils.blender_utils import ensure_object_mode
+
+        # The build path appends MN style node groups and calls select_all,
+        # neither of which polls in an edit mode - and the membrane builder's
+        # Edit Deformation leaves the user in one. See ensure_object_mode.
+        ensure_object_mode()
 
         scene_mgr = ProteinBlenderScene.get_instance()
         props = context.scene.dna_builder_props

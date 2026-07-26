@@ -264,6 +264,13 @@ class MembraneBuilderProperties(PropertyGroup):
     # ------------------------------------------------------------------
     # Colors
     # ------------------------------------------------------------------
+    # Head/tail must write through on change like every other membrane
+    # property. Without the callback the pick lived only in these scene props:
+    # no live preview, and the object->props sync that fires whenever the
+    # active object changes (in-dialog Add Hole / Edit Deformation / Select
+    # Hole all change it) replaced the pick with the membrane's stale stored
+    # colour, which OK then re-applied. Tester report (Janet): "changing the
+    # lipid colors can be buggy ... especially the head domains".
     color_head: FloatVectorProperty(
         name="Head Color",
         subtype="COLOR",
@@ -271,6 +278,7 @@ class MembraneBuilderProperties(PropertyGroup):
         min=0.0,
         max=1.0,
         default=(0.92, 0.30, 0.55, 1.0),
+        update=_sync_to_active_membrane,
     )
 
     color_tail: FloatVectorProperty(
@@ -280,6 +288,7 @@ class MembraneBuilderProperties(PropertyGroup):
         min=0.0,
         max=1.0,
         default=(0.98, 0.82, 0.30, 1.0),
+        update=_sync_to_active_membrane,
     )
 
     # Single colour for the SURFACE render style — head and tail share it,

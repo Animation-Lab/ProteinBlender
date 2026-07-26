@@ -396,3 +396,193 @@ def test_stacked_force_fields_do_not_carve_a_hole_from_afar(scene):
     assert embedded < far * 0.5, (
         f"the force field no longer carves when embedded: {far} lipids far, "
         f"{embedded} embedded - expected the sheet to part")
+
+
+# --------------------------------------------------------------------------
+# Lipid colours
+#
+# Head and tail colours are shared material datablocks. Ground truth for every
+# assertion below is the colour constant the test picks, read back off the
+# Blender material's Principled BSDF - never from the membrane code's own
+# accessors.
+# --------------------------------------------------------------------------
+
+HEAD_MATERIAL_NAME = "PB_Membrane_Head"
+TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
+
+BLUE = (0.0, 0.0, 1.0, 1.0)
+CYAN = (0.0, 1.0, 1.0, 1.0)
+BASELINE_PINK = (1.0, 0.5, 0.5, 1.0)
+
+
+def _material_base_color(name):
+    """The material's Principled BSDF base colour, or None if absent."""
+    mat = bpy.data.materials.get(name)
+    if mat is None or mat.node_tree is None:
+        return None
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is None:
+        return None
+    return tuple(round(v, 3) for v in bsdf.inputs["Base Color"].default_value)
+
+
+def _only_membrane():
+    return next(o for o in bpy.data.objects if o.get("pb_is_membrane", False))
+
+
+@pytest.mark.integration
+def test_head_and_tail_colors_write_through_to_the_active_membrane(scene):
+    """Setting the head / tail colour must reach the membrane immediately, the
+    way every other membrane property does.
+
+    Regression: ``color_head`` and ``color_tail`` were the only membrane props
+    without an ``update`` callback, so changing them left the value in the
+    scene props and never touched the membrane. Two consequences the tester
+    hit: no live preview, and - because the value lived nowhere but the props -
+    the object->props resync that fires on any active-object change silently
+    replaced the pick with the membrane's stale stored colour.
+    """
+    H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0,
+                     render_style="STYLIZED")
+    root = _only_membrane()
+    H.select_only(root)
+    props = scene.membrane_builder_props
+
+    props.color_head = BLUE
+    assert _material_base_color(HEAD_MATERIAL_NAME) == BLUE, (
+        f"head material is {_material_base_color(HEAD_MATERIAL_NAME)}, "
+        f"expected the picked {BLUE}")
+    assert tuple(root["pb_mem_color_head"]) == BLUE, (
+        "the head colour never reached the membrane, so the next "
+        "object->props sync will overwrite the user's pick")
+
+    props.color_tail = CYAN
+    assert _material_base_color(TAIL_MATERIAL_NAME) == CYAN
+    assert tuple(root["pb_mem_color_tail"]) == CYAN
+
+
+@pytest.mark.integration
+def test_head_color_survives_an_in_dialog_action(scene):
+    """A head colour picked in the open Membrane dialog must survive using
+    another control in that same dialog before pressing OK.
+
+    Regression: in-dialog buttons (Add Hole, Edit Deformation, Select Hole)
+    change the active object, which fires the membrane msgbus object->props
+    sync. With the pick living only in the scene props it was overwritten by
+    the membrane's stored colour, and OK then re-applied that stale value.
+    This is the "change representations, change colors, repeat" path the
+    tester reported as buggy.
+    """
+    from proteinblender.membrane_builder.membrane_props import (
+        sync_props_from_object,
+    )
+
+    # Build with an explicit baseline colour so the membrane's STORED colour
+    # is known and differs from the pick below. Without this the test would
+    # inherit whatever colour a previous test left in the scene props, and
+    # could pass vacuously when the stored colour already matched the pick.
+    H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0,
+                     render_style="STYLIZED", color_head=BASELINE_PINK)
+    root = _only_membrane()
+    H.select_only(root)
+    props = scene.membrane_builder_props
+
+    sync_props_from_object(props, root)     # what the dialog's invoke() does
+    assert tuple(root["pb_mem_color_head"]) == BASELINE_PINK, (
+        "test setup: the membrane did not store the baseline colour, so "
+        "there is nothing for the resync to clobber")
+
+    props.color_head = BLUE                 # the user picks a head colour
+
+    bpy.ops.proteinblender.membrane_add_hole()   # an in-dialog button
+    sync_props_from_object(props, root)          # what the msgbus then does
+
+    assert tuple(round(v, 3) for v in props.color_head) == BLUE, (
+        "the in-dialog action reverted the head colour the user had just "
+        f"picked: props now {tuple(round(v, 3) for v in props.color_head)}")
+
+    bpy.ops.proteinblender.build_membrane(
+        'EXEC_DEFAULT', membrane_root_to_update=root.name)   # press OK
+    assert _material_base_color(HEAD_MATERIAL_NAME) == BLUE, (
+        f"after OK the head material is "
+        f"{_material_base_color(HEAD_MATERIAL_NAME)}, expected {BLUE}")
+
+
+# --------------------------------------------------------------------------
+# Importing a protein after working on a membrane
+# --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_import_protein_works_after_editing_membrane_deformation(scene, sm):
+    """Importing a protein must work while the membrane's lattice deformer is
+    still in edit mode.
+
+    Regression: ``membrane_edit_deform`` deliberately leaves Blender in Lattice
+    edit mode so the user can drag points. MolecularNodes' import appends its
+    style node groups with ``bpy.ops.wm.append``, whose poll fails outside
+    Object mode, so every protein import failed with "context is incorrect"
+    until the user happened to tab out. Reported as "I can't seem to download a
+    protein after creating and editing a membrane".
+
+    Ground truth is the scene manager's registry plus a real Blender object -
+    neither derived from the import code's own status flag.
+    """
+    H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root = _only_membrane()
+    H.select_only(root)
+
+    try:
+        result = bpy.ops.proteinblender.membrane_edit_deform()
+    except RuntimeError as e:
+        HC.context_unavailable(
+            pytest, f"membrane_edit_deform needs an interactive context: {e}")
+    if result != {'FINISHED'} or bpy.context.mode != 'EDIT_LATTICE':
+        HC.context_unavailable(
+            pytest,
+            f"headless context could not enter Lattice edit mode "
+            f"(result={result}, mode={bpy.context.mode})")
+
+    mid = H.import_local("1ubq.pdb", "AFTER_MEMBRANE_EDIT")
+
+    assert mid in sm.molecules, "the protein never reached the molecule registry"
+    obj = sm.molecules[mid].object
+    assert obj is not None and obj.name in bpy.data.objects, (
+        "the import reported success but created no Blender object")
+    assert len(obj.data.vertices) > 0, "the imported protein has no atoms"
+
+
+@pytest.mark.integration
+def test_builders_work_after_editing_membrane_deformation(scene):
+    """The DNA builder and a second membrane must build while the first
+    membrane's lattice deformer is still in edit mode.
+
+    Same root cause as the protein-import regression above: these paths call
+    ``bpy.ops.object.select_all`` and (for DNA) ``bpy.ops.wm.append``, neither
+    of which polls outside Object mode. Edit Deformation parks the user there
+    by design, so this was the state a tutorial author would naturally build
+    from. Both raised "context is incorrect" and produced nothing.
+    """
+    H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root = _only_membrane()
+    H.select_only(root)
+
+    try:
+        result = bpy.ops.proteinblender.membrane_edit_deform()
+    except RuntimeError as e:
+        HC.context_unavailable(
+            pytest, f"membrane_edit_deform needs an interactive context: {e}")
+    if result != {'FINISHED'} or bpy.context.mode != 'EDIT_LATTICE':
+        HC.context_unavailable(
+            pytest,
+            f"headless context could not enter Lattice edit mode "
+            f"(result={result}, mode={bpy.context.mode})")
+
+    dna = H.build_dna(seq="ATCGATCG", name_prefix="AFTER_MEM_EDIT", ds=True,
+                      style="cartoon")
+    assert dna.get("pb_is_nucleic_acid") is True
+    assert len(dna.data.vertices) > 0, "the strand built from edit mode is empty"
+
+    before = {o.name for o in bpy.data.objects if o.get("pb_is_membrane", False)}
+    H.build_membrane(shape=SHAPE_FLAT, width=8.0, height=8.0)
+    after = {o.name for o in bpy.data.objects if o.get("pb_is_membrane", False)}
+    assert after - before, "no second membrane was created from edit mode"

@@ -19,7 +19,7 @@ import bpy
 from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
-from .blender_utils import is_object_valid
+from .blender_utils import is_object_valid, ensure_object_mode
 from .chain_utils import chain_match_tokens
 
 logger = logging.getLogger(__name__)
@@ -267,6 +267,7 @@ class ProteinBlenderScene:
     def create_molecule_from_id(self, identifier: str, import_method: str = 'PDB', remote_format: str = 'pdb') -> bool:
         """Create a new molecule from an identifier (PDB ID or UniProt ID)"""
         try:
+            ensure_object_mode()
             # Ensure MNSession is initialized
             if not hasattr(bpy.context.scene, "MNSession"):
                 from ..utils.molecularnodes.addon import register as register_mn
@@ -440,6 +441,7 @@ class ProteinBlenderScene:
     def import_molecule_from_file(self, filepath: str, identifier: str) -> bool:
         """Import a molecule from a local file"""
         try:
+            ensure_object_mode()
             # Import the molecule using MoleculeManager
             molecule = self.molecule_manager.import_from_file(filepath, identifier)
             if not molecule:

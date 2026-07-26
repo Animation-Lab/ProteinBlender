@@ -554,6 +554,12 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
         return root
 
     def execute(self, context):
+        from ..utils.blender_utils import ensure_object_mode
+
+        # Building calls select_all, which doesn't poll in an edit mode - and
+        # this operator's own Edit Deformation is what puts the user there.
+        ensure_object_mode()
+
         props = context.scene.membrane_builder_props
 
         if self.membrane_root_to_update:

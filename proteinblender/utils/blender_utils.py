@@ -284,6 +284,30 @@ class NodeGroupRef:
         return f"NodeGroupRef(name='{self._name}', valid={valid})"
 
 
+def ensure_object_mode() -> None:
+    """Leave whatever edit mode is active, so object-creating code can run.
+
+    Everything that builds a molecule goes through operators whose poll fails
+    outside Object mode - MolecularNodes appends its style node groups with
+    ``bpy.ops.wm.append``, and the builders call ``bpy.ops.object.select_all``.
+    Invoked from an edit mode they died with "context is incorrect" and nothing
+    appeared.
+
+    This is easy to hit because the add-on itself parks the user in edit mode:
+    the membrane builder's Edit Deformation enters Lattice edit mode by design.
+    Reported (Janet) as "I can't seem to download a protein after creating and
+    editing a membrane"; the DNA builder and a second membrane build failed the
+    same way. Call this at the top of any operator path that creates objects.
+    """
+    try:
+        if bpy.context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+    except (AttributeError, RuntimeError):
+        # No object-mode context to return to (background/headless corner
+        # cases) - the caller's own error handling takes it from here.
+        pass
+
+
 def refresh_ui_areas(area_types: tuple = ('PROPERTIES', 'VIEW_3D')):
     """Force a redraw of specified UI area types.
 
