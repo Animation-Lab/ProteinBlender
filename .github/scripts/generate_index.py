@@ -141,7 +141,7 @@ def build_extension_entry(manifest, archive_url, archive_size, archive_hash, pla
         "archive_url": archive_url,
         "archive_size": archive_size,
         "archive_hash": f"sha256:{archive_hash}",
-        "blender_version_min": manifest.get("blender_version_min", "4.2.0"),
+        "blender_version_min": manifest.get("blender_version_min", "5.0.0"),
         "type": manifest.get("type", "add-on"),
         "maintainer": manifest.get("maintainer", ""),
         "license": manifest.get("license", []),

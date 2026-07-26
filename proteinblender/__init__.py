@@ -432,7 +432,7 @@ bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
     "version": (1, 0, 13),  # Synced with blender_manifest.toml
-    "blender": (4, 2, 0),  # Updated to match manifest requirement
+    "blender": (5, 0, 0),  # Synced with blender_manifest.toml's blender_version_min
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
     "warning": "",  # Will be set dynamically if dependencies fail

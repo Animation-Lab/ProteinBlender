@@ -1,16 +1,16 @@
-"""Writing geometry-nodes modifier inputs across Blender 4.2 and 5.x.
+"""Writing geometry-nodes modifier inputs across the supported Blender 5.x line.
 
 Blender moved where a geometry-nodes modifier keeps its socket values, and the
 two APIs do not overlap:
 
-* **4.2 - 5.1** stores them as IDProperties directly on the modifier, addressed
+* **5.0 - 5.1** stores them as IDProperties directly on the modifier, addressed
   by the interface socket's identifier: ``mod["Socket_2"] = value``.
 * **5.2** removed IDProperty support from ``NodesModifier``. The same assignment
   now raises ``TypeError: id properties not supported for this type``. Values
   live one level deeper, under ``mod.properties.inputs["Socket_2"]["value"]``.
 
-The add-on supports both (``blender_version_min = "4.2.0"``, developed against
-5.x), so every write tries the modern path and falls back.
+The add-on supports both (``blender_version_min = "5.0.0"``, developed against
+the 5.x series), so every write tries the modern path and falls back.
 
 This module exists because getting it wrong is *silent*, and it shipped that way.
 Both membrane call sites wrapped the write in ``except Exception: pass``, so on

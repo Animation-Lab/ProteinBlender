@@ -13,11 +13,11 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 - **Keyframe Animation** - Animate protein movements, conformational changes, and colors
 - **Domain Selection** - Split proteins into domains for independent styling and animation
 - **Hierarchical Outliner** - Manage complex multi-protein scenes with ease
-- **Auto-Updates** - Receive update notifications and install with one click (Blender 4.2+)
+- **Auto-Updates** - Receive update notifications and install with one click (Blender 5.0+)
 
 ## Requirements
 
-- **Blender 4.2** or newer
+- **Blender 5.0** or newer
 - **Windows, macOS, or Linux**
 - All dependencies included (MolecularNodes, biotite, MDAnalysis, etc.)
 
@@ -27,7 +27,7 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 
 **Option 1: Extension Repository (Recommended)**
 
-1. Open Blender 4.2+
+1. Open Blender 5.0+
 2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
 3. Click `+` → `Add Remote Repository`
 4. Enter URL: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`

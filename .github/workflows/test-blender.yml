@@ -21,10 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Minimum supported LTS, first 5.x ABI, the interim 5.1 release (whose
-        # pre-5.2 geometry-nodes modifier-input API differs), and the current
-        # development target.
-        blender: ["4.2", "5.0", "5.1", "5.2"]
+        # The manifest floor (5.0, also the last release on Python 3.11), the
+        # interim 5.1 release (whose pre-5.2 geometry-nodes modifier-input API
+        # differs), and the current development target.
+        # 4.2 was dropped when blender_version_min moved to 5.0.0.
+        blender: ["5.0", "5.1", "5.2"]
     steps:
       - uses: actions/checkout@v4
       - uses: bradyajohnston/setup-blender@v4

@@ -35,7 +35,7 @@ def get_blender_path():
     if not blender_path:
         print("\n⚠️  BLENDER_PATH environment variable not set.")
         print("\nPlease enter the full path to your Blender executable:")
-        print("  Windows: C:\\Program Files\\Blender Foundation\\Blender 4.2\\blender.exe")
+        print("  Windows: C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe")
         print("  macOS: /Applications/Blender.app/Contents/MacOS/Blender")
         print("  Linux: /usr/bin/blender")
         blender_path = input("\nBlender path: ").strip().strip('"').strip("'")
@@ -133,7 +133,7 @@ def main():
     print(f"\n📍 Repository URL:")
     print(f"   {file_url}")
 
-    print(f"\n📖 To test in Blender 4.2+:")
+    print(f"\n📖 To test in Blender 5.0+:")
     print(f"   1. Open Blender")
     print(f"   2. Edit → Preferences → Get Extensions")
     print(f"   3. Click 'Repositories' dropdown → '+' → 'Add Remote Repository'")

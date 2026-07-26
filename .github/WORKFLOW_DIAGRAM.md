@@ -51,7 +51,7 @@
               │             ├─ v0.1.2 ─► proteinblender-0.1.2-*.zip
               │             └─ v0.1.3 ─► proteinblender-0.1.3-*.zip
               │
-              │             Setup Blender 4.2
+              │             Setup Blender 5.0
               │
               │  blender --command extension server-generate
               ├─────────────────────►
@@ -149,7 +149,7 @@ build.py (update_version)
                                 {
                                   "id": "proteinblender",
                                   "version": "0.1.3",
-                                  "blender_version_min": "4.2.0",
+                                  "blender_version_min": "5.0.0",
                                   ...
                                 }
                                       │

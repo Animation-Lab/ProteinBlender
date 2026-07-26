@@ -8,7 +8,8 @@ Starting with Blender 4.2, extensions can be distributed through custom reposito
 
 ## Prerequisites
 
-- **Blender 4.2.0 or higher** (required for extension repository support)
+- **Blender 5.0.0 or higher** (the add-on's manifest floor; extension
+  repositories themselves work from Blender 4.2 onward)
 
 ## Installation Steps
 
@@ -82,7 +83,7 @@ If you prefer not to use the extension repository or are using an older version 
 
 - Make sure the `ProteinBlender` repository is selected in the dropdown
 - Click the refresh icon to reload the repository
-- Check that you're using Blender 4.2.0 or higher
+- Check that you're using Blender 5.0.0 or higher
 
 ### Update notification doesn't appear
 

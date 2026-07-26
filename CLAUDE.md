@@ -11,10 +11,12 @@ It embeds MolecularNodes for the core molecular visualization and layers a full 
 
 ### Prerequisites
 
-- Blender 4.2 or higher.
-  The manifest floor is `blender_version_min = "4.2.0"` and the add-on is developed against the 5.x series.
+- Blender 5.0 or higher.
+  The manifest floor is `blender_version_min = "5.0.0"`, matching the versions the test suite actually runs against (5.0, 5.1, 5.2).
+  The floor was 4.2.0 until the 4.x line was dropped: nothing below 5.0 was ever exercised by a test run, so the manifest was promising more than we verified.
 - Blender's bundled Python, not a system Python.
-  Blender 4.2 ships Python 3.11 and Blender 5.x ships Python 3.13, so the add-on bundles wheels for both `cp311` and `cp313` (see `proteinblender/wheels/`).
+  Blender 5.0 ships Python 3.11 while 5.1 and 5.2 ship Python 3.13, so the add-on bundles wheels for both `cp311` and `cp313` (see `proteinblender/wheels/`).
+  Raising the floor to 5.0 does **not** make the `cp311` wheels removable - 5.0 still needs them.
 - Use Blender's own Python interpreter to install dependencies, run scripts, and build.
 
 ### Environment variables

@@ -11,7 +11,7 @@ ProteinBlender can be installed in two ways: through the extension repository (r
 
 ## Requirements
 
-- **Blender 4.2** or newer
+- **Blender 5.0** or newer
 - **Operating System**: Windows, macOS, or Linux
 - **Internet connection** (for initial installation and updates)
 
@@ -96,7 +96,7 @@ Click below to watch a tutorial on how to install ProteinBlender:
 
 ### Extension Doesn't Appear
 
-- Verify you're using **Blender 4.2** or newer
+- Verify you're using **Blender 5.0** or newer
 - Check that you restarted Blender after installation
 - Try Edit -> Preferences -> Get Extensions and look for ProteinBlender in the list
 

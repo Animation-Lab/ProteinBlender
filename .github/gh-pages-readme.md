@@ -6,7 +6,7 @@ This is the automated extension repository for ProteinBlender.
 
 ## Adding to Blender
 
-1. Open Blender 4.2+
+1. Open Blender 5.0+
 2. Go to `Edit` → `Preferences` → `Get Extensions`
 3. Click `Repositories` (top right) → `+` → `Add Remote Repository`
 4. Enter: `https://animation-lab.github.io/ProteinBlender/extensions/index.json`

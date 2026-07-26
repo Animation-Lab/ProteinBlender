@@ -49,7 +49,7 @@ Replace all instances of `PLACEHOLDER_URL_HERE` with the actual URL.
 
 ### 5. Test in Blender
 
-1. Open Blender 4.2+
+1. Open Blender 5.0+
 2. Go to `Edit` → `Preferences` → `Get Extensions` → `Repositories`
 3. Add a new remote repository with your URL
 4. Verify that ProteinBlender appears in the extensions list
@@ -120,7 +120,7 @@ Common issues:
 
 1. Test the URL in a web browser - should download/show index.json
 2. Check for CORS issues (GitHub Pages handles this correctly by default)
-3. Verify you're using Blender 4.2+
+3. Verify you're using Blender 5.0+
 4. Try removing and re-adding the repository in Blender
 
 ## Maintenance
