@@ -295,6 +295,19 @@ on a membrane whose typical gap was 0.28 nm.
   Reported (Janet, Blender 5.2) as a linker that stayed detached after being fixed. On the current code the edit path restores `is_valid` (the coil-width property callback re-runs `update_linker_curve` once endpoints are valid), so the fixed linker follows movement again - this could not be reproduced as a live defect, and the test exists to keep that behaviour from regressing.
   Guarded by `test_linker_edit_reattach_regression.py::test_editing_invalid_linker_reattaches_and_follows_movement` (drive a linker invalid, edit it back keeping every appearance param identical, then assert it re-snaps to a moved endpoint through the real frame-change handler).
 
+- **Keyframing a DNA bend deformer at a frame other than the playhead recorded the pre-drag position.**
+  Reported as "moving the deformers works great, but keyframes don't seem to be recorded".
+  `create_keyframe.execute` moved the playhead to the dialog's target frame *before* reading the values to key.
+  That frame change re-evaluates animation, which wipes any edit with no keyframe behind it - so dragging a bend control node and then typing a later frame into the dialog keyed the node's *old* position, the two keyframes were identical, and the strand never moved.
+  Fixed with `utils.animation.capture_unkeyed_edits` / `restore_unkeyed_edits`: any animated value that differs from its own F-curve at the current frame is a pending user edit and is carried across the frame change. Applies to every keyframe target (puppet controllers and members, DNA bend rigs, membrane holes and lattice `co_deform`), not just DNA.
+  Guarded by `test_keyframes.py::test_create_keyframe_at_a_later_frame_keeps_the_dragged_deformer` (ground truth is the constant the test drags the node to; verified red pre-fix - frame 60 keyed x=0.0 instead of 0.15).
+
+- **Re-editing a DNA strand silently deleted its bend animation.**
+  Same report. The strand's edit dialog rebuilds the molecule on OK, and `reattach_after_rebuild` recreates the control-node Empties from scratch, so every F-curve keyed against the old strand object and old nodes was destroyed.
+  The bend *curve* survives the rebuild as the same object and keeps its keys, so `get_keyframe_frames` still listed the frames - the Animate panel showed keyframes that no longer animated anything, which is what made this read as "not recorded" rather than "deleted".
+  Fixed with `bender.capture_bend_animation` / `restore_bend_animation`: the strand's and each node's action is held (with a fake user) across the rebuild and re-bound afterwards, matching nodes by bezier-point order and binding the action slot explicitly when the 4.4+ slotted-action auto-bind comes up empty.
+  Guarded by `test_keyframes.py::test_re_editing_a_dna_strand_preserves_its_bend_animation` (verified red pre-fix - the rebuilt node had no keyframes at all).
+
 - **Overlapping membrane force fields carved a phantom hole, ignoring Z.** A
   protein lifted far above the sheet still bored a hole straight down, at any
   height, as long as it overlapped in XY. It was NOT the per-field Z-attenuation

@@ -665,6 +665,82 @@ def _rebuild_bend_nodes(dna_obj, n_points):
 # ---------------------------------------------------------------------------
 
 
+def _bind_action(id_data, action):
+    """Assign *action* to *id_data*, binding a slot when the file uses slotted
+    actions (Blender 4.4+). Blender auto-binds the slot whose name matches the
+    ID's, which is why the rebuild keeps the strand's and nodes' names - but
+    fall back to the action's first slot if that lookup came up empty, or the
+    channels would sit in the action driving nothing."""
+    if id_data is None or action is None:
+        return
+    if id_data.animation_data is None:
+        id_data.animation_data_create()
+    id_data.animation_data.action = action
+    ad = id_data.animation_data
+    if hasattr(ad, "action_slot") and ad.action_slot is None:
+        slots = getattr(action, "slots", None)
+        if slots:
+            try:
+                ad.action_slot = slots[0]
+            except Exception:
+                pass
+
+
+def capture_bend_animation(dna_obj):
+    """Take custody of the animation on a strand and its bend control nodes,
+    so :func:`restore_bend_animation` can put it back after a rebuild.
+
+    ``update_dna`` deletes the molecule object and ``reattach_after_rebuild``
+    recreates the control-node Empties from scratch. Both carry the F-curves
+    that make a bend *animate*, so without this every keyframe the user set was
+    silently discarded the next time they opened the strand's edit dialog and
+    pressed OK. The bend CURVE survives the rebuild as the same object, so its
+    keys need no handling here - which is exactly why the Animate panel kept
+    listing the frames while nothing moved.
+
+    Each captured action is given a fake user so deleting its owner doesn't
+    free it while we're holding on.
+    """
+    stash = {"dna": None, "nodes": []}
+    if dna_obj is None:
+        return stash
+
+    def _take(obj):
+        ad = getattr(obj, "animation_data", None)
+        action = ad.action if ad else None
+        if action is not None:
+            action.use_fake_user = True
+        return action
+
+    stash["dna"] = _take(dna_obj)
+    stash["nodes"] = [_take(n) for n in get_bend_nodes(dna_obj)]
+    return stash
+
+
+def restore_bend_animation(new_dna_obj, stash):
+    """Re-bind the actions captured by :func:`capture_bend_animation`.
+
+    Control nodes are matched by position in the list: ``_create_bend_nodes``
+    rebuilds them in bezier-point order, so node *i* after the rebuild is the
+    same handle the user keyed as node *i* before it. A node's local
+    ``location`` is its world position (its parent inverse cancels the curve's
+    matrix), so the old F-curve values still mean the same place.
+    """
+    if not stash or new_dna_obj is None:
+        return
+    _bind_action(new_dna_obj, stash.get("dna"))
+    nodes = get_bend_nodes(new_dna_obj)
+    for node, action in zip(nodes, stash.get("nodes") or []):
+        _bind_action(node, action)
+
+    # Drop the fake users we added in capture - the actions have real owners
+    # again. Anything we could NOT re-bind (the node count changed) keeps its
+    # fake user so the user can still recover it from the Dope Sheet.
+    for action in [stash.get("dna")] + list(stash.get("nodes") or []):
+        if action is not None and action.users > 1:
+            action.use_fake_user = False
+
+
 def reattach_after_rebuild(new_dna_obj, curve_obj):
     """Re-establish the bend after `update_dna` rebuilds the DNA mesh.
 

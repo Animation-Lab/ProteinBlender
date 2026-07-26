@@ -14,6 +14,8 @@ from ..utils.animation import (
     has_color_keyframe,
     get_fcurves_from_action,
     ensure_quaternion_mode,
+    capture_unkeyed_edits,
+    restore_unkeyed_edits,
 )
 from ..utils.brownian import (
     get_brownian_metadata,
@@ -567,7 +569,27 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         """Every Blender object belonging to a puppet (see
         :func:`get_puppet_member_objects`)."""
         return get_puppet_member_objects(context, puppet_id)
-    
+
+    def _keyframe_targets_of(self, context, puppet_items):
+        """Every datablock ``execute`` will write animation to for these rows -
+        controllers, puppet members, DNA bend rigs, membrane holes, and the
+        membrane LATTICE DATA (whose ``co_deform`` keys live on the data block,
+        not the object). Used to protect un-keyed edits across a frame change.
+        """
+        targets = []
+        for item in puppet_items:
+            obj = bpy.data.objects.get(item.controller_object_name)
+            if obj is None:
+                continue
+            targets.extend(get_keyframe_animated_objects(obj, item.item_kind))
+            if item.item_kind == 'PUPPET':
+                targets.extend(self.get_puppet_objects(context, item.puppet_id))
+            elif item.item_kind == 'MEMBRANE':
+                lattice = get_membrane_lattice(obj)
+                if lattice is not None and lattice.data is not None:
+                    targets.append(lattice.data)
+        return targets
+
     def invoke(self, context, event):
         scene = context.scene
 
@@ -826,11 +848,23 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         
         # Store current frame
         original_frame = scene.frame_current
-        
-        # Only change frame if necessary
+
+        # Only change frame if necessary.
+        #
+        # Moving the playhead re-evaluates animation, which wipes any edit the
+        # user has made but not keyed yet - so keying a *different* frame than
+        # the one they are looking at used to record the pre-drag value and
+        # their move vanished (reported as "keyframes don't seem to be
+        # recorded", most visibly on DNA bend deformers). Carry those pending
+        # edits across the frame change so we key what the user actually sees.
         if original_frame != self.frame_number:
+            pending_edits = capture_unkeyed_edits(
+                self._keyframe_targets_of(context, selected_puppets),
+                original_frame,
+            )
             scene.frame_set(self.frame_number)
-        
+            restore_unkeyed_edits(pending_edits)
+
         keyframed_puppets = []
         total_keyframed = 0
         

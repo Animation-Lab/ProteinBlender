@@ -597,6 +597,12 @@ class PROTEINBLENDER_OT_build_dna(Operator):
         bend_curve_name = old_obj.get(_bender.BEND_CURVE_PROP)
         bend_curve_obj = bpy.data.objects.get(bend_curve_name) if bend_curve_name else None
 
+        # Take custody of the strand's and the control nodes' animation before
+        # anything is deleted: this rebuild destroys both objects, and with
+        # them every F-curve the user keyed. Re-bound after the bend rig is
+        # reattached below.
+        anim_stash = _bender.capture_bend_animation(old_obj)
+
         # Bake any user-driven bend into the curve's bezier data before
         # we destroy the hook empties — hooks only deform at eval time.
         if bend_curve_obj is not None:
@@ -638,6 +644,15 @@ class PROTEINBLENDER_OT_build_dna(Operator):
                 _bender.reattach_after_rebuild(new_obj, bend_curve_obj)
             except Exception as e:
                 self.report({"WARNING"}, f"Could not reattach bend: {e}")
+
+        # Put the animation back on the rebuilt strand and its fresh control
+        # nodes - must run after reattach_after_rebuild, which is what creates
+        # the nodes the F-curves bind to.
+        if new_obj is not None:
+            try:
+                _bender.restore_bend_animation(new_obj, anim_stash)
+            except Exception as e:
+                self.report({"WARNING"}, f"Could not restore animation: {e}")
 
         # Restore visual position: align the new bbox centre with the
         # saved centre so the strand stays where the user put it.

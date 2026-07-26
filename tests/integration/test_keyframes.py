@@ -20,6 +20,7 @@ so the assertions work on both the Blender 4.x direct-``fcurves`` API and the
 import pytest
 import bpy
 import helpers as H
+import proteinblender.dna_builder.bender as bender
 
 
 # ---------------------------------------------------------------------------
@@ -272,3 +273,147 @@ def test_create_keyframe_keys_puppet_controller(scene):
              for fc in _action_fcurves(action)
              for kp in fc.keyframe_points}
     assert frame in keyed, f"expected a key at frame {frame}, got {sorted(keyed)}"
+
+
+# ---------------------------------------------------------------------------
+# DNA bend deformers - the control-node empties that shape a bent strand.
+#
+# A DNA/RNA strand's SHAPE is not carried by its own transform: it is driven by
+# the bend control-node empties hooked onto the bend curve. So "keyframe this
+# strand" only means anything if those empties get keys that survive, and hold
+# the position the user actually dragged them to.
+# ---------------------------------------------------------------------------
+
+def _bent_dna(prefix):
+    """A double-stranded strand with a bend rig attached, made active."""
+    obj = H.build_dna(seq="ATCGATCGATCGATCG", name_prefix=prefix, ds=True,
+                      style="cartoon")
+    H.select_only(obj)
+    bpy.ops.proteinblender.dna_add_bend()
+    return obj
+
+
+def _keyframe_molecule(dna_obj, frame):
+    """Drive proteinblender.create_keyframe for one DNA/RNA row, exactly as
+    ticking that row in the dialog and pressing OK does."""
+    return bpy.ops.proteinblender.create_keyframe(
+        'EXEC_DEFAULT',
+        frame_number=frame,
+        puppet_items=[{
+            "name": dna_obj.name,  # required by bpy.ops collection conversion
+            "puppet_id": dna_obj.name,
+            "puppet_name": dna_obj.name,
+            "controller_object_name": dna_obj.name,
+            "item_kind": "MOLECULE",
+            "use_puppet": True,
+            "keyframe_location": True,
+            "keyframe_rotation": True,
+            "keyframe_scale": True,
+            "keyframe_pose": False,
+            "keyframe_color": False,
+            "brownian_enabled": False,
+        }],
+    )
+
+
+@pytest.mark.integration
+def test_create_keyframe_at_a_later_frame_keeps_the_dragged_deformer(scene, sm):
+    """Typing a *later* frame into the Create Keyframe dialog must key the
+    deformer where the user just dragged it - not snap it back first.
+
+    Regression: execute() moved the playhead to the target frame *before*
+    reading the values to key. That frame change re-evaluates animation, which
+    silently discards an un-keyed edit, so the second keyframe recorded the
+    same position as the first and the strand never moved. Reported as
+    "keyframes don't seem to be recorded".
+
+    Ground truth is the constant this test drags the node to (DRAGGED_X); it is
+    never read back from the keyframe code.
+    """
+    DRAGGED_X = 0.15
+
+    dna = _bent_dna("KF_DNA_LATER")
+    node = bender.get_bend_nodes(dna)[-1]   # the top control node
+
+    # Frame 1: record the strand's rest shape.
+    scene.frame_set(1)
+    assert _keyframe_molecule(dna, 1) == {'FINISHED'}
+
+    # Playhead stays on 1. The user drags the deformer, then asks for a
+    # keyframe at frame 60 by typing the frame into the dialog.
+    node.location.x = DRAGGED_X
+    bpy.context.view_layer.update()
+    assert _keyframe_molecule(dna, 60) == {'FINISHED'}
+
+    assert {1, 60} <= _keyframed_frames(node), \
+        f"deformer missing keys, got {sorted(_keyframed_frames(node))}"
+
+    # Read the node's animated position straight off the object at frame 60.
+    scene.frame_set(60)
+    bpy.context.view_layer.update()
+    assert abs(node.location.x - DRAGGED_X) < 1e-4, (
+        f"frame 60 keyed x={node.location.x:.5f}, but the user dragged the "
+        f"deformer to x={DRAGGED_X}"
+    )
+
+    # And frame 1 must still hold the rest shape, so the bend actually animates.
+    scene.frame_set(1)
+    bpy.context.view_layer.update()
+    assert abs(node.location.x) < 1e-4, \
+        f"frame 1 should still be the rest shape, got x={node.location.x:.5f}"
+
+
+@pytest.mark.integration
+def test_re_editing_a_dna_strand_preserves_its_bend_animation(scene, sm):
+    """Re-opening the DNA dialog on an animated strand and pressing OK must
+    not throw the bend animation away.
+
+    Regression: the edit path deletes the molecule and rebuilds the bend
+    control nodes from scratch, so every F-curve keyed against the old
+    objects vanished. The Animate panel still listed the frames (the bend
+    *curve* survives the rebuild and keeps its keys), so the keyframes looked
+    present while nothing animated - reported as "keyframes don't seem to be
+    recorded".
+
+    Ground truth is DRAGGED_X plus the frame numbers this test chose.
+    """
+    DRAGGED_X = 0.15
+
+    dna = _bent_dna("KF_DNA_REEDIT")
+    mol_id = next(it.item_id for it in scene.outliner_items
+                  if it.item_type == 'DNA_RNA')
+
+    scene.frame_set(1)
+    assert _keyframe_molecule(dna, 1) == {'FINISHED'}
+
+    scene.frame_set(60)
+    bender.get_bend_nodes(dna)[-1].location.x = DRAGGED_X
+    bpy.context.view_layer.update()
+    assert _keyframe_molecule(dna, 60) == {'FINISHED'}
+
+    # Re-open the strand's edit dialog and press OK, changing nothing.
+    assert bpy.ops.proteinblender.build_dna(
+        'EXEC_DEFAULT', molecule_id_to_update=mol_id) == {'FINISHED'}
+
+    new_dna = next(o for o in bpy.data.objects
+                   if o.get("pb_is_nucleic_acid")
+                   and o.name.startswith("KF_DNA_REEDIT"))
+    new_nodes = bender.get_bend_nodes(new_dna)
+    assert new_nodes, "the rebuild left the strand with no bend control nodes"
+
+    node = new_nodes[-1]
+    assert {1, 60} <= _keyframed_frames(node), (
+        "the rebuild dropped the deformer's keyframes; got "
+        f"{sorted(_keyframed_frames(node))}"
+    )
+    assert {1, 60} <= _keyframed_frames(new_dna), (
+        "the rebuild dropped the strand's own keyframes; got "
+        f"{sorted(_keyframed_frames(new_dna))}"
+    )
+
+    scene.frame_set(60)
+    bpy.context.view_layer.update()
+    assert abs(node.location.x - DRAGGED_X) < 1e-4, (
+        f"after the rebuild frame 60 gives x={node.location.x:.5f}, "
+        f"expected the dragged x={DRAGGED_X}"
+    )

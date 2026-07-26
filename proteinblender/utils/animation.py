@@ -190,9 +190,61 @@ def _ensure_shortest_path_quaternion(obj, frame):
         obj.rotation_quaternion = Quaternion((-current_quat.w, -current_quat.x, -current_quat.y, -current_quat.z))
 
 
+def capture_unkeyed_edits(id_datablocks, frame, tolerance=1e-6):
+    """Animated values the user has changed but not keyed yet, at *frame*.
+
+    Moving the playhead re-evaluates animation, which overwrites any edit that
+    has no keyframe behind it. Code that has to move the playhead before
+    inserting keys must therefore carry those edits across the move, or it
+    silently records the *old* value and the user's drag is lost.
+
+    A value counts as edited when the datablock's live value differs from what
+    its own F-curve evaluates to at *frame*. Values with no F-curve are left
+    out: a frame change cannot touch them, so there is nothing to preserve.
+
+    Works on any ID with ``animation_data`` - objects (``location``, ``scale``,
+    ...) and lattice data (``points[i].co_deform``) alike. Pair with
+    :func:`restore_unkeyed_edits`.
+    """
+    edits = []
+    for id_data in id_datablocks:
+        if id_data is None:
+            continue
+        ad = getattr(id_data, "animation_data", None)
+        if not ad or not ad.action:
+            continue
+        for fcurve in get_fcurves_from_action(ad.action, ad):
+            try:
+                target = id_data.path_resolve(fcurve.data_path)
+                live = (target[fcurve.array_index]
+                        if hasattr(target, "__len__") else target)
+                animated = fcurve.evaluate(frame)
+            except (ValueError, TypeError, IndexError, AttributeError):
+                continue
+            if abs(live - animated) > tolerance:
+                edits.append(
+                    (id_data, fcurve.data_path, fcurve.array_index, live))
+    return edits
+
+
+def restore_unkeyed_edits(edits):
+    """Write back the values captured by :func:`capture_unkeyed_edits`."""
+    for id_data, data_path, index, value in edits:
+        owner_path, _, attr = data_path.rpartition(".")
+        try:
+            owner = id_data.path_resolve(owner_path) if owner_path else id_data
+            current = getattr(owner, attr)
+            if hasattr(current, "__len__"):
+                current[index] = value
+            else:
+                setattr(owner, attr, value)
+        except (ValueError, TypeError, IndexError, AttributeError):
+            continue
+
+
 def keyframe_transforms(obj, frame, location=True, rotation=True, scale=True):
     """Insert keyframes for standard transforms using quaternion rotation.
-    
+
     Uses quaternion rotation mode to ensure shortest-path interpolation
     between rotation keyframes.
     """
