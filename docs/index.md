@@ -11,6 +11,15 @@ Welcome to the ProteinBlender documentation! This guide will help you create mol
 
 ProteinBlender is a Blender addon designed for researchers, educators, and scientific communicators. It provides an intuitive interface for importing, visualizing, and animating protein structures with publication-quality results.
 
+## Quick Navigation
+
+- [**Installation**](installation.html) - Get started with ProteinBlender
+- [**Import Proteins**](import.html) - Load protein structures into Blender
+- [**Update Visuals**](visuals.html) - Customize colors and molecular styles
+- [**Create Puppets**](puppets.html) - Group chains and domains for animation
+- [**Manage Poses**](poses.html) - Save and restore protein conformations
+- [**Keyframe Animation**](keyframes.html) - Animate your proteins
+
 ## Tutorials
 
 Check out our tutorials on our [YouTube channel](https://www.youtube.com/playlist?list=PLkW6xkyq5Q83ix0tGKf4Kdi2sBqND5bA3)!
@@ -31,15 +40,9 @@ Creating Dynamic Membranes:
 
 [![Membrane Tutorial](https://img.youtube.com/vi/sSJXe7CJowY/0.jpg)](https://www.youtube.com/watch?v=sSJXe7CJowY "Membrane Tutorial")
 
+Animating DNA and RNA:
 
-## Quick Navigation
-
-- [**Installation**](installation.html) - Get started with ProteinBlender
-- [**Import Proteins**](import.html) - Load protein structures into Blender
-- [**Update Visuals**](visuals.html) - Customize colors and molecular styles
-- [**Create Puppets**](puppets.html) - Group chains and domains for animation
-- [**Manage Poses**](poses.html) - Save and restore protein conformations
-- [**Keyframe Animation**](keyframes.html) - Animate your proteins
+[![DNA Tutorial](https://img.youtube.com/vi/zguzzk8UflU/0.jpg)](https://www.youtube.com/watch?v=zguzzk8UflU "DNA Tutorial")
 
 ## Getting Help
 
