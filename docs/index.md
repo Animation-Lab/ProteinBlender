@@ -19,9 +19,17 @@ Installing ProteinBlender:
 
 [![Installation](https://img.youtube.com/vi/FpLOwE0MfCk/0.jpg)](https://www.youtube.com/watch?v=FpLOwE0MfCk "ProteinBlender Installation")
 
-Animating with ProteinBlender:
+Creating a Simple Animation with ProteinBlender:
 
 [![ProteinBlender Tutorial](https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](https://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
+
+Creating a Flexible Linker:
+
+[![Flexible Linker Tutorial](https://img.youtube.com/vi/QoGkpMTAK6k/0.jpg)](https://www.youtube.com/watch?v=QoGkpMTAK6k "Flexible Linker")
+
+Creating Dynamic Membranes:
+
+[![Membrane Tutorial](https://img.youtube.com/vi/sSJXe7CJowY/0.jpg)](https://www.youtube.com/watch?v=sSJXe7CJowY "Membrane Tutorial")
 
 
 ## Quick Navigation
