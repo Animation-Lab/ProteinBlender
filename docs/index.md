@@ -42,7 +42,7 @@ Creating Dynamic Membranes:
 
 Animating DNA and RNA:
 
-[![DNA Tutorial](https://img.youtube.com/vi/zguzzk8UflU/0.jpg)](https://www.youtube.com/watch?v=zguzzk8UflU "DNA Tutorial")
+[![DNA Tutorial](https://img.youtube.com/vi/CMggDdqMTew/0.jpg)](https://www.youtube.com/watch?v=CMggDdqMTew "DNA Tutorial")
 
 ## Getting Help
 
