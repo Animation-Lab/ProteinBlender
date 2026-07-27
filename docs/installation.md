@@ -59,12 +59,20 @@ If you prefer to install manually or are having issues with the repository:
 
 ### Step 1: Download
 
-1. Go to the [Releases page](https://github.com/Animation-Lab/ProteinBlender/releases)
-2. Download the latest .zip file for your platform:
+1. Go to the [latest stable release](https://github.com/Animation-Lab/ProteinBlender/releases/latest)
+2. Download the .zip file for your platform:
    - proteinblender-X.X.X-windows-x64.zip (Windows)
    - proteinblender-X.X.X-linux-x64.zip (Linux)
    - proteinblender-X.X.X-macos-arm64.zip (Mac M1/M2)
    - proteinblender-X.X.X-macos-x64.zip (Mac Intel)
+
+That link always resolves to the current stable build. Alpha builds are
+published to the same repository but marked **Pre-release**, so they are
+deliberately excluded — if you browse the full
+[releases list](https://github.com/Animation-Lab/ProteinBlender/releases) you
+will also see `proteinblender_alpha-*` files carrying that badge. Those are
+test builds for the alpha channel; install them only if you are testing, and
+follow [Alpha Testing](alpha-testing.html) rather than the steps below.
 
 ### Step 2: Install in Blender
 
