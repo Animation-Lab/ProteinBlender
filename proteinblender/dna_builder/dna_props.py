@@ -1,5 +1,7 @@
 """PropertyGroup for the DNA/RNA Builder panel."""
 
+import random
+
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import (
@@ -40,6 +42,59 @@ def _on_nucleic_type_changed(self, context):
         self.sequence = new_seq
 
 
+def _alphabet_for(nucleic_type):
+    """The four letters a random sequence may use for this nucleic-acid type."""
+    return "ATGC" if nucleic_type == "DNA" else "AUGC"
+
+
+def _on_sequence_length_changed(self, context):
+    """Resize the sequence to match the Length field.
+
+    Length used to be the only builder field with no update callback: it fed the
+    randomize button and nothing else, so typing a new number left the sequence
+    (and therefore the built strand) exactly as it was. It read as a broken
+    control - a tester set it to 100, saw no change, and worked around it by
+    pasting a 50-base sequence twice.
+
+    Grows by appending fresh bases and shrinks by truncating, rather than
+    rerolling the whole thing: nudging 50 -> 51 should not throw away the
+    sequence you already have. The randomize arrows still regenerate outright.
+
+    Only applies in Length (``RANDOM``) mode - in Sequence mode the field is not
+    even drawn, so it must never rewrite what the user typed.
+    """
+    if self.input_mode != "RANDOM":
+        return
+    target = int(self.sequence_length)
+    current = self.sequence or ""
+    if len(current) == target:
+        return
+    if len(current) > target:
+        self.sequence = current[:target]
+        return
+    chars = _alphabet_for(self.nucleic_type)
+    self.sequence = current + "".join(
+        random.choice(chars) for _ in range(target - len(current)))
+
+
+def _on_input_mode_changed(self, context):
+    """Point Length at the sequence that actually exists when switching modes.
+
+    Without this the field can sit on a stale number - a 12-base typed sequence
+    with Length still reading its default 50. Typing 50 would then be a no-op
+    write, Blender would not fire the update at all, and Length would appear
+    broken again for exactly the reason we just fixed.
+    """
+    if self.input_mode == "RANDOM":
+        actual = len(self.sequence or "")
+        # Clamp into the property's own range so the assignment can't be
+        # silently rejected at either end.
+        lo, hi = 2, 500
+        clamped = max(lo, min(hi, actual))
+        if self.sequence_length != clamped:
+            self.sequence_length = clamped
+
+
 class DNABuilderProperties(PropertyGroup):
     """Scene-level properties for the DNA/RNA Builder UI."""
 
@@ -60,6 +115,7 @@ class DNABuilderProperties(PropertyGroup):
             ("RANDOM", "Length", "Generate a random sequence of given length"),
         ],
         default="MANUAL",
+        update=_on_input_mode_changed,
     )
 
     sequence: StringProperty(
@@ -71,10 +127,15 @@ class DNABuilderProperties(PropertyGroup):
 
     sequence_length: IntProperty(
         name="Length",
-        description="Number of nucleotides for random sequence generation",
+        description=(
+            "Number of nucleotides. Changing this resizes the sequence "
+            "immediately - growing appends random bases, shrinking truncates. "
+            "Use the refresh arrows to reroll the whole sequence"
+        ),
         default=50,
         min=2,
         max=500,
+        update=_on_sequence_length_changed,
     )
 
     double_stranded: BoolProperty(

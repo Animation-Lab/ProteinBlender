@@ -125,6 +125,105 @@ def test_swap_to_complement_produces_reverse_complement(scene):
 
 
 # ---------------------------------------------------------------------------
+# Length field (input_mode == "RANDOM")
+#
+# Ground truth throughout is the integer the test asks for. Nothing reads a
+# length back out of the code that sets it.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_setting_length_resizes_the_sequence(scene):
+    """In Length mode, typing a new length must resize the sequence.
+
+    Regression: ``sequence_length`` was the only builder field with no update
+    callback - it fed the randomize button and nothing else. Typing 100 into
+    Length left the 50-base default sequence untouched, and the strand built at
+    50. The field looked like it set the length but did nothing on its own.
+    Reported by a tester who worked around it by pasting the sequence twice.
+    """
+    props = scene.dna_builder_props
+    props.nucleic_type = "DNA"
+    props.input_mode = "RANDOM"
+    props.sequence = "ATCG" * 12 + "AT"          # 50 bases, the shipped default
+    assert len(props.sequence) == 50             # setup guard
+
+    props.sequence_length = 100
+    assert len(props.sequence) == 100, (
+        f"Length=100 left the sequence at {len(props.sequence)} bases")
+    assert set(props.sequence) <= set("ATGC")
+
+    # Shrinking works too, and keeps the leading bases rather than rerolling.
+    head = props.sequence[:20]
+    props.sequence_length = 20
+    assert props.sequence == head, (
+        "shrinking should truncate the existing sequence, not regenerate it")
+
+
+@pytest.mark.integration
+def test_length_change_builds_a_strand_of_that_length(scene):
+    """End to end: set Length, build, and the strand really has that many bases."""
+    props = scene.dna_builder_props
+    props.nucleic_type = "DNA"
+    props.input_mode = "RANDOM"
+    props.sequence_length = 80
+
+    obj = H.build_dna(seq=props.sequence, name_prefix="DNA_LEN", ds=True,
+                      style="cartoon")
+    assert len(obj.get("pb_sequence") or "") == 80, (
+        f"built strand has {len(obj.get('pb_sequence') or '')} bases, expected 80")
+
+
+@pytest.mark.integration
+def test_length_respects_the_rna_alphabet(scene):
+    """Extending an RNA sequence must not introduce T."""
+    props = scene.dna_builder_props
+    props.nucleic_type = "RNA"
+    props.input_mode = "RANDOM"
+    props.sequence = "AUGC"
+    props.sequence_length = 60
+    assert len(props.sequence) == 60
+    assert set(props.sequence) <= set("AUGC"), (
+        f"RNA sequence picked up non-RNA bases: {set(props.sequence)}")
+
+
+@pytest.mark.integration
+def test_switching_to_length_mode_shows_the_real_length(scene):
+    """Switching into Length mode must point the field at the sequence that
+    actually exists.
+
+    If it kept a stale default (50) while the sequence was 12 bases, typing 50
+    would be a no-op write, Blender would not fire the update, and Length would
+    look broken again for exactly the reason this fix addresses.
+    """
+    props = scene.dna_builder_props
+    props.nucleic_type = "DNA"
+    props.input_mode = "MANUAL"
+    props.sequence = "ATCGATCGATCG"          # 12 bases
+    props.sequence_length = 50               # stale value, MANUAL so inert
+    assert props.sequence == "ATCGATCGATCG"  # setup guard
+
+    props.input_mode = "RANDOM"
+    assert props.sequence_length == 12, (
+        f"Length shows {props.sequence_length} for a 12-base sequence")
+    assert props.sequence == "ATCGATCGATCG", (
+        "switching modes must not rewrite the sequence")
+
+
+@pytest.mark.integration
+def test_length_does_not_clobber_a_typed_sequence(scene):
+    """In Sequence (MANUAL) mode the Length field isn't shown, so it must not
+    rewrite what the user typed."""
+    props = scene.dna_builder_props
+    props.nucleic_type = "DNA"
+    props.input_mode = "MANUAL"
+    typed = "ATCGATCGATCG"
+    props.sequence = typed
+    props.sequence_length = 200
+    assert props.sequence == typed, (
+        "changing Length in Sequence mode overwrote the typed sequence")
+
+
+# ---------------------------------------------------------------------------
 # Colour / style updates on an existing strand
 # ---------------------------------------------------------------------------
 
