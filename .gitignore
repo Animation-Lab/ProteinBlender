@@ -70,7 +70,13 @@ docs/_build/
 docs/plans/
 
 # Claude Code
-.claude/skills/
+# Skills are local by default. Note the trailing /* rather than /: git cannot
+# re-include anything inside an excluded DIRECTORY, so excluding the contents is
+# what makes the negation below work at all.
+.claude/skills/*
+# ...except the shared release process, which is checked in on purpose so the
+# gates are the same for everyone who cuts a release.
+!.claude/skills/release-preflight/
 .claude/settings.local.json
 .claude/worktrees/
 
