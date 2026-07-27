@@ -586,3 +586,70 @@ def test_builders_work_after_editing_membrane_deformation(scene):
     H.build_membrane(shape=SHAPE_FLAT, width=8.0, height=8.0)
     after = {o.name for o in bpy.data.objects if o.get("pb_is_membrane", False)}
     assert after - before, "no second membrane was created from edit mode"
+
+
+@pytest.mark.integration
+def test_hole_operators_work_from_lattice_edit_mode(scene):
+    """Add / select / remove hole must work while the deformer is in edit mode.
+
+    Regression: the three hole operators end by calling
+    ``bpy.ops.object.select_all``, which does not poll outside Object mode -
+    and ``membrane_edit_deform`` parks the user in Lattice edit mode by design.
+    ``build_membrane`` and the importers got ``ensure_object_mode`` when this
+    was fixed for the builders; these three were missed.
+
+    Add Hole was the worst of them: it created the hole, linked it, and rebuilt
+    the GN assignments, and only THEN hit select_all and raised. The user saw a
+    red error and reasonably concluded nothing happened, while a hole silently
+    existed in the scene - a half-completed operator rather than a clean failure.
+
+    Ground truth is the hole count this test tracks itself, plus whether the
+    controller object exists in ``bpy.data`` - neither derived from the
+    operators' own return values.
+    """
+    H.build_membrane(shape=SHAPE_FLAT, width=20.0, height=20.0)
+    root = _only_membrane()
+    H.select_only(root)
+
+    # One hole to act on, created from Object mode where this always worked.
+    assert bpy.ops.proteinblender.membrane_add_hole() == {'FINISHED'}
+    first = _hole_children(root)[0]
+    first_name = first.name
+    assert _hole_count(root) == 1
+
+    def _enter_edit_mode():
+        """Re-select the membrane and open the deformer. Returns True if the
+        headless context managed to get into Lattice edit mode."""
+        H.select_only(root)
+        try:
+            res = bpy.ops.proteinblender.membrane_edit_deform()
+        except RuntimeError:
+            return False
+        return res == {'FINISHED'} and bpy.context.mode == 'EDIT_LATTICE'
+
+    if not _enter_edit_mode():
+        HC.context_unavailable(
+            pytest, "headless context could not enter Lattice edit mode")
+
+    # --- Add a second hole from edit mode -------------------------------
+    assert bpy.ops.proteinblender.membrane_add_hole() == {'FINISHED'}, \
+        "add_hole failed from Lattice edit mode"
+    assert _hole_count(root) == 2, (
+        f"expected 2 holes after adding from edit mode, got {_hole_count(root)}")
+
+    # --- Select a hole from edit mode -----------------------------------
+    assert _enter_edit_mode()
+    assert bpy.ops.proteinblender.membrane_select_hole(
+        hole_name=first_name) == {'FINISHED'}, \
+        "select_hole failed from Lattice edit mode"
+    assert bpy.context.view_layer.objects.active.name == first_name
+    assert bpy.data.objects[first_name].select_get()
+
+    # --- Remove a hole from edit mode -----------------------------------
+    assert _enter_edit_mode()
+    assert bpy.ops.proteinblender.membrane_remove_hole(
+        hole_name=first_name) == {'FINISHED'}, \
+        "remove_hole failed from Lattice edit mode"
+    assert bpy.data.objects.get(first_name) is None, \
+        "the hole controller object survived removal"
+    assert _hole_count(root) == 1
