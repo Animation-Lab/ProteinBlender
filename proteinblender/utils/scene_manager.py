@@ -536,6 +536,11 @@ def _snapshot_list_item(item):
         'style': item.style,
         'chain_mapping_json': item.chain_mapping_json,
         'chain_residue_ranges_json': item.chain_residue_ranges_json,
+        # User-assigned chain names. Chain outliner rows are regenerated from
+        # auth_chain_id_map on every rebuild, so this JSON map is the ONLY
+        # home a renamed chain has - omitting it here reset every rename on
+        # the next undo/redo.
+        'chain_custom_names': getattr(item, 'chain_custom_names', ''),
         # Per-protein membrane force field — without snapshotting, undo /
         # rebuild paths silently reset to FloatProperty defaults and the
         # protein's FF setup gets wiped.
@@ -613,6 +618,7 @@ def _restore_list_item(item, snap):
             pass
     item.chain_mapping_json = snap.get('chain_mapping_json', '{}')
     item.chain_residue_ranges_json = snap.get('chain_residue_ranges_json', '{}')
+    item.chain_custom_names = snap.get('chain_custom_names', '')
 
     # Force-field state — write the spacing first so the update callback
     # that fires on force_field_enabled = True applies the right value

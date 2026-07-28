@@ -162,9 +162,25 @@ the behavioral lanes.
   from `tests/data/` — no network. `helpers.import_pdb(...)` fetches from RCSB
   and its tests are marked `@pytest.mark.network`.
 - **Save/load can't reopen in-process.** `open_mainfile` after the addon is
-  registered segfaults (`EXCEPTION_STACK_OVERFLOW`) on Blender 5.0 and 5.1, so
-  roundtrip tests save a `.blend` then spawn a *fresh* Blender that opens the
-  file before registering (`roundtrip/_verify.py`). These are marked `slow`.
+  registered segfaults (`EXCEPTION_STACK_OVERFLOW`) on Blender 5.0 and 5.1, and
+  hangs indefinitely on 5.2 (measured: killed after 9 minutes). So roundtrip
+  tests save a `.blend` then spawn a *fresh* Blender that opens the file before
+  registering (`roundtrip/_verify.py`). These are marked `slow`.
+- **...which means `load_post` never fires there, so the verifier fires it.**
+  Opening before registration is what makes the reopen survivable, and it is
+  also why none of the add-on's ten load handlers run on their own.
+  `_verify.simulate_file_load` calls the whole `load_post` chain by hand and
+  then invokes the deferred bodies those handlers schedule - `bpy.app.timers`
+  never ticks in `--background`, so the registry rebuild, the linker rebuild
+  and the force-field re-apply are otherwise unreachable from any headless
+  test. Do not "reconstruct" with `sync_molecule_list_after_undo`: it is an
+  undo/redo handler, and using it is how this lane spent a long time reporting
+  on file loading while exercising undo.
+- **A save/load builder must assert the state it built.** An empty scene
+  round-trips perfectly. `roundtrip/_builders.py` ends every builder with
+  assertions that the poses, linkers, puppets or membranes it claims to have
+  made are actually there, because a builder that fails quietly turns its case
+  into a vacuous pass.
 - **Panels can't be drawn headless.** `--background` has no window/screen, so
   panel tests assert registration and exercise `poll()` rather than `draw()`.
 - **Never hold an outliner row across an operator.** Most PB operators finish by

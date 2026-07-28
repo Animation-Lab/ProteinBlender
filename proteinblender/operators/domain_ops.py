@@ -1193,11 +1193,20 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
         else:
             self._rename_domain(target_id)
 
-        # Reflect on any outliner row(s) with this id so the change shows
-        # immediately (there may be none for a full-chain auto-domain).
+        # Rebuild the outliner so the rename reaches every derived field, not
+        # just the row label. Rows carry a pre-rendered `tooltip` built from
+        # the row name, and writing `it.name` alone left the tooltip quoting
+        # the old name until some unrelated action happened to trigger a
+        # rebuild. The rebuild re-derives both from the model, where the rename
+        # has already been persisted (chain_custom_names / domain.name), so it
+        # preserves the new name rather than reverting it.
+        build_outliner_hierarchy(context)
+
+        # A full-chain auto-domain has no DOMAIN row of its own, so the rebuild
+        # has nothing to re-derive for it; reflect the label directly.
         if self.new_name.strip():
             for it in scene.outliner_items:
-                if it.item_id == target_id:
+                if it.item_id == target_id and it.name != self.new_name:
                     it.name = self.new_name
 
         # Redraw UI. context.area is None when called from a script/MCP/

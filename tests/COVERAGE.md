@@ -3,7 +3,7 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **269 passing, 9 skipped,
+Current status (Blender 5.2, offline lane): **354 passing, 9 skipped,
 1 xfailed**, no failures. The single xfail is intentional (a
 modal-dialog operator unreachable headless - see below), not a bug. The suite
 was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
@@ -16,9 +16,104 @@ the count above was re-run only on 5.2.
 |------|-----|----------------|
 | unit | `tests/unit/` | pure logic (chain maths, DNA sequence, base geometry, catenary physics) with no scene |
 | integration | `tests/integration/` | every registered subsystem operator, driven headless against a real scene |
-| roundtrip | `tests/roundtrip/` | save → reopen (fresh Blender) → state preserved |
+| roundtrip | `tests/roundtrip/` | save → reopen (fresh Blender) → **whole scene** identical, plus contracts that keep it exhaustive |
 | smoke | `tests/test_harness_smoke.py` | the harness itself (register, reset isolation, import) |
 | live | `tests/live/` | a real, open, windowed Blender observed through its 3D viewport, over the BlenderMCP socket |
+
+## Save/load lane (`tests/roundtrip/`)
+
+Save/load is the hardest thing to get useful bug reports about - a tester who
+reopens a file and finds their work subtly wrong usually cannot say what
+changed. The lane is therefore built to answer three questions on its own:
+*did anything change*, *exactly which field*, and *is the check still complete*.
+
+### How it works
+
+| file | role |
+|------|------|
+| `_snapshot.py` | whole-scene serializer, driven by walking RNA rather than by a list of fields |
+| `_diff.py` | path-precise structural diff (`scene.molecule_list_items[4hhb].chain_custom_names: '…' -> ''`) |
+| `_builders.py` | one builder per subsystem, each asserting it really created the state |
+| `_verify.py` | subprocess that reopens the .blend and runs the **real** file-load lifecycle |
+| `test_saveload.py` | the cases: 17 builders x round trip, 3 x second generation, 2 x render |
+| `test_persistence_contract.py` | the contracts that keep all of the above exhaustive |
+
+**The comparison is whole-scene and generic.** Every property of every
+PropertyGroup, every object transform, custom property, modifier input,
+geometry-node link, F-curve keyframe *value*, material node value, mesh/curve/
+lattice digest and the runtime molecule registry. Because the serializer walks
+`bl_rna.properties` instead of naming fields, a property added to the add-on
+next year is covered the day it is added.
+
+**It runs the load path, not the undo path.** The .blend must be opened before
+the add-on registers (`wm.open_mainfile` after registration raises
+EXCEPTION_STACK_OVERFLOW on 5.0/5.1 and hangs indefinitely on 5.2 - measured,
+killed after 9 minutes), so `load_post` never fires on its own. `_verify.py`
+runs the whole handler chain by hand and then pumps the deferred bodies those
+handlers schedule (`registry_reconstruct`, `linker_rebuild`,
+`force_field_reapply`), because `bpy.app.timers` never ticks in `--background`.
+The previous implementation instead called `sync_molecule_list_after_undo`,
+which is registered on `undo_post`/`redo_post` and *only* there - so the lane
+reported on file loading while exercising undo. `create_workspace_on_load` is
+the one handler still skipped; it builds UI, terminates only under a real event
+loop, and is covered by the foreground-ui lane.
+
+**Nothing is waived silently.** Reviewed tolerances live in
+`test_saveload.IGNORED`, snapshot exclusions in `_snapshot.EXCLUSIONS`, skipped
+handlers in `_verify.SKIPPED_HANDLERS` - each keyed to a written reason, each
+capped in size, all asserted by the contract tests.
+
+### What keeps it exhaustive
+
+`test_persistence_contract.py` fails the build when the lane stops being
+complete, rather than when save/load breaks:
+
+- every `bpy.types.Scene` / `bpy.types.Object` property the add-on registers is
+  snapshotted or excluded with a reason (parsed from the add-on's own source);
+- no covered name refers to a property that no longer exists;
+- the RNA walk demonstrably reaches every field of every live PropertyGroup;
+- every `bpy.app.timers` body is pumped by the verifier or declared
+  not-load-related;
+- every package that persists state has a builder that creates some;
+- the verifier does not regress to driving the undo path, and importing it does
+  not run it.
+
+### Falsifiability
+
+Two checks stop the lane from being decorative:
+
+- `test_the_comparison_detects_a_planted_change` plants six changes (a reset
+  scalar, a dropped collection, a moved object, an emptied registry, a rewired
+  geometry-node link, a renamed collection member) and requires each to be
+  reported, with its path in the message.
+- Verified by sabotage: reintroducing the historical
+  `_mirror_domains_to_property_group` bug (domains never reaching the .blend)
+  turns 5 of the 7 selected cases red, including both second-generation cases.
+  Builders assert their own state before the save, so a builder that silently
+  fails cannot round-trip an empty scene and report a pass.
+
+### Cases
+
+17 builders: `empty`, `single_protein`, `multi_chain`, `domains`,
+`chain_rename`, `pivots`, `keyframes`, `poses`, `pose_library`, `puppets`,
+`linkers`, `dna`, `membrane`, `force_fields`, `brownian`, `visual_style`,
+`kitchen_sink`. Three of them also run a **second generation**
+(save → reopen → save → reopen, compared against the original expectation),
+which is the only shape that catches the original data-loss bug's real
+mechanism: the reload degraded state and the *next save* persisted it. Two run
+a **Cycles render after reload**, because state assertions cannot see a node
+tree that reloaded subtly rewired.
+
+Whole lane: 32 tests, ~2m20s on Blender 5.2.
+
+### Known gaps
+
+- No corpus of `.blend` files written by *previous releases*, so the migration
+  paths (`GN_TREE_VERSION` membrane rebuild, the bend-curve `hide_render`
+  backfill) are exercised only against files this version wrote.
+- No cross-version round trip (save on 5.0, open on 5.2).
+- The deferred load passes are invoked directly rather than by a real timer
+  tick; only the live lane can observe them firing on their own.
 
 ## Live lane (`tests/live/`)
 
@@ -191,6 +286,54 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **A renamed chain was wiped by the first undo.**
+  `scene_manager._refresh_molecule_ui` rebuilds `scene.molecule_list_items` by
+  snapshotting every persistent field, clearing the collection, and writing the
+  snapshot back. `chain_custom_names` was added later, by the chain-rename
+  feature, and was never added to `_snapshot_list_item` - so it was reset to
+  `""` on every rebuild. That JSON map is the only home a chain name has (chain
+  rows are regenerated from `auth_chain_id_map` on every outliner rebuild), so
+  the rename was gone the first time the user pressed Ctrl+Z. This is the exact
+  shape of the documented "Save/load wiped every persisted field" regression
+  below, reintroduced for one field by a later feature.
+  Only `sync_molecule_list_after_undo` reaches that function, so **save/load was
+  never affected** - a renamed chain survives save and reopen. The bug was found
+  while auditing the round-trip lane precisely because the old verifier called
+  the undo handler in place of the load path.
+  Fixed by carrying `chain_custom_names` through `_snapshot_list_item` /
+  `_restore_list_item`. Guarded by
+  `test_rename_chain_domain.py::test_rename_chain_survives_the_undo_redo_reconstruction`
+  (ground truth is the literal string the test set; verified red pre-fix -
+  the stored map came back `{}` and the row reverted to "Chain A").
+
+- **Renaming a chain or domain left its outliner tooltip quoting the old name.**
+  `rename_domain` wrote the new label onto every matching row but not onto
+  `row.tooltip`, which is pre-rendered and only regenerated by
+  `build_outliner_hierarchy`. The row read "Alpha Globin" while hovering it
+  still said "Chain: Chain A", until some unrelated action happened to rebuild
+  the outliner and it silently corrected itself.
+  Found by the save/load round-trip lane: the reopened file (which rebuilds the
+  outliner on load) disagreed with the live scene, and the reopened one was
+  right. Fixed by rebuilding the outliner at the end of the operator - the
+  rename is already persisted to the model at that point, so the rebuild
+  re-derives the new name rather than reverting it. Guarded by
+  `test_rename_chain_domain.py::test_rename_chain_updates_the_row_tooltip_not_just_its_label`.
+
+- **The save/load lane reported on the file-load path while exercising undo.**
+  `roundtrip/_verify.py` reopened the .blend and then called
+  `sync_molecule_list_after_undo` to "drive the same reconstruction the panel
+  does on first draw after load". That function is registered on `undo_post` and
+  `redo_post` and nowhere else; no panel calls it, and it is not a load handler.
+  None of the ten `load_post` handlers a real File > Open runs had ever executed
+  in a test, and the three that defer their real work to `bpy.app.timers`
+  (registry rebuild, linker rebuild, force-field re-apply) were doubly
+  unreachable, since timers never tick in `--background`.
+  Fixed by `_verify.simulate_file_load`, which runs the real handler chain and
+  then pumps the deferred bodies. Guarded by
+  `test_persistence_contract.py::test_the_verifier_does_not_drive_the_undo_path_instead_of_the_load_path`
+  and `::test_every_deferred_load_pass_is_pumped_by_the_verifier`.
+  See the "Save/load lane" section above for the rest of the rebuild.
 
 - **A linker with an endpoint on a split chain was silently never created.**
   Reported: import 1atn, make a domain on chain A, puppet the chain, Create Linker with the chain as an endpoint -> nothing appears (log: `No object found for item ..._chain_0`, then `Could not find residue A:1`).
