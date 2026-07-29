@@ -24,9 +24,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Always build the site from `main`, never from the ref that happened to
+      # trigger this run. actions/checkout defaults to the triggering ref, which
+      # differs per trigger: a published release gives the release tag, but
+      # `workflow_run` gives the default branch. Because Track Repository Traffic
+      # fires daily, a release deployed from a tag whose docs/ was ahead of main
+      # was silently reverted the next day by the traffic run rebuilding from
+      # main's older docs/. That destroyed hand-authored tutorial content on the
+      # live index.html repeatedly, with no conflict and no warning.
+      #
+      # Pinning to main makes the published site a pure function of main's docs/,
+      # so the page no longer depends on which trigger fired. This is safe for the
+      # extension indexes: generate_index.py builds them from the GitHub Releases
+      # API, not from the checked-out tree, so alpha and release channels are
+      # still indexed correctly regardless of the ref checked out here.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
