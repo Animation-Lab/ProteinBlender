@@ -6,74 +6,12 @@
       "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "tagline": "Visualize proteins in Blender",
-      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-macos_x64.zip",
-      "archive_size": 126195716,
-      "archive_hash": "sha256:27bd2e94f836008e0e3ad4ccba9c5f7d3f9840bfcc51d4fdaf27cd14baa24b78",
-      "blender_version_min": "4.2.0",
-      "type": "add-on",
-      "maintainer": "Dillon Lee <dlee123@gmail.com>",
-      "license": [
-        "SPDX:GPL-3.0-or-later"
-      ],
-      "website": "https://github.com/Animation-Lab/ProteinBlender",
-      "platforms": [
-        "macos-x64"
-      ],
-      "tags": [
-        "Geometry Nodes",
-        "Import-Export"
-      ],
-      "permissions": {
-        "network": "Downloading structural data from the PDB and AFPDB",
-        "files": "Importing data files from disk and caching downloads"
-      },
-      "copyright": [
-        "2024-2025 Dillon Lee"
-      ]
-    },
-    {
-      "schema_version": "1.0.0",
-      "id": "proteinblender",
-      "name": "ProteinBlender",
-      "version": "1.0.0",
-      "tagline": "Visualize proteins in Blender",
-      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-windows_x64.zip",
-      "archive_size": 125470050,
-      "archive_hash": "sha256:6e196a7f24930a1f729c1b3bcde5c80d616ce2b886ae924438e6df60e3ce6467",
-      "blender_version_min": "4.2.0",
-      "type": "add-on",
-      "maintainer": "Dillon Lee <dlee123@gmail.com>",
-      "license": [
-        "SPDX:GPL-3.0-or-later"
-      ],
-      "website": "https://github.com/Animation-Lab/ProteinBlender",
-      "platforms": [
-        "windows-x64"
-      ],
-      "tags": [
-        "Geometry Nodes",
-        "Import-Export"
-      ],
-      "permissions": {
-        "network": "Downloading structural data from the PDB and AFPDB",
-        "files": "Importing data files from disk and caching downloads"
-      },
-      "copyright": [
-        "2024-2025 Dillon Lee"
-      ]
-    },
-    {
-      "schema_version": "1.0.0",
-      "id": "proteinblender",
-      "name": "ProteinBlender",
-      "version": "1.0.0",
-      "tagline": "Visualize proteins in Blender",
-      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-linux_x64.zip",
-      "archive_size": 152663815,
-      "archive_hash": "sha256:19ad50374820f875d2e83d2465eb0f51ff622ca229b33ce29ac118e3446bf80c",
-      "blender_version_min": "4.2.0",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.1.0/proteinblender-1.1.0-linux_x64.zip",
+      "archive_size": 303037902,
+      "archive_hash": "sha256:30de997c7426705aaf816a88f8fcc16a8b7b981685807975554b06f7b372fb43",
+      "blender_version_min": "5.0.0",
       "type": "add-on",
       "maintainer": "Dillon Lee <dlee123@gmail.com>",
       "license": [
@@ -99,12 +37,12 @@
       "schema_version": "1.0.0",
       "id": "proteinblender",
       "name": "ProteinBlender",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "tagline": "Visualize proteins in Blender",
-      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.0.0/proteinblender-1.0.0-macos_arm64.zip",
-      "archive_size": 114332625,
-      "archive_hash": "sha256:bace3db5c3ea8af351302991ababb79de5da9d98e26bf16fdfb56020c5ef4c40",
-      "blender_version_min": "4.2.0",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.1.0/proteinblender-1.1.0-macos_arm64.zip",
+      "archive_size": 223373764,
+      "archive_hash": "sha256:bc57bce41f310303427ddc141fec6b335f0717ea2707498faf7e58252d024732",
+      "blender_version_min": "5.0.0",
       "type": "add-on",
       "maintainer": "Dillon Lee <dlee123@gmail.com>",
       "license": [
@@ -113,6 +51,68 @@
       "website": "https://github.com/Animation-Lab/ProteinBlender",
       "platforms": [
         "macos-arm64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    },
+    {
+      "schema_version": "1.0.0",
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.1.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.1.0/proteinblender-1.1.0-macos_x64.zip",
+      "archive_size": 236974467,
+      "archive_hash": "sha256:22b3ac8868cc63851efe76e983852e4f63602f014984ef55113b00d732bf7891",
+      "blender_version_min": "5.0.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "macos-x64"
+      ],
+      "tags": [
+        "Geometry Nodes",
+        "Import-Export"
+      ],
+      "permissions": {
+        "network": "Downloading structural data from the PDB and AFPDB",
+        "files": "Importing data files from disk and caching downloads"
+      },
+      "copyright": [
+        "2024-2025 Dillon Lee"
+      ]
+    },
+    {
+      "schema_version": "1.0.0",
+      "id": "proteinblender",
+      "name": "ProteinBlender",
+      "version": "1.1.0",
+      "tagline": "Visualize proteins in Blender",
+      "archive_url": "https://github.com/Animation-Lab/ProteinBlender/releases/download/1.1.0/proteinblender-1.1.0-windows_x64.zip",
+      "archive_size": 241726367,
+      "archive_hash": "sha256:e53c874e9b4656adb31923057c46bc073cf89d4feddf3712d814f66cc9a075d8",
+      "blender_version_min": "5.0.0",
+      "type": "add-on",
+      "maintainer": "Dillon Lee <dlee123@gmail.com>",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "website": "https://github.com/Animation-Lab/ProteinBlender",
+      "platforms": [
+        "windows-x64"
       ],
       "tags": [
         "Geometry Nodes",
