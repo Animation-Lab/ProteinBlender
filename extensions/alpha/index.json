@@ -21,6 +21,10 @@
       "platforms": [
         "linux-x64"
       ],
+      "python_versions": [
+        "3.11",
+        "3.13"
+      ],
       "tags": [
         "Geometry Nodes",
         "Import-Export"
@@ -51,6 +55,10 @@
       "website": "https://github.com/Animation-Lab/ProteinBlender",
       "platforms": [
         "macos-arm64"
+      ],
+      "python_versions": [
+        "3.11",
+        "3.13"
       ],
       "tags": [
         "Geometry Nodes",
@@ -83,6 +91,10 @@
       "platforms": [
         "macos-x64"
       ],
+      "python_versions": [
+        "3.11",
+        "3.13"
+      ],
       "tags": [
         "Geometry Nodes",
         "Import-Export"
@@ -113,6 +125,10 @@
       "website": "https://github.com/Animation-Lab/ProteinBlender",
       "platforms": [
         "windows-x64"
+      ],
+      "python_versions": [
+        "3.11",
+        "3.13"
       ],
       "tags": [
         "Geometry Nodes",
