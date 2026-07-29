@@ -431,7 +431,7 @@ def _reload_modules(packages: Dict[str, str]) -> None:
 bl_info = {
     "name": "ProteinBlender",
     "author": "Dillon Lee",
-    "version": (1, 0, 15),  # Synced with blender_manifest.toml
+    "version": (1, 1, 0),  # Synced with blender_manifest.toml
     "blender": (5, 0, 0),  # Synced with blender_manifest.toml's blender_version_min
     "location": "View3D > Sidebar > ProteinBlender",
     "description": "A Blender addon for protein visualization and animation.",
