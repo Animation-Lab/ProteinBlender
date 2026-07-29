@@ -13,6 +13,7 @@ the large zip files in GitHub Releases while only committing the small index.jso
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import zipfile
@@ -130,6 +131,52 @@ def get_platform_from_filename(filename):
     return None  # Unknown platform
 
 
+def python_versions_from_wheels(wheel_paths):
+    """Return the Python versions a set of bundled wheels supports, e.g. ["3.11", "3.13"].
+
+    Mirrors Blender's own derivation (`python_versions_from_wheels` in
+    `bl_pkg/cli/blender_ext.py`): take the *union* of the versions named by each
+    wheel's Python tag, drop Python 2, and collapse a bare major ("3", from a
+    py3-none-any wheel) when a specific minor for that major is also present.
+
+    Blender uses this to decide whether to even offer an extension to the running
+    Blender. Emitting it means an incompatible build is filtered out of the
+    listing instead of being advertised and then failing at install with
+    "This Python version (3.13) isn't compatible with (3.11)".
+    """
+    major_only = set()
+    major_minor = set()
+
+    for path in wheel_paths:
+        stem = os.path.basename(path)
+        if not stem.endswith(".whl"):
+            continue
+        # {distribution}-{version}(-{build})?-{python tag}-{abi tag}-{platform tag}
+        parts = stem[: -len(".whl")].split("-")
+        if len(parts) < 5:
+            continue
+        python_tag = parts[-3]
+
+        for tag in python_tag.split("."):
+            match = re.fullmatch(r"(?:cp|py)(\d)(\d*)", tag)
+            if not match:
+                continue
+            major = int(match.group(1))
+            if major <= 2:
+                continue  # never useful to advertise Python 2 support
+            minor = match.group(2)
+            if minor:
+                major_minor.add((major, int(minor)))
+            else:
+                major_only.add((major,))
+
+    # "3" is redundant once "3.11" is known.
+    for major, _minor in major_minor:
+        major_only.discard((major,))
+
+    return sorted(".".join(str(n) for n in v) for v in (major_only | major_minor))
+
+
 def build_extension_entry(manifest, archive_url, archive_size, archive_hash, platform):
     """Build a single extension entry for the index.json data array."""
     entry = {
@@ -151,6 +198,13 @@ def build_extension_entry(manifest, archive_url, archive_size, archive_hash, pla
     # Add platform if specific
     if platform:
         entry["platforms"] = [platform]
+
+    # Declare which Python versions the bundled wheels actually support, so
+    # Blender filters incompatible builds out of the listing rather than
+    # offering an install that cannot succeed.
+    python_versions = python_versions_from_wheels(manifest.get("wheels", []))
+    if python_versions:
+        entry["python_versions"] = python_versions
 
     # Add optional fields if present
     if "tags" in manifest:
