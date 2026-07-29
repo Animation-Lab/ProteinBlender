@@ -167,3 +167,127 @@ def test_no_identity_comparisons_on_blender_data():
     assert not violations, (
         "identity comparison on Blender data (use == or compare .name):\n  "
         + "\n  ".join(violations))
+
+
+# --- extension repository index: Python-version compatibility -----------------
+#
+# Blender decides whether to *offer* a remote extension by reading the index
+# entry's `python_versions` (bl_pkg/cli/blender_ext.py). When that key is absent
+# the listing advertises the build to every Blender, and an incompatible one only
+# fails later at install time with "This Python version (3.13) isn't compatible
+# with (3.11)". That is exactly what release 1.0.0 did to Blender 5.1/5.2 users:
+# it shipped cp311-only wheels, so it could never load on Python 3.13, yet the
+# index happily offered it. Blender's own `server-generate` emits this key; our
+# generator must too.
+
+def _load_index_generator():
+    """Import .github/scripts/generate_index.py as a module."""
+    import importlib.util
+
+    path = ROOT / ".github" / "scripts" / "generate_index.py"
+    spec = importlib.util.spec_from_file_location("pb_generate_index", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_index_entry_declares_python_versions_derived_from_wheels():
+    """An index entry must advertise the Python versions its wheels support.
+
+    Ground truth is the wheel filenames written out below, not anything the
+    generator computes: cp311 + cp313 compiled wheels and a pure-python wheel
+    mean the build runs on 3.11 and 3.13, and on nothing else.
+    """
+    module = _load_index_generator()
+
+    manifest = {
+        "schema_version": "1.0.0",
+        "id": "proteinblender",
+        "name": "ProteinBlender",
+        "version": "9.9.9",
+        "tagline": "test",
+        "blender_version_min": "5.0.0",
+        "type": "add-on",
+        "maintainer": "test",
+        "license": ["SPDX:GPL-3.0-or-later"],
+        "website": "https://example.invalid",
+        "wheels": [
+            "./wheels/biotite-1.6.0-cp311-cp311-win_amd64.whl",
+            "./wheels/biotite-1.6.0-cp313-cp313-win_amd64.whl",
+            "./wheels/starfile-0.5.13-py3-none-any.whl",
+        ],
+    }
+
+    entry = module.build_extension_entry(
+        manifest=manifest,
+        archive_url="https://example.invalid/x.zip",
+        archive_size=1,
+        archive_hash="0" * 64,
+        platform="windows-x64",
+    )
+
+    assert "python_versions" in entry, (
+        "index entry omits python_versions; Blender will advertise this build to "
+        "Python versions it cannot run on and fail at install time instead"
+    )
+    assert sorted(entry["python_versions"]) == ["3.11", "3.13"]
+
+
+def test_cp311_only_build_is_not_advertised_to_python_313():
+    """The 1.0.0 regression, pinned: cp311-only wheels must declare only 3.11.
+
+    A build like release 1.0.0 (Blender 4.2 era, cp311 wheels only) genuinely
+    cannot load on Python 3.13. The index must say so, so Blender filters it out
+    of the listing rather than offering an install that cannot work.
+    """
+    module = _load_index_generator()
+
+    manifest = {
+        "schema_version": "1.0.0",
+        "id": "proteinblender",
+        "name": "ProteinBlender",
+        "version": "1.0.0",
+        "tagline": "test",
+        "blender_version_min": "4.2.0",
+        "type": "add-on",
+        "maintainer": "test",
+        "license": ["SPDX:GPL-3.0-or-later"],
+        "website": "https://example.invalid",
+        "wheels": [
+            "./wheels/biotite-1.4.0-cp311-cp311-win_amd64.whl",
+            "./wheels/msgpack-1.1.0-cp311-cp311-win_amd64.whl",
+        ],
+    }
+
+    entry = module.build_extension_entry(
+        manifest=manifest,
+        archive_url="https://example.invalid/x.zip",
+        archive_size=1,
+        archive_hash="0" * 64,
+        platform="windows-x64",
+    )
+
+    assert entry.get("python_versions") == ["3.11"]
+    assert "3.13" not in entry.get("python_versions", []), (
+        "a cp311-only build must not be advertised as 3.13-compatible"
+    )
+
+
+def test_shipped_manifest_runs_on_every_supported_blender_python():
+    """The wheels we ship must cover the Python of every supported Blender.
+
+    Blender 5.0 runs Python 3.11; 5.1 and 5.2 run 3.13. Both are declared
+    supported by blender_version_min = 5.0.0, so a build whose wheels cover only
+    one of them is unloadable on the rest - silently, until a user installs it.
+    The expected set here comes from the Blender releases themselves, not from
+    anything the add-on computes.
+    """
+    module = _load_index_generator()
+
+    manifest = tomllib.loads((PACKAGE / "blender_manifest.toml").read_text(encoding="utf-8"))
+    derived = set(module.python_versions_from_wheels(manifest.get("wheels", [])))
+
+    assert {"3.11", "3.13"} <= derived, (
+        f"shipped wheels cover Python {sorted(derived)}, but Blender 5.0 needs "
+        f"3.11 and Blender 5.1/5.2 need 3.13"
+    )
