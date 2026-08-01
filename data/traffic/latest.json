@@ -1,56 +1,56 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-07-31T03:47:06+00:00",
+  "generated_at": "2026-08-01T03:46:25+00:00",
   "summary": {
-    "views": 116,
+    "views": 113,
     "visitors": 20,
-    "clones": 458,
-    "cloners": 134
+    "clones": 443,
+    "cloners": 124
   },
   "all_time": {
-    "views": 636,
-    "visitors": 279,
-    "clones": 3600,
-    "cloners": 1613,
-    "days_tracked": 135
+    "views": 637,
+    "visitors": 280,
+    "clones": 3611,
+    "cloners": 1615,
+    "days_tracked": 136
   },
   "current_day": {
+    "date": "2026-07-30",
+    "views": 1,
+    "visitors": 1,
+    "clones": 11,
+    "cloners": 2
+  },
+  "previous_day": {
     "date": "2026-07-29",
     "views": 26,
     "visitors": 8,
     "clones": 59,
     "cloners": 18
   },
-  "previous_day": {
-    "date": "2026-07-28",
-    "views": 0,
-    "visitors": 0,
-    "clones": 19,
-    "cloners": 13
-  },
   "delta_since_previous_day": {
-    "views": 26,
-    "visitors": 8,
-    "clones": 40,
-    "cloners": 5
+    "views": -25,
+    "visitors": -7,
+    "clones": -48,
+    "cloners": -16
   },
   "referrers": [
-    {
-      "referrer": "github.com",
-      "count": 33,
-      "uniques": 6
-    },
     {
       "referrer": "animation-lab.github.io",
       "count": 31,
       "uniques": 15
+    },
+    {
+      "referrer": "github.com",
+      "count": 30,
+      "uniques": 6
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 40,
+      "count": 39,
       "uniques": 16
     },
     {
@@ -62,7 +62,7 @@
     {
       "path": "/Animation-Lab/ProteinBlender/actions",
       "title": "/actions",
-      "count": 12,
+      "count": 11,
       "uniques": 1
     },
     {
@@ -84,12 +84,6 @@
       "uniques": 1
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/tree/main/docs",
-      "title": "/tree/main/docs",
-      "count": 3,
-      "uniques": 2
-    },
-    {
       "path": "/Animation-Lab/ProteinBlender/tree/gh-pages",
       "title": "/tree/gh-pages",
       "count": 3,
@@ -106,6 +100,12 @@
       "title": "/issues",
       "count": 2,
       "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/edit/gh-pages/index.html",
+      "title": "/edit/gh-pages/index.html",
+      "count": 2,
+      "uniques": 1
     }
   ]
 }
