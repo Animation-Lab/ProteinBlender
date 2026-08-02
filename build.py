@@ -11,7 +11,9 @@ It is used to update the blender manifest.toml file with the necessary wheels fo
 
 import argparse
 import glob
+import importlib
 import os
+import site
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -31,14 +33,60 @@ def run_python(args: str | List[str]):
             "or a list of individual arguments already split"
         )
 
-    subprocess.run(args)
+    # check=True matters: this drives `pip download` for the whole release wheel
+    # matrix. A swallowed non-zero exit lets update_toml_whls() go on to write a
+    # manifest from whatever wheels happened to land, shipping a partial
+    # dependency set as if it were complete.
+    subprocess.run(args, check=True)
 
 
-try:
+def _ensure_tomlkit():
+    """Import tomlkit, installing it first when the interpreter lacks it.
+
+    A plain `pip install` is not enough on CI: GitHub's ubuntu runners expose a
+    Python whose `dist-packages` the job user cannot write, so the install dies
+    with EACCES. The original code ignored that exit status and re-raised the
+    import, so the real error ("Permission denied") was replaced by a bare
+    ModuleNotFoundError that pointed nowhere. Retry into the user site directory,
+    and if that fails too, fail loudly with pip's own output.
+    """
+    try:
+        import tomlkit
+        return tomlkit
+    except ModuleNotFoundError:
+        pass
+
+    python = os.path.realpath(sys.executable)
+    attempts = (
+        [python, "-m", "pip", "install", "tomlkit"],
+        [python, "-m", "pip", "install", "--user", "tomlkit"],
+    )
+
+    failures = []
+    for command in attempts:
+        completed = subprocess.run(command, capture_output=True, text=True)
+        if completed.returncode == 0:
+            break
+        failures.append(
+            "$ {}\n{}{}".format(
+                " ".join(command), completed.stdout or "", completed.stderr or ""))
+    else:
+        raise SystemExit(
+            "build.py requires tomlkit and could not install it.\n\n"
+            + "\n".join(failures))
+
+    # A --user install can land in a directory that was not on sys.path when this
+    # interpreter started, so make it importable before retrying the import.
+    user_site = site.getusersitepackages()
+    if user_site not in sys.path:
+        sys.path.append(user_site)
+    importlib.invalidate_caches()
+
     import tomlkit
-except ModuleNotFoundError:
-    run_python("-m pip install tomlkit")
-    import tomlkit
+    return tomlkit
+
+
+tomlkit = _ensure_tomlkit()
 
 TOML_PATH = "proteinblender/blender_manifest.toml"
 WHL_PATH = "./proteinblender/wheels"
