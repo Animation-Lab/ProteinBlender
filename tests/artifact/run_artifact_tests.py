@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -30,7 +31,15 @@ def _windows_path(value):
     return str(value)
 
 
-def run(command, *, env, cwd=ROOT, blender_command=False):
+# Per-step ceiling, well under the workflow's timeout-minutes. A step that blows
+# through this is wedged, not slow: the whole lane takes a few minutes end to
+# end. Without it a stuck child burns the entire job budget and Actions reports
+# "The operation was canceled", which says nothing about what was stuck.
+STEP_TIMEOUT_SECONDS = float(os.environ.get("PB_ARTIFACT_STEP_TIMEOUT", "900"))
+
+
+def run(command, *, env, cwd=ROOT, blender_command=False,
+        timeout=None):
     values = [str(x) for x in command]
     run_env = env
     if blender_command and os.name == "posix" and values[0].lower().endswith(".exe"):
@@ -44,7 +53,19 @@ def run(command, *, env, cwd=ROOT, blender_command=False):
                     "PB_ARTIFACT_REPO_ROOT"):
             run_env[key] = _windows_path(run_env[key])
     print("[artifact]", " ".join(values), flush=True)
-    subprocess.run(values, cwd=cwd, env=run_env, check=True)
+    started = time.monotonic()
+    if timeout is None:
+        timeout = STEP_TIMEOUT_SECONDS
+    try:
+        subprocess.run(values, cwd=cwd, env=run_env, check=True,
+                       timeout=timeout if timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            f"[artifact] TIMEOUT: no exit after {timeout:.0f}s from:\n"
+            f"  {' '.join(values)}\n"
+            "The step is wedged. Raise PB_ARTIFACT_STEP_TIMEOUT if the machine is "
+            "genuinely this slow; otherwise read the watchdog traceback above.")
+    print(f"[artifact] ok in {time.monotonic() - started:.1f}s", flush=True)
 
 
 def main():

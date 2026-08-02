@@ -16,7 +16,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
+        # macos-13 was the Intel leg. GitHub retired those runners, so the label
+        # no longer resolves to anything: the job never gets picked up and sits
+        # queued until Actions cancels it at the 24h ceiling. `timeout-minutes`
+        # does not help, because it only starts counting once a job is running.
+        # That one dead label kept the whole nightly "in progress" for a day and
+        # reported the run as failed. Intel-mac artifact coverage is dropped
+        # until a replacement label is verified to schedule.
+        os: [ubuntu-latest, windows-latest, macos-14]
     steps:
       - uses: actions/checkout@v4
       - uses: bradyajohnston/setup-blender@v4
