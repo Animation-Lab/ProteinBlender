@@ -110,17 +110,17 @@ def _dump_child_traceback(process, grace=25):
             print("[artifact] child survived SIGKILL", flush=True)
 
 
-def main():
+def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--blender", default=os.environ.get("BLENDER_PATH", "blender"))
     parser.add_argument(
         "--prepare-wheels", action="store_true",
         help="resolve the release wheel matrix in a disposable staging copy")
     parser.add_argument("--keep", action="store_true", help="keep isolated user/build directories")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    owner = tempfile.TemporaryDirectory(prefix="pb-artifact-")
-    base = Path(owner.name)
+
+def _run_lane(args, base):
     build_dir = base / "dist"
     repo_dir = base / "extensions"
     user_dir = base / "user"
@@ -192,9 +192,22 @@ def main():
         blender_command=True, timeout=BLENDER_STEP_TIMEOUT_SECONDS)
 
     print(f"[artifact] PASS: installed extension report at {report}")
+
+
+def main():
+    args = _parse_args()
+    # Deliberately not TemporaryDirectory: it cleans up through a
+    # weakref.finalize, so assigning over `.cleanup` was a no-op and --keep never
+    # actually kept anything. Own the lifetime here, and keep the tree on failure
+    # too - that is exactly when it is worth inspecting.
+    base = Path(tempfile.mkdtemp(prefix="pb-artifact-"))
     if args.keep:
-        print(f"[artifact] kept: {base}")
-        owner.cleanup = lambda: None
+        print(f"[artifact] keeping {base}", flush=True)
+    try:
+        _run_lane(args, base)
+    finally:
+        if not args.keep:
+            shutil.rmtree(base, ignore_errors=True)
 
 
 if __name__ == "__main__":
