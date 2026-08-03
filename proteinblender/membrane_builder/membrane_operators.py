@@ -234,6 +234,26 @@ def _rebuild_membrane_for_shape(root_obj: bpy.types.Object, props) -> None:
             break
 
 
+def _enable_rest_position(root_obj: bpy.types.Object) -> None:
+    """Ask Blender to publish a ``rest_position`` attribute on the membrane.
+
+    The GN tree scatters lipids on the mesh's rest shape so they keep their
+    identity while the lattice morphs (see the rest-shape scatter block in
+    membrane_geometry). That attribute only exists if this flag is set, and it
+    is a per-object setting, so every membrane root needs it — both freshly
+    built ones and older ones being upgraded on load.
+
+    The flag moved between Blender versions: it lives on Object in 5.x and on
+    Mesh in 4.x. The tree tolerates its absence (it falls back to the live
+    deformed position, i.e. the old re-scatter behaviour) so a version that
+    exposes it in neither place degrades rather than breaking.
+    """
+    if hasattr(root_obj, "add_rest_position_attribute"):
+        root_obj.add_rest_position_attribute = True
+    elif hasattr(root_obj.data, "add_rest_position_attribute"):
+        root_obj.data.add_rest_position_attribute = True
+
+
 def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     """Re-push a membrane's stored (pb_mem_*) settings onto its GN modifier.
 
@@ -245,6 +265,9 @@ def reapply_membrane_settings(root_obj: bpy.types.Object) -> None:
     mod = _get_gn_modifier(root_obj)
     if mod is None:
         return
+
+    # Migration for membranes saved before the rest-shape scatter landed.
+    _enable_rest_position(root_obj)
 
     style = str(root_obj.get("pb_mem_render_style", lipid_assets.DEFAULT_STYLE))
     _set_mod_input(mod, "Lipid Collection",
@@ -398,6 +421,9 @@ def _build_new_membrane(context, props):
     mesh.name = f"{name}_mesh"
     root = bpy.data.objects.new(name, mesh)
     root["pb_is_membrane"] = True
+    # Must be set before the Lattice + GN modifiers go on: the GN tree reads
+    # `rest_position` to scatter lipids on the undeformed shape.
+    _enable_rest_position(root)
     # Seed the shape custom prop so apply_props_to_membrane below sees
     # a matching old_shape and doesn't trigger a redundant rebuild.
     root["pb_mem_shape"] = shape
@@ -937,12 +963,49 @@ class PROTEINBLENDER_OT_select_hole(Operator):
 # Deformation: enter/exit lattice edit mode, reset lattice
 # ---------------------------------------------------------------------------
 
+DEFORM_STATUS = ("Membrane deformation:   G  move point    I  keyframe    "
+                 "|    Tab  or  Finish Deformation  to exit")
+
+# Set while the deform banner is on screen, so the status-bar hint can be
+# cleared exactly once when the user leaves edit mode by any route (including
+# Blender's own Tab, which never reaches our Finish operator).
+_STATUS_ARMED = False
+
+
+def _set_deform_status(context, active: bool) -> None:
+    """Show / clear the status-bar hint for membrane deformation mode.
+
+    Entering Lattice edit mode used to leave no trace anywhere in the UI: the
+    dialog that launched it closes, Blender's own mode pill is easy to miss,
+    and `membrane_finish_deform` was registered but never drawn, so there was
+    no visible way back out. The status bar is always on screen, so it carries
+    the way out even when the user is working in the viewport.
+    """
+    try:
+        workspace = context.workspace
+        if workspace is not None:
+            workspace.status_text_set(DEFORM_STATUS if active else None)
+    except Exception:
+        # Headless / no workspace — the panel banner still covers the UI case.
+        pass
+
+
+def is_editing_membrane_deform(context) -> bool:
+    """True while the user is in Lattice edit mode on a membrane's deformer."""
+    if context.mode != "EDIT_LATTICE":
+        return False
+    obj = context.active_object
+    if obj is None or obj.type != "LATTICE":
+        return False
+    return _get_membrane_root(obj) is not None
+
+
 class PROTEINBLENDER_OT_edit_deform(Operator):
     """Enter Lattice edit mode for the active membrane's deformer.
 
     The user can then grab lattice points, drag them, and keyframe them to
-    animate the membrane's surface. Click the panel button again (or Tab)
-    to return to Object mode.
+    animate the membrane's surface. Tab, or the Finish Deformation button in
+    the banner that appears while editing, returns to Object mode.
     """
 
     bl_idname = "proteinblender.membrane_edit_deform"
@@ -985,6 +1048,7 @@ class PROTEINBLENDER_OT_edit_deform(Operator):
             self.report({"ERROR"}, f"Could not enter edit mode: {e}")
             return {"CANCELLED"}
 
+        _set_deform_status(context, True)
         return {"FINISHED"}
 
 
@@ -1006,6 +1070,7 @@ class PROTEINBLENDER_OT_finish_deform(Operator):
             bpy.ops.object.select_all(action="DESELECT")
             obj.parent.select_set(True)
             context.view_layer.objects.active = obj.parent
+        _set_deform_status(context, False)
         return {"FINISHED"}
 
 
@@ -1025,15 +1090,62 @@ class PROTEINBLENDER_OT_reset_deform(Operator):
         root = _get_membrane_root(context.active_object)
         if root is None:
             return {"CANCELLED"}
+
+        lattice = None
         for child in root.children:
             if child.type == "LATTICE":
-                # IMPORTANT: a lattice point's "no deformation" state is
-                # ``co_deform == co`` (rest position), NOT (0,0,0). Setting
-                # co_deform to (0,0,0) collapses every point to the lattice
-                # centre, crushing the mesh into a tiny region.
-                for p in child.data.points:
-                    p.co_deform = tuple(p.co)
+                lattice = child
                 break
+        if lattice is None:
+            return {"CANCELLED"}
+
+        # Writes to `lattice.data.points` do not stick while the lattice is in
+        # edit mode — Blender is holding an authoritative edit-mode copy and
+        # overwrites the datablock from it on exit, so the reset silently did
+        # nothing at all. Edit mode is exactly where a user reaches for this
+        # button, so drop out, reset, and go back where they were.
+        resume_edit = (context.mode == "EDIT_LATTICE"
+                       and context.active_object is not None
+                       and context.active_object.name == lattice.name)
+        if resume_edit:
+            try:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception:
+                resume_edit = False
+
+        # A keyframed lattice re-asserts its animated value on the very next
+        # depsgraph evaluation, so resetting the points alone looked like it
+        # worked and then silently reverted on the next frame change. Now that
+        # lattices are the way membranes are animated, "Reset Deformation" has
+        # to mean the animation too, or the button lies. Only the lattice DATA
+        # animation is cleared (that is where co_deform lives); any object-level
+        # animation on the lattice is left alone, and the whole operator is
+        # undoable.
+        had_animation = (lattice.data.animation_data is not None
+                         and lattice.data.animation_data.action is not None)
+        if had_animation:
+            lattice.data.animation_data_clear()
+
+        # IMPORTANT: a lattice point's "no deformation" state is
+        # ``co_deform == co`` (rest position), NOT (0,0,0). Setting
+        # co_deform to (0,0,0) collapses every point to the lattice
+        # centre, crushing the mesh into a tiny region.
+        for p in lattice.data.points:
+            p.co_deform = tuple(p.co)
+
+        if resume_edit:
+            try:
+                bpy.ops.object.select_all(action="DESELECT")
+                lattice.select_set(True)
+                context.view_layer.objects.active = lattice
+                bpy.ops.object.mode_set(mode="EDIT")
+            except Exception:
+                pass
+
+        if had_animation:
+            self.report({"INFO"},
+                        f"Reset {root.name}: deformation and its keyframes "
+                        "cleared (Ctrl+Z to restore)")
         return {"FINISHED"}
 
 
@@ -1107,6 +1219,53 @@ class PROTEINBLENDER_OT_delete_membrane(Operator):
         return {"FINISHED"}
 
 
+class PROTEINBLENDER_PT_membrane_deform_banner(bpy.types.Panel):
+    """Always-on-screen way out of membrane deformation mode.
+
+    Only drawn while the user is actually in Lattice edit mode on a membrane
+    deformer, so it costs nothing the rest of the time. It exists because
+    Edit Deformation used to be a one-way door: the dialog that launches it
+    closes behind the user, and the Finish operator had no button anywhere.
+    """
+
+    bl_label = "Membrane Deformation"
+    bl_idname = "PROTEINBLENDER_PT_membrane_deform_banner"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "scene"
+    bl_order = -1          # above every other PB panel — it's a modal state
+
+    @classmethod
+    def poll(cls, context):
+        editing = is_editing_membrane_deform(context)
+        # Blender's own Tab can leave the mode without going through
+        # Finish Deformation, which would strand the status-bar hint. The
+        # panel's poll is the one thing guaranteed to run on redraw, so it
+        # doubles as the place to notice and clean up.
+        global _STATUS_ARMED
+        if editing:
+            _STATUS_ARMED = True
+        elif _STATUS_ARMED:
+            _STATUS_ARMED = False
+            _set_deform_status(context, False)
+        return editing
+
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        box.label(text="Editing membrane deformation", icon="MOD_LATTICE")
+        col = box.column(align=True)
+        col.label(text="Drag lattice points to shape the membrane.", icon="INFO")
+        col.label(text="Right-click a point → Insert Keyframe to animate it.")
+        row = box.row()
+        row.scale_y = 1.4
+        row.operator(
+            "proteinblender.membrane_finish_deform",
+            text="Finish Deformation",
+            icon="CHECKMARK",
+        )
+
+
 CLASSES = (
     PROTEINBLENDER_OT_build_membrane,
     PROTEINBLENDER_OT_resize_membrane,
@@ -1117,6 +1276,7 @@ CLASSES = (
     PROTEINBLENDER_OT_finish_deform,
     PROTEINBLENDER_OT_reset_deform,
     PROTEINBLENDER_OT_delete_membrane,
+    PROTEINBLENDER_PT_membrane_deform_banner,
 )
 
 

@@ -495,6 +495,158 @@ on a membrane whose typical gap was 0.28 nm.
   Root-caused live over the BlenderMCP socket against the user's actual scene,
   where the field was enabled on the molecule plus all three chains.
 
+- **Morphing a membrane made the lipids flicker violently, so membranes could
+  not be animated.** Reported as "it redraws/resets the lipids when the shape
+  deforms" - which is exactly right. The Lattice modifier sits *before* the GN
+  modifier, so `_build_membrane_gn_tree` fed the already-deformed mesh straight
+  into Distribute Points on Faces. Poisson-disk sampling is a function of the
+  triangle geometry, so moving a single lattice point re-sampled the entire
+  sheet: over a 10-frame lattice bulge the lipid count drifted 1240 -> 1267 and
+  each lipid teleported across the membrane every frame (max per-lipid step
+  4.70 BU on a 4 BU grid). The lipids weren't flickering, they were being
+  replaced. Fixed by scattering on the mesh's REST shape, which is
+  frame-invariant: the deformed position and normal are captured on the mesh
+  point domain, Set Position flattens the mesh back to `rest_position`,
+  Distribute runs on that, and the resulting points are immediately pushed onto
+  the live surface with the captured deformed position (Distribute propagates
+  anonymous attributes onto the points, barycentrically interpolated). Doing the
+  remap right after Distribute means every downstream `Input Position` - the
+  half-thickness offset, the hole/force-field SDF pushers, the six wobble
+  channels - still reads real deformed coordinates and needed no change. Max
+  per-lipid step dropped to 0.027 BU. Two things that are not optional: the
+  captured *deformed* normal must replace `dist.outputs["Normal"]` for the tilt
+  and bilayer offset (on a domed sheet the rest normal measures 0.0000
+  off-vertical against the true 0.4152, so every lipid would stand bolt upright
+  on a curve), and the `rest_position` read is wrapped in an Exists switch
+  falling back to the live position - without it, a membrane whose object lacks
+  `add_rest_position_attribute` collapses to a point and renders ZERO lipids
+  (measured). `add_rest_position_attribute` is set per-object by
+  `membrane_operators._enable_rest_position`, on build and again in
+  `reapply_membrane_settings` so older .blend files pick it up on load; it is a
+  native Object property and survives save/load (verified). Consequence by
+  design: lipid count is fixed by the rest area, so stretching spreads the
+  lipids apart rather than spawning new ones - which is how a bilayer under
+  tension behaves, and the only pop-free option. `GN_TREE_VERSION` 35 -> 36.
+  Guarded by `test_membrane.py::test_lipids_keep_their_identity_while_the_membrane_morphs`
+  (verified red pre-fix with the exact signature above) and
+  `::test_morphed_membrane_lipids_follow_the_deformed_surface`, which guards the
+  obvious wrong fix - leaving the lipids frozen on the rest shape - and was
+  already green pre-fix. Both measure the depsgraph instance list (what actually
+  renders) against a dome the test itself authors, so the expected value never
+  comes from the node tree. Removing only the object flag reproduces the
+  original signature exactly, so each half of the fix is independently covered.
+  Green on Blender 5.0, 5.1 and 5.2.
+
+- **Lipids snapped 180 degrees about their own axis while a membrane morphed.**
+  Reported as "a superfast flip, almost like they are going from a negative
+  angle to a positive and they flip at a specific angle value" - which is
+  exactly the shape of the defect. The per-instance rotation came from
+  `AlignRotationToVector` with `pivot_axis = "AUTO"`, which derives the azimuth
+  frame from its own input vector and swaps to a different pivot as that input
+  crosses a critical direction. v9 had already hit this and worked around it by
+  feeding the *un-perturbed* normal, so the node's input stopped moving - a fix
+  that only held while the surface was rigid. v36 (morphable membranes) put a
+  slowly-swinging normal back into it and the flip returned. Measured over a
+  20-frame lattice bulge: the lipid's long axis tracked the surface smoothly at
+  1.59 deg/frame while its SPIN about that axis jumped 179.91 deg in a single
+  frame - the lipid never tumbled, it snapped about its own axis, which is why
+  it looked instantaneous and hit only the few lipids whose normal crossed the
+  critical direction. Fixed by replacing the node with `AxesToRotation`, which
+  takes the azimuth reference as an explicit input instead of guessing one; the
+  reference is `normalize(cross(rest_normal, helper))` built from the REST
+  normal, so it is constant in time by construction and the only time-varying
+  input left is the primary axis. A flip is therefore impossible rather than
+  merely unlikely. `helper` picks world X or Y by which is less parallel to the
+  rest normal - a branch that is safe precisely because it reads a per-lipid
+  constant and so cannot flip mid-animation. Tilt behaviour is untouched (max
+  step identical at 1.59 deg before and after). `GN_TREE_VERSION` 36 -> 37.
+  Guarded by `test_membrane.py::test_lipids_do_not_flip_about_their_own_axis_during_a_morph`
+  (FLAT and SPHERE), which asserts a lipid's total rotation between adjacent
+  frames cannot greatly exceed how far its long axis actually tilted - both
+  measured from the rendered instance matrices, so neither side comes from the
+  node tree - plus a tilt floor so it cannot pass on a frozen scene. Verified
+  red by reverting *only* the rotation node while keeping v36 (179.93 deg flat,
+  179.22 deg sphere); stashing the whole file instead passes vacuously, because
+  without v36 the lipids have no stable identity to compare across frames.
+
+- **The v37 flip fix moved the singularity instead of removing it.**
+  Found by driving the live Blender past the gentle domes the v37 tests use.
+  v37 fed `AxesToRotation` a secondary axis built from the REST normal, on the
+  reasoning that a frame-invariant reference cannot flip. That reasoning is
+  incomplete: `AxesToRotation` projects the secondary onto the plane
+  perpendicular to the primary, and the projection collapses when the two go
+  parallel. The rest normal never moves - but the DEFORMED normal (the primary)
+  swings onto it once a lipid tilts ~90 degrees from rest *in the direction of
+  the reference*, and the lipid then snaps 180 degrees about its own axis. Same
+  user-visible symptom v37 was meant to end, and "a specific angle value" is
+  literally 90 degrees from rest. Measured on a flat sheet folded 120 degrees
+  about X: 178.98 deg of total rotation in one frame against 19.13 deg of
+  actual tilt, with every culprit lipid sitting 80-90 deg from its rest
+  orientation. Fixed by carrying the reference onto the deformed surface with
+  the minimal (Rodrigues) rotation that takes the rest normal to the deformed
+  normal: `ref' = ref cos + (k x ref) sin + k (k . ref)(1 - cos)` for
+  `k = normalize(rest_n x def_n)`. That rotation is rigid and `ref` starts
+  perpendicular to the rest normal, so `ref'` is perpendicular to the deformed
+  normal *by construction* at every frame - parallel is now impossible rather
+  than merely unlikely, which is the property v37 claimed but did not have.
+  Both endpoints are safe: at `def_n == rest_n` the cross product is zero and
+  Blender's NORMALIZE maps zero to zero rather than NaN, so the sin and
+  (1-cos) terms vanish and `ref' = ref`; at `def_n == -rest_n` it degrades to
+  `ref' = -ref`, still perpendicular to the normal. The only discontinuity left
+  is exactly antipodal, where the sheet has folded fully back on itself and the
+  azimuth is undefined for any stateless frame. Tilt behaviour is untouched -
+  the per-frame tilt steps are bit-identical before and after across the whole
+  fold sweep (2.21 / 6.18 / 15.47 / 38.59 / 156.90 deg), only the spurious spin
+  is gone, and on the dome sweep total step now equals tilt step exactly where
+  it previously carried a small residual (19.00 vs 18.61 at a 16 BU bulge).
+  `GN_TREE_VERSION` 37 -> 38. Guarded by
+  `test_membrane.py::test_lipids_do_not_flip_when_a_fold_passes_the_azimuth_reference`,
+  verified red pre-fix with exactly the signature above. The test folds about
+  **X** deliberately: for a flat membrane the azimuth reference is world Y, so a
+  fold about Y keeps the normal permanently perpendicular to the reference and
+  cannot expose the defect (measured - a Y fold is clean at every angle even on
+  the broken code). It also asserts a >90 deg tilt-from-rest floor, because the
+  existing dome tests cannot reach the cliff at all: a radially symmetric bulge
+  asymptotes at ~88 deg no matter how hard it is driven (87.71 deg at a 32 BU
+  bulge, 2.3 deg short of failure). Green on Blender 5.0, 5.1 and 5.2, and
+  re-confirmed against the live windowed Blender across the whole fold sweep
+  and on FLAT / SPHERE / HEMISPHERE with `animate_bob` left ON (the headless
+  morph tests disable it).
+
+- **Reset Deformation silently did nothing in the two cases that matter.**
+  Found while investigating a reported "reset makes the membrane disappear",
+  which did NOT reproduce (see the open note below) - but two real defects in
+  the same operator did. (1) It wrote `lattice.data.points[*].co_deform`
+  directly, and Blender holds an authoritative edit-mode copy of a lattice that
+  overwrites the datablock on exit, so pressing Reset while *in* deformation
+  mode had no effect at all, neither immediately nor after leaving - and edit
+  mode is exactly where a user reaches for it. Fixed by dropping to Object
+  mode, resetting, and restoring edit mode. (2) On a keyframed lattice the
+  reset landed and was then re-asserted by the F-curves on the next depsgraph
+  evaluation, so the membrane snapped back the instant the frame changed.
+  Harmless while lattices were static; a lie once v36 made lattice keyframes
+  the way membranes are animated. Fixed by clearing the lattice *data*
+  animation as part of the reset (that is where `co_deform` lives), leaving any
+  object-level animation on the lattice alone, and reporting what was dropped
+  since the operator is undoable. Guarded by
+  `test_membrane.py::test_reset_deform_sticks_while_in_edit_mode` and
+  `::test_reset_deform_clears_lattice_keyframes`, both verified red pre-fix
+  ("did not stick" / "keyframes re-asserted the deformation"); ground truth is
+  each point's own rest `co`, which the operator never computes.
+
+- **Membrane deformation mode was a one-way door.** Reported as "once you enter
+  deformation, there is not an obvious way to exit it". `membrane_edit_deform`
+  drops the user into Lattice edit mode from inside a dialog that then closes,
+  and `membrane_finish_deform` was registered but drawn nowhere - so the only
+  exit was already knowing to press Tab. Fixed with
+  `PROTEINBLENDER_PT_membrane_deform_banner`, a `bl_order = -1` panel that polls
+  true only in Lattice edit mode on a membrane deformer, plus a status-bar hint
+  set on entry. The banner's poll doubles as the cleanup hook for the status
+  text, since Blender's own Tab leaves the mode without going through the Finish
+  operator. Guarded by
+  `test_membrane.py::test_deform_mode_offers_a_visible_way_out` (banner poll
+  false before, true while editing, false after Finish).
+
 - **"Set Pivot Last" landed in the centre of the chain, not the C-terminus.**
   A bound metal ion whose atom name is "CA" (a calcium ion - element Ca, e.g.
   the Ca(2+) in actin, 1ATN chain A res 373) was flagged `is_alpha_carbon`,
@@ -789,6 +941,27 @@ by passing that state directly (no dialog needed):
   are checked via registration + `poll`, not rendering.
 
 ## Known issues surfaced but not fixed here
+
+- **UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and lattice
+  disappear; you have to undo until it comes back."** Reported against a
+  membrane that already existed and was reopened through the PB Outliner's edit
+  pencil, with Reset clicked inside that dialog. Not reproducible from the
+  operator: driven headless in Object mode, with a hole, from inside
+  `EDIT_LATTICE`, on a fully keyframed lattice, and after a stale-`pb_gn_version`
+  tree upgrade (the state a .blend saved by an older build lands in), the root,
+  lattice, hole, per-membrane collection and all 1240 lipid instances survive
+  every time. Two real defects in the same operator *were* found and fixed (see
+  "Reset Deformation silently did nothing" above), but neither deletes anything,
+  so the disappearance is still unexplained. The remaining untested ingredient is
+  the live `invoke_props_dialog` + undo-push interaction, which background pytest
+  cannot drive - a nested operator carrying `bl_options = {"REGISTER", "UNDO"}`
+  executed while the dialog's own REGISTER|UNDO operator is still pending. Note
+  that all objects live in one `<name>_Group` collection, so a single collection
+  unlink would make root, lattice and holes vanish together, matching the report
+  exactly; `_ensure_membrane_collection` re-uses an existing collection by name
+  without re-linking it to the scene, which would leave everything invisible.
+  That is a hypothesis, not a diagnosis. Needs a live repro with the system
+  console open.
 
 - **`pdb_model_num` and `entity_id` fail to write on every PDB import.**
   `_create_object` builds them from `array.pdb_model_num` / `array.entity_id`,

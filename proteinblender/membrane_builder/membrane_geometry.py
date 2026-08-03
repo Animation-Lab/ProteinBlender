@@ -324,7 +324,35 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        softmax-weighted mean smin_sdf = Σ(w_i·sdf_i)/Σ w_i, which is bounded by
 #        the individual sdfs, so out-of-reach fields carve nothing. Single-field
 #        behaviour is unchanged (the weights cancel). Structural; rebuilds trees.
-GN_TREE_VERSION = 35
+#   v36: membranes are animatable. Lipids used to be scattered on the
+#        lattice-DEFORMED mesh, so Poisson-disk sampling re-ran from scratch
+#        on every lattice move: over a 10-frame bulge the lipid count drifted
+#        1240 → 1267 and each lipid teleported across the sheet every frame -
+#        the "flicker" that made morphing membranes unusable. They are now
+#        scattered on the mesh's REST shape (frame-invariant, so the point set
+#        is stable) and carried onto the live surface via the deformed
+#        position + normal captured before the flatten. Per-lipid motion
+#        between adjacent frames dropped from 4.70 BU to 0.027 BU. Needs
+#        `rest_position`, enabled per-object by membrane_operators.
+#   v37: lipids no longer snap 180 deg about their own axis mid-morph. v36 put
+#        a slowly-swinging normal back into AlignRotationToVector, whose AUTO
+#        pivot picks the azimuth frame from that input and flips it as the
+#        input crosses a critical direction - the lipid's long axis tracked the
+#        surface smoothly (1.59 deg/frame) while its SPIN jumped 179.91 deg in
+#        one frame. Replaced with AxesToRotation, taking the azimuth reference
+#        as an explicit input built from the REST normal (frame-invariant), so
+#        the only time-varying input is the primary axis and a flip is
+#        impossible by construction. Tilt is unchanged.
+#   v38: v37 moved the flip rather than removing it. AxesToRotation projects
+#        the secondary axis onto the plane perpendicular to the primary, and a
+#        REST-frame secondary is free to go parallel to the primary once the
+#        deformed normal swings ~90 deg onto it - measured 178.98 deg of spin
+#        in one frame against 19.13 deg of tilt, on a sheet folded 120 deg
+#        about X. The reference is now carried onto the deformed surface by the
+#        minimal (Rodrigues) rotation taking the rest normal to the deformed
+#        normal, so it is perpendicular to the primary by construction at every
+#        frame. Tilt is unchanged.
+GN_TREE_VERSION = 38
 
 
 # ===========================================================================
@@ -618,6 +646,78 @@ def _build_membrane_gn_tree(num_holes: int = 0,
     links.new(inset_clamped.outputs[0], half_thick_shared.inputs[0])
 
     # ------------------------------------------------------------------
+    # 1c. REST-SHAPE SCATTER SOURCE — what makes the membrane animatable.
+    #
+    # The Lattice modifier sits *before* this one in the stack, so the mesh
+    # arriving here is already deformed. Feeding that straight into Distribute
+    # Points on Faces is what used to make morphing membranes flicker
+    # violently: Poisson-disk sampling is a function of the triangle geometry,
+    # so moving a single lattice point re-sampled the entire sheet from
+    # scratch. Measured over a 10-frame lattice bulge, the lipid count drifted
+    # 1240 → 1267 and individual lipids teleported clear across the membrane
+    # every frame. The lipids weren't flickering; they were being replaced.
+    #
+    # The fix is to scatter on the shape the mesh has at REST — which never
+    # changes from frame to frame — and then carry each lipid onto the live
+    # deformed surface:
+    #
+    #   1. capture the deformed position + normal on the mesh point domain;
+    #   2. Set Position back to `rest_position`, undoing the lattice;
+    #   3. Distribute on that frame-invariant rest mesh (stable point set);
+    #   4. Set Position on the resulting points to the captured deformed
+    #      position (see make_leaflet), landing them on the live surface.
+    #
+    # Steps 1 and 3 work because Distribute Points on Faces propagates
+    # anonymous attribute fields from the mesh onto the points, barycentrically
+    # interpolated — so a point that lands mid-triangle gets the interpolated
+    # deformed position of that triangle, not a snapped vertex value.
+    #
+    # A consequence worth knowing: lipid count is now fixed by the REST area,
+    # so stretching the membrane spreads the lipids apart rather than spawning
+    # new ones. That is how a real bilayer under tension behaves, and it is the
+    # only way to avoid a pop — a new lipid can only ever appear instantly.
+    #
+    # `rest_position` is supplied by Blender when the membrane root object has
+    # `add_rest_position_attribute` set (see membrane_operators.create_membrane).
+    # The Exists switch below is NOT optional: if the attribute is missing the
+    # Named Attribute node yields (0,0,0), the mesh collapses to a single point
+    # and the membrane renders ZERO lipids. Falling back to the live position
+    # degrades to the old behaviour instead, which is what keeps membranes in
+    # .blend files saved before this change rendering at all.
+    # ------------------------------------------------------------------
+    mesh_pos = new("GeometryNodeInputPosition", name="Deformed Position")
+    mesh_pos.location = (-2800, -450)
+    mesh_nrm = new("GeometryNodeInputNormal", name="Deformed Normal")
+    mesh_nrm.location = (-2800, -600)
+
+    capture_deformed = new("GeometryNodeCaptureAttribute",
+                           name="Capture Deformed")
+    capture_deformed.domain = "POINT"
+    capture_deformed.location = (-2600, -300)
+    capture_deformed.capture_items.new("VECTOR", "deformed_position")
+    capture_deformed.capture_items.new("VECTOR", "deformed_normal")
+    links.new(get_in("Geometry"), capture_deformed.inputs["Geometry"])
+    links.new(mesh_pos.outputs[0], capture_deformed.inputs["deformed_position"])
+    links.new(mesh_nrm.outputs[0], capture_deformed.inputs["deformed_normal"])
+
+    rest_attr = new("GeometryNodeInputNamedAttribute", name="Rest Position")
+    rest_attr.data_type = "FLOAT_VECTOR"
+    rest_attr.inputs["Name"].default_value = "rest_position"
+    rest_attr.location = (-2600, -750)
+
+    rest_or_live = new("GeometryNodeSwitch", name="Rest Or Live")
+    rest_or_live.input_type = "VECTOR"
+    rest_or_live.location = (-2400, -750)
+    links.new(rest_attr.outputs["Exists"], rest_or_live.inputs[0])
+    links.new(mesh_pos.outputs[0], rest_or_live.inputs["False"])
+    links.new(rest_attr.outputs["Attribute"], rest_or_live.inputs["True"])
+
+    rest_mesh = new("GeometryNodeSetPosition", name="To Rest Shape")
+    rest_mesh.location = (-2350, -300)
+    links.new(capture_deformed.outputs["Geometry"], rest_mesh.inputs["Geometry"])
+    links.new(rest_or_live.outputs[0], rest_mesh.inputs["Position"])
+
+    # ------------------------------------------------------------------
     # 2. Distribute Points on Faces — produces one point per future lipid.
     #    Used twice: once for upper leaflet, once for lower leaflet, with
     #    different seeds so the two leaflets don't perfectly mirror.
@@ -638,7 +738,10 @@ def _build_membrane_gn_tree(num_holes: int = 0,
                    name=f"Distribute {('Upper' if is_upper else 'Lower')}")
         dist.distribute_method = "POISSON"
         dist.location = (-2200, y_pos)
-        links.new(get_in("Geometry"), dist.inputs["Mesh"])
+        # Scatter on the REST shape, not the incoming (lattice-deformed) mesh
+        # — see the "rest-shape scatter source" block above. This is the whole
+        # reason the point set survives a morph.
+        links.new(rest_mesh.outputs[0], dist.inputs["Mesh"])
         links.new(density_max.outputs[0], dist.inputs["Density Max"])
         links.new(dmin.outputs[0], dist.inputs["Distance Min"])
 
@@ -650,21 +753,47 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         links.new(get_in("Random Seed"), seed_add.inputs[0])
         links.new(seed_add.outputs[0], dist.inputs["Seed"])
 
+        # Land the rest-scattered points on the live deformed surface, before
+        # anything downstream reads Position. Doing the remap here — rather
+        # than threading a "deformed position" socket through the half-
+        # thickness offset, the hole/force-field pushers and the wobble
+        # channels — means every Input Position below still reads real,
+        # deformed coordinates and none of that code has to know the scatter
+        # happened somewhere else.
+        to_deformed = new("GeometryNodeSetPosition",
+                          name=f"ToDeformed {leaflet_index}")
+        to_deformed.location = (-2120, y_pos)
+        links.new(dist.outputs["Points"], to_deformed.inputs["Geometry"])
+        links.new(capture_deformed.outputs["deformed_position"],
+                  to_deformed.inputs["Position"])
+
         # Capture Normal at each point (so deformed grids tilt lipids correctly).
-        # Use Distribute's *own* Normal output — InputNormal reads from the
-        # geometry's normal attribute, which a point cloud doesn't have
-        # (it would return (0,0,0) and silently disable the half-thickness
-        # offset, the bob offset, and the lipid tilt).
+        # This is the normal of the DEFORMED mesh, carried through Distribute
+        # as an interpolated anonymous attribute — not Distribute's own Normal
+        # output, which now describes the flat rest shape. On a domed membrane
+        # the rest normal measures 0.0000 off-vertical while the true deformed
+        # normal measures 0.4152, so using Distribute's output would stand
+        # every lipid bolt upright on a curved sheet and collapse the bilayer
+        # offset to a pure Z shift.
         #
-        # We capture the normal as a Float Vector attribute on the points so
-        # it's accessible downstream of SetPos / Delete / etc., where the
-        # source Distribute node isn't directly reachable per-point.
+        # InputNormal is not an option either: it reads the geometry's normal
+        # attribute, which a point cloud doesn't have (it would return (0,0,0)
+        # and silently disable the half-thickness offset, the bob offset, and
+        # the lipid tilt). We capture into a Float Vector attribute on the
+        # points so it stays accessible downstream of SetPos / Delete / etc.,
+        # where the source nodes aren't directly reachable per-point.
         capture_n = new("GeometryNodeCaptureAttribute",
                         name=f"CaptureNormal {leaflet_index}")
         capture_n.domain = "POINT"
         capture_n.location = (-2050, y_pos)
         capture_n.capture_items.new("VECTOR", "captured_normal")
-        links.new(dist.outputs["Points"], capture_n.inputs["Geometry"])
+        # The REST normal is captured alongside it. Unlike the deformed normal
+        # this one never changes from frame to frame (the rest mesh is
+        # frame-invariant by construction), which is exactly what the lipid's
+        # azimuth reference needs — see the rotation block further down.
+        capture_n.capture_items.new("VECTOR", "rest_normal")
+        links.new(to_deformed.outputs[0], capture_n.inputs["Geometry"])
+        links.new(dist.outputs["Normal"], capture_n.inputs["rest_normal"])
         # Address the captured socket by the name we just gave it, never by
         # position. On 4.2 the layout was [Geometry, captured_normal], so
         # index 1 was the value socket; Blender 5.2 inserted a Selection
@@ -675,7 +804,8 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         # then aligned to the (1,1,1) diagonal: a constant 54.7 degree tilt
         # (arccos(1/sqrt(3))) on every instance, both leaflets sheared
         # sideways by the same wrong offset vector, and no bilayer.
-        links.new(dist.outputs["Normal"], capture_n.inputs["captured_normal"])
+        links.new(capture_deformed.outputs["deformed_normal"],
+                  capture_n.inputs["captured_normal"])
 
         # Get current point position via Input Position.
         pos = new("GeometryNodeInputPosition", name=f"Pos {leaflet_index}")
@@ -687,6 +817,7 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             def __init__(self, sock):
                 self.outputs = [sock]
         normal = _NormalProxy(capture_n.outputs["captured_normal"])
+        rest_normal = capture_n.outputs["rest_normal"]
 
         # Half thickness (in BU). The shared inset half-thickness sub-graph
         # (see pre-leaflet block) accounts for the rendered lipid mesh
@@ -1549,13 +1680,203 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         # ~180° even when the perturbation itself is bounded. Measured
         # peak step at amp=1.0/speed=1.0 was 177°.
         #
-        # NEW APPROACH (v9+) — feed the *un-perturbed* normal (static per
-        # surface location) into AlignRotationToVector → a stable rotation
-        # whose local frame doesn't change with time. Apply the time-
-        # varying tilt as a small Euler rotation around local X / Y in
-        # the *same* RotateInstances call that handles the Z twist. Tilt
-        # is bounded by the tilt amplitude (no quaternion flips), and the
-        # alignment is rebuilt only when the surface deforms.
+        # v9 APPROACH — feed the *un-perturbed* normal (static per surface
+        # location) into AlignRotationToVector. That removed the wobble from
+        # the node's input, so with a rigid surface its AUTO pivot had nothing
+        # left to swing on. Apply the time-varying tilt as a small Euler
+        # rotation around local X / Y in the *same* RotateInstances call that
+        # handles the Z twist, bounded by the tilt amplitude.
+        #
+        # v37 — that fix only held while the surface was RIGID. v36 made
+        # membranes morphable, which put a slowly-swinging normal back into
+        # AlignRotationToVector and brought the flip straight back: measured
+        # over a 20-frame lattice bulge, the lipid's long axis tracked the
+        # surface smoothly (1.59 deg per frame) but its SPIN about that axis
+        # jumped 179.91 deg in a single frame. That is the "superfast flip at a
+        # specific angle" — the lipid doesn't tumble, it snaps 180 deg about
+        # its own axis when AUTO picks a different pivot.
+        #
+        # Fixed by dropping AlignRotationToVector for AxesToRotation, which
+        # takes the azimuth reference as an explicit input instead of guessing
+        # one. The reference is built from the REST normal, which by
+        # construction never changes from frame to frame — so the only
+        # time-varying input to the rotation is the primary axis (the deformed
+        # normal), which moves smoothly. A flip is therefore impossible, rather
+        # than merely unlikely.
+        #
+        # Azimuth reference = normalize(cross(rest_normal, helper)), where
+        # helper is world X unless the rest normal is nearly parallel to it, in
+        # which case world Y. The branch is safe *because* it reads the rest
+        # normal: a per-lipid constant, so it can be taken once and can never
+        # flip mid-animation. Picking the less-parallel helper keeps the cross
+        # product well-conditioned for curved membranes, where rest normals
+        # point in every direction.
+        rn_xyz = new("ShaderNodeSeparateXYZ", name=f"RestN XYZ {leaflet_index}")
+        rn_xyz.location = (2400, y_pos - 420)
+        links.new(rest_normal, rn_xyz.inputs[0])
+
+        rn_absx = new("ShaderNodeMath", name=f"RestN |X| {leaflet_index}")
+        rn_absx.operation = "ABSOLUTE"
+        rn_absx.location = (2580, y_pos - 420)
+        links.new(rn_xyz.outputs["X"], rn_absx.inputs[0])
+
+        rn_flat = new("ShaderNodeMath", name=f"RestN NotAlongX {leaflet_index}")
+        rn_flat.operation = "LESS_THAN"
+        rn_flat.inputs[1].default_value = 0.9
+        rn_flat.location = (2760, y_pos - 420)
+        links.new(rn_absx.outputs[0], rn_flat.inputs[0])
+
+        helper = new("GeometryNodeSwitch", name=f"AzimuthHelper {leaflet_index}")
+        helper.input_type = "VECTOR"
+        helper.location = (2940, y_pos - 420)
+        helper.inputs["False"].default_value = (0.0, 1.0, 0.0)   # world Y
+        helper.inputs["True"].default_value = (1.0, 0.0, 0.0)    # world X
+        links.new(rn_flat.outputs[0], helper.inputs[0])
+
+        azimuth_cross = new("ShaderNodeVectorMath",
+                            name=f"AzimuthRef {leaflet_index}")
+        azimuth_cross.operation = "CROSS_PRODUCT"
+        azimuth_cross.location = (3120, y_pos - 420)
+        links.new(rest_normal, azimuth_cross.inputs[0])
+        links.new(helper.outputs[0], azimuth_cross.inputs[1])
+
+        azimuth_ref = new("ShaderNodeVectorMath",
+                          name=f"AzimuthRefN {leaflet_index}")
+        azimuth_ref.operation = "NORMALIZE"
+        azimuth_ref.location = (3300, y_pos - 420)
+        links.new(azimuth_cross.outputs[0], azimuth_ref.inputs[0])
+
+        # v38 — carry that reference onto the deformed surface.
+        #
+        # A rest-frame reference is stable in time but it is NOT safe on its
+        # own: AxesToRotation projects the secondary axis onto the plane
+        # perpendicular to the primary, and that projection collapses when the
+        # two go parallel. The rest normal never moves, but the DEFORMED normal
+        # can swing onto it — once a lipid tilts ~90 degrees from rest *in the
+        # direction of the reference*, the frame is degenerate and the lipid
+        # snaps 180 degrees about its own axis. Measured on a flat sheet folded
+        # 120 degrees about X: 178.98 degrees of total rotation in one frame
+        # against 19.13 degrees of actual tilt, every culprit 80-90 degrees
+        # from rest. So v37 did not remove the flip, it moved it from
+        # "AlignRotationToVector picks a new pivot" to "the primary axis
+        # reaches the secondary".
+        #
+        # The fix is to rotate the reference by the same minimal rotation that
+        # carries the rest normal onto the deformed normal (Rodrigues). That
+        # rotation is rigid, and the reference starts perpendicular to the rest
+        # normal, so the rotated reference is perpendicular to the deformed
+        # normal *by construction*, at every frame and every deformation. Going
+        # parallel is now impossible rather than merely unlikely — which is the
+        # property v37 claimed but did not have.
+        #
+        #   k = normalize(rest_n x def_n),  sin = |rest_n x def_n|,
+        #   cos = rest_n . def_n
+        #   ref' = ref cos + (k x ref) sin + k (k . ref)(1 - cos)
+        #
+        # Both endpoints are safe. With def_n == rest_n the cross product is
+        # zero, so sin = 0, cos = 1 and Blender's NORMALIZE maps the zero
+        # vector to zero (not NaN) — the sin and (1-cos) terms vanish and
+        # ref' = ref. With def_n == -rest_n it degrades to ref' = -ref, which
+        # is still perpendicular to the normal, so the frame stays valid. The
+        # only true discontinuity left is exactly antipodal, where the membrane
+        # has folded completely back on itself and the azimuth is genuinely
+        # undefined for any stateless frame.
+        rest_n_unit = new("ShaderNodeVectorMath",
+                          name=f"RestN Unit {leaflet_index}")
+        rest_n_unit.operation = "NORMALIZE"
+        rest_n_unit.location = (2400, y_pos - 560)
+        links.new(rest_normal, rest_n_unit.inputs[0])
+
+        def_n_unit = new("ShaderNodeVectorMath",
+                         name=f"DefN Unit {leaflet_index}")
+        def_n_unit.operation = "NORMALIZE"
+        def_n_unit.location = (2400, y_pos - 640)
+        links.new(normal.outputs[0], def_n_unit.inputs[0])
+
+        rd_cross = new("ShaderNodeVectorMath",
+                       name=f"RestToDef Axis {leaflet_index}")
+        rd_cross.operation = "CROSS_PRODUCT"
+        rd_cross.location = (2600, y_pos - 600)
+        links.new(rest_n_unit.outputs[0], rd_cross.inputs[0])
+        links.new(def_n_unit.outputs[0], rd_cross.inputs[1])
+
+        rd_axis = new("ShaderNodeVectorMath",
+                      name=f"RestToDef AxisN {leaflet_index}")
+        rd_axis.operation = "NORMALIZE"
+        rd_axis.location = (2780, y_pos - 600)
+        links.new(rd_cross.outputs[0], rd_axis.inputs[0])
+
+        rd_sin = new("ShaderNodeVectorMath",
+                     name=f"RestToDef Sin {leaflet_index}")
+        rd_sin.operation = "LENGTH"
+        rd_sin.location = (2780, y_pos - 690)
+        links.new(rd_cross.outputs[0], rd_sin.inputs[0])
+
+        rd_cos = new("ShaderNodeVectorMath",
+                     name=f"RestToDef Cos {leaflet_index}")
+        rd_cos.operation = "DOT_PRODUCT"
+        rd_cos.location = (2780, y_pos - 780)
+        links.new(rest_n_unit.outputs[0], rd_cos.inputs[0])
+        links.new(def_n_unit.outputs[0], rd_cos.inputs[1])
+
+        # term 1: ref * cos
+        rod_t1 = new("ShaderNodeVectorMath", name=f"Rod T1 {leaflet_index}")
+        rod_t1.operation = "SCALE"
+        rod_t1.location = (3480, y_pos - 420)
+        links.new(azimuth_ref.outputs[0], rod_t1.inputs[0])
+        links.new(rd_cos.outputs["Value"], rod_t1.inputs["Scale"])
+
+        # term 2: (k x ref) * sin
+        rod_kx = new("ShaderNodeVectorMath", name=f"Rod KxRef {leaflet_index}")
+        rod_kx.operation = "CROSS_PRODUCT"
+        rod_kx.location = (3480, y_pos - 520)
+        links.new(rd_axis.outputs[0], rod_kx.inputs[0])
+        links.new(azimuth_ref.outputs[0], rod_kx.inputs[1])
+
+        rod_t2 = new("ShaderNodeVectorMath", name=f"Rod T2 {leaflet_index}")
+        rod_t2.operation = "SCALE"
+        rod_t2.location = (3660, y_pos - 520)
+        links.new(rod_kx.outputs[0], rod_t2.inputs[0])
+        links.new(rd_sin.outputs["Value"], rod_t2.inputs["Scale"])
+
+        # term 3: k * (k . ref) * (1 - cos)
+        rod_kd = new("ShaderNodeVectorMath", name=f"Rod KdotRef {leaflet_index}")
+        rod_kd.operation = "DOT_PRODUCT"
+        rod_kd.location = (3480, y_pos - 620)
+        links.new(rd_axis.outputs[0], rod_kd.inputs[0])
+        links.new(azimuth_ref.outputs[0], rod_kd.inputs[1])
+
+        rod_omc = new("ShaderNodeMath", name=f"Rod 1-Cos {leaflet_index}")
+        rod_omc.operation = "SUBTRACT"
+        rod_omc.inputs[0].default_value = 1.0
+        rod_omc.location = (3480, y_pos - 700)
+        links.new(rd_cos.outputs["Value"], rod_omc.inputs[1])
+
+        rod_s3 = new("ShaderNodeMath", name=f"Rod S3 {leaflet_index}")
+        rod_s3.operation = "MULTIPLY"
+        rod_s3.location = (3660, y_pos - 660)
+        links.new(rod_kd.outputs["Value"], rod_s3.inputs[0])
+        links.new(rod_omc.outputs[0], rod_s3.inputs[1])
+
+        rod_t3 = new("ShaderNodeVectorMath", name=f"Rod T3 {leaflet_index}")
+        rod_t3.operation = "SCALE"
+        rod_t3.location = (3840, y_pos - 660)
+        links.new(rd_axis.outputs[0], rod_t3.inputs[0])
+        links.new(rod_s3.outputs[0], rod_t3.inputs["Scale"])
+
+        rod_sum = new("ShaderNodeVectorMath", name=f"Rod T1T2 {leaflet_index}")
+        rod_sum.operation = "ADD"
+        rod_sum.location = (3840, y_pos - 470)
+        links.new(rod_t1.outputs[0], rod_sum.inputs[0])
+        links.new(rod_t2.outputs[0], rod_sum.inputs[1])
+
+        azimuth_live = new("ShaderNodeVectorMath",
+                           name=f"AzimuthLive {leaflet_index}")
+        azimuth_live.operation = "ADD"
+        azimuth_live.location = (4020, y_pos - 520)
+        links.new(rod_sum.outputs[0], azimuth_live.inputs[0])
+        links.new(rod_t3.outputs[0], azimuth_live.inputs[1])
+
         if is_upper:
             align_base = normal.outputs[0]
         else:
@@ -1566,12 +1887,21 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             links.new(normal.outputs[0], neg.inputs[0])
             align_base = neg.outputs[0]
 
-        align = new("FunctionNodeAlignRotationToVector",
-                   name=f"AlignRot {leaflet_index}")
-        align.axis = "Z"
-        align.pivot_axis = "AUTO"
-        align.location = (3200, y_pos - 150)
-        links.new(align_base, align.inputs["Vector"])
+        # Primary Z = the lipid's long axis, aligned to the live deformed
+        # normal (so the tilt still tracks the surface exactly as before).
+        # Secondary X = the co-rotated azimuth reference, which only pins the
+        # spin about that axis. AxesToRotation projects the secondary onto the
+        # plane perpendicular to the primary; feeding it the *rest* reference
+        # (v37) left that projection free to collapse once the primary swung
+        # onto it, so the secondary is now carried onto the deformed surface
+        # first and is perpendicular to the primary by construction.
+        align = new("FunctionNodeAxesToRotation",
+                    name=f"AlignRot {leaflet_index}")
+        align.primary_axis = "Z"
+        align.secondary_axis = "X"
+        align.location = (4220, y_pos - 150)
+        links.new(align_base, align.inputs["Primary Axis"])
+        links.new(azimuth_live.outputs[0], align.inputs["Secondary Axis"])
         base_rot = align.outputs["Rotation"]
 
         # ---- Instance lipid on points ------------------------------------
