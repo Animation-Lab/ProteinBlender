@@ -5,13 +5,28 @@ dialog edits a *desired layout* (a list of named residue ranges) and hands it
 to :mod:`core.domain_layout`, which reconciles it against the chain's current
 domains rather than rebuilding them - see that module for why that matters.
 
-Nothing here mutates the model. `draw()` only reads, the row-editing buttons
+The layout is kept **contiguous**: the rows always tile the chain end to end,
+with no gaps and no overlaps. That is what makes the boundaries directly
+draggable - moving one domain's start is the same edit as moving the previous
+domain's end, so the dialog adjusts the neighbour to match instead of leaving
+the user to keep two numbers in sync by hand. Pulling the first domain's start
+off the beginning of the chain (or the last domain's end off the end) leaves a
+stretch with no owner, so a new domain is created there to keep the tiling
+whole.
+
+While a range is being edited the viewport isolates that one domain, so the
+user can see the piece they are defining instead of guessing at residue
+numbers. This drives the geometry-nodes residue range on a single preview
+object and hides the rest; both are restored when the dialog closes, whether
+it is confirmed or cancelled.
+
+Nothing here mutates the domain model. `draw()` only reads, the row buttons
 only touch the dialog's own rows, and the model is changed once, in `execute`.
 
-The row buttons ("Build Domains", split, merge, remove) reach the live modal
-operator through ``_active_instance``. A modal dialog is not in
-``wm.operators``, so a button inside it cannot address the instance any other
-way; this is the same workaround ``keyframe_operators`` uses.
+The row buttons reach the live modal operator through ``_active_instance``. A
+modal dialog is not in ``wm.operators``, so a button inside it cannot address
+the instance any other way; this is the same workaround ``keyframe_operators``
+uses.
 """
 
 from __future__ import annotations
@@ -19,8 +34,7 @@ from __future__ import annotations
 import json
 
 import bpy
-from bpy.props import (BoolProperty, CollectionProperty, IntProperty,
-                       StringProperty)
+from bpy.props import (CollectionProperty, IntProperty, StringProperty)
 from bpy.types import Operator, PropertyGroup
 
 from ..core import domain_layout
@@ -31,40 +45,214 @@ from ..utils.scene_manager import ProteinBlenderScene
 # being readable and the user is better served splitting in stages.
 MAX_DOMAINS = 32
 
+# Preview bookkeeping lives on the scene rather than the operator instance so a
+# preview can still be torn down if the dialog dies without running execute()
+# or cancel() - otherwise the user would be left staring at a scene with
+# everything but one domain hidden and no way to know why.
+_PREVIEW_OBJECT = "pb_splitter_preview_object"
+_PREVIEW_MODIFIER = "pb_splitter_preview_modifier"
+_PREVIEW_NODE = "pb_splitter_preview_node"
+_PREVIEW_RANGE = "pb_splitter_preview_range"
+_PREVIEW_HIDDEN = "pb_splitter_preview_hidden"
+
+# Object types worth hiding while isolating a domain. Cameras, lights and the
+# puppet controller Empties are deliberately left alone: hiding the lights
+# would just darken the very thing the user is trying to look at.
+_ISOLATABLE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT'}
+
 
 def _active():
     return PROTEINBLENDER_OT_edit_chain_domains._active_instance
 
 
-def _clamp_row(row, context):
-    """Keep a row's start/end inside the chain and correctly ordered.
+# Dialog edit state. Module-level rather than attributes on the operator
+# because Blender does not expose a plain (non-RNA) class attribute through an
+# operator *instance* inside a property update callback - `instance.suspended`
+# raises AttributeError even with `suspended = False` on the class. Only one
+# Domain Splitter can be open at a time (it is modal), so a single set of
+# module state is exactly right.
+_state = {
+    # Guards the update callbacks against re-entering while the dialog is
+    # rewriting its own rows. Without it, adjusting a neighbour's boundary
+    # fires that neighbour's callback, which adjusts the next one, and a single
+    # click cascades down the whole chain.
+    "suspended": False,
+    # Layout computed by a range edit, applied in check(). The row collection
+    # must not be resized from inside a property update callback: that
+    # reallocates the collection Blender is mid-write on.
+    "pending_layout": None,
+}
 
-    Runs as the update callback on both fields so the numbers a user types are
-    corrected as they type, instead of failing validation at OK time.
+
+class _Suspend:
+    """Context manager for the re-entrancy guard."""
+
+    def __enter__(self):
+        _state["suspended"] = True
+
+    def __exit__(self, *exc_info):
+        _state["suspended"] = False
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Viewport preview
+#
+# Module-level and scene-driven rather than methods on the dialog, for two
+# reasons: a preview left behind by a dialog that died without closing can be
+# cleared by anyone holding the scene, and the isolate/restore pair can be
+# exercised directly by tests (a modal dialog cannot be driven headlessly, and
+# an isolation that fails to restore leaves the user staring at an apparently
+# empty scene).
+# ---------------------------------------------------------------------------
+
+def _preview_target(molecule, chain_token):
+    """The object whose geometry nodes stand in for the previewed domain.
+
+    One object serves the whole session: every domain of a chain carries the
+    same "Select Chain" -> "Select Res ID Range" pair, so driving one object's
+    range can show any stretch of that chain. Rows the user has just added have
+    no object of their own, which is why the preview cannot simply isolate the
+    edited row's own domain.
     """
-    instance = _active()
-    if instance is None:
+    for spec in domain_layout.current_layout(molecule, chain_token):
+        domain = molecule.domains.get(spec.domain_id)
+        obj = getattr(domain, "object", None) if domain else None
+        if obj is None:
+            continue
+        for modifier in obj.modifiers:
+            if modifier.type != 'NODES' or not modifier.node_group:
+                continue
+            for node in modifier.node_group.nodes:
+                if (node.type == 'GROUP' and node.node_tree
+                        and "Select Res ID Range" in node.node_tree.name):
+                    return obj, modifier, node
+    return None, None, None
+
+
+def _preview_node(context):
+    """Re-resolve the live preview node from the scene bookkeeping."""
+    scene = context.scene
+    obj = bpy.data.objects.get(scene.get(_PREVIEW_OBJECT, ""))
+    if obj is None:
+        return None
+    modifier = obj.modifiers.get(scene.get(_PREVIEW_MODIFIER, ""))
+    if modifier is None or not modifier.node_group:
+        return None
+    return modifier.node_group.nodes.get(scene.get(_PREVIEW_NODE, ""))
+
+
+def enter_preview(context, molecule, chain_token):
+    """Hide everything but the preview object, remembering what to restore.
+
+    Idempotent: a preview that is already running is left alone, so dragging a
+    boundary does not re-capture the isolated state as if it were the user's.
+    """
+    scene = context.scene
+    if _PREVIEW_OBJECT in scene:
+        return bpy.data.objects.get(scene[_PREVIEW_OBJECT])
+
+    obj, modifier, node = _preview_target(molecule, chain_token)
+    if obj is None:
+        return None
+
+    scene[_PREVIEW_OBJECT] = obj.name
+    scene[_PREVIEW_MODIFIER] = modifier.name
+    scene[_PREVIEW_NODE] = node.name
+    scene[_PREVIEW_RANGE] = [int(node.inputs["Min"].default_value),
+                             int(node.inputs["Max"].default_value)]
+
+    hidden = {}
+    for other in bpy.data.objects:
+        if other == obj or other.type not in _ISOLATABLE_TYPES:
+            continue
+        hidden[other.name] = bool(other.hide_viewport)
+        other.hide_viewport = True
+    obj.hide_viewport = False
+    scene[_PREVIEW_HIDDEN] = json.dumps(hidden)
+    return obj
+
+
+def preview_range(context, molecule, chain_token, start, end):
+    """Isolate the chain and show only residues ``start``-``end`` of it."""
+    if enter_preview(context, molecule, chain_token) is None:
         return
-    low, high = instance.chain_min, instance.chain_max
-    start = max(low, min(high, row.start))
-    end = max(low, min(high, row.end))
-    if end < start:
-        end = start
-    if row.start != start:
-        row.start = start
-    if row.end != end:
-        row.end = end
+    node = _preview_node(context)
+    if node is None:
+        return
+    node.inputs["Min"].default_value = start
+    node.inputs["Max"].default_value = end
+    if context.view_layer:
+        context.view_layer.update()
+    _tag_redraw(context, {'VIEW_3D', 'NODE_EDITOR'})
+
+
+def restore_preview(context):
+    """Undo the isolation and put the preview object's range back."""
+    scene = context.scene
+    if _PREVIEW_OBJECT not in scene:
+        return
+
+    node = _preview_node(context)
+    original = scene.get(_PREVIEW_RANGE)
+    if node is not None and original is not None and len(original) == 2:
+        node.inputs["Min"].default_value = int(original[0])
+        node.inputs["Max"].default_value = int(original[1])
+
+    try:
+        hidden = json.loads(scene.get(_PREVIEW_HIDDEN, "{}"))
+    except (ValueError, TypeError):
+        hidden = {}
+    for name, was_hidden in hidden.items():
+        other = bpy.data.objects.get(name)
+        if other is not None:
+            other.hide_viewport = was_hidden
+
+    for key in (_PREVIEW_OBJECT, _PREVIEW_MODIFIER, _PREVIEW_NODE,
+                _PREVIEW_RANGE, _PREVIEW_HIDDEN):
+        if key in scene:
+            del scene[key]
+
+    if context.view_layer:
+        context.view_layer.update()
+    _tag_redraw(context, {'VIEW_3D', 'NODE_EDITOR'})
+
+
+def _on_start_edited(row, context):
+    instance = _active()
+    if instance is not None:
+        instance.range_edited(row, moved_start=True)
+
+
+def _on_end_edited(row, context):
+    instance = _active()
+    if instance is not None:
+        instance.range_edited(row, moved_start=False)
+
+
+def _on_count_edited(instance, context):
+    """Redistribute the chain evenly whenever the domain count changes.
+
+    This replaces the old explicit "Build Domains" button: the count spinner
+    *is* the build control, and OK commits.
+    """
+    if not _state["suspended"]:
+        instance.redistribute()
 
 
 class PROTEINBLENDER_DomainLayoutRow(PropertyGroup):
     """One editable domain row inside the Domain Splitter dialog."""
     name: StringProperty(name="Name", description="Name for this domain")
     start: IntProperty(
-        name="Start", description="First residue in this domain (inclusive)",
-        update=_clamp_row)
+        name="Start",
+        description="First residue in this domain. Moving it moves the "
+                    "boundary with the domain above",
+        update=_on_start_edited)
     end: IntProperty(
-        name="End", description="Last residue in this domain (inclusive)",
-        update=_clamp_row)
+        name="End",
+        description="Last residue in this domain. Moving it moves the "
+                    "boundary with the domain below",
+        update=_on_end_edited)
     # The existing domain this row stands for, empty for a row the user added.
     # Carrying it is what lets the layout be reconciled instead of rebuilt, so
     # an untouched domain keeps its puppet membership, linkers and animation.
@@ -78,6 +266,8 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # The live modal instance, so the in-dialog row buttons can edit its rows.
+    # Read through the class, never through an instance - see the note on
+    # `_state` above for why instance attribute lookup is not reliable here.
     _active_instance = None
 
     item_id: StringProperty(
@@ -88,18 +278,15 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         description="Display name for this chain in the Protein Outliner")
     domain_count: IntProperty(
         name="Number of Domains",
-        description="How many domains to divide this chain into",
-        default=2, min=1, max=MAX_DOMAINS)
+        description="How many domains to divide this chain into. Changing "
+                    "this re-divides the chain evenly",
+        default=1, min=1, max=MAX_DOMAINS, update=_on_count_edited)
     rows: CollectionProperty(type=PROTEINBLENDER_DomainLayoutRow)
 
-    # Chain bounds, cached on the instance so draw() and the clamp callback do
+    # Chain bounds, cached on the instance so draw() and the edit callbacks do
     # not have to re-derive them on every redraw.
     chain_min: IntProperty(default=1)
     chain_max: IntProperty(default=1)
-
-    built: BoolProperty(
-        default=False,
-        description="Whether the domain rows have been populated yet")
 
     # Headless escape hatch: a JSON list of {name, start, end, domain_id}. When
     # set, execute() uses it instead of the dialog rows, so the operator is
@@ -121,8 +308,20 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             return None
         return ProteinBlenderScene.get_instance().molecules.get(chain_row.parent_id)
 
+    def _index_of(self, row):
+        """Position of ``row`` in the collection.
+
+        Compared with ``==``, never ``is``: Blender hands out a fresh
+        ``bpy_struct`` wrapper on each access, so identity comparison is False
+        even for the same element.
+        """
+        for index, candidate in enumerate(self.rows):
+            if candidate == row:
+                return index
+        return -1
+
     # ------------------------------------------------------------------
-    # Row editing, called by the in-dialog buttons
+    # Row editing
     # ------------------------------------------------------------------
 
     def load_rows(self, specs):
@@ -134,7 +333,6 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             row.start = spec.start
             row.end = spec.end
             row.domain_id = spec.domain_id or ""
-        self.domain_count = max(1, len(specs))
 
     def current_specs(self):
         return [domain_layout.DomainSpec(
@@ -142,7 +340,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                     domain_id=row.domain_id or None)
                 for row in self.rows]
 
-    def rebuild_even(self):
+    def redistribute(self):
         """Divide the chain evenly into ``domain_count`` rows.
 
         Existing domains are re-assigned to rows positionally, so reshaping a
@@ -153,67 +351,150 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         previous = [r.domain_id for r in self.rows if r.domain_id]
         ranges = domain_layout.even_split(self.chain_min, self.chain_max,
                                           self.domain_count)
-        self.rows.clear()
-        for i, (start, end) in enumerate(ranges):
-            row = self.rows.add()
-            row.start = start
-            row.end = end
-            # Names are reset because Build is a "start over with N even
-            # pieces" action: carrying the old names over left the first row
-            # labelled after the whole chain ("Chain A") while its siblings read
-            # "Domain 2/3/4". The ids still carry over, which is what actually
-            # preserves puppets, linkers and animation.
-            row.name = f"Domain {i + 1}"
-            if i < len(previous):
-                row.domain_id = previous[i]
-        self.built = True
+        with _Suspend():
+            self.rows.clear()
+            for i, (start, end) in enumerate(ranges):
+                row = self.rows.add()
+                row.start = start
+                row.end = end
+                # Names are reset because changing the count is a "start over
+                # with N even pieces" action: carrying old names over left the
+                # first row labelled after the whole chain ("Chain A") while
+                # its siblings read "Domain 2/3/4". The ids still carry over,
+                # which is what preserves puppets, linkers and animation.
+                row.name = f"Domain {i + 1}"
+                if i < len(previous):
+                    row.domain_id = previous[i]
+
+    def range_edited(self, row, moved_start):
+        """Re-tile the layout around a boundary the user just moved.
+
+        The new layout is computed here but *applied* in check(). Rewriting the
+        row collection from inside a property update callback would reallocate
+        the very collection Blender is mid-write on, which can invalidate the
+        element it is writing to.
+        """
+        if _state["suspended"]:
+            return
+        index = self._index_of(row)
+        if index < 0:
+            return
+
+        retiled, new_index = domain_layout.retile_after_edit(
+            self.current_specs(), index, self.chain_min, self.chain_max,
+            moved_start)
+        if len(retiled) > MAX_DOMAINS:
+            return
+
+        _state["pending_layout"] = retiled
+        # Preview off the pending layout: the rows still hold the raw value the
+        # user typed, which may be out of bounds until check() applies the
+        # re-tiled result.
+        self._preview_range(retiled[new_index].start, retiled[new_index].end)
+
+    def _apply_pending_layout(self):
+        """Write the re-tiled layout back onto the dialog's rows."""
+        pending = _state["pending_layout"]
+        _state["pending_layout"] = None
+        if not pending:
+            return
+
+        with _Suspend():
+            while len(self.rows) > len(pending):
+                self.rows.remove(len(self.rows) - 1)
+            while len(self.rows) < len(pending):
+                self.rows.add()
+            for row, spec in zip(self.rows, pending):
+                row.name = spec.name
+                row.start = spec.start
+                row.end = spec.end
+                row.domain_id = spec.domain_id or ""
+            self._renumber_default_names()
+            self.domain_count = len(self.rows)
+
+    def _renumber_default_names(self):
+        """Give any unnamed row the next free 'Domain N'.
+
+        Only fills blanks - a name the user typed is never renumbered.
+        """
+        taken = {r.name for r in self.rows if r.name}
+        for row in self.rows:
+            if row.name:
+                continue
+            number = 1
+            while f"Domain {number}" in taken:
+                number += 1
+            row.name = f"Domain {number}"
+            taken.add(row.name)
 
     def split_row(self, index):
         """Cut one row in half, giving the new half a fresh (unassigned) row."""
-        if not (0 <= index < len(self.rows)):
+        if not (0 <= index < len(self.rows)) or len(self.rows) >= MAX_DOMAINS:
             return
         row = self.rows[index]
         if row.end - row.start < 1:
             return
-        midpoint = row.start + (row.end - row.start) // 2
-        tail_start, tail_end, tail_name = midpoint + 1, row.end, row.name
-        row.end = midpoint
+        with _Suspend():
+            midpoint = row.start + (row.end - row.start) // 2
+            tail_start, tail_end = midpoint + 1, row.end
+            row.end = midpoint
 
-        new_row = self.rows.add()
-        new_row.name = f"{tail_name} (2)" if tail_name else ""
-        new_row.start = tail_start
-        new_row.end = tail_end
-        self.rows.move(len(self.rows) - 1, index + 1)
-        self.domain_count = len(self.rows)
+            new_row = self.rows.add()
+            new_row.start = tail_start
+            new_row.end = tail_end
+            self.rows.move(len(self.rows) - 1, index + 1)
+            self._renumber_default_names()
+            self.domain_count = len(self.rows)
 
     def merge_row(self, index):
         """Absorb the following row into this one."""
         if not (0 <= index < len(self.rows) - 1):
             return
-        row, nxt = self.rows[index], self.rows[index + 1]
-        row.start = min(row.start, nxt.start)
-        row.end = max(row.end, nxt.end)
-        self.rows.remove(index + 1)
-        self.domain_count = len(self.rows)
+        with _Suspend():
+            row, following = self.rows[index], self.rows[index + 1]
+            row.start = min(row.start, following.start)
+            row.end = max(row.end, following.end)
+            self.rows.remove(index + 1)
+            self.domain_count = len(self.rows)
 
     def remove_row(self, index):
-        if 0 <= index < len(self.rows) and len(self.rows) > 1:
+        """Delete a row, handing its residues to a neighbour.
+
+        The residues have to go somewhere or the layout stops tiling the chain
+        and a stretch silently belongs to no domain.
+        """
+        if not (0 <= index < len(self.rows)) or len(self.rows) <= 1:
+            return
+        with _Suspend():
+            row = self.rows[index]
+            if index > 0:
+                self.rows[index - 1].end = row.end
+            else:
+                self.rows[index + 1].start = row.start
             self.rows.remove(index)
             self.domain_count = len(self.rows)
 
     def add_row(self):
-        """Append a row covering the first uncovered stretch of the chain."""
+        """Add a domain by halving the largest one, keeping the chain tiled."""
         if len(self.rows) >= MAX_DOMAINS:
             return
-        gaps = domain_layout.coverage_gaps(self.current_specs(),
-                                           self.chain_min, self.chain_max)
-        row = self.rows.add()
-        if gaps:
-            row.start, row.end = gaps[0]
-        else:
-            row.start = row.end = self.chain_max
-        row.name = f"Domain {len(self.rows)}"
-        self.domain_count = len(self.rows)
+        widest = max(range(len(self.rows)),
+                     key=lambda i: self.rows[i].end - self.rows[i].start)
+        self.split_row(widest)
+
+    # ------------------------------------------------------------------
+    # Viewport preview
+    # ------------------------------------------------------------------
+
+    def _preview_range(self, start, end):
+        """Show only the residues the user is currently sizing a domain to."""
+        context = bpy.context
+        chain_row = self._chain_row(context)
+        molecule = self._molecule(context, chain_row)
+        if molecule is None:
+            return
+        preview_range(context, molecule, chain_token_from_item(chain_row),
+                      start, end)
 
     # ------------------------------------------------------------------
     # Invoke / draw / execute
@@ -226,33 +507,35 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             self.report({'ERROR'}, "Could not resolve the chain to edit")
             return {'CANCELLED'}
 
+        # Clear any preview a previous dialog left behind before recording a
+        # new "original" visibility set, or the leftover hidden state would be
+        # captured as if the user had chosen it.
+        restore_preview(context)
+
         token = chain_token_from_item(chain_row)
         self.chain_min, self.chain_max = domain_layout.chain_residue_range(
             molecule, token)
         self.chain_name = chain_row.name
 
-        specs = domain_layout.current_layout(molecule, token)
-        self.load_rows(specs)
-        # A chain that is still one whole-chain domain has not been split yet,
-        # so present the drawing's first step ("choose a count, then Build")
-        # rather than a single row the user has to dismantle by hand.
-        whole = (len(specs) == 1 and specs[0].start == self.chain_min
-                 and specs[0].end == self.chain_max)
-        self.built = bool(specs) and not whole
-        if whole:
-            self.domain_count = 2
+        with _Suspend():
+            specs = domain_layout.current_layout(molecule, token)
+            self.load_rows(specs)
+            self.domain_count = max(1, len(specs))
 
+        _state["pending_layout"] = None
         type(self)._active_instance = self
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def check(self, context):
-        """Force the dialog to re-layout after every change.
+        """Apply the deferred re-tile and force the dialog to re-layout.
 
-        The row buttons (Build/split/merge/remove) add and remove rows rather
-        than editing a property, and Blender only re-runs a dialog's draw() for
-        property edits unless check() asks for it. Without this, pressing Build
-        Domains updates the rows but the popup keeps showing the old layout.
+        Blender only re-runs a dialog's draw() for property edits unless
+        check() asks for it, and the row buttons add and remove rows rather
+        than editing a property. This is also the safe place to rewrite the row
+        collection after a boundary edit re-tiled the layout - see
+        range_edited.
         """
+        self._apply_pending_layout()
         return True
 
     def draw(self, context):
@@ -261,16 +544,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
 
         header = layout.box()
         header.prop(self, "chain_name", text="Chain Name")
-
         header.prop(self, "domain_count")
-        header.operator("proteinblender.domain_splitter_build",
-                        text="Build Domains", icon='FILE_REFRESH')
-
-        if not self.built:
-            info = layout.box()
-            info.label(text="Choose how many domains, then press Build Domains.",
-                       icon='INFO')
-            return
 
         body = layout.box()
         body.label(text=f"Chain valid range: {self.chain_min} - {self.chain_max}")
@@ -335,23 +609,18 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         op.index = index
 
     def _draw_feedback(self, layout):
-        specs = self.current_specs()
-        errors = domain_layout.validate_layout(specs, self.chain_min,
-                                               self.chain_max)
-        if errors:
-            box = layout.box()
-            box.alert = True
-            for message in errors:
-                box.label(text=message, icon='ERROR')
+        errors = domain_layout.validate_layout(self.current_specs(),
+                                               self.chain_min, self.chain_max)
+        if not errors:
             return
-
-        gaps = domain_layout.coverage_gaps(specs, self.chain_min, self.chain_max)
-        if gaps:
-            box = layout.box()
-            spans = ", ".join(f"{a}-{b}" for a, b in gaps)
-            box.label(text=f"Not covered by any domain: {spans}", icon='INFO')
+        box = layout.box()
+        box.alert = True
+        for message in errors:
+            box.label(text=message, icon='ERROR')
 
     def execute(self, context):
+        restore_preview(context)
+
         chain_row = self._chain_row(context)
         molecule = self._molecule(context, chain_row)
         if chain_row is None or molecule is None:
@@ -371,8 +640,6 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 self.report({'ERROR'}, f"Bad layout_json: {exc}")
                 type(self)._active_instance = None
                 return {'CANCELLED'}
-            self.chain_min, self.chain_max = domain_layout.chain_residue_range(
-                molecule, token)
         else:
             specs = self.current_specs()
 
@@ -433,17 +700,17 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         list_item.chain_custom_names = json.dumps(names)
 
     def cancel(self, context):
+        restore_preview(context)
         type(self)._active_instance = None
 
 
-def _tag_redraw(context):
-    """Redraw the panels showing domains, headless-safe."""
+def _tag_redraw(context, area_types=frozenset({'VIEW_3D', 'PROPERTIES'})):
+    """Redraw the areas showing domains, headless-safe."""
     if getattr(context, "area", None) is not None:
         context.area.tag_redraw()
-        return
     for window in getattr(context.window_manager, "windows", []):
         for area in window.screen.areas:
-            if area.type in {'VIEW_3D', 'PROPERTIES'}:
+            if area.type in area_types:
                 area.tag_redraw()
 
 
@@ -475,17 +742,8 @@ class _RowEdit:
         raise NotImplementedError
 
 
-class PROTEINBLENDER_OT_domain_splitter_build(_RowEdit, Operator):
-    """Divide the chain evenly into the chosen number of domains"""
-    bl_idname = "proteinblender.domain_splitter_build"
-    bl_label = "Build Domains"
-
-    def edit(self, instance):
-        instance.rebuild_even()
-
-
 class PROTEINBLENDER_OT_domain_splitter_add(_RowEdit, Operator):
-    """Add another domain row"""
+    """Add another domain by halving the largest one"""
     bl_idname = "proteinblender.domain_splitter_add"
     bl_label = "Add Domain"
 
@@ -512,7 +770,7 @@ class PROTEINBLENDER_OT_domain_splitter_merge(_RowEdit, Operator):
 
 
 class PROTEINBLENDER_OT_domain_splitter_remove(_RowEdit, Operator):
-    """Remove this domain row"""
+    """Remove this domain, giving its residues to a neighbour"""
     bl_idname = "proteinblender.domain_splitter_remove"
     bl_label = "Remove Domain"
 
@@ -523,7 +781,6 @@ class PROTEINBLENDER_OT_domain_splitter_remove(_RowEdit, Operator):
 CLASSES = [
     PROTEINBLENDER_DomainLayoutRow,
     PROTEINBLENDER_OT_edit_chain_domains,
-    PROTEINBLENDER_OT_domain_splitter_build,
     PROTEINBLENDER_OT_domain_splitter_add,
     PROTEINBLENDER_OT_domain_splitter_split,
     PROTEINBLENDER_OT_domain_splitter_merge,

@@ -166,6 +166,61 @@ def validate_layout(specs: List[DomainSpec], chain_min: int,
     return errors
 
 
+def retile_after_edit(specs: List[DomainSpec], index: int, chain_min: int,
+                      chain_max: int,
+                      moved_start: bool) -> Tuple[List[DomainSpec], int]:
+    """Re-tile a contiguous layout around a boundary the user just moved.
+
+    A layout tiles the chain end to end, so a domain's start *is* the previous
+    domain's end plus one - the same boundary seen from both sides. Moving one
+    therefore has to move the other, or the layout stops tiling and a stretch
+    of chain silently belongs to no domain.
+
+    Two rules keep the result sane:
+
+    * A domain never shrinks below one residue, and a boundary never drags
+      through the neighbour beyond it. Removing a neighbour is what Merge and
+      the row's X button are for; it should not be a side effect of dragging.
+    * Pulling the first domain's start off the beginning of the chain (or the
+      last domain's end off the end) leaves residues with no owner, so a new
+      domain is created to hold them.
+
+    Returns the new layout and the new index of the edited domain, which
+    shifts when a domain is inserted ahead of it.
+    """
+    rows = list(specs)
+    if not (0 <= index < len(rows)):
+        return rows, index
+
+    if moved_start:
+        value = max(chain_min, min(chain_max, rows[index].start))
+        value = min(value, rows[index].end)
+        if index > 0:
+            value = max(value, rows[index - 1].start + 1)
+            rows[index - 1] = rows[index - 1]._replace(end=value - 1)
+            rows[index] = rows[index]._replace(start=value)
+        else:
+            rows[index] = rows[index]._replace(start=value)
+            if value > chain_min:
+                rows.insert(0, DomainSpec(name="", start=chain_min,
+                                          end=value - 1, domain_id=None))
+                index += 1
+    else:
+        value = max(chain_min, min(chain_max, rows[index].end))
+        value = max(value, rows[index].start)
+        if index < len(rows) - 1:
+            value = min(value, rows[index + 1].end - 1)
+            rows[index + 1] = rows[index + 1]._replace(start=value + 1)
+            rows[index] = rows[index]._replace(end=value)
+        else:
+            rows[index] = rows[index]._replace(end=value)
+            if value < chain_max:
+                rows.append(DomainSpec(name="", start=value + 1,
+                                       end=chain_max, domain_id=None))
+
+    return rows, index
+
+
 def coverage_gaps(specs: List[DomainSpec], chain_min: int,
                   chain_max: int) -> List[Tuple[int, int]]:
     """Return the residue spans of the chain no domain covers.

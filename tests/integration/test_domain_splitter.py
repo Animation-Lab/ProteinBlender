@@ -150,6 +150,155 @@ def test_validate_layout_rejects_overlap_and_out_of_bounds():
     assert domain_layout.validate_layout(valid, 1, 90) == []
 
 
+# --------------------------------------------------------------------------
+# Boundary dragging: the layout re-tiles itself
+# --------------------------------------------------------------------------
+
+def _tiles(specs, low, high):
+    """True if ``specs`` covers [low, high] exactly, with no gaps or overlaps."""
+    ordered = sorted(specs, key=lambda s: s.start)
+    if ordered[0].start != low or ordered[-1].end != high:
+        return False
+    return all(nxt.start == prev.end + 1
+               for prev, nxt in zip(ordered, ordered[1:]))
+
+
+@pytest.mark.integration
+def test_moving_a_start_moves_the_boundary_with_the_domain_above():
+    """A domain's start and the previous domain's end are one boundary."""
+    spec = domain_layout.DomainSpec
+    layout = [spec("A", 1, 50, "a"), spec("B", 51, 100, "b")]
+
+    # The user drags B's start from 51 to 71.
+    edited = [layout[0], layout[1]._replace(start=71)]
+    result, index = domain_layout.retile_after_edit(edited, 1, 1, 100,
+                                                    moved_start=True)
+
+    assert index == 1
+    assert [(s.start, s.end) for s in result] == [(1, 70), (71, 100)]
+    assert _tiles(result, 1, 100)
+    # Identity is untouched: this is still the same two domains.
+    assert [s.domain_id for s in result] == ["a", "b"]
+
+
+@pytest.mark.integration
+def test_moving_an_end_moves_the_boundary_with_the_domain_below():
+    spec = domain_layout.DomainSpec
+    layout = [spec("A", 1, 50, "a"), spec("B", 51, 100, "b")]
+
+    # The user drags A's end from 50 to 30.
+    edited = [layout[0]._replace(end=30), layout[1]]
+    result, index = domain_layout.retile_after_edit(edited, 0, 1, 100,
+                                                    moved_start=False)
+
+    assert index == 0
+    assert [(s.start, s.end) for s in result] == [(1, 30), (31, 100)]
+    assert _tiles(result, 1, 100)
+    assert [s.domain_id for s in result] == ["a", "b"]
+
+
+@pytest.mark.integration
+def test_pulling_the_first_start_off_the_chain_creates_a_domain_above():
+    """Residues left with no owner get a new domain rather than vanishing."""
+    spec = domain_layout.DomainSpec
+    edited = [spec("A", 20, 100, "a")]
+
+    result, index = domain_layout.retile_after_edit(edited, 0, 1, 100,
+                                                    moved_start=True)
+
+    assert len(result) == 2, "a domain should have been created above"
+    assert (result[0].start, result[0].end) == (1, 19)
+    assert result[0].domain_id is None, "the new domain must be a fresh one"
+    assert (result[1].start, result[1].end) == (20, 100)
+    assert result[1].domain_id == "a", "the edited domain kept its identity"
+    assert index == 1, "the edited domain shifted down by the insertion"
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_pulling_the_last_end_off_the_chain_creates_a_domain_below():
+    spec = domain_layout.DomainSpec
+    edited = [spec("A", 1, 80, "a")]
+
+    result, index = domain_layout.retile_after_edit(edited, 0, 1, 100,
+                                                    moved_start=False)
+
+    assert len(result) == 2
+    assert (result[0].start, result[0].end) == (1, 80)
+    assert result[0].domain_id == "a"
+    assert (result[1].start, result[1].end) == (81, 100)
+    assert result[1].domain_id is None
+    assert index == 0
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_a_boundary_cannot_swallow_its_neighbour():
+    """Dragging through a neighbour stops at one residue instead of deleting it.
+
+    Removing a domain is what Merge and the row's X button are for; it must not
+    happen as a side effect of dragging a boundary too far.
+    """
+    spec = domain_layout.DomainSpec
+    layout = [spec("A", 1, 50, "a"), spec("B", 51, 100, "b")]
+
+    # Drag B's start all the way to 1, well past A's start.
+    edited = [layout[0], layout[1]._replace(start=1)]
+    result, _ = domain_layout.retile_after_edit(edited, 1, 1, 100,
+                                                moved_start=True)
+    assert len(result) == 2, "the neighbour must survive"
+    assert (result[0].start, result[0].end) == (1, 1), "A keeps one residue"
+    assert (result[1].start, result[1].end) == (2, 100)
+    assert _tiles(result, 1, 100)
+
+    # And symmetrically, dragging A's end past B's end.
+    edited = [layout[0]._replace(end=100), layout[1]]
+    result, _ = domain_layout.retile_after_edit(edited, 0, 1, 100,
+                                                moved_start=False)
+    assert len(result) == 2
+    assert (result[0].start, result[0].end) == (1, 99)
+    assert (result[1].start, result[1].end) == (100, 100)
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_retiling_clamps_to_the_chain_and_never_inverts_a_domain():
+    spec = domain_layout.DomainSpec
+
+    # A start typed past the chain end is clamped, and never passes its own end.
+    edited = [spec("A", 1, 40, "a"), spec("B", 41, 100, "b")]
+    edited[1] = edited[1]._replace(start=9999)
+    result, _ = domain_layout.retile_after_edit(edited, 1, 1, 100,
+                                                moved_start=True)
+    assert all(s.start <= s.end for s in result)
+    assert all(1 <= s.start and s.end <= 100 for s in result)
+    assert _tiles(result, 1, 100)
+
+    # An end typed below the chain start likewise.
+    edited = [spec("A", 1, 40, "a"), spec("B", 41, 100, "b")]
+    edited[0] = edited[0]._replace(end=-50)
+    result, _ = domain_layout.retile_after_edit(edited, 0, 1, 100,
+                                                moved_start=False)
+    assert all(s.start <= s.end for s in result)
+    assert all(1 <= s.start and s.end <= 100 for s in result)
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_retiling_a_single_full_chain_domain_is_a_no_op():
+    """Touching a boundary that is already at the chain edge changes nothing."""
+    spec = domain_layout.DomainSpec
+    layout = [spec("A", 1, 100, "a")]
+
+    result, index = domain_layout.retile_after_edit(layout, 0, 1, 100,
+                                                    moved_start=True)
+    assert result == layout and index == 0
+
+    result, index = domain_layout.retile_after_edit(layout, 0, 1, 100,
+                                                    moved_start=False)
+    assert result == layout and index == 0
+
+
 @pytest.mark.integration
 def test_coverage_gaps_reports_uncovered_spans_without_failing_validation():
     """A deliberate hole in the layout is reported but is not an error."""
@@ -545,6 +694,84 @@ def test_removing_a_domain_strips_it_from_puppet_membership(scene):
     remaining = set(puppet.puppet_memberships.split(','))
     assert doomed_id not in remaining, "deleted domain left a dangling member id"
     assert {kept[0][0], kept[1][0]} <= remaining
+
+
+# --------------------------------------------------------------------------
+# The viewport preview must always be undone
+# --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
+    """Sizing a domain isolates it, and closing the dialog puts the scene back.
+
+    This is the one piece of the dialog that touches the scene *before* the
+    user confirms, so a leak is highly visible: the user would be left looking
+    at an apparently empty viewport with no idea why. Ground truth is the
+    visibility flags and node range captured before isolating, so the assertion
+    cannot move with a bug in the restore code.
+    """
+    from proteinblender.operators import domain_splitter as ds
+
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol = H.sm().molecules[mid]
+    row = _chain_rows(mid)[0]
+    token = row.chain_id
+
+    # Split so the chain has several domains and the scene has plenty to hide.
+    low, high = domain_layout.chain_residue_range(mol, token)
+    pieces = domain_layout.even_split(low, high, 2)
+    _apply(row, [(f"Piece {i}", s, e, None)
+                 for i, (s, e) in enumerate(pieces, start=1)])
+    _build_outliner()
+
+    geometry = [o for o in bpy.data.objects if o.type in ds._ISOLATABLE_TYPES]
+    assert len(geometry) > 2, "need several objects for isolation to mean anything"
+    before = {o.name: o.hide_viewport for o in geometry}
+
+    target, _mod, node = ds._preview_target(mol, token)
+    assert target is not None, "no preview object resolved for the chain"
+    original_range = (node.inputs["Min"].default_value,
+                      node.inputs["Max"].default_value)
+
+    ds.preview_range(bpy.context, mol, token, low + 5, low + 25)
+
+    # Everything but the preview object is hidden, and it shows the asked range.
+    still_visible = [o.name for o in bpy.data.objects
+                     if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
+    assert still_visible == [target.name], (
+        f"isolation left these visible: {still_visible}")
+    assert node.inputs["Min"].default_value == low + 5
+    assert node.inputs["Max"].default_value == low + 25
+
+    # Dragging further must not re-capture the isolated state as "original".
+    ds.preview_range(bpy.context, mol, token, low + 5, low + 40)
+    assert node.inputs["Max"].default_value == low + 40
+
+    ds.restore_preview(bpy.context)
+
+    after = {o.name: o.hide_viewport for o in bpy.data.objects
+             if o.type in ds._ISOLATABLE_TYPES}
+    assert after == before, "the preview did not restore the original visibility"
+    assert (node.inputs["Min"].default_value,
+            node.inputs["Max"].default_value) == original_range, (
+        "the preview left the domain's residue range altered")
+    assert ds._PREVIEW_OBJECT not in bpy.context.scene, (
+        "preview bookkeeping was left on the scene")
+
+
+@pytest.mark.integration
+def test_restoring_a_preview_that_was_never_started_is_harmless(scene):
+    """A stale-preview teardown on a clean scene must be a no-op, not a crash."""
+    from proteinblender.operators import domain_splitter as ds
+
+    H.import_local("1ubq.pdb", "1ubq")
+    _build_outliner()
+    before = {o.name: o.hide_viewport for o in bpy.data.objects}
+
+    ds.restore_preview(bpy.context)
+
+    assert {o.name: o.hide_viewport for o in bpy.data.objects} == before
 
 
 # --------------------------------------------------------------------------
