@@ -1015,6 +1015,74 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
 
 
 @pytest.mark.integration
+def test_a_chain_that_was_never_split_still_gets_ghosted_context(scene):
+    """The ordinary way in, where almost every row is intent rather than object.
+
+    A chain imports as a *single* domain, so opening the splitter and asking
+    for three gives one row backed by a real object and two backed by nothing
+    at all - the domains a layout describes are created when the user presses
+    OK, long after the preview has to draw them. Previewing only the rows that
+    already had objects meant this, the common path, showed one solid domain
+    and an otherwise empty viewport with nothing ghosted whatsoever.
+
+    Every other test in this file splits the chain up front, which hands the
+    preview a full set of objects and hides the case entirely. That is what let
+    the feature ship looking, to its author, like it worked.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol = H.sm().molecules[mid]
+    row = _chain_rows(mid)[0]
+    token = row.chain_id
+    low, high = domain_layout.chain_residue_range(mol, token)
+
+    layout = domain_layout.current_layout(mol, token)
+    assert len(layout) == 1, "the chain should import as a single domain"
+    real = mol.domains[layout[0].domain_id].object
+    real_range = _shown_range(real)
+
+    # What the dialog holds after the user sets the count to three: the first
+    # row inherits the existing domain, the rest are pure intent.
+    thirds = domain_layout.even_split(low, high, 3)
+    specs = [domain_layout.DomainSpec(
+                name=f"New {i}", start=start, end=end,
+                domain_id=layout[0].domain_id if i == 0 else None)
+             for i, (start, end) in enumerate(thirds)]
+
+    # Size the middle row - the one with no object of its own.
+    ds.preview_layout(bpy.context, mol, token, specs, 1)
+
+    visible = [o for o in bpy.data.objects
+               if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
+    assert len(visible) == 3, (
+        f"every row should be drawn, but only these are: "
+        f"{[o.name for o in visible]}")
+    assert sorted(_shown_range(o) for o in visible) == sorted(
+        (s.start, s.end) for s in specs), (
+        "what is on screen does not tile the chain the layout describes")
+
+    ghosted = [o for o in visible
+               if _style_material_name(o).endswith(ds._GHOST_SUFFIX)]
+    solid = [o for o in visible if o not in ghosted]
+    assert len(solid) == 1, (
+        f"exactly one domain should be solid, got {[o.name for o in solid]}")
+    assert len(ghosted) == 2, "the rest of the chain should be ghosted"
+    assert _shown_range(solid[0]) == (specs[1].start, specs[1].end), (
+        "the solid domain is not the one being sized")
+    assert _domain_color(solid[0]) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4), (
+        "the stand-in for a brand-new domain was not highlighted - its colour "
+        "group is probably still shared with the object it was copied from")
+
+    ds.restore_preview(bpy.context)
+
+    assert [o.name for o in bpy.data.objects
+            if o.name.startswith(ds._TEMP_PREFIX)] == [], (
+        "the preview left its stand-in objects in the scene")
+    assert _shown_range(real) == real_range, (
+        "the real domain was left showing a preview range")
+
+
+@pytest.mark.integration
 def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
     """The ghost must differ from the real material in opacity and nothing else.
 
@@ -1068,13 +1136,14 @@ def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
 
 
 @pytest.mark.integration
-def test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row(scene):
-    """A row with no object yet borrows a sibling's, and gives it back.
+def test_a_new_row_gets_its_own_stand_in_and_leaves_the_real_domains_alone(scene):
+    """A row with no object is drawn by a stand-in, not by taking a sibling's.
 
-    A domain the user has just added exists only in the dialog, so the preview
-    drives some other domain of the chain to show its span. That lender must
-    not be left displaying the new domain's residues once the user moves on -
-    it would silently show the wrong stretch of the chain.
+    An earlier version lent the new row an existing domain's object. That domain
+    then had nothing left to draw itself with, so adding a row silently blanked
+    a real one from the context it was supposed to be providing - and the lender
+    had to be handed its own range back on the way out or it would sit there
+    showing the wrong stretch of the chain.
     """
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
@@ -1086,25 +1155,20 @@ def test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row(scene):
     before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
 
     # A third row the user has just added: no domain_id, so no object of its own.
-    brand_new = domain_layout.DomainSpec(name="New", start=low + 10,
-                                         end=low + 20, domain_id=None)
+    brand_new = domain_layout.DomainSpec(name="New", start=low, end=low + 20,
+                                         domain_id=None)
     ds.preview_layout(bpy.context, mol, token,
                       [brand_new, _spec(layout[0], low + 21, low + 60),
                        _spec(layout[1], low + 61, high)], 0)
 
-    lender = bpy.data.objects[bpy.context.scene[ds._PREVIEW_OBJECT]]
-    assert lender.name in {first_obj.name, second_obj.name}, (
-        "the new row did not borrow a domain of its own chain")
-    assert _shown_range(lender) == (low + 10, low + 20), (
-        "the borrowed object is not showing the new domain's span")
-
-    # Back to sizing a real domain: the lender returns to its own range.
-    ds.preview_layout(bpy.context, mol, token,
-                      [_spec(layout[0], low, low + 60),
-                       _spec(layout[1], low + 61, high)], 0)
-    assert _shown_range(first_obj) == (low, low + 60)
-    assert _shown_range(second_obj) == (low + 61, high), (
-        "the lender was left showing the new row's residues")
+    drawn = bpy.data.objects[bpy.context.scene[ds._PREVIEW_OBJECT]]
+    assert drawn.name.startswith(ds._TEMP_PREFIX), (
+        f"the new row took a real domain's object ({drawn.name}) instead of "
+        "being given a stand-in")
+    assert _shown_range(drawn) == (low, low + 20)
+    # Both real domains keep drawing themselves, which is the whole point.
+    assert _shown_range(first_obj) == (low + 21, low + 60)
+    assert _shown_range(second_obj) == (low + 61, high)
 
     ds.restore_preview(bpy.context)
 
@@ -1112,6 +1176,9 @@ def test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row(scene):
         assert _shown_range(obj) == before_range[obj.name]
         assert _domain_color(obj) == pytest.approx(before_color[obj.name],
                                                    abs=1e-4)
+    assert [o.name for o in bpy.data.objects
+            if o.name.startswith(ds._TEMP_PREFIX)] == [], (
+        "the preview left its stand-in objects in the scene")
 
 
 @pytest.mark.integration

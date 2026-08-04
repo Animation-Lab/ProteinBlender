@@ -63,6 +63,10 @@ _PREVIEW_NODE = "pb_splitter_preview_node"
 # and so switching which domain is being sized still restores the others.
 _PREVIEW_STATE = "pb_splitter_preview_state"
 _PREVIEW_HIDDEN = "pb_splitter_preview_hidden"
+# Objects the preview had to invent, because the domains they stand for do not
+# exist yet. {object_name: True}; all of them are deleted on restore.
+_PREVIEW_TEMPS = "pb_splitter_preview_temps"
+_TEMP_PREFIX = "PB Splitter Preview "
 
 # Object types worth hiding while isolating a domain. Cameras, lights and the
 # puppet controller Empties are deliberately left alone: hiding the lights
@@ -427,13 +431,12 @@ def _drivable(obj):
     return obj is not None and _range_node(obj)[1] is not None
 
 
-def _stand_in(molecule, chain_token, objects):
-    """An object to show the edited domain's span when it has none of its own.
+def _any_chain_object(molecule, chain_token, objects):
+    """Any object of the chain that can be driven to an arbitrary span.
 
-    A row the user has just added has no object yet. Every domain of a chain
-    shares the mesh and the same "Select Chain" -> "Select Res ID Range" pair,
-    so any of them can be driven to show any stretch of that chain. The lender
-    stands in for the new domain instead of showing its own span.
+    Every domain of a chain shares the mesh and the same "Select Chain" ->
+    "Select Res ID Range" pair, so any one of them can show any stretch of that
+    chain - which is what makes it usable as a template for the stand-ins.
     """
     for obj in objects:
         if _drivable(obj):
@@ -443,6 +446,67 @@ def _stand_in(molecule, chain_token, objects):
         if _drivable(obj):
             return obj
     return None
+
+
+def _temp_object(scene, source, index):
+    """A throwaway twin of ``source``, for a domain that has no object yet.
+
+    Most rows in this dialog have no object. A chain is imported as a *single*
+    domain, so the ordinary way in - open the splitter on a chain, set the
+    count to 3, drag the boundaries - produces one row backed by a real object
+    and two backed by nothing at all. Without stand-ins there was simply
+    nothing to ghost in that case: the viewport showed one solid domain and
+    otherwise nothing, which is the state this feature exists to improve on.
+    Every domain the dialog is about is created when the user presses OK, long
+    after the preview needs to draw it.
+
+    The copy shares the mesh but must not share the node group: the residue
+    range lives on the node group, so twins that share one would all jump to
+    whichever span was written last.
+    """
+    name = f"{_TEMP_PREFIX}{index}"
+    existing = bpy.data.objects.get(name)
+    if existing is not None:
+        return existing
+
+    obj = source.copy()
+    obj.name = name
+    trees = []
+    for modifier in obj.modifiers:
+        if modifier.type != 'NODES' or not modifier.node_group:
+            continue
+        modifier.node_group = modifier.node_group.copy()
+        trees.append(modifier.node_group.name)
+        # Copying a node group leaves its *group nodes* pointing at the
+        # original's sub-trees, and the colour lives in one of those. A shared
+        # colour tree is one this module refuses to write to, since writing
+        # would repaint every domain sharing it - so leaving it shared silently
+        # costs the highlight on the twin *and* on the domain it was copied
+        # from, which is a much worse bug than it looks.
+        for node in modifier.node_group.nodes:
+            if (node.name == "Color Common" and node.type == 'GROUP'
+                    and node.node_tree):
+                node.node_tree = node.node_tree.copy()
+                trees.append(node.node_tree.name)
+    for collection in source.users_collection:
+        collection.objects.link(obj)
+
+    temps = _scene_map(scene, _PREVIEW_TEMPS)
+    temps[name] = trees
+    _store_map(scene, _PREVIEW_TEMPS, temps)
+    return obj
+
+
+def _discard_temp_objects(scene):
+    """Delete the stand-ins, and the node groups copied for them."""
+    for name, trees in _scene_map(scene, _PREVIEW_TEMPS).items():
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        for tree_name in trees:
+            tree = bpy.data.node_groups.get(tree_name)
+            if tree is not None and tree.users == 0:
+                bpy.data.node_groups.remove(tree)
 
 
 def preview_layout(context, molecule, chain_token, specs, edited_index):
@@ -461,12 +525,12 @@ def preview_layout(context, molecule, chain_token, specs, edited_index):
         return None
 
     objects = [_domain_object(molecule, spec.domain_id) for spec in specs]
-    edited_obj = objects[edited_index]
-    if not _drivable(edited_obj):
-        edited_obj = _stand_in(molecule, chain_token, objects)
-    if edited_obj is None:
+    template = _any_chain_object(molecule, chain_token, objects)
+    if template is None:
         return None
 
+    # Capture the hidden set before inventing any stand-in, so the stand-ins
+    # are never recorded as scene objects the user had chosen to hide.
     if _PREVIEW_OBJECT not in scene:
         hidden = {}
         for other in bpy.data.objects:
@@ -475,6 +539,16 @@ def preview_layout(context, molecule, chain_token, specs, edited_index):
             hidden[other.name] = bool(other.hide_viewport)
             other.hide_viewport = True
         _store_map(scene, _PREVIEW_HIDDEN, hidden)
+
+    # Every row gets something to be drawn with, real or invented, so the chain
+    # is always shown whole no matter how few of its domains exist yet.
+    for index, obj in enumerate(objects):
+        if not _drivable(obj):
+            objects[index] = _temp_object(scene, template, index)
+
+    edited_obj = objects[edited_index]
+    if not _drivable(edited_obj):
+        return None
 
     shown = set()
     for index, (spec, obj) in enumerate(zip(specs, objects)):
@@ -519,8 +593,10 @@ def restore_preview(context):
         if obj is not None:
             obj.hide_viewport = was_hidden
 
+    _discard_temp_objects(scene)
+
     for key in (_PREVIEW_OBJECT, _PREVIEW_MODIFIER, _PREVIEW_NODE,
-                _PREVIEW_STATE, _PREVIEW_HIDDEN):
+                _PREVIEW_STATE, _PREVIEW_HIDDEN, _PREVIEW_TEMPS):
         if key in scene:
             del scene[key]
 
