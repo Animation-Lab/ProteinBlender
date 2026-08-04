@@ -276,36 +276,24 @@ class PROTEINBLENDER_PT_domain_maker(Panel):
                 info_col.label(text="Split into multiple domains", icon='INFO')
                 if selected_item.item_type == 'CHAIN':
                     info_col.label(text="Auto-generates complementary domains")
-            
-        # Domain operations
-        elif selected_item.item_type == 'DOMAIN':
-            col = main_box.column(align=True)
-            
-            # Rename domain
-            row = col.row(align=True)
-            row.label(text="Name:", icon='FONT_DATA')
-            row.prop(selected_item, "name", text="")
-            
-            col.separator()
-            
-            # Adjust domain range
-            col.label(text="Adjust Range", icon='ARROW_LEFTRIGHT')
-            row = col.row(align=True)
-            row.prop(selected_item, "domain_start", text="Start")
-            row.prop(selected_item, "domain_end", text="End")
-            
-            # Update button
-            row = col.row()
-            row.operator("proteinblender.update_domain_range", text="Update Range", icon='FILE_REFRESH')
-            
-            col.separator()
-            
-            # Merge/Delete operations
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.operator("proteinblender.merge_domains", text="Merge", icon='AUTOMERGE_ON')
-            row.operator("proteinblender.delete_domain", text="Delete", icon='X')
-        
+
+            # Editing the chain's whole domain layout at once. Split and Merge
+            # above are single-step actions on the current selection; this opens
+            # the Domain Splitter, where every domain on the chain is laid out
+            # together. Offered for a domain selection too, resolved to its
+            # parent chain, because "edit this domain's range" and "edit the
+            # chain's layout" are the same operation from the model's side.
+            chain_row_id = (selected_item.item_id
+                            if selected_item.item_type == 'CHAIN'
+                            else selected_item.parent_id)
+            if chain_row_id:
+                col.separator()
+                row = col.row()
+                row.scale_y = 1.3
+                edit_op = row.operator("proteinblender.edit_chain_domains",
+                                       text="Edit Domains...", icon='GREASEPENCIL')
+                edit_op.item_id = chain_row_id
+
         # Add bottom spacing
         layout.separator()
 
