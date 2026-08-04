@@ -841,6 +841,13 @@ class PROTEINBLENDER_OT_add_hole(Operator):
         return _get_membrane_root(context.active_object) is not None
 
     def execute(self, context):
+        from ..utils.blender_utils import ensure_object_mode
+
+        # These operators finish with select_all, which does not poll
+        # outside Object mode - and this membrane's own Edit Deformation
+        # is what puts the user in Lattice edit mode. See ensure_object_mode.
+        ensure_object_mode()
+
         root = _get_membrane_root(context.active_object)
         if root is None:
             return {"CANCELLED"}
@@ -904,6 +911,13 @@ class PROTEINBLENDER_OT_remove_hole(Operator):
         return _get_membrane_root(context.active_object) is not None
 
     def execute(self, context):
+        from ..utils.blender_utils import ensure_object_mode
+
+        # Finishes with select_all, which does not poll outside Object
+        # mode - and this membrane's own Edit Deformation is what puts the
+        # user in Lattice edit mode. See ensure_object_mode.
+        ensure_object_mode()
+
         root = _get_membrane_root(context.active_object)
         if root is None:
             return {"CANCELLED"}
@@ -950,6 +964,13 @@ class PROTEINBLENDER_OT_select_hole(Operator):
     hole_name: StringProperty()
 
     def execute(self, context):
+        from ..utils.blender_utils import ensure_object_mode
+
+        # Finishes with select_all, which does not poll outside Object
+        # mode - and this membrane's own Edit Deformation is what puts the
+        # user in Lattice edit mode. See ensure_object_mode.
+        ensure_object_mode()
+
         hole = bpy.data.objects.get(self.hole_name)
         if hole is None:
             return {"CANCELLED"}
