@@ -52,7 +52,9 @@ MAX_DOMAINS = 32
 _PREVIEW_OBJECT = "pb_splitter_preview_object"
 _PREVIEW_MODIFIER = "pb_splitter_preview_modifier"
 _PREVIEW_NODE = "pb_splitter_preview_node"
-_PREVIEW_RANGE = "pb_splitter_preview_range"
+# {object_name: [min, max]} for every object the preview has driven, so
+# switching which domain is shown still restores all of them.
+_PREVIEW_RANGES = "pb_splitter_preview_ranges"
 _PREVIEW_HIDDEN = "pb_splitter_preview_hidden"
 
 # Object types worth hiding while isolating a domain. Cameras, lights and the
@@ -106,27 +108,39 @@ class _Suspend:
 # empty scene).
 # ---------------------------------------------------------------------------
 
-def _preview_target(molecule, chain_token):
-    """The object whose geometry nodes stand in for the previewed domain.
+def _range_node(obj):
+    """The (modifier, node) pair driving a domain object's residue range."""
+    if obj is None:
+        return None, None
+    for modifier in obj.modifiers:
+        if modifier.type != 'NODES' or not modifier.node_group:
+            continue
+        for node in modifier.node_group.nodes:
+            if (node.type == 'GROUP' and node.node_tree
+                    and "Select Res ID Range" in node.node_tree.name):
+                return modifier, node
+    return None, None
 
-    One object serves the whole session: every domain of a chain carries the
-    same "Select Chain" -> "Select Res ID Range" pair, so driving one object's
-    range can show any stretch of that chain. Rows the user has just added have
-    no object of their own, which is why the preview cannot simply isolate the
-    edited row's own domain.
+
+def _preview_target(molecule, chain_token, preferred=None):
+    """The object to drive for the preview.
+
+    Prefers the edited domain's *own* object, so the user watches that domain
+    grow and shrink where it actually sits. A row the user has just added has
+    no object yet, so any other domain of the same chain stands in: they share
+    the mesh and the same "Select Chain" -> "Select Res ID Range" pair, so
+    driving one can show any stretch of the chain.
     """
+    modifier, node = _range_node(preferred)
+    if node is not None:
+        return preferred, modifier, node
+
     for spec in domain_layout.current_layout(molecule, chain_token):
         domain = molecule.domains.get(spec.domain_id)
         obj = getattr(domain, "object", None) if domain else None
-        if obj is None:
-            continue
-        for modifier in obj.modifiers:
-            if modifier.type != 'NODES' or not modifier.node_group:
-                continue
-            for node in modifier.node_group.nodes:
-                if (node.type == 'GROUP' and node.node_tree
-                        and "Select Res ID Range" in node.node_tree.name):
-                    return obj, modifier, node
+        modifier, node = _range_node(obj)
+        if node is not None:
+            return obj, modifier, node
     return None, None, None
 
 
@@ -142,40 +156,67 @@ def _preview_node(context):
     return modifier.node_group.nodes.get(scene.get(_PREVIEW_NODE, ""))
 
 
-def enter_preview(context, molecule, chain_token):
-    """Hide everything but the preview object, remembering what to restore.
+def _remember_range(scene, obj, node):
+    """Record an object's untouched residue range, once."""
+    try:
+        ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
+    except (ValueError, TypeError):
+        ranges = {}
+    if obj.name not in ranges:
+        ranges[obj.name] = [int(node.inputs["Min"].default_value),
+                            int(node.inputs["Max"].default_value)]
+        scene[_PREVIEW_RANGES] = json.dumps(ranges)
 
-    Idempotent: a preview that is already running is left alone, so dragging a
-    boundary does not re-capture the isolated state as if it were the user's.
+
+def enter_preview(context, molecule, chain_token, preferred=None):
+    """Hide everything but the previewed domain, remembering what to restore.
+
+    The hidden set is captured once, on the first call, so dragging a boundary
+    never re-captures the isolated state as if the user had chosen it. Which
+    object is *shown* can still change as the user moves between rows.
     """
     scene = context.scene
-    if _PREVIEW_OBJECT in scene:
-        return bpy.data.objects.get(scene[_PREVIEW_OBJECT])
+    first_entry = _PREVIEW_OBJECT not in scene
 
-    obj, modifier, node = _preview_target(molecule, chain_token)
+    obj, modifier, node = _preview_target(molecule, chain_token, preferred)
     if obj is None:
         return None
+
+    if first_entry:
+        hidden = {}
+        for other in bpy.data.objects:
+            if other.type not in _ISOLATABLE_TYPES:
+                continue
+            hidden[other.name] = bool(other.hide_viewport)
+            other.hide_viewport = True
+        scene[_PREVIEW_HIDDEN] = json.dumps(hidden)
+    elif scene.get(_PREVIEW_OBJECT) != obj.name:
+        # Switching to a different domain: put the one we were driving back to
+        # its own range and hide it again.
+        previous_node = _preview_node(context)
+        previous = bpy.data.objects.get(scene.get(_PREVIEW_OBJECT, ""))
+        if previous is not None:
+            try:
+                ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
+            except (ValueError, TypeError):
+                ranges = {}
+            original = ranges.get(previous.name)
+            if previous_node is not None and original:
+                previous_node.inputs["Min"].default_value = int(original[0])
+                previous_node.inputs["Max"].default_value = int(original[1])
+            previous.hide_viewport = True
 
     scene[_PREVIEW_OBJECT] = obj.name
     scene[_PREVIEW_MODIFIER] = modifier.name
     scene[_PREVIEW_NODE] = node.name
-    scene[_PREVIEW_RANGE] = [int(node.inputs["Min"].default_value),
-                             int(node.inputs["Max"].default_value)]
-
-    hidden = {}
-    for other in bpy.data.objects:
-        if other == obj or other.type not in _ISOLATABLE_TYPES:
-            continue
-        hidden[other.name] = bool(other.hide_viewport)
-        other.hide_viewport = True
+    _remember_range(scene, obj, node)
     obj.hide_viewport = False
-    scene[_PREVIEW_HIDDEN] = json.dumps(hidden)
     return obj
 
 
-def preview_range(context, molecule, chain_token, start, end):
-    """Isolate the chain and show only residues ``start``-``end`` of it."""
-    if enter_preview(context, molecule, chain_token) is None:
+def preview_range(context, molecule, chain_token, start, end, preferred=None):
+    """Isolate ``preferred`` (or any domain of the chain) and show ``start``-``end``."""
+    if enter_preview(context, molecule, chain_token, preferred) is None:
         return
     node = _preview_node(context)
     if node is None:
@@ -188,16 +229,20 @@ def preview_range(context, molecule, chain_token, start, end):
 
 
 def restore_preview(context):
-    """Undo the isolation and put the preview object's range back."""
+    """Undo the isolation and put every driven object's range back."""
     scene = context.scene
     if _PREVIEW_OBJECT not in scene:
         return
 
-    node = _preview_node(context)
-    original = scene.get(_PREVIEW_RANGE)
-    if node is not None and original is not None and len(original) == 2:
-        node.inputs["Min"].default_value = int(original[0])
-        node.inputs["Max"].default_value = int(original[1])
+    try:
+        ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
+    except (ValueError, TypeError):
+        ranges = {}
+    for name, original in ranges.items():
+        _modifier, node = _range_node(bpy.data.objects.get(name))
+        if node is not None and original and len(original) == 2:
+            node.inputs["Min"].default_value = int(original[0])
+            node.inputs["Max"].default_value = int(original[1])
 
     try:
         hidden = json.loads(scene.get(_PREVIEW_HIDDEN, "{}"))
@@ -209,7 +254,7 @@ def restore_preview(context):
             other.hide_viewport = was_hidden
 
     for key in (_PREVIEW_OBJECT, _PREVIEW_MODIFIER, _PREVIEW_NODE,
-                _PREVIEW_RANGE, _PREVIEW_HIDDEN):
+                _PREVIEW_RANGES, _PREVIEW_HIDDEN):
         if key in scene:
             del scene[key]
 
@@ -369,10 +414,14 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     def range_edited(self, row, moved_start):
         """Re-tile the layout around a boundary the user just moved.
 
-        The new layout is computed here but *applied* in check(). Rewriting the
-        row collection from inside a property update callback would reallocate
-        the very collection Blender is mid-write on, which can invalidate the
-        element it is writing to.
+        Values are written back **immediately**, here in the update callback.
+        Only *resizing* the row collection is unsafe from inside a property
+        write (it reallocates the collection Blender is mid-write on), so just
+        that part is deferred to check(). Deferring the values too meant the
+        neighbour only followed if Blender happened to call check() for an edit
+        to a collection *element*, which is not something to rely on - and when
+        it did not fire, the boundary silently failed to move and the viewport
+        preview never updated either.
         """
         if _state["suspended"]:
             return
@@ -386,11 +435,25 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         if len(retiled) > MAX_DOMAINS:
             return
 
-        _state["pending_layout"] = retiled
-        # Preview off the pending layout: the rows still hold the raw value the
-        # user typed, which may be out of bounds until check() applies the
-        # re-tiled result.
-        self._preview_range(retiled[new_index].start, retiled[new_index].end)
+        with _Suspend():
+            if len(retiled) == len(self.rows):
+                # The common case: a boundary moved between two existing
+                # domains. Write every value now, the neighbour included.
+                for existing, spec in zip(self.rows, retiled):
+                    existing.start = spec.start
+                    existing.end = spec.end
+            else:
+                # A domain has to be created to own the residues this edit
+                # orphaned. Apply the edited row's own (clamped) value now so
+                # the field shows what it will keep, and let check() do the
+                # structural part.
+                edited = retiled[new_index]
+                row.start = edited.start
+                row.end = edited.end
+                _state["pending_layout"] = retiled
+
+        edited = retiled[new_index]
+        self._preview_range(edited.start, edited.end, edited.domain_id)
 
     def _apply_pending_layout(self):
         """Write the re-tiled layout back onto the dialog's rows."""
@@ -486,15 +549,20 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     # Viewport preview
     # ------------------------------------------------------------------
 
-    def _preview_range(self, start, end):
-        """Show only the residues the user is currently sizing a domain to."""
+    def _preview_range(self, start, end, domain_id=None):
+        """Show only the residues the user is currently sizing a domain to.
+
+        Driven on the edited domain's own object where there is one, so the
+        user watches that domain grow and shrink in place.
+        """
         context = bpy.context
         chain_row = self._chain_row(context)
         molecule = self._molecule(context, chain_row)
         if molecule is None:
             return
+        domain = molecule.domains.get(domain_id) if domain_id else None
         preview_range(context, molecule, chain_token_from_item(chain_row),
-                      start, end)
+                      start, end, preferred=getattr(domain, "object", None))
 
     # ------------------------------------------------------------------
     # Invoke / draw / execute

@@ -327,6 +327,84 @@ def invoke_and_cancel_split_dialog():
     return "split-domain popup invoked and cancelled"
 
 
+def edit_chain_domains_live_boundary_drag():
+    """A row edit in the Domain Splitter must re-tile without waiting for check().
+
+    Only reachable with a real window: in background Blender INVOKE_DEFAULT
+    falls through to execute(), so there is no live modal instance to drive.
+
+    The re-tile used to be deferred to the operator's check(), which Blender
+    does not reliably call for an edit to a CollectionProperty *element*. When
+    it did not fire, moving a boundary left the neighbour behind and the
+    viewport preview never updated. So this writes the row property directly -
+    exactly what the widget does - and never calls check().
+    """
+    from proteinblender.core import domain_layout
+    from proteinblender.operators import domain_splitter as ds
+
+    scene_manager = H.scene_manager_module()
+    chain = next(row for row in bpy.context.scene.outliner_items
+                 if row.item_type == "CHAIN")
+    molecule = H.sm().molecules[chain.parent_id]
+    low, high = domain_layout.chain_residue_range(molecule, chain.chain_id)
+    pieces = domain_layout.even_split(low, high, 3)
+    payload = json.dumps([{"name": f"UI Domain {i}", "start": a, "end": b,
+                           "domain_id": ""}
+                          for i, (a, b) in enumerate(pieces, start=1)])
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.edit_chain_domains(
+            "EXEC_DEFAULT", item_id=chain.item_id,
+            layout_json=payload) == {"FINISHED"}
+    scene_manager.build_outliner_hierarchy(bpy.context)
+
+    chain_id = next(row.item_id for row in bpy.context.scene.outliner_items
+                    if row.item_type == "CHAIN")
+    with ui_override("PROPERTIES"):
+        result = bpy.ops.proteinblender.edit_chain_domains(
+            "INVOKE_DEFAULT", item_id=chain_id)
+    assert result == {"RUNNING_MODAL"}, result
+
+    instance = ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance
+    assert instance is not None, "the dialog published no live instance"
+    assert len(instance.rows) == 3, [r.start for r in instance.rows]
+
+    boundary = instance.rows[1].start
+    instance.rows[1].start = boundary + 12
+    assert instance.rows[1].start == boundary + 12, "the edited value did not stick"
+    assert instance.rows[0].end == boundary + 11, (
+        f"neighbour did not follow: rows[0].end={instance.rows[0].end}, "
+        f"expected {boundary + 11}")
+
+    new_end = instance.rows[1].end - 7
+    instance.rows[1].end = new_end
+    assert instance.rows[2].start == new_end + 1, (
+        f"next domain did not follow: rows[2].start={instance.rows[2].start}")
+
+    node = ds._preview_node(bpy.context)
+    assert node is not None, "editing a range did not start the viewport preview"
+    shown = (node.inputs["Min"].default_value, node.inputs["Max"].default_value)
+    assert shown == (boundary + 12, new_end), (
+        f"preview shows {shown}, expected {(boundary + 12, new_end)}")
+
+    state["splitter_hidden"] = ds._PREVIEW_HIDDEN in bpy.context.scene
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return f"boundary drag re-tiled live; preview showed {shown}"
+
+
+def assert_splitter_preview_restored():
+    """Cancelling the dialog must un-hide everything it isolated."""
+    from proteinblender.operators import domain_splitter as ds
+
+    assert state.get("splitter_hidden"), "the preview never isolated anything"
+    assert ds._PREVIEW_OBJECT not in bpy.context.scene, (
+        "cancelling the Domain Splitter left its preview bookkeeping behind")
+    hidden = [obj.name for obj in bpy.data.objects
+              if obj.type in ds._ISOLATABLE_TYPES and obj.hide_viewport]
+    assert not hidden, f"cancelling left these objects hidden: {hidden}"
+    return "splitter preview restored on cancel"
+
+
 def dna_edit_mode_roundtrip():
     dna = H.build_dna(seq="ATCGATCG", name_prefix="UI_DNA")
     state["dna"] = dna.name
@@ -462,6 +540,9 @@ steps = [
     ("parent and domain pivot edit", parent_and_domain_pivot_edit_roundtrip),
     ("split domain invoke dialog", invoke_and_cancel_split_dialog),
     ("settle split modal", lambda: "modal cancellation processed"),
+    ("domain splitter live boundary drag", edit_chain_domains_live_boundary_drag),
+    ("settle splitter modal", lambda: "modal cancellation processed"),
+    ("assert splitter preview restored", assert_splitter_preview_restored),
     ("DNA edit mode", dna_edit_mode_roundtrip),
     ("membrane edit mode", membrane_edit_mode_roundtrip),
     ("create domain for undo", create_domain_for_undo),

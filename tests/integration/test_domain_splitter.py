@@ -729,33 +729,58 @@ def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
     assert len(geometry) > 2, "need several objects for isolation to mean anything"
     before = {o.name: o.hide_viewport for o in geometry}
 
-    target, _mod, node = ds._preview_target(mol, token)
-    assert target is not None, "no preview object resolved for the chain"
-    original_range = (node.inputs["Min"].default_value,
-                      node.inputs["Max"].default_value)
+    layout = domain_layout.current_layout(mol, token)
+    assert len(layout) == 2, "expected the chain to be split in two"
+    first_obj = mol.domains[layout[0].domain_id].object
+    second_obj = mol.domains[layout[1].domain_id].object
+    _mod, first_node = ds._range_node(first_obj)
+    _mod, second_node = ds._range_node(second_obj)
+    assert first_node is not None and second_node is not None
+    first_original = (first_node.inputs["Min"].default_value,
+                      first_node.inputs["Max"].default_value)
+    second_original = (second_node.inputs["Min"].default_value,
+                       second_node.inputs["Max"].default_value)
 
-    ds.preview_range(bpy.context, mol, token, low + 5, low + 25)
-
-    # Everything but the preview object is hidden, and it shows the asked range.
+    # Size the FIRST domain: it alone is visible and shows the asked range.
+    ds.preview_range(bpy.context, mol, token, low + 5, low + 25,
+                     preferred=first_obj)
     still_visible = [o.name for o in bpy.data.objects
                      if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
-    assert still_visible == [target.name], (
+    assert still_visible == [first_obj.name], (
         f"isolation left these visible: {still_visible}")
-    assert node.inputs["Min"].default_value == low + 5
-    assert node.inputs["Max"].default_value == low + 25
+    assert first_node.inputs["Min"].default_value == low + 5
+    assert first_node.inputs["Max"].default_value == low + 25
 
     # Dragging further must not re-capture the isolated state as "original".
-    ds.preview_range(bpy.context, mol, token, low + 5, low + 40)
-    assert node.inputs["Max"].default_value == low + 40
+    ds.preview_range(bpy.context, mol, token, low + 5, low + 40,
+                     preferred=first_obj)
+    assert first_node.inputs["Max"].default_value == low + 40
+
+    # Moving to the SECOND domain shows that one instead, and hands the first
+    # its own range back - the user is sizing a different domain now.
+    ds.preview_range(bpy.context, mol, token, low + 50, low + 60,
+                     preferred=second_obj)
+    still_visible = [o.name for o in bpy.data.objects
+                     if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
+    assert still_visible == [second_obj.name], (
+        f"switching domains left these visible: {still_visible}")
+    assert (first_node.inputs["Min"].default_value,
+            first_node.inputs["Max"].default_value) == first_original, (
+        "the domain we stopped previewing kept a preview range")
+    assert second_node.inputs["Min"].default_value == low + 50
 
     ds.restore_preview(bpy.context)
 
     after = {o.name: o.hide_viewport for o in bpy.data.objects
              if o.type in ds._ISOLATABLE_TYPES}
     assert after == before, "the preview did not restore the original visibility"
-    assert (node.inputs["Min"].default_value,
-            node.inputs["Max"].default_value) == original_range, (
-        "the preview left the domain's residue range altered")
+    # Both driven objects get their own range back, not just the last one.
+    assert (first_node.inputs["Min"].default_value,
+            first_node.inputs["Max"].default_value) == first_original, (
+        "the preview left the first domain's residue range altered")
+    assert (second_node.inputs["Min"].default_value,
+            second_node.inputs["Max"].default_value) == second_original, (
+        "the preview left the second domain's residue range altered")
     assert ds._PREVIEW_OBJECT not in bpy.context.scene, (
         "preview bookkeeping was left on the scene")
 

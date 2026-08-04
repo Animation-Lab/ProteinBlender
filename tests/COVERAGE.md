@@ -432,6 +432,15 @@ on a membrane whose typical gap was 0.28 nm.
   The explicit "Build Domains" button is gone: the domain-count field re-divides the chain as it changes, and OK commits.
   Guarded by `test_domain_splitter.py::test_moving_a_start_moves_the_boundary_with_the_domain_above` and `::test_moving_an_end_moves_the_boundary_with_the_domain_below`, `::test_pulling_the_first_start_off_the_chain_creates_a_domain_above` and `::test_pulling_the_last_end_off_the_chain_creates_a_domain_below`, `::test_a_boundary_cannot_swallow_its_neighbour`, `::test_retiling_clamps_to_the_chain_and_never_inverts_a_domain` and `::test_retiling_a_single_full_chain_domain_is_a_no_op`. Every case also asserts the result still tiles the chain exactly.
 
+- **A Domain Splitter boundary edit did not move the neighbour, and the viewport preview did not follow.**
+  Reported: "when I adjust a domain's start/end it just snaps back to where it was", and "it doesn't adjust the res_id on-the-fly in the 3d viewer".
+  The re-tile was computed in the row's property update callback but *applied* in the operator's `check()`, on the assumption that Blender calls `check()` after any dialog property edit.
+  It does not call it for an edit to a **CollectionProperty element** - only for a property directly on the operator - so the re-tiled layout was computed and then never written: the neighbour stayed put and the layout stopped tiling the chain.
+  Fixed by writing the re-tiled values immediately, in the update callback. Only *resizing* the row collection is unsafe there (it reallocates the collection Blender is mid-write on), so only the edge-insert case is still deferred to `check()`, and the edited row's own clamped value is applied immediately even then.
+  The preview also now drives the **edited domain's own object** rather than always the chain's first domain, so the user watches that domain grow and shrink where it actually sits; switching rows hands the previous object its range back.
+  Guarded by `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`, which drives a **real modal dialog in a foreground Blender** (background Blender routes `INVOKE_DEFAULT` to `execute()`, so there is no live instance to drive and this cannot be covered in the headless lane) and deliberately never calls `check()`.
+  Verified red pre-fix: `AssertionError: neighbour did not follow: rows[0].end=66, expected 78`.
+
 - **Sizing a domain isolates it in the viewport, and the isolation is always undone.**
   Residue numbers alone are a poor way to choose a domain boundary, so while a range is being edited everything but that domain is hidden and the geometry-nodes residue range is driven live (the same technique `split_domain_popup` uses).
   This is the only part of the dialog that touches the scene *before* the user confirms, so a leak is highly visible - the user would be left looking at an apparently empty viewport with no idea why. The bookkeeping therefore lives on the scene, not the operator instance, so a preview left behind by a dialog that died without closing can be cleared by the next `invoke`; `execute` and `cancel` both restore.
