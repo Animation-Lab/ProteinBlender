@@ -69,10 +69,16 @@ _PREVIEW_HIDDEN = "pb_splitter_preview_hidden"
 # would just darken the very thing the user is trying to look at.
 _ISOLATABLE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT'}
 
-# How opaque the rest of the chain stays while one of its domains is sized.
-# Low enough that the solid domain reads as the subject at a glance, high
-# enough that the chain's shape is still legible behind it.
-GHOST_ALPHA = 0.2
+# Per-surface opacity for the rest of the chain while one domain is sized.
+#
+# Much lower than the ~0.2 the finished effect looks like, and deliberately so.
+# A space-filling chain stacks 20-odd sphere surfaces along any given view ray,
+# and each one blends again, so per-surface alpha compounds: at 0.2 the chain
+# still renders at 68% of its opaque brightness, which reads as "flat", not as
+# "behind". Measured against an opaque reference of the same domain in a live
+# Material Preview viewport, 0.1 with `show_transparent_back` off lands at 25%
+# - dim enough to recede, solid enough to keep the chain's shape legible.
+GHOST_ALPHA = 0.1
 
 # The colour the domain being sized takes for as long as it is being sized. A
 # fixed colour rather than a brightened version of the domain's own: derived
@@ -291,8 +297,14 @@ def _ghost_material(original):
         material.name = name
 
     # True alpha blending, not EEVEE's default dithered transparency, which
-    # renders a 20%-opaque ghost as a sparse stipple rather than a wash.
+    # renders a faint ghost as a sparse stipple rather than a wash.
     material.surface_render_method = 'BLENDED'
+    # Draw only the surface nearest the camera. This is what makes the ghost a
+    # ghost: with the far side left in, every sphere behind every other sphere
+    # blends again and a space-filling chain comes back to near-opaque however
+    # low the alpha goes. Turning it off cuts the same chain from 68% of its
+    # opaque brightness to 42%, before alpha is lowered at all.
+    material.show_transparent_back = False
     # Solid viewport shading reads this rather than the shader nodes.
     material.diffuse_color = (*original.diffuse_color[:3], GHOST_ALPHA)
     for node in material.node_tree.nodes:

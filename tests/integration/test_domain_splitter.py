@@ -1050,6 +1050,13 @@ def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
         "the ghost is not actually transparent")
     assert ghost.surface_render_method == 'BLENDED', (
         "dithered transparency renders the ghost as a stipple, not a wash")
+    # The one that silently undoes the whole effect. A space-filling chain
+    # stacks ~20 sphere surfaces per view ray; with the far side drawn, each
+    # blends again and the chain returns to near-opaque however low the alpha
+    # is set - measured at 68% of opaque brightness versus 25% with it off.
+    # Nothing about the assignment, the colour or the alpha value catches this.
+    assert ghost.show_transparent_back is False, (
+        "the ghost draws its far side, so alpha compounds back to near-opaque")
     # The domain being sized is untouched: its material must still be the real
     # one, at full opacity, or the subject fades along with its context.
     assert _style_material(first_obj) == real
