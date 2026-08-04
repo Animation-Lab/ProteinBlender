@@ -820,7 +820,7 @@ def _shown_range(obj):
     return (node.inputs["Min"].default_value, node.inputs["Max"].default_value)
 
 
-def _style_material_name(obj):
+def _style_material(obj):
     """The material the domain is shaded with, read from the node graph.
 
     Deliberately not domain_splitter's own accessor: an assertion that reads
@@ -830,8 +830,28 @@ def _style_material_name(obj):
     tree = _domain_tree(obj)
     style = next(n for n in tree.nodes if n.type == 'GROUP' and n.node_tree
                  and 'Style' in n.node_tree.name)
-    material = style.inputs["Material"].default_value
+    return style.inputs["Material"].default_value
+
+
+def _style_material_name(obj):
+    material = _style_material(obj)
     return material.name if material else ""
+
+
+def _shader_alpha(material):
+    """The Principled BSDF alpha a material shades with, or None."""
+    return next((n.inputs['Alpha'].default_value
+                 for n in material.node_tree.nodes
+                 if n.type == 'BSDF_PRINCIPLED'), None)
+
+
+def _shader_shape(material):
+    """The material's node types and links, as a comparable fingerprint."""
+    nodes = sorted(n.type for n in material.node_tree.nodes)
+    links = sorted((l.from_node.type, l.from_socket.name,
+                    l.to_node.type, l.to_socket.name)
+                   for l in material.node_tree.links)
+    return nodes, links
 
 
 def _domain_color(obj):
@@ -960,7 +980,8 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
 
     assert _style_material_name(first_obj) == before_material[first_obj.name], (
         "the domain being sized should stay solid, in its own material")
-    assert _style_material_name(second_obj) == ds._GHOST_MATERIAL, (
+    assert _style_material_name(second_obj) == (
+        before_material[second_obj.name] + ds._GHOST_SUFFIX), (
         "the rest of the chain should be ghosted for context")
     assert _domain_color(first_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4), (
         "the domain being sized was not highlighted")
@@ -968,17 +989,12 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
         before_color[second_obj.name], abs=1e-4), (
         "highlighting one domain repainted its neighbour")
 
-    ghost = bpy.data.materials[ds._GHOST_MATERIAL]
-    principled = next(n for n in ghost.node_tree.nodes
-                      if n.type == 'BSDF_PRINCIPLED')
-    assert principled.inputs['Alpha'].default_value < 1.0, (
-        "the ghost material is fully opaque, so it hides what it should reveal")
-
     # Sizing the other domain swaps which one is the subject, both ways round.
     ds.preview_layout(bpy.context, mol, token,
                       [_spec(layout[0], low, low + 40),
                        _spec(layout[1], low + 41, high)], 1)
-    assert _style_material_name(first_obj) == ds._GHOST_MATERIAL
+    assert _style_material_name(first_obj) == (
+        before_material[first_obj.name] + ds._GHOST_SUFFIX)
     assert _style_material_name(second_obj) == before_material[second_obj.name]
     assert _domain_color(second_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4)
     assert _domain_color(first_obj) == pytest.approx(
@@ -993,6 +1009,55 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
         assert _domain_color(obj) == pytest.approx(before_color[obj.name],
                                                    abs=1e-4), (
             f"{obj.name} was left wearing the preview's colour")
+    assert [m.name for m in bpy.data.materials
+            if m.name.endswith(ds._GHOST_SUFFIX)] == [], (
+        "the preview left its ghost materials in the file")
+
+
+@pytest.mark.integration
+def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
+    """The ghost must differ from the real material in opacity and nothing else.
+
+    This is the shape of the feature, not an implementation detail. A ghost
+    built from scratch - a plain Attribute node into a fresh Principled BSDF -
+    reproduces the domain's colours and so looks correct in a node graph, but
+    MolecularNodes shades through its own group reading the *instancer*, and
+    the stand-in renders effectively opaque in the Material Preview viewport
+    however low its alpha is set. That failure is invisible to any assertion
+    about colour or about which material is assigned; only "the ghost shades
+    the same way the real material does" catches it.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol, token, low, high, layout = _split_in_two(mid)
+
+    first_obj = mol.domains[layout[0].domain_id].object
+    second_obj = mol.domains[layout[1].domain_id].object
+    real = _style_material(second_obj)
+    real_shape = _shader_shape(real)
+    assert _shader_alpha(real) == 1.0, "the fixture's material is already faded"
+
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 40),
+                       _spec(layout[1], low + 41, high)], 0)
+
+    ghost = _style_material(second_obj)
+    assert ghost != real, "the ghost shares the real material, so alpha would leak"
+    assert _shader_shape(ghost) == real_shape, (
+        "the ghost does not shade the way the domain does - it is a stand-in, "
+        "not a copy, and will not render translucent")
+    assert _shader_alpha(ghost) == pytest.approx(ds.GHOST_ALPHA), (
+        "the ghost is not actually transparent")
+    assert ghost.surface_render_method == 'BLENDED', (
+        "dithered transparency renders the ghost as a stipple, not a wash")
+    # The domain being sized is untouched: its material must still be the real
+    # one, at full opacity, or the subject fades along with its context.
+    assert _style_material(first_obj) == real
+    assert _shader_alpha(_style_material(first_obj)) == 1.0
+
+    ds.restore_preview(bpy.context)
+    assert _style_material(second_obj) == real
+    assert _shader_alpha(real) == 1.0, "the preview faded the real material"
 
 
 @pytest.mark.integration

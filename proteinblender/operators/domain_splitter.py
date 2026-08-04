@@ -72,7 +72,7 @@ _ISOLATABLE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT'}
 # How opaque the rest of the chain stays while one of its domains is sized.
 # Low enough that the solid domain reads as the subject at a glance, high
 # enough that the chain's shape is still legible behind it.
-GHOST_ALPHA = 0.12
+GHOST_ALPHA = 0.2
 
 # The colour the domain being sized takes for as long as it is being sized. A
 # fixed colour rather than a brightened version of the domain's own: derived
@@ -81,7 +81,8 @@ GHOST_ALPHA = 0.12
 # coloured. The domain's real colour is written back when the dialog closes.
 HIGHLIGHT_COLOR = (1.0, 0.62, 0.05, 1.0)
 
-_GHOST_MATERIAL = "PB Domain Ghost"
+# Appended to the name of the material a ghosted domain normally wears.
+_GHOST_SUFFIX = " (PB ghost)"
 
 
 def _active():
@@ -264,51 +265,47 @@ def _write_color(obj, color):
             socket.default_value = value
 
 
-def _ghost_material():
-    """The single shared translucent material the chain's context is drawn in.
+def _ghost_material(original):
+    """A translucent twin of ``original`` - identical shading, less opacity.
 
-    One datablock swapped onto the Style node, rather than dialling alpha down
-    on each domain's own material: the domains of a molecule all share "MN
-    Default", so editing alpha in place would mean copying that material per
-    object and leaving the copies behind once the dialog closed. Swapping a
-    pointer is exactly reversible and costs one datablock, which has no users
-    once the preview ends.
+    A *copy of the domain's own material*, not a material of our own. A
+    hand-built stand-in does not reproduce how MolecularNodes shades: it reads
+    colour through its own node group off the instancer, and a plain Attribute
+    node fed into a fresh Principled BSDF renders the chain effectively opaque
+    in the Material Preview viewport however low its alpha is set. Copying the
+    real material and dialling alpha down changes exactly one thing, which is
+    the only way the ghost is guaranteed to look like the domain it stands for.
 
-    Base colour still comes from the geometry's "Color" attribute, so a ghosted
-    domain keeps its own colour and loses only its opacity.
+    A copy is needed because every domain of a molecule shares "MN Default";
+    alpha set on it in place would ghost the whole scene. The copy is swapped
+    onto the Style node and swapped back when the preview ends, then dropped by
+    `restore_preview` - so nothing survives the dialog.
     """
-    material = bpy.data.materials.get(_GHOST_MATERIAL)
-    if material is not None:
-        return material
+    if original is None:
+        return None
 
-    # A new material already comes with a node tree on every Blender this
-    # add-on supports; `use_nodes` is deprecated and goes away in 6.0.
-    material = bpy.data.materials.new(name=_GHOST_MATERIAL)
-    # True alpha blending, not EEVEE's default dithered transparency: dithering
-    # a 12%-opaque ghost leaves a sparse stipple of the chain rather than a
-    # wash. `surface_render_method` rather than the legacy `blend_method`
-    # alias, which is on the same path out as `use_nodes`.
+    name = original.name + _GHOST_SUFFIX
+    material = bpy.data.materials.get(name)
+    if material is None:
+        material = original.copy()
+        material.name = name
+
+    # True alpha blending, not EEVEE's default dithered transparency, which
+    # renders a 20%-opaque ghost as a sparse stipple rather than a wash.
     material.surface_render_method = 'BLENDED'
-    material.use_backface_culling = False
-    # The chain is drawn as dense geometry; letting every interior face through
-    # turns the ghost into a solid haze and hides the domain behind it.
-    material.show_transparent_back = False
     # Solid viewport shading reads this rather than the shader nodes.
-    material.diffuse_color = (0.6, 0.6, 0.6, GHOST_ALPHA)
-
-    tree = material.node_tree
-    tree.nodes.clear()
-    output = tree.nodes.new('ShaderNodeOutputMaterial')
-    output.location = (300, 0)
-    principled = tree.nodes.new('ShaderNodeBsdfPrincipled')
-    principled.location = (0, 0)
-    principled.inputs['Alpha'].default_value = GHOST_ALPHA
-    attribute = tree.nodes.new('ShaderNodeAttribute')
-    attribute.location = (-300, 0)
-    attribute.attribute_name = "Color"
-    tree.links.new(attribute.outputs['Color'], principled.inputs['Base Color'])
-    tree.links.new(principled.outputs['BSDF'], output.inputs['Surface'])
+    material.diffuse_color = (*original.diffuse_color[:3], GHOST_ALPHA)
+    for node in material.node_tree.nodes:
+        if node.type == 'BSDF_PRINCIPLED':
+            node.inputs['Alpha'].default_value = GHOST_ALPHA
     return material
+
+
+def _discard_ghost_materials():
+    """Drop the ghost copies once nothing is wearing them any more."""
+    for material in list(bpy.data.materials):
+        if material.name.endswith(_GHOST_SUFFIX) and material.users == 0:
+            bpy.data.materials.remove(material)
 
 
 def _scene_map(scene, key):
@@ -380,8 +377,8 @@ def _show(scene, obj, start, end, ghosted):
 
     socket = _style_material_socket(obj)
     if socket is not None:
-        wanted = (_ghost_material() if ghosted
-                  else bpy.data.materials.get(entry["material"] or ""))
+        own = bpy.data.materials.get(entry["material"] or "")
+        wanted = _ghost_material(own) if ghosted else own
         # Compared with `!=`, never `is not`: a fresh wrapper comes back on
         # every access. Skipping an unchanged assignment avoids a shader
         # rebuild on every keystroke.
@@ -514,6 +511,9 @@ def restore_preview(context):
                 _PREVIEW_STATE, _PREVIEW_HIDDEN):
         if key in scene:
             del scene[key]
+
+    # After the sockets are back on the real materials, nothing wears a ghost.
+    _discard_ghost_materials()
 
     if context.view_layer:
         context.view_layer.update()
