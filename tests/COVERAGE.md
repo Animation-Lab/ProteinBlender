@@ -668,6 +668,35 @@ on a membrane whose typical gap was 0.28 nm.
   and on FLAT / SPHERE / HEMISPHERE with `animate_bob` left ON (the headless
   morph tests disable it).
 
+- **A membrane vanished entirely if its `_Group` collection was unlinked, and
+  could never come back.** Found while hunting the reported "Reset Deformation
+  makes everything disappear" (see the open note below - Reset turned out not to
+  be the trigger, but this failure mode matches the symptom exactly). Every
+  object a membrane owns - root, lattice, holes - lives in one `<name>_Group`
+  collection, so unlinking that one collection makes all of them disappear
+  together while the objects stay in `bpy.data`. That is an ordinary user
+  accident, not file corruption: deleting the group's row in Blender's own
+  outliner unlinks the collection without touching the objects.
+  `_ensure_membrane_collection` looked the collection up by name and returned it
+  as-is, so nothing ever re-attached it and the membrane could not be recovered
+  by re-editing it. Building a *new* membrane that resolved to the same group
+  name then failed outright, because the builder selects the root it just
+  created and Blender refuses: `Object 'Membrane_001' cannot be selected because
+  it is not in View Layer 'ViewLayer'`. Fixed by making the helper ensure the
+  collection is *in this scene*, not merely that it exists - it re-links when
+  the collection is not reachable from `scene.collection.children_recursive`.
+  Reachability rather than direct parentage on purpose: a user who filed the
+  group away inside another collection still sees the membrane, and re-linking
+  to the scene root would yank it out of the place they put it. The repair is
+  reachable from any path that builds or re-applies a membrane, so an already
+  stranded membrane heals rather than staying lost. Guarded by
+  `test_membrane.py::test_a_membrane_survives_its_group_collection_being_unlinked`,
+  verified red pre-fix with exactly the RuntimeError above. Ground truth is
+  Blender's own scene graph - membership in `scene.objects` and
+  `scene.collection.children` - never the helper under test, and the test
+  asserts its own setup actually stranded the membrane so it cannot pass
+  vacuously.
+
 - **Reset Deformation silently did nothing in the two cases that matter.**
   Found while investigating a reported "reset makes the membrane disappear",
   which did NOT reproduce (see the open note below) - but two real defects in
@@ -688,6 +717,56 @@ on a membrane whose typical gap was 0.28 nm.
   `::test_reset_deform_clears_lattice_keyframes`, both verified red pre-fix
   ("did not stick" / "keyframes re-asserted the deformation"); ground truth is
   each point's own rest `co`, which the operator never computes.
+
+- **Deformation mode moved out of the Edit Membrane dialog onto the PB
+  Outliner row.** Reported as "when I click Edit Deformation on the popup then
+  Okay it doesn't let me edit, it takes me out of that mode" - confirmed:
+  `build_membrane.execute()` calls `ensure_object_mode()` (it has to; building
+  calls `select_all`, which does not poll in an edit mode), so confirming the
+  dialog tore the mode straight back down and the lattice could only be reached
+  by *dismissing* the dialog instead. The root cause is a category error rather
+  than a bug: deformation is a **mode**, and it was being launched from a
+  **transient popup**, which cannot host one. Blender offers no way to pin an
+  `invoke_props_dialog` open - it closes on OK, Esc and click-away alike - so
+  the entry point became a toggle on the membrane's Outliner row, which stays
+  on screen and makes entering and leaving the same control.
+  `membrane_toggle_deform` resolves its membrane by name (so it works on a row
+  that is not the active object), hands the mode over cleanly when a
+  *different* membrane is already being deformed, and invokes `edit_deform`
+  with `INVOKE_DEFAULT` so the Esc/Enter modal is actually armed - an EXEC call
+  would silently skip it. The Edit Deformation button was removed from the
+  dialog rather than left as a trap, and the Deformation section was then
+  dropped from it entirely (along with the now-dead `show_deform_section`
+  property). Reset Deformation moved to the deform banner instead of being
+  orphaned - the same dead-operator trap `finish_deform` used to be in - which
+  is also the one surface guaranteed to be on screen while the lattice is being
+  shaped, and it works from there because Reset now drops out of edit mode,
+  resets, and returns. Guarded by
+  `test_membrane.py::test_outliner_toggle_enters_and_leaves_deform_mode` and
+  `::test_deform_toggle_is_per_membrane` (two membranes: only the one actually
+  open may read as active, and toggling the other hands over rather than
+  stacking). The row draw itself is not reachable from background pytest, so it
+  was smoke-tested in a real GUI in both states.
+
+- **Esc / Enter now leave membrane deformation mode.** Follow-up to the
+  one-way-door fix below: a banner button helped, but the mode is entered from
+  a popup and worked on in the viewport, so users still had no keystroke out.
+  `membrane_edit_deform` now stays resident as a modal operator and owns the
+  exit key itself, rather than registering a global keymap item that would
+  hijack Esc for every lattice in the file (the add-on registers no keymaps at
+  all, and this is not a good place to start). It falls back to the old
+  one-shot behaviour whenever a modal handler cannot be attached (headless, no
+  window), so the mode is never entered without *some* way back out. The risky
+  half is not the exit key but swallowing keys normal lattice editing needs, so
+  the per-event decision lives in `deform_modal_step()` - testable without an
+  event loop - and everything except an exit-key PRESS returns "pass". A
+  running transform sits above this handler in Blender's modal stack, so Esc
+  mid-grab is consumed there and cancelling a grab does not drop the user out
+  of the mode. Guarded by
+  `test_membrane.py::test_esc_and_enter_leave_deform_mode`, which pins the
+  whole decision table: the three exit keys, key releases (must not re-fire),
+  the stand-down case outside deform mode, and 16 editing/mouse events that
+  must pass through.
 
 - **Membrane deformation mode was a one-way door.** Reported as "once you enter
   deformation, there is not an obvious way to exit it". `membrane_edit_deform`
@@ -997,8 +1076,8 @@ by passing that state directly (no dialog needed):
 
 ## Known issues surfaced but not fixed here
 
-- **UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and lattice
-  disappear; you have to undo until it comes back."** Reported against a
+- **STILL UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and
+  lattice disappear; you have to undo until it comes back."** Reported against a
   membrane that already existed and was reopened through the PB Outliner's edit
   pencil, with Reset clicked inside that dialog. Not reproducible from the
   operator: driven headless in Object mode, with a hole, from inside
@@ -1006,17 +1085,26 @@ by passing that state directly (no dialog needed):
   tree upgrade (the state a .blend saved by an older build lands in), the root,
   lattice, hole, per-membrane collection and all 1240 lipid instances survive
   every time. Two real defects in the same operator *were* found and fixed (see
-  "Reset Deformation silently did nothing" above), but neither deletes anything,
-  so the disappearance is still unexplained. The remaining untested ingredient is
-  the live `invoke_props_dialog` + undo-push interaction, which background pytest
-  cannot drive - a nested operator carrying `bl_options = {"REGISTER", "UNDO"}`
-  executed while the dialog's own REGISTER|UNDO operator is still pending. Note
-  that all objects live in one `<name>_Group` collection, so a single collection
-  unlink would make root, lattice and holes vanish together, matching the report
-  exactly; `_ensure_membrane_collection` re-uses an existing collection by name
-  without re-linking it to the scene, which would leave everything invisible.
-  That is a hypothesis, not a diagnosis. Needs a live repro with the system
-  console open.
+  "Reset Deformation silently did nothing" above), but neither deletes anything.
+  **The `invoke_props_dialog` + undo-push hypothesis has now been tested and
+  eliminated.** It was driven in the foreground UI lane
+  (`--enable-event-simulate`, steps advanced one per application timer so the
+  window manager really processes the modal dialog): membrane with a hole and a
+  keyframed lattice, edit dialog opened through the outliner pencil path, Reset
+  clicked while the dialog was still up, then confirm / cancel / undo /
+  double-Reset / Edit-Deformation-then-Reset. Everything survives every arm.
+  One caution for anyone re-running this: operators driven from an application
+  timer do **not** push undo steps of their own (`ed.undo.poll()` fails outright
+  after a timer-built membrane), so without explicit `ed.undo_push` calls the
+  dialog's push is the only step on the stack and a single undo lands on the
+  factory-startup scene - which looks exactly like the reported disappearance
+  but is an artifact of the harness. That false positive is what the no-dialog
+  control arm exists to catch. What *was* real is the collection half of the old
+  hypothesis, now fixed and no longer a candidate explanation either (see "A
+  membrane vanished entirely if its `_Group` collection was unlinked" above).
+  So the original report remains unexplained, and its stated trigger (Reset) is
+  now positively ruled out on every path we can drive. Needs a live repro with
+  the system console open - ideally the user's own .blend.
 
 - **`pdb_model_num` and `entity_id` fail to write on every PDB import.**
   `_create_object` builds them from `array.pdb_model_num` / `array.entity_id`,

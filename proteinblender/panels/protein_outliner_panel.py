@@ -260,6 +260,25 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if edit_op:
                 edit_op.membrane_root_to_update = item.object_name
+            # Deformation toggle — enters and leaves lattice deform mode from
+            # one button. It lives here rather than in the edit dialog because
+            # deformation is a *mode*: launching it from a popup meant OK tore
+            # the mode straight back down, and the only way to reach the
+            # lattice was to dismiss the dialog instead of confirming it. The
+            # row stays on screen, so in and out are the same control.
+            from ..membrane_builder.membrane_operators import (
+                is_deforming_membrane,
+            )
+            deforming = is_deforming_membrane(context, item.object_name)
+            deform_op = row.operator(
+                "proteinblender.membrane_toggle_deform",
+                text="",
+                icon='CHECKMARK' if deforming else 'MOD_LATTICE',
+                emboss=deforming,      # the active membrane's button reads as pressed
+                depress=deforming,
+            )
+            if deform_op:
+                deform_op.membrane_name = item.object_name
             # Delete button — routes through the addon's own membrane
             # deleter (which also tears down lattice + hole children + the
             # per-membrane collection).

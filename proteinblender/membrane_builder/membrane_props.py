@@ -317,7 +317,6 @@ class MembraneBuilderProperties(PropertyGroup):
     show_lipid_section: BoolProperty(name="Show Lipid Section", default=True)
     show_animation_section: BoolProperty(name="Show Animation Section", default=False)
     show_colors_section: BoolProperty(name="Show Colors Section", default=False)
-    show_deform_section: BoolProperty(name="Show Deform Section", default=False)
     show_holes_section: BoolProperty(name="Show Holes Section", default=True)
 
 
