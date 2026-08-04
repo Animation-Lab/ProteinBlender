@@ -60,11 +60,33 @@ def _next_hole_name(membrane_name: str) -> str:
 def _ensure_membrane_collection(scene: bpy.types.Scene,
                                   membrane_name: str) -> bpy.types.Collection:
     """Create-or-find a per-membrane collection so the root + children + lattice
-    + holes are all grouped together in the outliner."""
+    + holes are all grouped together in the outliner.
+
+    The collection is *ensured to be in this scene*, not merely to exist. A
+    membrane's root, lattice and holes all live in this one collection, so a
+    collection that exists but is unlinked strands the entire membrane at once:
+    the objects stay in ``bpy.data`` while vanishing from the viewport, the
+    outliner and ``scene.objects``. Deleting the group's row in Blender's own
+    outliner does exactly that, which makes it an ordinary user accident rather
+    than a corrupt-file case.
+
+    Looking the collection up by name and returning it as-is was not enough.
+    Nothing re-attached it, so the membrane could never come back; and building
+    a *new* membrane that resolved to the same group name raised outright,
+    because the builder selects the root it just created and Blender refuses:
+    ``Object '...' cannot be selected because it is not in View Layer``.
+    Re-linking here repairs both, and makes the repair reachable from any path
+    that builds or re-applies a membrane.
+    """
     coll_name = f"{membrane_name}_Group"
     coll = bpy.data.collections.get(coll_name)
     if coll is None:
         coll = bpy.data.collections.new(coll_name)
+    # Reachability, not direct parentage: a user who filed the group away
+    # inside another collection still sees the membrane, and re-linking it to
+    # the scene root would yank it out of the place they put it.
+    reachable = {child.name for child in scene.collection.children_recursive}
+    if coll.name not in reachable:
         scene.collection.children.link(coll)
     return coll
 
@@ -693,33 +715,13 @@ def _draw_membrane_form(layout, props, *, root=None):
             icon="INFO",
         )
 
-    # ---- Deformation (edit mode only) ---------------------------------
-    if root is not None:
-        deform_box = layout.box()
-        deform_header = deform_box.row()
-        deform_header.prop(
-            props, "show_deform_section",
-            text="Deformation",
-            icon="TRIA_DOWN" if props.show_deform_section else "TRIA_RIGHT",
-            emboss=False,
-        )
-        if props.show_deform_section:
-            row = deform_box.row(align=True)
-            row.scale_y = 1.2
-            row.operator(
-                "proteinblender.membrane_edit_deform",
-                text="Edit Deformation",
-                icon="MOD_LATTICE",
-            )
-            row.operator(
-                "proteinblender.membrane_reset_deform",
-                text="",
-                icon="LOOP_BACK",
-            )
-            deform_box.label(
-                text="Close dialog to grab lattice points; right-click → Insert Keyframe.",
-                icon="INFO",
-            )
+    # Deformation is deliberately absent from this dialog. It is a *mode*, and
+    # a dialog is transient: OK calls ensure_object_mode() (it must - building
+    # calls select_all, which does not poll in an edit mode), so confirming
+    # tore the mode straight back down and the lattice could only be reached by
+    # dismissing the dialog instead. Entering and leaving now live on the PB
+    # Outliner row's lattice toggle, and Reset Deformation lives in the banner
+    # that is on screen while deforming - both places that persist.
 
     # ---- Holes (edit mode only) ---------------------------------------
     if root is not None:
@@ -964,7 +966,7 @@ class PROTEINBLENDER_OT_select_hole(Operator):
 # ---------------------------------------------------------------------------
 
 DEFORM_STATUS = ("Membrane deformation:   G  move point    I  keyframe    "
-                 "|    Tab  or  Finish Deformation  to exit")
+                 "|    Esc  or  Enter  to finish")
 
 # Set while the deform banner is on screen, so the status-bar hint can be
 # cleared exactly once when the user leaves edit mode by any route (including
@@ -998,6 +1000,36 @@ def is_editing_membrane_deform(context) -> bool:
     if obj is None or obj.type != "LATTICE":
         return False
     return _get_membrane_root(obj) is not None
+
+
+# Keys that leave deformation mode. Esc is the one users reach for; Enter is
+# included because a dialog-shaped task trains people to confirm with it.
+DEFORM_EXIT_KEYS = frozenset({"ESC", "RET", "NUMPAD_ENTER"})
+
+
+def deform_modal_step(context, event_type: str, event_value: str) -> str:
+    """Decide what the deformation modal should do about one event.
+
+    Split out of ``modal()`` so the decision can be tested without an event
+    loop, because the dangerous failure here is not the exit key — it is
+    swallowing a key that normal lattice editing needs. Returns:
+
+    * ``"stand_down"`` — the user already left deform mode by some other route
+      (Tab, an operator, loading a file); stop listening, touch nothing.
+    * ``"finish"`` — an exit key was pressed; leave deform mode.
+    * ``"pass"`` — none of our business; hand the event straight on.
+
+    Every event that is not an exit-key PRESS must return ``"pass"``, or the
+    add-on starts eating G / S / R / box-select and deformation mode becomes
+    unusable. Note that a running transform sits *above* this handler in
+    Blender's stack, so Esc mid-grab is consumed there and never arrives here —
+    cancelling a grab does not drop the user out of the mode.
+    """
+    if not is_editing_membrane_deform(context):
+        return "stand_down"
+    if event_value == "PRESS" and event_type in DEFORM_EXIT_KEYS:
+        return "finish"
+    return "pass"
 
 
 class PROTEINBLENDER_OT_edit_deform(Operator):
@@ -1051,6 +1083,41 @@ class PROTEINBLENDER_OT_edit_deform(Operator):
         _set_deform_status(context, True)
         return {"FINISHED"}
 
+    def invoke(self, context, event):
+        """Enter the mode, then stay resident so Esc / Enter can leave it.
+
+        Blender has no way out of Lattice edit mode other than Tab, which is
+        not discoverable when the mode was entered from a dialog button. Living
+        as a modal operator lets the add-on own an exit key without registering
+        a global keymap item that would apply to every lattice in the file.
+
+        Falls back to the plain one-shot behaviour whenever a modal handler
+        can't be attached (headless, no window): the banner and Tab still work,
+        so the mode is never entered without *some* way back out.
+        """
+        result = self.execute(context)
+        if result != {"FINISHED"}:
+            return result
+        try:
+            context.window_manager.modal_handler_add(self)
+        except Exception:
+            return {"FINISHED"}
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        action = deform_modal_step(context, event.type, event.value)
+        if action == "pass":
+            return {"PASS_THROUGH"}
+        if action == "stand_down":
+            # Someone else already took us out of the mode; only clear the hint.
+            _set_deform_status(context, False)
+            return {"FINISHED"}
+        try:
+            bpy.ops.proteinblender.membrane_finish_deform()
+        except Exception:
+            _set_deform_status(context, False)
+        return {"FINISHED"}
+
 
 class PROTEINBLENDER_OT_finish_deform(Operator):
     """Leave Lattice edit mode and re-select the membrane root"""
@@ -1072,6 +1139,90 @@ class PROTEINBLENDER_OT_finish_deform(Operator):
             context.view_layer.objects.active = obj.parent
         _set_deform_status(context, False)
         return {"FINISHED"}
+
+
+def is_deforming_membrane(context, root_name: str) -> bool:
+    """True while ``root_name``'s own lattice is the one being edited.
+
+    Checked per-membrane, not globally: with several membranes in a scene the
+    Outliner draws a toggle on every row, and only the row whose lattice is
+    actually open may show as active.
+    """
+    if not is_editing_membrane_deform(context):
+        return False
+    root = _get_membrane_root(context.active_object)
+    return root is not None and root.name == root_name
+
+
+class PROTEINBLENDER_OT_toggle_deform(Operator):
+    """Enter or leave deformation mode for a membrane, from one button.
+
+    The Outliner row is the entry point rather than the Edit Membrane dialog:
+    a dialog is transient and deformation is a *mode*, so launching a mode
+    from one meant OK tore the mode straight back down (execute() has to call
+    ensure_object_mode, because building calls select_all, which does not poll
+    in an edit mode). One toggle in a place that stays on screen makes going in
+    and coming out the same control.
+    """
+
+    bl_idname = "proteinblender.membrane_toggle_deform"
+    bl_label = "Toggle Membrane Deformation"
+    bl_options = {"REGISTER", "UNDO"}
+
+    membrane_name: StringProperty(
+        name="Membrane",
+        description="Membrane root object whose deformer to toggle",
+        default="",
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+
+    def _resolve_root(self, context):
+        if self.membrane_name:
+            root = bpy.data.objects.get(self.membrane_name)
+            if root is not None and root.get("pb_is_membrane", False):
+                return root
+        return _get_membrane_root(context.active_object)
+
+    def invoke(self, context, event):
+        root = self._resolve_root(context)
+        if root is None:
+            self.report({"ERROR"}, "No membrane to deform.")
+            return {"CANCELLED"}
+
+        if is_deforming_membrane(context, root.name):
+            return bpy.ops.proteinblender.membrane_finish_deform()
+
+        # Editing a *different* membrane's lattice — leave that one first, or
+        # the mode_set below runs against the wrong object.
+        if context.mode != "OBJECT":
+            try:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception:
+                pass
+
+        bpy.ops.object.select_all(action="DESELECT")
+        root.select_set(True)
+        context.view_layer.objects.active = root
+        # INVOKE, not EXEC: the modal handler that owns Esc / Enter is armed in
+        # edit_deform's invoke(), and an EXEC call would silently skip it.
+        return bpy.ops.proteinblender.membrane_edit_deform('INVOKE_DEFAULT')
+
+    def execute(self, context):
+        # Scripted / headless path: same decision, no modal arming available.
+        root = self._resolve_root(context)
+        if root is None:
+            return {"CANCELLED"}
+        if is_deforming_membrane(context, root.name):
+            return bpy.ops.proteinblender.membrane_finish_deform()
+        if context.mode != "OBJECT":
+            try:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception:
+                pass
+        bpy.ops.object.select_all(action="DESELECT")
+        root.select_set(True)
+        context.view_layer.objects.active = root
+        return bpy.ops.proteinblender.membrane_edit_deform()
 
 
 class PROTEINBLENDER_OT_reset_deform(Operator):
@@ -1257,12 +1408,22 @@ class PROTEINBLENDER_PT_membrane_deform_banner(bpy.types.Panel):
         col = box.column(align=True)
         col.label(text="Drag lattice points to shape the membrane.", icon="INFO")
         col.label(text="Right-click a point → Insert Keyframe to animate it.")
+        col.label(text="Press Esc or Enter to finish.", icon="EVENT_ESC")
         row = box.row()
         row.scale_y = 1.4
         row.operator(
             "proteinblender.membrane_finish_deform",
             text="Finish Deformation",
             icon="CHECKMARK",
+        )
+        # Reset lives here rather than in the Edit Membrane dialog: this is the
+        # one place guaranteed to be on screen while the user is actually
+        # shaping the lattice, and the operator now works from inside edit mode
+        # (it drops out, resets, and returns) so it is usable where it is drawn.
+        box.operator(
+            "proteinblender.membrane_reset_deform",
+            text="Reset to Flat",
+            icon="LOOP_BACK",
         )
 
 
@@ -1274,6 +1435,7 @@ CLASSES = (
     PROTEINBLENDER_OT_select_hole,
     PROTEINBLENDER_OT_edit_deform,
     PROTEINBLENDER_OT_finish_deform,
+    PROTEINBLENDER_OT_toggle_deform,
     PROTEINBLENDER_OT_reset_deform,
     PROTEINBLENDER_OT_delete_membrane,
     PROTEINBLENDER_PT_membrane_deform_banner,

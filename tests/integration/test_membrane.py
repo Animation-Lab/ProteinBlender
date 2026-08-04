@@ -897,6 +897,62 @@ def test_lipids_do_not_flip_when_a_fold_passes_the_azimuth_reference(scene):
 
 
 @pytest.mark.integration
+def test_a_membrane_survives_its_group_collection_being_unlinked(scene):
+    """An unlinked <name>_Group must not strand or break the membrane.
+
+    Every object a membrane owns - root, lattice, holes - lives in one
+    ``<name>_Group`` collection, so unlinking that collection from the scene
+    makes all of them disappear together. That is an ordinary thing for a user
+    to do by accident: deleting the group's row in Blender's own outliner
+    unlinks the collection without touching the objects.
+
+    `_ensure_membrane_collection` looks the collection up by name and returns
+    it as-is, so it hands back a collection that is not in the scene and the
+    membrane never comes back. Worse, building a *new* membrane that resolves
+    to the same group name then fails outright, because the operator selects
+    the root it just made and Blender refuses:
+    ``Object 'Membrane_001' cannot be selected because it is not in View Layer``.
+
+    Ground truth is Blender's own scene graph - membership in
+    ``scene.objects`` and ``scene.collection.children`` - never the helper
+    under test.
+    """
+    names = H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root = _membrane_root(names)
+    assert root is not None
+    group_name = f"{root.name}_Group"
+    group = bpy.data.collections.get(group_name)
+    assert group is not None, f"no {group_name} collection was created"
+    assert root.name in {o.name for o in bpy.context.scene.objects}
+
+    # What deleting the group row in Blender's outliner does.
+    bpy.context.scene.collection.children.unlink(group)
+    assert root.name not in {o.name for o in bpy.context.scene.objects}, (
+        "test setup: unlinking the group did not actually strand the membrane")
+
+    # Free the names so a rebuild resolves to the same group, which is the
+    # state in which the builder used to raise.
+    for obj in [root] + list(root.children):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    assert group_name in {c.name for c in bpy.data.collections}, (
+        "test setup: the stranded group was cleaned up, nothing left to hit")
+    assert group_name not in {c.name for c in bpy.context.scene.collection.children}
+
+    # Building again must succeed and must be visible, not silently land in
+    # the stranded collection.
+    names2 = H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root2 = _membrane_root(names2)
+    assert root2 is not None, "no membrane was built over the stranded group"
+    assert root2.name in {o.name for o in bpy.context.scene.objects}, (
+        f"{root2.name} was built into a collection that is not in the scene, "
+        "so the whole membrane is invisible")
+    assert root2.visible_get(), f"{root2.name} was built but is not visible"
+    assert f"{root2.name}_Group" in {
+        c.name for c in bpy.context.scene.collection.children}, (
+        "the membrane's group collection is still not linked to the scene")
+
+
+@pytest.mark.integration
 def test_deform_mode_offers_a_visible_way_out(scene):
     """Entering deformation mode must put an exit on screen.
 
@@ -1021,3 +1077,140 @@ def test_reset_deform_clears_lattice_keyframes(scene):
     assert lattice.animation_data is not None \
         and lattice.animation_data.action is not None, (
             "Reset cleared the lattice OBJECT's animation, which it does not own")
+
+
+@pytest.mark.integration
+def test_esc_and_enter_leave_deform_mode(scene):
+    """Esc / Enter must exit deformation mode, and nothing else may be eaten.
+
+    Reported: "there isn't an easy way to go back to the regular editing (it
+    stays in the deform edit mode)". Edit Deformation now stays resident as a
+    modal operator so it can own an exit key without registering a global
+    keymap item that would hijack Esc for every lattice in the file.
+
+    The exit key is the easy half. The half that breaks the feature is
+    swallowing keys normal lattice editing needs, so this pins down the whole
+    decision table - every non-exit event must pass straight through.
+    """
+    from proteinblender.membrane_builder.membrane_operators import (
+        deform_modal_step,
+    )
+
+    names = H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root = _membrane_root(names)
+    H.select_only(root)
+
+    # Outside deform mode the modal must never act.
+    assert deform_modal_step(bpy.context, "ESC", "PRESS") == "stand_down"
+
+    try:
+        result = bpy.ops.proteinblender.membrane_edit_deform()
+    except RuntimeError as e:
+        HC.context_unavailable(pytest, f"needs an interactive context: {e}")
+    if result != {'FINISHED'} or bpy.context.mode != 'EDIT_LATTICE':
+        HC.context_unavailable(
+            pytest, f"headless context could not enter Lattice edit mode "
+                    f"(result={result}, mode={bpy.context.mode})")
+
+    for key in ("ESC", "RET", "NUMPAD_ENTER"):
+        assert deform_modal_step(bpy.context, key, "PRESS") == "finish", (
+            f"{key} does not leave deformation mode")
+
+    # The editing keys a user actually needs, plus mouse traffic. If any of
+    # these stop passing through, deform mode becomes unusable.
+    for key in ("G", "S", "R", "X", "A", "B", "Z", "TAB", "I",
+                "LEFTMOUSE", "RIGHTMOUSE", "MIDDLEMOUSE", "MOUSEMOVE",
+                "WHEELUPMOUSE", "LEFT_CTRL", "ONE"):
+        assert deform_modal_step(bpy.context, key, "PRESS") == "pass", (
+            f"the deform modal is swallowing {key}, which normal lattice "
+            "editing needs")
+
+    # Key releases must not fire a second exit.
+    for key in ("ESC", "RET"):
+        assert deform_modal_step(bpy.context, key, "RELEASE") == "pass"
+
+    # And the exit itself works end to end.
+    assert bpy.ops.proteinblender.membrane_finish_deform() == {'FINISHED'}
+    assert bpy.context.mode == 'OBJECT'
+    assert deform_modal_step(bpy.context, "ESC", "PRESS") == "stand_down"
+
+
+@pytest.mark.integration
+def test_outliner_toggle_enters_and_leaves_deform_mode(scene):
+    """One Outliner button must both enter and leave deformation mode.
+
+    Reported: "when I click Edit Deformation on the popup then Okay it doesn't
+    let me edit, it takes me out of that mode". The dialog's OK calls
+    ensure_object_mode(), so launching a *mode* from a transient popup tore it
+    straight back down - the lattice could only be reached by dismissing the
+    dialog rather than confirming it. The entry point is now a toggle on the
+    PB Outliner row, which stays on screen, so in and out are one control.
+    """
+    from proteinblender.membrane_builder.membrane_operators import (
+        is_deforming_membrane,
+    )
+
+    names = H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0)
+    root = _membrane_root(names)
+    assert root is not None
+    H.select_only(root)
+
+    assert not is_deforming_membrane(bpy.context, root.name)
+
+    try:
+        result = bpy.ops.proteinblender.membrane_toggle_deform(
+            membrane_name=root.name)
+    except RuntimeError as e:
+        HC.context_unavailable(pytest, f"needs an interactive context: {e}")
+    if result != {'FINISHED'} or bpy.context.mode != 'EDIT_LATTICE':
+        HC.context_unavailable(
+            pytest, f"headless context could not enter Lattice edit mode "
+                    f"(result={result}, mode={bpy.context.mode})")
+
+    assert is_deforming_membrane(bpy.context, root.name), (
+        "the toggle entered edit mode but the row does not read as active")
+
+    # The same button again must come back out.
+    assert bpy.ops.proteinblender.membrane_toggle_deform(
+        membrane_name=root.name) == {'FINISHED'}
+    assert bpy.context.mode == 'OBJECT', "the toggle did not leave deform mode"
+    assert not is_deforming_membrane(bpy.context, root.name)
+
+
+@pytest.mark.integration
+def test_deform_toggle_is_per_membrane(scene):
+    """Only the membrane actually being deformed may read as active.
+
+    The Outliner draws a toggle on every membrane row, so a global "are we in
+    lattice edit mode" check would light up all of them and let the wrong row
+    claim to be the one open.
+    """
+    from proteinblender.membrane_builder.membrane_operators import (
+        is_deforming_membrane,
+    )
+
+    first = _membrane_root(H.build_membrane(shape=SHAPE_FLAT, width=10.0,
+                                            height=10.0))
+    second = _membrane_root(H.build_membrane(shape=SHAPE_FLAT, width=8.0,
+                                             height=8.0))
+    assert first is not None and second is not None and first != second
+
+    try:
+        result = bpy.ops.proteinblender.membrane_toggle_deform(
+            membrane_name=first.name)
+    except RuntimeError as e:
+        HC.context_unavailable(pytest, f"needs an interactive context: {e}")
+    if result != {'FINISHED'} or bpy.context.mode != 'EDIT_LATTICE':
+        HC.context_unavailable(
+            pytest, f"headless context could not enter Lattice edit mode "
+                    f"(result={result}, mode={bpy.context.mode})")
+
+    assert is_deforming_membrane(bpy.context, first.name)
+    assert not is_deforming_membrane(bpy.context, second.name), (
+        "the other membrane's row also reads as being deformed")
+
+    # Toggling the second one must hand the mode over, not stack two.
+    assert bpy.ops.proteinblender.membrane_toggle_deform(
+        membrane_name=second.name) == {'FINISHED'}
+    assert is_deforming_membrane(bpy.context, second.name)
+    assert not is_deforming_membrane(bpy.context, first.name)
