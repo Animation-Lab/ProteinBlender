@@ -8,8 +8,44 @@ multiple files (molecule_wrapper.py, molecule_props.py, scene_manager.py).
 import bpy
 from typing import Dict, List, Tuple, Optional, Any
 import json
+import re
 
 from .blender_utils import get_object_safe
+
+
+# ---------------------------------------------------------------------------
+# Domain naming
+#
+# One canonical auto-generated name, and one test for "did the user choose
+# this?". Both live here because the name is produced in three places that
+# must agree - the create path, the Domain Splitter dialog, and the outliner
+# rebuild that re-derives row labels - and when they disagreed the same chain
+# showed "Chain A: Residues 1-248" next to "Domain 1".
+# ---------------------------------------------------------------------------
+
+def default_domain_name(chain_id: Any, start: int, end: int) -> str:
+    """The auto-generated name for a domain covering ``start``-``end``."""
+    return f"Chain {chain_id}: {start}-{end}"
+
+
+# Every auto-generated form the create/split/dialog paths have produced. A
+# name matching one of these is regenerated as the range changes; anything
+# else is a deliberate rename and must survive untouched.
+_AUTO_NAME_PATTERNS = (
+    r'^Residues\s+\d+-\d+$',                      # early split path
+    r'^Chain\s+\S+$',                             # sole full-span domain
+    r'^Chain\s+\S+:\s*\d+-\d+$',                  # the canonical form
+    r'^Chain\s+\S+:\s*Residues\s+\d+-\d+$',       # canonical, older wording
+    r'^Domain\s+\d+$',                            # early Domain Splitter rows
+)
+
+
+def is_default_domain_name(name: Optional[str]) -> bool:
+    """True if ``name`` was generated rather than typed by the user."""
+    text = (name or "").strip()
+    if not text:
+        return True
+    return any(re.match(pattern, text) for pattern in _AUTO_NAME_PATTERNS)
 
 
 def get_chain_mapping_from_string(mapping_str: str) -> Dict[int, str]:

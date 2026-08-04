@@ -38,7 +38,8 @@ from bpy.props import (CollectionProperty, IntProperty, StringProperty)
 from bpy.types import Operator, PropertyGroup
 
 from ..core import domain_layout
-from ..utils.chain_utils import chain_token_from_item
+from ..utils.chain_utils import (chain_match_tokens, chain_token_from_item,
+                                 default_domain_name, is_default_domain_name)
 from ..utils.scene_manager import ProteinBlenderScene
 
 # Blender caps how tall a dialog can usefully get; past this the row list stops
@@ -65,6 +66,24 @@ _ISOLATABLE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT'}
 
 def _active():
     return PROTEINBLENDER_OT_edit_chain_domains._active_instance
+
+
+def _author_chain_label(molecule, chain_token, specs):
+    """The author chain letter ("A") for a chain the outliner calls "2".
+
+    Default domain names read "Chain A: 1-248", so they need the letter a user
+    recognises, not the row's numeric index. An existing domain already stores
+    the letter; otherwise fall back to the molecule's own index->letter map.
+    """
+    for spec in specs:
+        domain = molecule.domains.get(spec.domain_id)
+        letter = getattr(domain, "chain_id", None)
+        if letter:
+            return str(letter)
+    for candidate in chain_match_tokens(molecule, chain_token):
+        if not str(candidate).isdigit():
+            return str(candidate)
+    return str(chain_token)
 
 
 # Dialog edit state. Module-level rather than attributes on the operator
@@ -275,13 +294,21 @@ def _on_end_edited(row, context):
         instance.range_edited(row, moved_start=False)
 
 
-def _on_count_edited(instance, context):
+def _on_count_edited(_operator, context):
     """Redistribute the chain evenly whenever the domain count changes.
 
     This replaces the old explicit "Build Domains" button: the count spinner
     *is* the build control, and OK commits.
+
+    Routed through ``_active()`` rather than the ``self`` RNA hands this
+    callback: that wrapper does not expose the operator's own methods, so
+    calling ``redistribute()`` on it raises AttributeError - the same
+    limitation that makes plain class attributes unreachable here.
     """
-    if not _state["suspended"]:
+    if _state["suspended"]:
+        return
+    instance = _active()
+    if instance is not None:
         instance.redistribute()
 
 
@@ -332,6 +359,10 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     # not have to re-derive them on every redraw.
     chain_min: IntProperty(default=1)
     chain_max: IntProperty(default=1)
+    # The author chain letter ("A"), used to build default domain names. The
+    # outliner row carries the chain *index*, which is not what a user reading
+    # "Chain A: 1-248" expects to see.
+    chain_label: StringProperty(default="")
 
     # Headless escape hatch: a JSON list of {name, start, end, domain_id}. When
     # set, execute() uses it instead of the dialog rows, so the operator is
@@ -393,7 +424,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         membership, linkers and animation) and deletes only the fourth, rather
         than replacing all of them.
         """
-        previous = [r.domain_id for r in self.rows if r.domain_id]
+        previous = [(r.domain_id, r.name) for r in self.rows if r.domain_id]
         ranges = domain_layout.even_split(self.chain_min, self.chain_max,
                                           self.domain_count)
         with _Suspend():
@@ -402,14 +433,12 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 row = self.rows.add()
                 row.start = start
                 row.end = end
-                # Names are reset because changing the count is a "start over
-                # with N even pieces" action: carrying old names over left the
-                # first row labelled after the whole chain ("Chain A") while
-                # its siblings read "Domain 2/3/4". The ids still carry over,
-                # which is what preserves puppets, linkers and animation.
-                row.name = f"Domain {i + 1}"
+                # A name the user typed survives a re-divide; an auto-generated
+                # one is re-derived from the row's new range.
                 if i < len(previous):
-                    row.domain_id = previous[i]
+                    row.domain_id, kept = previous[i]
+                    row.name = "" if is_default_domain_name(kept) else kept
+            self._refresh_default_names()
 
     def range_edited(self, row, moved_start):
         """Re-tile the layout around a boundary the user just moved.
@@ -442,6 +471,9 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 for existing, spec in zip(self.rows, retiled):
                     existing.start = spec.start
                     existing.end = spec.end
+                # Both domains either side of the boundary changed size, so any
+                # auto-generated name on them is now advertising the wrong span.
+                self._refresh_default_names()
             else:
                 # A domain has to be created to own the residues this edit
                 # orphaned. Apply the edited row's own (clamped) value now so
@@ -472,23 +504,20 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 row.start = spec.start
                 row.end = spec.end
                 row.domain_id = spec.domain_id or ""
-            self._renumber_default_names()
+            self._refresh_default_names()
             self.domain_count = len(self.rows)
 
-    def _renumber_default_names(self):
-        """Give any unnamed row the next free 'Domain N'.
+    def _refresh_default_names(self):
+        """Re-derive every auto-generated row name from its current range.
 
-        Only fills blanks - a name the user typed is never renumbered.
+        A name the user typed is never touched. An auto-generated one tracks
+        the range, so a domain the user re-sized is not left advertising the
+        span it used to cover.
         """
-        taken = {r.name for r in self.rows if r.name}
         for row in self.rows:
-            if row.name:
-                continue
-            number = 1
-            while f"Domain {number}" in taken:
-                number += 1
-            row.name = f"Domain {number}"
-            taken.add(row.name)
+            if is_default_domain_name(row.name):
+                row.name = default_domain_name(self.chain_label, row.start,
+                                               row.end)
 
     def split_row(self, index):
         """Cut one row in half, giving the new half a fresh (unassigned) row."""
@@ -506,7 +535,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             new_row.start = tail_start
             new_row.end = tail_end
             self.rows.move(len(self.rows) - 1, index + 1)
-            self._renumber_default_names()
+            self._refresh_default_names()
             self.domain_count = len(self.rows)
 
     def merge_row(self, index):
@@ -518,6 +547,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             row.start = min(row.start, following.start)
             row.end = max(row.end, following.end)
             self.rows.remove(index + 1)
+            self._refresh_default_names()
             self.domain_count = len(self.rows)
 
     def remove_row(self, index):
@@ -535,6 +565,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             else:
                 self.rows[index + 1].start = row.start
             self.rows.remove(index)
+            self._refresh_default_names()
             self.domain_count = len(self.rows)
 
     def add_row(self):
@@ -587,8 +618,10 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
 
         with _Suspend():
             specs = domain_layout.current_layout(molecule, token)
+            self.chain_label = _author_chain_label(molecule, token, specs)
             self.load_rows(specs)
             self.domain_count = max(1, len(specs))
+            self._refresh_default_names()
 
         _state["pending_layout"] = None
         type(self)._active_instance = self

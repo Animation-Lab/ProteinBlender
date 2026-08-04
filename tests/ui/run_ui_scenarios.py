@@ -341,6 +341,7 @@ def edit_chain_domains_live_boundary_drag():
     """
     from proteinblender.core import domain_layout
     from proteinblender.operators import domain_splitter as ds
+    from proteinblender.utils.chain_utils import default_domain_name
 
     scene_manager = H.scene_manager_module()
     chain = next(row for row in bpy.context.scene.outliner_items
@@ -348,9 +349,12 @@ def edit_chain_domains_live_boundary_drag():
     molecule = H.sm().molecules[chain.parent_id]
     low, high = domain_layout.chain_residue_range(molecule, chain.chain_id)
     pieces = domain_layout.even_split(low, high, 3)
-    payload = json.dumps([{"name": f"UI Domain {i}", "start": a, "end": b,
-                           "domain_id": ""}
-                          for i, (a, b) in enumerate(pieces, start=1)])
+    # Seed with auto-generated names, so the assertions below exercise the
+    # "auto names track their range" rule rather than the rename rule.
+    letter = next((d.chain_id for d in molecule.domains.values()), "A")
+    payload = json.dumps([{"name": default_domain_name(letter, a, b),
+                           "start": a, "end": b, "domain_id": ""}
+                          for a, b in pieces])
     with ui_override("PROPERTIES"):
         assert bpy.ops.proteinblender.edit_chain_domains(
             "EXEC_DEFAULT", item_id=chain.item_id,
@@ -385,6 +389,30 @@ def edit_chain_domains_live_boundary_drag():
     shown = (node.inputs["Min"].default_value, node.inputs["Max"].default_value)
     assert shown == (boundary + 12, new_end), (
         f"preview shows {shown}, expected {(boundary + 12, new_end)}")
+
+    # Auto-generated names track their range; a typed one never changes. Both
+    # rules only run through the live dialog.
+    label = instance.chain_label
+    assert instance.rows[0].name == default_domain_name(
+        label, instance.rows[0].start, instance.rows[0].end), (
+        f"auto name did not follow its range: {instance.rows[0].name!r}")
+
+    instance.rows[1].name = "Catalytic core"
+    instance.rows[1].start = instance.rows[1].start + 4
+    assert instance.rows[1].name == "Catalytic core", (
+        "a typed name was overwritten by a boundary edit")
+
+    # Changing the count re-divides. This is a method call on the operator
+    # through a property update callback, which RNA's `self` wrapper cannot
+    # serve - it used to raise AttributeError and leave the rows untouched.
+    instance.domain_count = 4
+    assert len(instance.rows) == 4, (
+        f"changing the count did not re-divide: {len(instance.rows)} rows")
+    assert "Catalytic core" in [r.name for r in instance.rows], (
+        "the typed name was lost when the chain was re-divided")
+    for row in instance.rows:
+        assert row.name == "Catalytic core" or row.name == default_domain_name(
+            label, row.start, row.end), f"stale auto name {row.name!r}"
 
     state["splitter_hidden"] = ds._PREVIEW_HIDDEN in bpy.context.scene
     active_window().event_simulate(type="ESC", value="PRESS")

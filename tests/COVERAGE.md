@@ -432,6 +432,19 @@ on a membrane whose typical gap was 0.28 nm.
   The explicit "Build Domains" button is gone: the domain-count field re-divides the chain as it changes, and OK commits.
   Guarded by `test_domain_splitter.py::test_moving_a_start_moves_the_boundary_with_the_domain_above` and `::test_moving_an_end_moves_the_boundary_with_the_domain_below`, `::test_pulling_the_first_start_off_the_chain_creates_a_domain_above` and `::test_pulling_the_last_end_off_the_chain_creates_a_domain_below`, `::test_a_boundary_cannot_swallow_its_neighbour`, `::test_retiling_clamps_to_the_chain_and_never_inverts_a_domain` and `::test_retiling_a_single_full_chain_domain_is_a_no_op`. Every case also asserts the result still tiles the chain exactly.
 
+- **Domains on one chain were named by three different generators, so they disagreed.**
+  Reported: splitting a chain gave a first domain named "Chain A: Residues 1-248" and a second named "Domain 1".
+  Three places produced a default name and none of them agreed: `_create_domain_with_params` generated `Chain A: 1-248`, the outliner rebuild re-derived display names as `Chain A: Residues 1-248`, and the Domain Splitter dialog used `Domain N` - which the rebuild's auto-name patterns did not recognise, so it was preserved as though the user had typed it.
+  Fixed by moving both rules into `chain_utils`: `default_domain_name(chain_id, start, end)` -> `"Chain A: 1-248"` (the wording the user asked for), and `is_default_domain_name(name)`, which recognises every historical auto form (blank, `Residues N-M`, `Chain X`, `Chain X: N-M`, `Chain X: Residues N-M`, `Domain N`). The create path, the dialog and the outliner rebuild all go through them.
+  An auto-generated name is re-derived whenever its range changes - on a boundary drag, a merge, a remove, or a re-divide - so it never advertises a span it no longer covers. A name the user typed is never rewritten, including across a re-divide that changes its range.
+  Guarded by `test_domain_splitter.py::test_auto_generated_names_name_the_chain_and_the_range`, `::test_every_historical_auto_name_is_recognised_as_auto`, `::test_a_name_the_user_typed_is_never_treated_as_auto`, `::test_split_domains_are_all_named_for_the_chain_and_their_range` and `::test_the_outliner_keeps_a_name_the_user_typed`, plus the live-dialog assertions in `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`.
+  Note `test_domains.py::test_split_domain_default_name_includes_chain_and_residues` now pins `"Chain A: 1-50"`; the expected string is written out in full rather than built with `default_domain_name`, so it cannot silently follow a change to the generator it exists to pin.
+
+- **Changing the Domain Splitter's domain count raised AttributeError and did nothing.**
+  `domain_count`'s update callback called `instance.redistribute()` on the ``self`` RNA hands a property update callback. That wrapper does not expose the operator's own **methods** - the same limitation that makes plain class attributes unreachable there - so re-dividing the chain raised `AttributeError: no attribute 'redistribute'` and silently left the rows alone.
+  Fixed by routing through `_active()` (the instance published at invoke/draw time), as the row callbacks already did.
+  Only reachable through a live modal dialog, so guarded in `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`.
+
 - **A Domain Splitter boundary edit did not move the neighbour, and the viewport preview did not follow.**
   Reported: "when I adjust a domain's start/end it just snaps back to where it was", and "it doesn't adjust the res_id on-the-fly in the 3d viewer".
   The re-tile was computed in the row's property update callback but *applied* in the operator's `check()`, on the assumption that Blender calls `check()` after any dialog property edit.

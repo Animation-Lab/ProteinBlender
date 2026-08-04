@@ -151,6 +151,113 @@ def test_validate_layout_rejects_overlap_and_out_of_bounds():
 
 
 # --------------------------------------------------------------------------
+# Default names
+# --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_auto_generated_names_name_the_chain_and_the_range():
+    from proteinblender.utils.chain_utils import (default_domain_name,
+                                                  is_default_domain_name)
+
+    assert default_domain_name("A", 1, 248) == "Chain A: 1-248"
+    assert default_domain_name("D", 249, 400) == "Chain D: 249-400"
+    # Whatever the generator produces must read back as auto-generated, or a
+    # name would freeze the moment it was first written.
+    assert is_default_domain_name(default_domain_name("A", 1, 248))
+
+
+@pytest.mark.integration
+def test_every_historical_auto_name_is_recognised_as_auto():
+    """All the shapes the create/split/dialog paths have produced count as auto.
+
+    Each of these was a default at some point. Any one that stops being
+    recognised freezes as if the user had typed it, which is how the same chain
+    ended up showing "Chain A: Residues 1-248" next to "Domain 1".
+    """
+    from proteinblender.utils.chain_utils import is_default_domain_name
+
+    for name in ("", "   ", "Residues 1-50", "Chain A", "Chain A: 1-248",
+                 "Chain A: Residues 1-248", "Domain 1", "Domain 12"):
+        assert is_default_domain_name(name), f"{name!r} should count as auto"
+
+
+@pytest.mark.integration
+def test_a_name_the_user_typed_is_never_treated_as_auto():
+    from proteinblender.utils.chain_utils import is_default_domain_name
+
+    for name in ("Catalytic core", "Kinase domain", "SH2", "N-lobe",
+                 "Chain A tail", "Residues of interest", "Domain of unknown"):
+        assert not is_default_domain_name(name), f"{name!r} is a user rename"
+
+
+@pytest.mark.integration
+def test_split_domains_are_all_named_for_the_chain_and_their_range(scene):
+    """Every piece of a split chain gets a consistent, range-accurate name.
+
+    The reported defect: the first domain read "Chain A: Residues 1-248" while
+    the second read "Domain 1" - two different generators disagreeing.
+    """
+    from proteinblender.utils.chain_utils import default_domain_name
+
+    mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
+    row_id = chain_row.item_id  # every _apply rebuilds and invalidates the row
+    low = max(1, pdb_min)
+    pieces = domain_layout.even_split(low, pdb_max, 3)
+
+    # Create them the way the dialog does for auto-named rows.
+    _apply(chain_row, [(default_domain_name(letter, s, e), s, e, None)
+                       for s, e in pieces])
+    _build_outliner()
+
+    rows = [it for it in bpy.context.scene.outliner_items
+            if it.item_type == "DOMAIN" and it.parent_id == row_id]
+    assert len(rows) == 3
+    shown = sorted(it.name for it in rows)
+    assert shown == sorted(default_domain_name(letter, s, e) for s, e in pieces)
+    # Nothing may read "Domain N" or carry the old "Residues" wording.
+    assert not any("Residues" in name or name.startswith("Domain ")
+                   for name in shown), shown
+
+
+@pytest.mark.integration
+def test_the_outliner_keeps_a_name_the_user_typed(scene):
+    """A rename survives the rebuild; its auto-named sibling still tracks."""
+    from proteinblender.utils.chain_utils import default_domain_name
+
+    mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
+    mol = H.sm().molecules[mid]
+    low = max(1, pdb_min)
+    midpoint = (low + pdb_max) // 2
+    _apply(chain_row, [("Catalytic core", low, midpoint, None),
+                       (default_domain_name(letter, midpoint + 1, pdb_max),
+                        midpoint + 1, pdb_max, None)])
+    _build_outliner()
+
+    names = [it.name for it in bpy.context.scene.outliner_items
+             if it.item_type == "DOMAIN"]
+    assert "Catalytic core" in names, (
+        f"the user's name was overwritten by the rebuild: {names}")
+    assert default_domain_name(letter, midpoint + 1, pdb_max) in names
+
+    # Re-range the auto-named one: its name follows, the typed one does not.
+    layout = domain_layout.current_layout(mol, chain_row.chain_id)
+    typed = next(s for s in layout if s.name == "Catalytic core")
+    auto = next(s for s in layout if s.name != "Catalytic core")
+    shifted = midpoint + 10
+    chain_row = _row_by_id(chain_row.item_id)
+    _apply(chain_row, [("Catalytic core", low, shifted, typed.domain_id),
+                       (default_domain_name(letter, shifted + 1, pdb_max),
+                        shifted + 1, pdb_max, auto.domain_id)])
+    _build_outliner()
+
+    names = [it.name for it in bpy.context.scene.outliner_items
+             if it.item_type == "DOMAIN"]
+    assert "Catalytic core" in names, "the rename did not survive a re-range"
+    assert default_domain_name(letter, shifted + 1, pdb_max) in names, (
+        f"the auto name did not follow its new range: {names}")
+
+
+# --------------------------------------------------------------------------
 # Boundary dragging: the layout re-tiles itself
 # --------------------------------------------------------------------------
 
