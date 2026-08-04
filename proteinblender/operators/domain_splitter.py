@@ -14,11 +14,14 @@ off the beginning of the chain (or the last domain's end off the end) leaves a
 stretch with no owner, so a new domain is created there to keep the tiling
 whole.
 
-While a range is being edited the viewport isolates that one domain, so the
-user can see the piece they are defining instead of guessing at residue
-numbers. This drives the geometry-nodes residue range on a single preview
-object and hides the rest; both are restored when the dialog closes, whether
-it is confirmed or cancelled.
+While a range is being edited the viewport isolates the chain being edited, so
+the user can see the piece they are defining instead of guessing at residue
+numbers. The domain under the cursor is drawn solid and in a highlight colour;
+the rest of the chain stays visible but ghosted, so the piece being sized is
+read against the whole it is being carved out of rather than floating on its
+own. Everything outside the chain is hidden. The residue ranges, materials,
+colours and visibility this touches are all restored when the dialog closes,
+whether it is confirmed or cancelled.
 
 Nothing here mutates the domain model. `draw()` only reads, the row buttons
 only touch the dialog's own rows, and the model is changed once, in `execute`.
@@ -53,15 +56,32 @@ MAX_DOMAINS = 32
 _PREVIEW_OBJECT = "pb_splitter_preview_object"
 _PREVIEW_MODIFIER = "pb_splitter_preview_modifier"
 _PREVIEW_NODE = "pb_splitter_preview_node"
-# {object_name: [min, max]} for every object the preview has driven, so
-# switching which domain is shown still restores all of them.
-_PREVIEW_RANGES = "pb_splitter_preview_ranges"
+# Everything the preview changed on an object, captured the first time that
+# object is touched and restored verbatim afterwards:
+# {object_name: {"range": [min, max], "material": name_or_"", "color": rgba}}.
+# One map rather than one per property so an object is always put back whole,
+# and so switching which domain is being sized still restores the others.
+_PREVIEW_STATE = "pb_splitter_preview_state"
 _PREVIEW_HIDDEN = "pb_splitter_preview_hidden"
 
 # Object types worth hiding while isolating a domain. Cameras, lights and the
 # puppet controller Empties are deliberately left alone: hiding the lights
 # would just darken the very thing the user is trying to look at.
 _ISOLATABLE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT'}
+
+# How opaque the rest of the chain stays while one of its domains is sized.
+# Low enough that the solid domain reads as the subject at a glance, high
+# enough that the chain's shape is still legible behind it.
+GHOST_ALPHA = 0.12
+
+# The colour the domain being sized takes for as long as it is being sized. A
+# fixed colour rather than a brightened version of the domain's own: derived
+# highlights barely move for a domain that is already vivid, whereas "the gold
+# one is the one you are editing" holds however the chain happens to be
+# coloured. The domain's real colour is written back when the dialog closes.
+HIGHLIGHT_COLOR = (1.0, 0.62, 0.05, 1.0)
+
+_GHOST_MATERIAL = "PB Domain Ghost"
 
 
 def _active():
@@ -141,30 +161,12 @@ def _range_node(obj):
     return None, None
 
 
-def _preview_target(molecule, chain_token, preferred=None):
-    """The object to drive for the preview.
-
-    Prefers the edited domain's *own* object, so the user watches that domain
-    grow and shrink where it actually sits. A row the user has just added has
-    no object yet, so any other domain of the same chain stands in: they share
-    the mesh and the same "Select Chain" -> "Select Res ID Range" pair, so
-    driving one can show any stretch of the chain.
-    """
-    modifier, node = _range_node(preferred)
-    if node is not None:
-        return preferred, modifier, node
-
-    for spec in domain_layout.current_layout(molecule, chain_token):
-        domain = molecule.domains.get(spec.domain_id)
-        obj = getattr(domain, "object", None) if domain else None
-        modifier, node = _range_node(obj)
-        if node is not None:
-            return obj, modifier, node
-    return None, None, None
-
-
 def _preview_node(context):
-    """Re-resolve the live preview node from the scene bookkeeping."""
+    """Re-resolve the range node of the domain currently being sized.
+
+    Pointers into a node collection cannot be cached across edits, so the
+    bookkeeping stores names and this resolves them at point of use.
+    """
     scene = context.scene
     obj = bpy.data.objects.get(scene.get(_PREVIEW_OBJECT, ""))
     if obj is None:
@@ -175,105 +177,341 @@ def _preview_node(context):
     return modifier.node_group.nodes.get(scene.get(_PREVIEW_NODE, ""))
 
 
-def _remember_range(scene, obj, node):
-    """Record an object's untouched residue range, once."""
-    try:
-        ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
-    except (ValueError, TypeError):
-        ranges = {}
-    if obj.name not in ranges:
-        ranges[obj.name] = [int(node.inputs["Min"].default_value),
-                            int(node.inputs["Max"].default_value)]
-        scene[_PREVIEW_RANGES] = json.dumps(ranges)
+def _style_material_socket(obj):
+    """The Style node's Material input - what a domain is shaded with."""
+    for modifier in obj.modifiers:
+        if modifier.type != 'NODES' or not modifier.node_group:
+            continue
+        for node in modifier.node_group.nodes:
+            if (node.type == 'GROUP' and node.node_tree
+                    and "Style" in node.node_tree.name):
+                return node.inputs.get("Material")
+    return None
 
 
-def enter_preview(context, molecule, chain_token, preferred=None):
-    """Hide everything but the previewed domain, remembering what to restore.
+def _color_sockets(obj):
+    """The sockets holding a domain's colour, on whichever node drives it.
 
-    The hidden set is captured once, on the first call, so dragging a boundary
-    never re-captures the isolated state as if the user had chosen it. Which
-    object is *shown* can still change as the user moves between rows.
+    Two node layouts reach "Set Color", and they store the colour differently.
+    Import wires it from a per-domain copy of the "Color Common" group, which
+    holds an RGBA "Carbon" socket. The Visual Set-up colour picker instead
+    relinks it to a "Custom Combine Color" node holding three float channels.
+    Both are handled, so a domain the user has already recoloured still
+    highlights - and, more importantly, still gets its colour back afterwards.
+
+    Links are compared with ``==``: Blender hands back a fresh wrapper on every
+    access, so ``is`` would never match.
     """
-    scene = context.scene
-    first_entry = _PREVIEW_OBJECT not in scene
-
-    obj, modifier, node = _preview_target(molecule, chain_token, preferred)
-    if obj is None:
+    tree = next((m.node_group for m in obj.modifiers
+                 if m.type == 'NODES' and m.node_group), None)
+    if tree is None:
         return None
 
-    if first_entry:
+    set_color = tree.nodes.get("Set Color")
+    if set_color is None:
+        return None
+    color_input = next((s for s in set_color.inputs if "Color" in s.name), None)
+    if color_input is None:
+        return None
+    driver = next((link.from_node for link in tree.links
+                   if link.to_socket == color_input), None)
+    if driver is None:
+        return None
+
+    if driver.name == "Custom Combine Color":
+        return [driver.inputs[channel]
+                for channel in ("Red", "Green", "Blue")
+                if channel in driver.inputs]
+    if driver.name == "Color Common":
+        # Import gives every domain its own copy of this group. Should one ever
+        # be shared, highlighting through it would recolour the domain's
+        # neighbours too, so leave that domain uncoloured rather than repaint
+        # the wrong thing.
+        if driver.node_tree is None or driver.node_tree.users > 1:
+            return None
+        carbon = driver.inputs.get("Carbon")
+        return [carbon] if carbon is not None else None
+    return None
+
+
+def _read_color(obj):
+    """The domain's current colour as RGBA, or None if nothing drives it."""
+    sockets = _color_sockets(obj)
+    if not sockets:
+        return None
+    if len(sockets) == 1:
+        return list(sockets[0].default_value)
+    return [s.default_value for s in sockets] + [1.0]
+
+
+def _write_color(obj, color):
+    """Set the domain's colour, skipping sockets that already hold it.
+
+    The skip matters: this runs on every keystroke in the dialog's Start and
+    End fields, and re-assigning an unchanged socket still tags the shader for
+    a rebuild.
+    """
+    sockets = _color_sockets(obj)
+    if not sockets:
+        return
+    if len(sockets) == 1:
+        wanted = tuple(color)[:4]
+        if tuple(sockets[0].default_value) != wanted:
+            sockets[0].default_value = wanted
+        return
+    for socket, value in zip(sockets, color):
+        if socket.default_value != value:
+            socket.default_value = value
+
+
+def _ghost_material():
+    """The single shared translucent material the chain's context is drawn in.
+
+    One datablock swapped onto the Style node, rather than dialling alpha down
+    on each domain's own material: the domains of a molecule all share "MN
+    Default", so editing alpha in place would mean copying that material per
+    object and leaving the copies behind once the dialog closed. Swapping a
+    pointer is exactly reversible and costs one datablock, which has no users
+    once the preview ends.
+
+    Base colour still comes from the geometry's "Color" attribute, so a ghosted
+    domain keeps its own colour and loses only its opacity.
+    """
+    material = bpy.data.materials.get(_GHOST_MATERIAL)
+    if material is not None:
+        return material
+
+    # A new material already comes with a node tree on every Blender this
+    # add-on supports; `use_nodes` is deprecated and goes away in 6.0.
+    material = bpy.data.materials.new(name=_GHOST_MATERIAL)
+    # True alpha blending, not EEVEE's default dithered transparency: dithering
+    # a 12%-opaque ghost leaves a sparse stipple of the chain rather than a
+    # wash. `surface_render_method` rather than the legacy `blend_method`
+    # alias, which is on the same path out as `use_nodes`.
+    material.surface_render_method = 'BLENDED'
+    material.use_backface_culling = False
+    # The chain is drawn as dense geometry; letting every interior face through
+    # turns the ghost into a solid haze and hides the domain behind it.
+    material.show_transparent_back = False
+    # Solid viewport shading reads this rather than the shader nodes.
+    material.diffuse_color = (0.6, 0.6, 0.6, GHOST_ALPHA)
+
+    tree = material.node_tree
+    tree.nodes.clear()
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    output.location = (300, 0)
+    principled = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    principled.location = (0, 0)
+    principled.inputs['Alpha'].default_value = GHOST_ALPHA
+    attribute = tree.nodes.new('ShaderNodeAttribute')
+    attribute.location = (-300, 0)
+    attribute.attribute_name = "Color"
+    tree.links.new(attribute.outputs['Color'], principled.inputs['Base Color'])
+    tree.links.new(principled.outputs['BSDF'], output.inputs['Surface'])
+    return material
+
+
+def _scene_map(scene, key):
+    try:
+        return json.loads(scene.get(key, "{}"))
+    except (ValueError, TypeError):
+        return {}
+
+
+def _store_map(scene, key, data):
+    scene[key] = json.dumps(data)
+
+
+def _capture(scene, obj):
+    """Record what the preview is about to change on ``obj``, once.
+
+    Captured on first touch and never re-captured, so dragging a boundary
+    cannot record the previewed state as if it were the user's own.
+    """
+    state = _scene_map(scene, _PREVIEW_STATE)
+    if obj.name in state:
+        return state[obj.name]
+
+    _modifier, node = _range_node(obj)
+    socket = _style_material_socket(obj)
+    material = socket.default_value if socket is not None else None
+    state[obj.name] = {
+        "range": [int(node.inputs["Min"].default_value),
+                  int(node.inputs["Max"].default_value)],
+        "material": material.name if material is not None else "",
+        "color": _read_color(obj),
+    }
+    _store_map(scene, _PREVIEW_STATE, state)
+    return state[obj.name]
+
+
+def _restore_object(scene, obj):
+    """Put back everything the preview changed on ``obj``, and forget it."""
+    state = _scene_map(scene, _PREVIEW_STATE)
+    entry = state.pop(obj.name, None)
+    if entry is None:
+        return
+    _store_map(scene, _PREVIEW_STATE, state)
+
+    _modifier, node = _range_node(obj)
+    if node is not None:
+        node.inputs["Min"].default_value = int(entry["range"][0])
+        node.inputs["Max"].default_value = int(entry["range"][1])
+
+    socket = _style_material_socket(obj)
+    if socket is not None:
+        socket.default_value = bpy.data.materials.get(entry["material"] or "")
+
+    if entry["color"]:
+        _write_color(obj, entry["color"])
+
+
+def _show(scene, obj, start, end, ghosted):
+    """Reveal ``obj`` showing residues ``start``-``end``, solid or ghosted.
+
+    Solid also means highlighted: exactly one domain is un-ghosted at a time -
+    the one being sized - so the two go together.
+    """
+    entry = _capture(scene, obj)
+
+    _modifier, node = _range_node(obj)
+    node.inputs["Min"].default_value = start
+    node.inputs["Max"].default_value = end
+
+    socket = _style_material_socket(obj)
+    if socket is not None:
+        wanted = (_ghost_material() if ghosted
+                  else bpy.data.materials.get(entry["material"] or ""))
+        # Compared with `!=`, never `is not`: a fresh wrapper comes back on
+        # every access. Skipping an unchanged assignment avoids a shader
+        # rebuild on every keystroke.
+        if socket.default_value != wanted:
+            socket.default_value = wanted
+
+    if entry["color"]:
+        _write_color(obj, entry["color"] if ghosted else HIGHLIGHT_COLOR)
+
+    obj.hide_viewport = False
+
+
+def _retire(scene, keep):
+    """Hide and reset every object the preview showed that it no longer shows.
+
+    Without this, moving between rows would leave the domain that lent its
+    object to a previous row stuck at someone else's residue range.
+    """
+    for name in set(_scene_map(scene, _PREVIEW_STATE)) - keep:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        _restore_object(scene, obj)
+        obj.hide_viewport = True
+
+
+def _domain_object(molecule, domain_id):
+    domain = molecule.domains.get(domain_id) if domain_id else None
+    return getattr(domain, "object", None) if domain else None
+
+
+def _drivable(obj):
+    """Can this object be driven to show an arbitrary stretch of its chain?"""
+    return obj is not None and _range_node(obj)[1] is not None
+
+
+def _stand_in(molecule, chain_token, objects):
+    """An object to show the edited domain's span when it has none of its own.
+
+    A row the user has just added has no object yet. Every domain of a chain
+    shares the mesh and the same "Select Chain" -> "Select Res ID Range" pair,
+    so any of them can be driven to show any stretch of that chain. The lender
+    stands in for the new domain instead of showing its own span.
+    """
+    for obj in objects:
+        if _drivable(obj):
+            return obj
+    for spec in domain_layout.current_layout(molecule, chain_token):
+        obj = _domain_object(molecule, spec.domain_id)
+        if _drivable(obj):
+            return obj
+    return None
+
+
+def preview_layout(context, molecule, chain_token, specs, edited_index):
+    """Isolate the chain, with the domain being sized picked out from it.
+
+    ``specs[edited_index]`` is drawn solid and in the highlight colour; the
+    other domains of the chain are shown at their own ranges but ghosted, so
+    the piece being carved out is read against the whole chain rather than
+    floating alone. Everything outside the chain is hidden.
+
+    The hidden set is captured once, on the first call, so dragging a boundary
+    never re-captures the isolated scene as if the user had chosen it.
+    """
+    scene = context.scene
+    if not specs or not (0 <= edited_index < len(specs)):
+        return None
+
+    objects = [_domain_object(molecule, spec.domain_id) for spec in specs]
+    edited_obj = objects[edited_index]
+    if not _drivable(edited_obj):
+        edited_obj = _stand_in(molecule, chain_token, objects)
+    if edited_obj is None:
+        return None
+
+    if _PREVIEW_OBJECT not in scene:
         hidden = {}
         for other in bpy.data.objects:
             if other.type not in _ISOLATABLE_TYPES:
                 continue
             hidden[other.name] = bool(other.hide_viewport)
             other.hide_viewport = True
-        scene[_PREVIEW_HIDDEN] = json.dumps(hidden)
-    elif scene.get(_PREVIEW_OBJECT) != obj.name:
-        # Switching to a different domain: put the one we were driving back to
-        # its own range and hide it again.
-        previous_node = _preview_node(context)
-        previous = bpy.data.objects.get(scene.get(_PREVIEW_OBJECT, ""))
-        if previous is not None:
-            try:
-                ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
-            except (ValueError, TypeError):
-                ranges = {}
-            original = ranges.get(previous.name)
-            if previous_node is not None and original:
-                previous_node.inputs["Min"].default_value = int(original[0])
-                previous_node.inputs["Max"].default_value = int(original[1])
-            previous.hide_viewport = True
+        _store_map(scene, _PREVIEW_HIDDEN, hidden)
 
-    scene[_PREVIEW_OBJECT] = obj.name
+    shown = set()
+    for index, (spec, obj) in enumerate(zip(specs, objects)):
+        # The edited domain is placed last, and an object lent to it cannot
+        # also show its own span.
+        if index == edited_index or not _drivable(obj):
+            continue
+        if obj.name == edited_obj.name:
+            continue
+        _show(scene, obj, spec.start, spec.end, ghosted=True)
+        shown.add(obj.name)
+
+    edited = specs[edited_index]
+    _show(scene, edited_obj, edited.start, edited.end, ghosted=False)
+    shown.add(edited_obj.name)
+    _retire(scene, shown)
+
+    modifier, node = _range_node(edited_obj)
+    scene[_PREVIEW_OBJECT] = edited_obj.name
     scene[_PREVIEW_MODIFIER] = modifier.name
     scene[_PREVIEW_NODE] = node.name
-    _remember_range(scene, obj, node)
-    obj.hide_viewport = False
-    return obj
 
-
-def preview_range(context, molecule, chain_token, start, end, preferred=None):
-    """Isolate ``preferred`` (or any domain of the chain) and show ``start``-``end``."""
-    if enter_preview(context, molecule, chain_token, preferred) is None:
-        return
-    node = _preview_node(context)
-    if node is None:
-        return
-    node.inputs["Min"].default_value = start
-    node.inputs["Max"].default_value = end
     if context.view_layer:
         context.view_layer.update()
     _tag_redraw(context, {'VIEW_3D', 'NODE_EDITOR'})
+    return edited_obj
 
 
 def restore_preview(context):
-    """Undo the isolation and put every driven object's range back."""
+    """Undo the isolation and put every object the preview touched back."""
     scene = context.scene
     if _PREVIEW_OBJECT not in scene:
         return
 
-    try:
-        ranges = json.loads(scene.get(_PREVIEW_RANGES, "{}"))
-    except (ValueError, TypeError):
-        ranges = {}
-    for name, original in ranges.items():
-        _modifier, node = _range_node(bpy.data.objects.get(name))
-        if node is not None and original and len(original) == 2:
-            node.inputs["Min"].default_value = int(original[0])
-            node.inputs["Max"].default_value = int(original[1])
+    for name in list(_scene_map(scene, _PREVIEW_STATE)):
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            _restore_object(scene, obj)
 
-    try:
-        hidden = json.loads(scene.get(_PREVIEW_HIDDEN, "{}"))
-    except (ValueError, TypeError):
-        hidden = {}
-    for name, was_hidden in hidden.items():
-        other = bpy.data.objects.get(name)
-        if other is not None:
-            other.hide_viewport = was_hidden
+    for name, was_hidden in _scene_map(scene, _PREVIEW_HIDDEN).items():
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            obj.hide_viewport = was_hidden
 
     for key in (_PREVIEW_OBJECT, _PREVIEW_MODIFIER, _PREVIEW_NODE,
-                _PREVIEW_RANGES, _PREVIEW_HIDDEN):
+                _PREVIEW_STATE, _PREVIEW_HIDDEN):
         if key in scene:
             del scene[key]
 
@@ -484,8 +722,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 row.end = edited.end
                 _state["pending_layout"] = retiled
 
-        edited = retiled[new_index]
-        self._preview_range(edited.start, edited.end, edited.domain_id)
+        self._preview_layout(retiled, new_index)
 
     def _apply_pending_layout(self):
         """Write the re-tiled layout back onto the dialog's rows."""
@@ -580,20 +817,20 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     # Viewport preview
     # ------------------------------------------------------------------
 
-    def _preview_range(self, start, end, domain_id=None):
-        """Show only the residues the user is currently sizing a domain to.
+    def _preview_layout(self, specs, edited_index):
+        """Show the layout the user is heading towards, in the viewport.
 
-        Driven on the edited domain's own object where there is one, so the
-        user watches that domain grow and shrink in place.
+        The whole layout is handed over, not just the edited row: the domains
+        either side of a boundary move with it, and seeing them move is the
+        point of previewing the chain rather than the one domain.
         """
         context = bpy.context
         chain_row = self._chain_row(context)
         molecule = self._molecule(context, chain_row)
         if molecule is None:
             return
-        domain = molecule.domains.get(domain_id) if domain_id else None
-        preview_range(context, molecule, chain_token_from_item(chain_row),
-                      start, end, preferred=getattr(domain, "object", None))
+        preview_layout(context, molecule, chain_token_from_item(chain_row),
+                       specs, edited_index)
 
     # ------------------------------------------------------------------
     # Invoke / draw / execute

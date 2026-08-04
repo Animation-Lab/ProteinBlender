@@ -284,7 +284,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |
 | `test_panels.py` | all 9 Panels + 2 UILists registered; `poll()` safety |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
-| `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/restore pair, and the identity-preservation invariants a layout edit must hold (see below) |
+| `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
 
@@ -454,10 +454,12 @@ on a membrane whose typical gap was 0.28 nm.
   Guarded by `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`, which drives a **real modal dialog in a foreground Blender** (background Blender routes `INVOKE_DEFAULT` to `execute()`, so there is no live instance to drive and this cannot be covered in the headless lane) and deliberately never calls `check()`.
   Verified red pre-fix: `AssertionError: neighbour did not follow: rows[0].end=66, expected 78`.
 
-- **Sizing a domain isolates it in the viewport, and the isolation is always undone.**
-  Residue numbers alone are a poor way to choose a domain boundary, so while a range is being edited everything but that domain is hidden and the geometry-nodes residue range is driven live (the same technique `split_domain_popup` uses).
-  This is the only part of the dialog that touches the scene *before* the user confirms, so a leak is highly visible - the user would be left looking at an apparently empty viewport with no idea why. The bookkeeping therefore lives on the scene, not the operator instance, so a preview left behind by a dialog that died without closing can be cleared by the next `invoke`; `execute` and `cancel` both restore.
-  Guarded by `test_domain_splitter.py::test_preview_isolates_the_chain_and_restores_everything_afterwards` (ground truth is the visibility flags and node range captured *before* isolating, and it also asserts a second preview call does not re-capture the isolated state as the original) and `::test_restoring_a_preview_that_was_never_started_is_harmless`.
+- **Sizing a domain isolates its chain in the viewport, and the isolation is always undone.**
+  Residue numbers alone are a poor way to choose a domain boundary, so while a range is being edited the geometry-nodes residue range is driven live (the same technique `split_domain_popup` uses) and everything outside the edited chain is hidden.
+  The chain itself stays whole: the domain under the cursor is drawn solid and in `HIGHLIGHT_COLOR`, its neighbours are shown at the ranges the pending layout gives them but wearing the shared `PB Domain Ghost` material at `GHOST_ALPHA`. Isolating the one domain alone left it floating with nothing to judge a boundary against; ghosting the rest of the chain gives the boundary something to be a boundary *of*.
+  Ghosting swaps a material *pointer* on the Style node rather than dialling alpha down in place: every domain of a molecule shares `MN Default`, so editing alpha on it would mean copying that material per object and leaving the copies behind once the dialog closed.
+  This is the only part of the dialog that touches the scene *before* the user confirms, so a leak is highly visible - the user would be left looking at a scene missing most of its contents, or at a molecule the dialog silently repainted. The bookkeeping therefore lives on the scene, not the operator instance, so a preview left behind by a dialog that died without closing can be cleared by the next `invoke`; `execute` and `cancel` both restore.
+  Guarded by `test_domain_splitter.py::test_preview_isolates_the_chain_and_restores_everything_afterwards` (ground truth is the visibility flags and node ranges captured *before* isolating, and it also asserts a second preview call does not re-capture the previewed state as the original), `::test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized` (materials and colours read straight off the node graph, never through the splitter's own accessors), `::test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row` and `::test_restoring_a_preview_that_was_never_started_is_harmless`.
   Note for future work here: Blender does **not** expose a plain (non-RNA) class attribute through an operator *instance* inside a property update callback - `instance.suspended` raises AttributeError even with `suspended = False` on the class - so the dialog's re-entrancy guard and deferred-layout state are module-level, not class attributes.
 
 - **The Domain Maker panel drew an unreachable block calling two operators that do not exist.**

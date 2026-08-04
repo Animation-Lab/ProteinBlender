@@ -29,6 +29,7 @@ import pytest
 import helpers as H
 
 from proteinblender.core import domain_layout
+from proteinblender.operators import domain_splitter as ds
 
 
 # --------------------------------------------------------------------------
@@ -807,96 +808,243 @@ def test_removing_a_domain_strips_it_from_puppet_membership(scene):
 # The viewport preview must always be undone
 # --------------------------------------------------------------------------
 
-@pytest.mark.integration
-def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
-    """Sizing a domain isolates it, and closing the dialog puts the scene back.
+def _domain_tree(obj):
+    """The domain's geometry-node tree, straight off its modifier."""
+    return next(m.node_group for m in obj.modifiers
+                if m.type == 'NODES' and m.node_group)
 
-    This is the one piece of the dialog that touches the scene *before* the
-    user confirms, so a leak is highly visible: the user would be left looking
-    at an apparently empty viewport with no idea why. Ground truth is the
-    visibility flags and node range captured before isolating, so the assertion
-    cannot move with a bug in the restore code.
+
+def _shown_range(obj):
+    """The residue span a domain object is currently displaying."""
+    _mod, node = ds._range_node(obj)
+    return (node.inputs["Min"].default_value, node.inputs["Max"].default_value)
+
+
+def _style_material_name(obj):
+    """The material the domain is shaded with, read from the node graph.
+
+    Deliberately not domain_splitter's own accessor: an assertion that reads
+    state through the code under test would move with a bug in that code
+    instead of catching it.
     """
-    from proteinblender.operators import domain_splitter as ds
+    tree = _domain_tree(obj)
+    style = next(n for n in tree.nodes if n.type == 'GROUP' and n.node_tree
+                 and 'Style' in n.node_tree.name)
+    material = style.inputs["Material"].default_value
+    return material.name if material else ""
 
-    mid = H.import_local("4hhb.pdb", "4hhb")
-    _build_outliner()
+
+def _domain_color(obj):
+    """The domain's colour, read from the node graph rather than the model."""
+    return tuple(_domain_tree(obj).nodes["Color Common"].inputs["Carbon"]
+                 .default_value)
+
+
+def _spec(entry, start, end):
+    return domain_layout.DomainSpec(name=entry.name, start=start, end=end,
+                                    domain_id=entry.domain_id)
+
+
+def _split_in_two(mid):
+    """A chain of 4hhb divided into two domains, ready to preview."""
     mol = H.sm().molecules[mid]
     row = _chain_rows(mid)[0]
     token = row.chain_id
-
-    # Split so the chain has several domains and the scene has plenty to hide.
     low, high = domain_layout.chain_residue_range(mol, token)
     pieces = domain_layout.even_split(low, high, 2)
     _apply(row, [(f"Piece {i}", s, e, None)
                  for i, (s, e) in enumerate(pieces, start=1)])
     _build_outliner()
 
-    geometry = [o for o in bpy.data.objects if o.type in ds._ISOLATABLE_TYPES]
-    assert len(geometry) > 2, "need several objects for isolation to mean anything"
-    before = {o.name: o.hide_viewport for o in geometry}
-
     layout = domain_layout.current_layout(mol, token)
     assert len(layout) == 2, "expected the chain to be split in two"
+    return mol, token, low, high, layout
+
+
+@pytest.mark.integration
+def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
+    """Sizing a domain isolates its chain, and closing the dialog puts it back.
+
+    The chain being edited stays whole - the domain under the cursor plus its
+    neighbours for context - while everything else in the scene is hidden. This
+    is the one piece of the dialog that touches the scene *before* the user
+    confirms, so a leak is highly visible: the user would be left looking at a
+    scene missing most of its contents with no idea why. Ground truth is the
+    visibility flags and node ranges captured before isolating, so the
+    assertions cannot move with a bug in the restore code.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol, token, low, high, layout = _split_in_two(mid)
+
+    geometry = [o for o in bpy.data.objects if o.type in ds._ISOLATABLE_TYPES]
+    assert len(geometry) > 3, "need several objects for isolation to mean anything"
+    before_hidden = {o.name: o.hide_viewport for o in geometry}
+
     first_obj = mol.domains[layout[0].domain_id].object
     second_obj = mol.domains[layout[1].domain_id].object
-    _mod, first_node = ds._range_node(first_obj)
-    _mod, second_node = ds._range_node(second_obj)
-    assert first_node is not None and second_node is not None
-    first_original = (first_node.inputs["Min"].default_value,
-                      first_node.inputs["Max"].default_value)
-    second_original = (second_node.inputs["Min"].default_value,
-                       second_node.inputs["Max"].default_value)
+    chain_objects = {first_obj.name, second_obj.name}
+    assert chain_objects < set(before_hidden), (
+        "the scene holds nothing outside the edited chain to hide")
+    before_range = {o.name: _shown_range(o) for o in (first_obj, second_obj)}
 
-    # Size the FIRST domain: it alone is visible and shows the asked range.
-    ds.preview_range(bpy.context, mol, token, low + 5, low + 25,
-                     preferred=first_obj)
-    still_visible = [o.name for o in bpy.data.objects
-                     if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
-    assert still_visible == [first_obj.name], (
-        f"isolation left these visible: {still_visible}")
-    assert first_node.inputs["Min"].default_value == low + 5
-    assert first_node.inputs["Max"].default_value == low + 25
+    # Size the FIRST domain. Its chain stays whole; nothing else survives.
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low + 5, low + 25),
+                       _spec(layout[1], low + 26, high)], 0)
+    visible = {o.name for o in bpy.data.objects
+               if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport}
+    assert visible == chain_objects, (
+        f"isolation should leave exactly the edited chain visible, left {visible}")
+    assert _shown_range(first_obj) == (low + 5, low + 25)
+    assert _shown_range(second_obj) == (low + 26, high), (
+        "the rest of the chain is not showing the layout the user is heading to")
 
-    # Dragging further must not re-capture the isolated state as "original".
-    ds.preview_range(bpy.context, mol, token, low + 5, low + 40,
-                     preferred=first_obj)
-    assert first_node.inputs["Max"].default_value == low + 40
+    # Dragging further must not re-capture the previewed state as "original".
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low + 5, low + 40),
+                       _spec(layout[1], low + 41, high)], 0)
+    assert _shown_range(first_obj) == (low + 5, low + 40)
 
-    # Moving to the SECOND domain shows that one instead, and hands the first
-    # its own range back - the user is sizing a different domain now.
-    ds.preview_range(bpy.context, mol, token, low + 50, low + 60,
-                     preferred=second_obj)
-    still_visible = [o.name for o in bpy.data.objects
-                     if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
-    assert still_visible == [second_obj.name], (
-        f"switching domains left these visible: {still_visible}")
-    assert (first_node.inputs["Min"].default_value,
-            first_node.inputs["Max"].default_value) == first_original, (
-        "the domain we stopped previewing kept a preview range")
-    assert second_node.inputs["Min"].default_value == low + 50
+    # Moving to the SECOND domain sizes that one instead. Both stay visible:
+    # the chain is the context, only which domain is the subject changes.
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 49),
+                       _spec(layout[1], low + 50, low + 60)], 1)
+    visible = {o.name for o in bpy.data.objects
+               if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport}
+    assert visible == chain_objects, (
+        f"switching domains changed what is visible: {visible}")
+    assert bpy.context.scene[ds._PREVIEW_OBJECT] == second_obj.name
 
     ds.restore_preview(bpy.context)
 
-    after = {o.name: o.hide_viewport for o in bpy.data.objects
-             if o.type in ds._ISOLATABLE_TYPES}
-    assert after == before, "the preview did not restore the original visibility"
-    # Both driven objects get their own range back, not just the last one.
-    assert (first_node.inputs["Min"].default_value,
-            first_node.inputs["Max"].default_value) == first_original, (
-        "the preview left the first domain's residue range altered")
-    assert (second_node.inputs["Min"].default_value,
-            second_node.inputs["Max"].default_value) == second_original, (
-        "the preview left the second domain's residue range altered")
+    after_hidden = {o.name: o.hide_viewport for o in bpy.data.objects
+                    if o.type in ds._ISOLATABLE_TYPES}
+    assert after_hidden == before_hidden, (
+        "the preview did not restore the original visibility")
+    # Every driven object gets its own range back, not just the last one.
+    for obj in (first_obj, second_obj):
+        assert _shown_range(obj) == before_range[obj.name], (
+            f"the preview left {obj.name} showing a preview range")
     assert ds._PREVIEW_OBJECT not in bpy.context.scene, (
         "preview bookkeeping was left on the scene")
 
 
 @pytest.mark.integration
+def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
+    """The edited domain is picked out of its chain, and both revert on close.
+
+    Context is only useful if the subject still reads as the subject, so the
+    domain under the cursor is drawn solid and in the highlight colour while
+    its neighbours drop to the ghost material. Both are borrowed, not owned:
+    the domain's real colour and material have to come back, or the dialog
+    silently repaints the user's molecule.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol, token, low, high, layout = _split_in_two(mid)
+
+    first_obj = mol.domains[layout[0].domain_id].object
+    second_obj = mol.domains[layout[1].domain_id].object
+    before_material = {o.name: _style_material_name(o)
+                       for o in (first_obj, second_obj)}
+    before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
+    assert before_color[first_obj.name] != before_color[second_obj.name], (
+        "the fixture gave both domains the same colour, so a highlight that "
+        "leaked to the neighbour would go unnoticed")
+
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 40),
+                       _spec(layout[1], low + 41, high)], 0)
+
+    assert _style_material_name(first_obj) == before_material[first_obj.name], (
+        "the domain being sized should stay solid, in its own material")
+    assert _style_material_name(second_obj) == ds._GHOST_MATERIAL, (
+        "the rest of the chain should be ghosted for context")
+    assert _domain_color(first_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4), (
+        "the domain being sized was not highlighted")
+    assert _domain_color(second_obj) == pytest.approx(
+        before_color[second_obj.name], abs=1e-4), (
+        "highlighting one domain repainted its neighbour")
+
+    ghost = bpy.data.materials[ds._GHOST_MATERIAL]
+    principled = next(n for n in ghost.node_tree.nodes
+                      if n.type == 'BSDF_PRINCIPLED')
+    assert principled.inputs['Alpha'].default_value < 1.0, (
+        "the ghost material is fully opaque, so it hides what it should reveal")
+
+    # Sizing the other domain swaps which one is the subject, both ways round.
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 40),
+                       _spec(layout[1], low + 41, high)], 1)
+    assert _style_material_name(first_obj) == ds._GHOST_MATERIAL
+    assert _style_material_name(second_obj) == before_material[second_obj.name]
+    assert _domain_color(second_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4)
+    assert _domain_color(first_obj) == pytest.approx(
+        before_color[first_obj.name], abs=1e-4), (
+        "the domain we stopped sizing kept the highlight colour")
+
+    ds.restore_preview(bpy.context)
+
+    for obj in (first_obj, second_obj):
+        assert _style_material_name(obj) == before_material[obj.name], (
+            f"{obj.name} was left wearing the preview's material")
+        assert _domain_color(obj) == pytest.approx(before_color[obj.name],
+                                                   abs=1e-4), (
+            f"{obj.name} was left wearing the preview's colour")
+
+
+@pytest.mark.integration
+def test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row(scene):
+    """A row with no object yet borrows a sibling's, and gives it back.
+
+    A domain the user has just added exists only in the dialog, so the preview
+    drives some other domain of the chain to show its span. That lender must
+    not be left displaying the new domain's residues once the user moves on -
+    it would silently show the wrong stretch of the chain.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol, token, low, high, layout = _split_in_two(mid)
+
+    first_obj = mol.domains[layout[0].domain_id].object
+    second_obj = mol.domains[layout[1].domain_id].object
+    before_range = {o.name: _shown_range(o) for o in (first_obj, second_obj)}
+    before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
+
+    # A third row the user has just added: no domain_id, so no object of its own.
+    brand_new = domain_layout.DomainSpec(name="New", start=low + 10,
+                                         end=low + 20, domain_id=None)
+    ds.preview_layout(bpy.context, mol, token,
+                      [brand_new, _spec(layout[0], low + 21, low + 60),
+                       _spec(layout[1], low + 61, high)], 0)
+
+    lender = bpy.data.objects[bpy.context.scene[ds._PREVIEW_OBJECT]]
+    assert lender.name in {first_obj.name, second_obj.name}, (
+        "the new row did not borrow a domain of its own chain")
+    assert _shown_range(lender) == (low + 10, low + 20), (
+        "the borrowed object is not showing the new domain's span")
+
+    # Back to sizing a real domain: the lender returns to its own range.
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 60),
+                       _spec(layout[1], low + 61, high)], 0)
+    assert _shown_range(first_obj) == (low, low + 60)
+    assert _shown_range(second_obj) == (low + 61, high), (
+        "the lender was left showing the new row's residues")
+
+    ds.restore_preview(bpy.context)
+
+    for obj in (first_obj, second_obj):
+        assert _shown_range(obj) == before_range[obj.name]
+        assert _domain_color(obj) == pytest.approx(before_color[obj.name],
+                                                   abs=1e-4)
+
+
+@pytest.mark.integration
 def test_restoring_a_preview_that_was_never_started_is_harmless(scene):
     """A stale-preview teardown on a clean scene must be a no-op, not a crash."""
-    from proteinblender.operators import domain_splitter as ds
-
     H.import_local("1ubq.pdb", "1ubq")
     _build_outliner()
     before = {o.name: o.hide_viewport for o in bpy.data.objects}
