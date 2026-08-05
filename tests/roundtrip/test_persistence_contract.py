@@ -247,6 +247,13 @@ def test_every_deferred_load_pass_is_pumped_by_the_verifier():
         "_apply_workspace_context_callback":
             "re-applies Scene context to the workspace's Properties editor "
             "after activation; UI layout only, covered by the foreground-ui lane",
+        "_settle":
+            "Domain Splitter debounce: adds the row for a stretch a boundary "
+            "drag orphaned, once the value stops moving. Scheduled from a "
+            "dialog property edit, never from a load handler, and it only "
+            "touches the dialog's own rows - the model is written in execute(). "
+            "Covered by the foreground-ui lane, which is the only place a live "
+            "modal dialog exists",
     }
 
     scheduled: dict[str, list[str]] = {}
