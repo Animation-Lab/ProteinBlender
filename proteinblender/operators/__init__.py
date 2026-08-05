@@ -50,6 +50,7 @@ from .domain_ops import (
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
 )
+from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
 from .keyframe_operators import (
     PuppetKeyframeSettings,  # Must be imported and registered before operators that use it
     PROTEINBLENDER_OT_create_keyframe,
@@ -125,4 +126,6 @@ CLASSES = (
     PROTEINBLENDER_OT_brownian_disable,
     PROTEINBLENDER_OT_brownian_rebuild,
     PROTEINBLENDER_OT_brownian_clear_all,
+    # Domain Splitter dialog (row PropertyGroup first, then its operators)
+    *DOMAIN_SPLITTER_CLASSES,
 )

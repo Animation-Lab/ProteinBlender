@@ -284,6 +284,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |
 | `test_panels.py` | all 9 Panels + 2 UILists registered; `poll()` safety |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
+| `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
 
@@ -415,6 +416,73 @@ on a membrane whose typical gap was 0.28 nm.
   Fixed in `operators/domain_ops.py` by carrying the split source's world mapping onto the pieces. Because a domain maps a mesh coord as `matrix_world @ (co - pivot)`, the transfer is computed in that render space: `delta = (src_mw @ T(-src_pivot)) @ (ref_mw @ T(-ref_pivot))^-1`, applied as a rigid premultiply AFTER the pivots are set. Computing it in render space (not from `matrix_world` alone) makes it EXACTLY identity when the source already draws its atoms where a fresh piece would - e.g. an unmoved chain, or a chain on a re-centred copy whose `matrix_world` differs but whose rendered position matches - so it only fires for a genuine user move.
   Guarded by `test_split_domain_regression.py::test_split_preserves_a_moved_and_rotated_chain` (every piece must draw atom 0 where the moved chain drew it, `_render_world` as independent ground truth); verified red pre-fix (piece ~13 units away). The existing `test_split_on_a_copy_does_not_move_the_split_chain` guards the identity case against re-introduction.
 
+- **Re-ranging a domain destroyed its puppet membership, linkers, animation and pivot.**
+  A domain's id embeds its residue range (`_create_domain_with_params` builds `{molecule}_{chain}_{start}_{end}_{name}`) and its object name embeds the range too (`DomainDefinition.create_object_from_parent`).
+  Every downstream consumer keys off one of those two strings - puppet membership and linker endpoints and saved per-molecule poses store the domain id; the scene pose library stores the object name; pose/colour keyframes and the geometry-nodes pivot live on the object itself.
+  The only route to "change this domain's range" was delete-and-recreate (`proteinblender.split_domain`), so every one of those references silently went stale: the outliner rebuild pruned the unknown puppet member and, if that emptied the puppet, deleted its controller Empty and the puppet's animation with it.
+  Fixed by making a range edit an in-place mutation. `MoleculeWrapper.update_domain_range` keeps the id and the object, retargets only the domain's own `Select Res ID Range` node and the matching parent mask, and re-mirrors to the persisted collection; it replaces the dead, never-called `update_domain`, which re-derived a *different* id scheme (no name suffix) and renamed the object.
+  On top of it, `core/domain_layout.py` reconciles a whole desired layout against the chain's current domains: rows carrying a known domain id are updated in place, rows without one are created, and only domains genuinely absent from the layout are deleted (with puppet-membership strip and linker prune, the prune running *after* the outliner rebuild so it resolves against current rows).
+  Guarded by `test_domain_splitter.py`: identity (`::test_reranging_keeps_the_domain_id_and_its_object`), animation (`::test_reranging_preserves_per_domain_animation`, evaluated through Blender's own animation data), puppets (`::test_reranging_preserves_puppet_membership_and_controller`, deliberately built from DOMAIN rows because a chain-row puppet's id never moves and would pass even when broken), linkers (`::test_reranging_preserves_linker_endpoints`), cleanup on genuine deletion (`::test_removing_a_domain_strips_it_from_puppet_membership`), persistence (`::test_layout_edit_is_mirrored_into_the_persisted_collection`) and that the geometry actually follows the new range (`::test_domain_geometry_follows_its_range`, measured as rendered pixel coverage because a MolecularNodes style emits instanced geometry and `to_mesh()` reports zero verts for every molecule and domain object).
+  All seven verified red against a delete-and-recreate reconcile.
+
+- **The Domain Splitter edits boundaries, not two independent numbers.**
+  A layout tiles the chain end to end, so a domain's start *is* the previous domain's end plus one - the same boundary seen from both sides.
+  Moving one therefore moves the other (`domain_layout.retile_after_edit`), instead of leaving the user to keep two numbers in sync by hand and failing validation when they do not.
+  Two rules keep it sane: a boundary never drags through the neighbour beyond it (the neighbour keeps at least one residue - removing a domain is what Merge and the row's X are for, not a side effect of dragging), and pulling the first domain's start off the beginning of the chain (or the last domain's end off the end) creates a domain to own the residues that would otherwise belong to none.
+  The explicit "Build Domains" button is gone: the domain-count field re-divides the chain as it changes, and OK commits.
+  Guarded by `test_domain_splitter.py::test_moving_a_start_moves_the_boundary_with_the_domain_above` and `::test_moving_an_end_moves_the_boundary_with_the_domain_below`, `::test_pulling_the_first_start_off_the_chain_creates_a_domain_above` and `::test_pulling_the_last_end_off_the_chain_creates_a_domain_below`, `::test_a_boundary_cannot_swallow_its_neighbour`, `::test_retiling_clamps_to_the_chain_and_never_inverts_a_domain` and `::test_retiling_a_single_full_chain_domain_is_a_no_op`. Every case also asserts the result still tiles the chain exactly.
+
+- **Domains on one chain were named by three different generators, so they disagreed.**
+  Reported: splitting a chain gave a first domain named "Chain A: Residues 1-248" and a second named "Domain 1".
+  Three places produced a default name and none of them agreed: `_create_domain_with_params` generated `Chain A: 1-248`, the outliner rebuild re-derived display names as `Chain A: Residues 1-248`, and the Domain Splitter dialog used `Domain N` - which the rebuild's auto-name patterns did not recognise, so it was preserved as though the user had typed it.
+  Fixed by moving both rules into `chain_utils`: `default_domain_name(chain_id, start, end)` -> `"Chain A: 1-248"` (the wording the user asked for), and `is_default_domain_name(name)`, which recognises every historical auto form (blank, `Residues N-M`, `Chain X`, `Chain X: N-M`, `Chain X: Residues N-M`, `Domain N`). The create path, the dialog and the outliner rebuild all go through them.
+  An auto-generated name is re-derived whenever its range changes - on a boundary drag, a merge, a remove, or a re-divide - so it never advertises a span it no longer covers. A name the user typed is never rewritten, including across a re-divide that changes its range.
+  Guarded by `test_domain_splitter.py::test_auto_generated_names_name_the_chain_and_the_range`, `::test_every_historical_auto_name_is_recognised_as_auto`, `::test_a_name_the_user_typed_is_never_treated_as_auto`, `::test_split_domains_are_all_named_for_the_chain_and_their_range` and `::test_the_outliner_keeps_a_name_the_user_typed`, plus the live-dialog assertions in `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`.
+  Note `test_domains.py::test_split_domain_default_name_includes_chain_and_residues` now pins `"Chain A: 1-50"`; the expected string is written out in full rather than built with `default_domain_name`, so it cannot silently follow a change to the generator it exists to pin.
+
+- **Changing the Domain Splitter's domain count raised AttributeError and did nothing.**
+  `domain_count`'s update callback called `instance.redistribute()` on the ``self`` RNA hands a property update callback. That wrapper does not expose the operator's own **methods** - the same limitation that makes plain class attributes unreachable there - so re-dividing the chain raised `AttributeError: no attribute 'redistribute'` and silently left the rows alone.
+  Fixed by routing through `_active()` (the instance published at invoke/draw time), as the row callbacks already did.
+  Only reachable through a live modal dialog, so guarded in `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`.
+
+- **A Domain Splitter boundary edit did not move the neighbour, and the viewport preview did not follow.**
+  Reported: "when I adjust a domain's start/end it just snaps back to where it was", and "it doesn't adjust the res_id on-the-fly in the 3d viewer".
+  The re-tile was computed in the row's property update callback but *applied* in the operator's `check()`, on the assumption that Blender calls `check()` after any dialog property edit.
+  It does not call it for an edit to a **CollectionProperty element** - only for a property directly on the operator - so the re-tiled layout was computed and then never written: the neighbour stayed put and the layout stopped tiling the chain.
+  Fixed by writing the re-tiled values immediately, in the update callback. Only *resizing* the row collection is unsafe there (it reallocates the collection Blender is mid-write on), so only the edge-insert case is still deferred to `check()`, and the edited row's own clamped value is applied immediately even then.
+  The preview also now drives the **edited domain's own object** rather than always the chain's first domain, so the user watches that domain grow and shrink where it actually sits; switching rows hands the previous object its range back.
+  Guarded by `tests/ui/run_ui_scenarios.py::edit_chain_domains_live_boundary_drag`, which drives a **real modal dialog in a foreground Blender** (background Blender routes `INVOKE_DEFAULT` to `execute()`, so there is no live instance to drive and this cannot be covered in the headless lane) and deliberately never calls `check()`.
+  Verified red pre-fix: `AssertionError: neighbour did not follow: rows[0].end=66, expected 78`.
+
+- **Dragging the FIRST domain's Start stalled one residue in and left a 1-1 domain behind.**
+  Reported: "the start one just snaps to 2 and creates a new domain from 1-1"; the End field of the same domain was fine, because that is an ordinary middle boundary.
+  Raising the first Start orphans the residues below it, and the fix for that was to insert a domain in front - which moves the edited row, and every row after it, down by one. Blender's number widget stays bound to *row 0*, so what the user carried on dragging was the domain just inserted ahead of theirs, and that one is pinned to the start of the chain and cannot move at all. The drag died at the first residue.
+  It was also non-deterministic: the insert was parked in `_state["pending_layout"]` for `check()` to apply, and Blender does **not** call `check()` for an edit to a CollectionProperty *element* - which is what every row field is. So it landed at whatever unrelated moment `check()` next fired, or never; committing without it silently left a gap.
+  Fixed by never adding a row while the dialog is open. The row list may stop short of either end of the chain, `execute` completes it through the new `domain_layout.complete_layout`, and the orphaned stretch is shown as an **adjuster drawn from operator properties** - a grid line above the first row or below the last, with the boundary editable, the chain's own end greyed out, and an editable name. Operator properties cannot be inserted into, so there is nothing for a drag to trip over.
+  A debounced timer was tried first and is the wrong shape: a real drag pauses for longer than any sane debounce, so the row landed mid-drag and reintroduced the identical stall (measured: `STALLED at 1  rows: [(1, 1), (2, 66), ...]`). Reverted in 87fb50f. The lesson generalises - **a CollectionProperty row must never be added ahead of a row the user may be dragging, at any time, however it is timed.**
+  Guarded by `test_domain_splitter.py::test_complete_layout_*` for the arithmetic (orphaned head, orphaned tail, both ends at once, an interior hole, an already-tiling layout left alone, the degenerate empty layout, no mutation of the caller's list, and the names it invents), plus two foreground scenarios for the interaction, which is the only lane that can reach it since the headless lane never calls the row-element update path at all. `run_ui_scenarios.py::edit_chain_domains_first_start_drag` drags the first Start and asserts it does not stall, that no row is inserted mid-drag, that the head adjuster appears with the right range and drives the boundary both ways, and that a name typed into it reaches the created domain. `::edit_chain_domains_last_end_drag` is the mirror for the tail. Both commit through the live instance's `execute()` rather than `layout_json`, which is taken literally and would prove nothing about the completion, and each runs on its **own** chain: they are the only committing scenarios and the undo scenarios below assume the first chain's domain ordering.
+  Both scenarios read `item_id`/`parent_id` into plain values before committing, because `build_outliner_hierarchy` rebuilds `scene.outliner_items` and every `bpy_struct` into it goes stale - the tail scenario failed with `KeyError: ''` until it did.
+  Verified red pre-fix: `AssertionError: the drag stalled: rows[0].start reached 1, expected 13`.
+
+- **Sizing a domain isolates its chain in the viewport, and the isolation is always undone.**
+  Residue numbers alone are a poor way to choose a domain boundary, so while a range is being edited the geometry-nodes residue range is driven live (the same technique `split_domain_popup` uses) and everything outside the edited chain is hidden.
+  The chain itself stays whole: the domain under the cursor is drawn solid and in `HIGHLIGHT_COLOR`, its neighbours are shown at the ranges the pending layout gives them but wearing the shared `PB Domain Ghost` material at `GHOST_ALPHA`. Isolating the one domain alone left it floating with nothing to judge a boundary against; ghosting the rest of the chain gives the boundary something to be a boundary *of*.
+  Ghosting swaps a material *pointer* on the Style node rather than dialling alpha down in place: every domain of a molecule shares `MN Default`, so editing alpha on it would ghost the whole scene.
+  What is swapped in is a **copy of the domain's own material** with its alpha lowered, not a material of our own. The first attempt built a stand-in from scratch - an Attribute node reading `Color` into a fresh Principled BSDF - which reproduced every domain's colour correctly and so looked right in the node graph and in an F12 render, but rendered **effectively opaque in the Material Preview viewport at any alpha**: MolecularNodes shades through its own group node reading the *instancer*, and the stand-in does not reproduce it. Copying the real material changes exactly one thing.
+  The copies are swapped back out and deleted when the preview ends, so nothing survives the dialog.
+  **Per-surface alpha compounds, and on this geometry it compounds to nothing.** A space-filling chain stacks ~20 sphere surfaces along any view ray and each one blends again, so a ghost at alpha 0.2 still rendered at 68% of its opaque brightness - visibly flat, but not visibly *behind*, which is what "I still don't see it" meant. `show_transparent_back = False` (draw only the surface nearest the camera) is the load-bearing setting: it alone takes the same chain from 68% to 42%, and 0.1 alpha on top lands at 25%. Percentages are mean per-pixel distance from the viewport background over the opaque render's silhouette, measured in a live Material Preview viewport.
+  Judge this effect in a **live viewport**, never an F12 render: the isolation uses `hide_viewport`, which Cycles and EEVEE renders ignore, and a from-scratch ghost that renders translucent under F12 can still render opaque in the viewport.
+  **Most rows in this dialog have no object.** A chain imports as a *single* domain, so the ordinary way in - open the splitter on a chain, set the count to 3, drag - leaves one row backed by a real object and two backed by nothing; the domains a layout describes are created on OK, long after the preview must draw them. Previewing only the rows that already had objects meant the common path had nothing to ghost at all. Rows without objects are now given throwaway copies of a real chain object (`PB Splitter Preview N`), deleted on restore.
+  A copied node group keeps its *group nodes* pointing at the original's sub-trees, so a stand-in shares its `Color Common` tree with the object it was copied from. That makes the tree shared, which is exactly the case this module refuses to write colour into - costing the highlight on the stand-in **and** on the real domain. The colour tree is copied too.
+  Every other test in this file splits the chain up front, which hands the preview a full set of objects and hides all of this; `::test_a_chain_that_was_never_split_still_gets_ghosted_context` is the one that exercises the real entry path.
+  This is the only part of the dialog that touches the scene *before* the user confirms, so a leak is highly visible - the user would be left looking at a scene missing most of its contents, or at a molecule the dialog silently repainted. The bookkeeping therefore lives on the scene, not the operator instance, so a preview left behind by a dialog that died without closing can be cleared by the next `invoke`; `execute` and `cancel` both restore.
+  Guarded by `test_domain_splitter.py::test_preview_isolates_the_chain_and_restores_everything_afterwards` (ground truth is the visibility flags and node ranges captured *before* isolating, and it also asserts a second preview call does not re-capture the previewed state as the original), `::test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized` (materials and colours read straight off the node graph, never through the splitter's own accessors), `::test_the_ghost_is_a_copy_of_the_domains_own_material` (asserts the ghost's node types and links match the real material's, which is the only assertion that catches the opaque-stand-in failure - one about colour or about which material is assigned passes straight through it), `::test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row` and `::test_restoring_a_preview_that_was_never_started_is_harmless`.
+  Note for future work here: Blender does **not** expose a plain (non-RNA) class attribute through an operator *instance* inside a property update callback - `instance.suspended` raises AttributeError even with `suspended = False` on the class - so the dialog's re-entrancy guard and deferred-layout state are module-level, not class attributes.
+
+- **The Domain Maker panel drew an unreachable block calling two operators that do not exist.**
+  `domain_maker_panel.py` had an `elif selected_item.item_type == 'DOMAIN'` after an `if selected_item.item_type in ['CHAIN', 'DOMAIN']`, so it could never run - which is the only reason its `proteinblender.update_domain_range` and `proteinblender.delete_domain` buttons never raised in front of a user (neither `bl_idname` is defined anywhere; the real delete is `molecule.delete_domain`).
+  Removed, and replaced with an "Edit Domains..." button that opens the Domain Splitter for the selected chain (or the selected domain's parent chain).
+
 - **Renaming a domain never survived an outliner rebuild, and chains had no rename at all.**
   `build_outliner_hierarchy` unconditionally reset every non-copy DOMAIN row name to `"Residues N-M"`, clobbering any name set via the (UI-less) `rename_domain` operator - so renaming appeared not to work. Chains were regenerated from `auth_chain_id_map` with no custom-name store.
   Fixed by: preserving a user-set domain name in the rebuild (only auto-generated `Residues N-M` / `Chain X` / blank names are normalised); adding a persistent `MoleculeListItem.chain_custom_names` JSON store consulted during the rebuild; generalising `proteinblender.rename_domain` to rename chains too (explicit `target_item_id` + `item_type`); and exposing a Rename (pencil) button on CHAIN and DOMAIN rows in the Protein Outliner.
@@ -463,6 +531,12 @@ on a membrane whose typical gap was 0.28 nm.
   `membrane_edit_deform` parks the user in Lattice edit mode by design so they can drag deformation points. MolecularNodes appends its style node groups with `bpy.ops.wm.append` and the builders call `bpy.ops.object.select_all`, neither of which polls outside Object mode, so protein import died with "context is incorrect" and no molecule appeared. The DNA builder and a second membrane build failed identically - the add-on put the user in the one state where its own creation paths could not run.
   Fixed with `utils.blender_utils.ensure_object_mode`, called at the top of `create_molecule_from_id`, `import_molecule_from_file`, `build_dna.execute` and `build_membrane.execute`. Fixing it at the creation sites covers every edit mode, not just the membrane lattice.
   Guarded by `test_membrane.py::test_import_protein_works_after_editing_membrane_deformation` and `::test_builders_work_after_editing_membrane_deformation` (ground truth is the molecule registry plus real Blender objects with vertices). Both verified red pre-fix with the real `bpy.ops.wm.append.poll() failed` signature.
+
+- **The hole operators failed - and half-completed - from Lattice edit mode.**
+  The same root cause as the import/builder regression above, in three places that fix missed. `membrane_add_hole`, `membrane_remove_hole` and `membrane_select_hole` all finish by calling `bpy.ops.object.select_all`, which does not poll outside Object mode, while `membrane_edit_deform` parks the user in Lattice edit mode by design. `build_membrane` and the importers got `ensure_object_mode` in the earlier fix; these three did not.
+  Add Hole was the worst: it created the hole object, linked it, parented it, resynced the cache and rebuilt the GN hole assignments, and only then hit `select_all` and raised. Measured from edit mode: `holes_before=1`, `RuntimeError`, `holes_after=2`. So the user saw a red error and reasonably concluded nothing happened, while a hole silently existed in the scene - a half-completed operator rather than a clean failure, on the exact path a membrane tutorial walks (shape the deformer, then add a pore).
+  Fixed by calling `utils.blender_utils.ensure_object_mode` at the top of all three `execute` methods.
+  Guarded by `test_membrane.py::test_hole_operators_work_from_lattice_edit_mode`, which drives all three from `EDIT_LATTICE` and asserts on hole counts it tracks itself plus whether the controller object exists in `bpy.data` - never on the operators' own return values alone. Verified red pre-fix via `git stash push -- membrane_operators.py`, with the real `bpy.ops.object.select_all.poll() failed` signature.
 
 - **The DNA builder's Length field did nothing.**
   Reported (Janet): "using the 'length' feature doesn't seem to work? I tried changing it to 100 and no change, but copying/pasting the random 50 so that there was 100 bp worked."
@@ -613,6 +687,35 @@ on a membrane whose typical gap was 0.28 nm.
   and on FLAT / SPHERE / HEMISPHERE with `animate_bob` left ON (the headless
   morph tests disable it).
 
+- **A membrane vanished entirely if its `_Group` collection was unlinked, and
+  could never come back.** Found while hunting the reported "Reset Deformation
+  makes everything disappear" (see the open note below - Reset turned out not to
+  be the trigger, but this failure mode matches the symptom exactly). Every
+  object a membrane owns - root, lattice, holes - lives in one `<name>_Group`
+  collection, so unlinking that one collection makes all of them disappear
+  together while the objects stay in `bpy.data`. That is an ordinary user
+  accident, not file corruption: deleting the group's row in Blender's own
+  outliner unlinks the collection without touching the objects.
+  `_ensure_membrane_collection` looked the collection up by name and returned it
+  as-is, so nothing ever re-attached it and the membrane could not be recovered
+  by re-editing it. Building a *new* membrane that resolved to the same group
+  name then failed outright, because the builder selects the root it just
+  created and Blender refuses: `Object 'Membrane_001' cannot be selected because
+  it is not in View Layer 'ViewLayer'`. Fixed by making the helper ensure the
+  collection is *in this scene*, not merely that it exists - it re-links when
+  the collection is not reachable from `scene.collection.children_recursive`.
+  Reachability rather than direct parentage on purpose: a user who filed the
+  group away inside another collection still sees the membrane, and re-linking
+  to the scene root would yank it out of the place they put it. The repair is
+  reachable from any path that builds or re-applies a membrane, so an already
+  stranded membrane heals rather than staying lost. Guarded by
+  `test_membrane.py::test_a_membrane_survives_its_group_collection_being_unlinked`,
+  verified red pre-fix with exactly the RuntimeError above. Ground truth is
+  Blender's own scene graph - membership in `scene.objects` and
+  `scene.collection.children` - never the helper under test, and the test
+  asserts its own setup actually stranded the membrane so it cannot pass
+  vacuously.
+
 - **Reset Deformation silently did nothing in the two cases that matter.**
   Found while investigating a reported "reset makes the membrane disappear",
   which did NOT reproduce (see the open note below) - but two real defects in
@@ -633,6 +736,56 @@ on a membrane whose typical gap was 0.28 nm.
   `::test_reset_deform_clears_lattice_keyframes`, both verified red pre-fix
   ("did not stick" / "keyframes re-asserted the deformation"); ground truth is
   each point's own rest `co`, which the operator never computes.
+
+- **Deformation mode moved out of the Edit Membrane dialog onto the PB
+  Outliner row.** Reported as "when I click Edit Deformation on the popup then
+  Okay it doesn't let me edit, it takes me out of that mode" - confirmed:
+  `build_membrane.execute()` calls `ensure_object_mode()` (it has to; building
+  calls `select_all`, which does not poll in an edit mode), so confirming the
+  dialog tore the mode straight back down and the lattice could only be reached
+  by *dismissing* the dialog instead. The root cause is a category error rather
+  than a bug: deformation is a **mode**, and it was being launched from a
+  **transient popup**, which cannot host one. Blender offers no way to pin an
+  `invoke_props_dialog` open - it closes on OK, Esc and click-away alike - so
+  the entry point became a toggle on the membrane's Outliner row, which stays
+  on screen and makes entering and leaving the same control.
+  `membrane_toggle_deform` resolves its membrane by name (so it works on a row
+  that is not the active object), hands the mode over cleanly when a
+  *different* membrane is already being deformed, and invokes `edit_deform`
+  with `INVOKE_DEFAULT` so the Esc/Enter modal is actually armed - an EXEC call
+  would silently skip it. The Edit Deformation button was removed from the
+  dialog rather than left as a trap, and the Deformation section was then
+  dropped from it entirely (along with the now-dead `show_deform_section`
+  property). Reset Deformation moved to the deform banner instead of being
+  orphaned - the same dead-operator trap `finish_deform` used to be in - which
+  is also the one surface guaranteed to be on screen while the lattice is being
+  shaped, and it works from there because Reset now drops out of edit mode,
+  resets, and returns. Guarded by
+  `test_membrane.py::test_outliner_toggle_enters_and_leaves_deform_mode` and
+  `::test_deform_toggle_is_per_membrane` (two membranes: only the one actually
+  open may read as active, and toggling the other hands over rather than
+  stacking). The row draw itself is not reachable from background pytest, so it
+  was smoke-tested in a real GUI in both states.
+
+- **Esc / Enter now leave membrane deformation mode.** Follow-up to the
+  one-way-door fix below: a banner button helped, but the mode is entered from
+  a popup and worked on in the viewport, so users still had no keystroke out.
+  `membrane_edit_deform` now stays resident as a modal operator and owns the
+  exit key itself, rather than registering a global keymap item that would
+  hijack Esc for every lattice in the file (the add-on registers no keymaps at
+  all, and this is not a good place to start). It falls back to the old
+  one-shot behaviour whenever a modal handler cannot be attached (headless, no
+  window), so the mode is never entered without *some* way back out. The risky
+  half is not the exit key but swallowing keys normal lattice editing needs, so
+  the per-event decision lives in `deform_modal_step()` - testable without an
+  event loop - and everything except an exit-key PRESS returns "pass". A
+  running transform sits above this handler in Blender's modal stack, so Esc
+  mid-grab is consumed there and cancelling a grab does not drop the user out
+  of the mode. Guarded by
+  `test_membrane.py::test_esc_and_enter_leave_deform_mode`, which pins the
+  whole decision table: the three exit keys, key releases (must not re-fire),
+  the stand-down case outside deform mode, and 16 editing/mouse events that
+  must pass through.
 
 - **Membrane deformation mode was a one-way door.** Reported as "once you enter
   deformation, there is not an obvious way to exit it". `membrane_edit_deform`
@@ -976,8 +1129,8 @@ by passing that state directly (no dialog needed):
 
 ## Known issues surfaced but not fixed here
 
-- **UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and lattice
-  disappear; you have to undo until it comes back."** Reported against a
+- **STILL UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and
+  lattice disappear; you have to undo until it comes back."** Reported against a
   membrane that already existed and was reopened through the PB Outliner's edit
   pencil, with Reset clicked inside that dialog. Not reproducible from the
   operator: driven headless in Object mode, with a hole, from inside
@@ -985,17 +1138,26 @@ by passing that state directly (no dialog needed):
   tree upgrade (the state a .blend saved by an older build lands in), the root,
   lattice, hole, per-membrane collection and all 1240 lipid instances survive
   every time. Two real defects in the same operator *were* found and fixed (see
-  "Reset Deformation silently did nothing" above), but neither deletes anything,
-  so the disappearance is still unexplained. The remaining untested ingredient is
-  the live `invoke_props_dialog` + undo-push interaction, which background pytest
-  cannot drive - a nested operator carrying `bl_options = {"REGISTER", "UNDO"}`
-  executed while the dialog's own REGISTER|UNDO operator is still pending. Note
-  that all objects live in one `<name>_Group` collection, so a single collection
-  unlink would make root, lattice and holes vanish together, matching the report
-  exactly; `_ensure_membrane_collection` re-uses an existing collection by name
-  without re-linking it to the scene, which would leave everything invisible.
-  That is a hypothesis, not a diagnosis. Needs a live repro with the system
-  console open.
+  "Reset Deformation silently did nothing" above), but neither deletes anything.
+  **The `invoke_props_dialog` + undo-push hypothesis has now been tested and
+  eliminated.** It was driven in the foreground UI lane
+  (`--enable-event-simulate`, steps advanced one per application timer so the
+  window manager really processes the modal dialog): membrane with a hole and a
+  keyframed lattice, edit dialog opened through the outliner pencil path, Reset
+  clicked while the dialog was still up, then confirm / cancel / undo /
+  double-Reset / Edit-Deformation-then-Reset. Everything survives every arm.
+  One caution for anyone re-running this: operators driven from an application
+  timer do **not** push undo steps of their own (`ed.undo.poll()` fails outright
+  after a timer-built membrane), so without explicit `ed.undo_push` calls the
+  dialog's push is the only step on the stack and a single undo lands on the
+  factory-startup scene - which looks exactly like the reported disappearance
+  but is an artifact of the harness. That false positive is what the no-dialog
+  control arm exists to catch. What *was* real is the collection half of the old
+  hypothesis, now fixed and no longer a candidate explanation either (see "A
+  membrane vanished entirely if its `_Group` collection was unlinked" above).
+  So the original report remains unexplained, and its stated trigger (Reset) is
+  now positively ruled out on every path we can drive. Needs a live repro with
+  the system console open - ideally the user's own .blend.
 
 - **`pdb_model_num` and `entity_id` fail to write on every PDB import.**
   `_create_object` builds them from `array.pdb_model_num` / `array.entity_id`,

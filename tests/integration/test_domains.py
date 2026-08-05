@@ -519,10 +519,13 @@ def test_toggle_domain_expanded_flips_flag(scene, sm, multi_chain):
 @pytest.mark.integration
 def test_split_domain_default_name_includes_chain_and_residues(scene, sm, multi_chain):
     """A freshly split domain's outliner row names both the chain and the
-    residue range, e.g. "Chain A: Residues 1-50" - not just the residues.
+    residue range, e.g. "Chain A: 1-50" - not just the residues.
 
     Ground truth for the chain letter and range comes from the split we drive
-    here (chain A, 1-50), independent of the naming code under test.
+    here (chain A, 1-50), independent of the naming code under test. The
+    expected string is written out in full rather than built with
+    ``default_domain_name``, so it cannot silently follow a change to the
+    generator it is meant to pin.
     """
     mid = multi_chain
     scene.selected_molecule_id = mid
@@ -531,10 +534,10 @@ def test_split_domain_default_name_includes_chain_and_residues(scene, sm, multi_
 
     dom_rows = [it for it in scene.outliner_items if it.item_type == "DOMAIN"]
     names = {it.name for it in dom_rows}
-    assert "Chain A: Residues 1-50" in names, \
-        f"expected a 'Chain A: Residues 1-50' row, got {sorted(names)}"
+    assert "Chain A: 1-50" in names, \
+        f"expected a 'Chain A: 1-50' row, got {sorted(names)}"
     # The complementary piece is named the same way.
-    assert any(n.startswith("Chain A: Residues ") for n in names)
+    assert any(n.startswith("Chain A: ") for n in names)
     # And none fall back to the bare residue-only form.
     assert not any(n.startswith("Residues ") for n in names), \
         f"a domain row still uses the residue-only name: {sorted(names)}"

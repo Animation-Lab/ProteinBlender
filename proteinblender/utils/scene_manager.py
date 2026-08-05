@@ -20,7 +20,8 @@ from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid, ensure_object_mode
-from .chain_utils import chain_match_tokens
+from .chain_utils import (chain_match_tokens, default_domain_name,
+                          is_default_domain_name)
 
 logger = logging.getLogger(__name__)
 
@@ -1714,29 +1715,18 @@ def build_outliner_hierarchy(context=None):
                         domain_display_name = domain.name
 
                         # For copies, the name already includes the copy number
-                        # (e.g., "Chain A 1"). For non-copies, normalise an
-                        # auto-generated name to the canonical
-                        # "Chain <id>: Residues N-M" form - naming both the chain
-                        # and the residue range - but keep a name the user set
-                        # via Rename. A name counts as auto-generated when it's
-                        # blank or matches any default form the create/split
-                        # paths have produced ("Residues N-M", "Chain X",
-                        # "Chain X: N-M", or the canonical form itself); anything
-                        # else is a deliberate rename and must survive the rebuild.
+                        # (e.g., "Chain A 1"). For non-copies, re-derive an
+                        # auto-generated name from the current range so it never
+                        # goes stale, but keep a name the user set via Rename.
+                        # Both rules live in chain_utils so the create path, the
+                        # Domain Splitter and this rebuild cannot drift apart -
+                        # they did, and one chain ended up showing
+                        # "Chain A: Residues 1-248" next to "Domain 1".
                         if not (hasattr(domain, 'is_copy') and domain.is_copy):
                             if hasattr(domain, 'start') and hasattr(domain, 'end'):
-                                name = (domain.name or "").strip()
-                                is_auto_name = (
-                                    not name
-                                    or re.match(r'^Residues\s+\d+-\d+$', name)
-                                    or re.match(r'^Chain\s+\S+$', name)
-                                    or re.match(r'^Chain\s+\S+:\s*\d+-\d+$', name)
-                                    or re.match(r'^Chain\s+\S+:\s*Residues\s+\d+-\d+$', name)
-                                )
-                                if is_auto_name:
-                                    domain_display_name = (
-                                        f"Chain {domain.chain_id}: "
-                                        f"Residues {domain.start}-{domain.end}")
+                                if is_default_domain_name(domain.name):
+                                    domain_display_name = default_domain_name(
+                                        domain.chain_id, domain.start, domain.end)
 
                         domain_item.name = domain_display_name
 

@@ -1586,72 +1586,69 @@ class MoleculeWrapper:
             
         bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
 
-    def update_domain(self, domain_id: str, chain_id: str, start: int, end: int) -> str:
-        """Update an existing domain with new parameters
-        
+    def update_domain_range(self, domain_id: str, start: int, end: int,
+                            enforce_no_overlap: bool = True) -> bool:
+        """Re-range an existing domain in place, keeping its identity intact.
+
+        `domain_id` and the domain's Blender object are deliberately left
+        untouched. Both are load-bearing keys elsewhere: puppet memberships,
+        linker endpoints and saved domain poses all store the domain id, while
+        the scene pose library stores the object *name*. The old
+        delete-and-recreate route silently orphaned every one of them, because
+        the id embeds the residue range (see `_create_domain_with_params`) and
+        the object name embeds it too (see `DomainDefinition`). Mutating in
+        place is what lets a user re-range a domain without losing its puppet,
+        its linkers, its animation or its pivot.
+
         Args:
-            domain_id: Current domain ID
-            chain_id: New chain ID
-            start: New start residue
-            end: New end residue
-            
+            domain_id: The domain to re-range.
+            start: New first residue (inclusive).
+            end: New last residue (inclusive).
+            enforce_no_overlap: Reject a range that collides with a sibling.
+                Callers reconciling a whole chain layout at once turn this off:
+                they have already validated the final layout, and intermediate
+                states legitimately overlap - swapping two adjacent domains'
+                ranges has no conflict-free ordering.
+
         Returns:
-            str: The new domain ID (which may be different if range changed)
+            True if the domain was updated.
         """
         if domain_id not in self.domains:
-            return domain_id
-            
+            return False
+
         try:
             domain = self.domains[domain_id]
-            
-            # Check for overlaps with other domains
-            if self._check_domain_overlap(chain_id, start, end, exclude_domain_id=domain_id):
-                return domain_id
-                
-            # Update domain definition
-            domain.chain_id = chain_id
+
+            if enforce_no_overlap and self._check_domain_overlap(
+                    domain.chain_id, start, end, exclude_domain_id=domain_id):
+                print(f"update_domain_range: {start}-{end} overlaps another domain "
+                      f"on chain {domain.chain_id}; leaving {domain_id} unchanged")
+                return False
+
+            if domain.start == start and domain.end == end:
+                return True
+
             domain.start = start
             domain.end = end
-            
-            # Generate new domain ID
-            new_domain_id = f"{self.identifier}_{chain_id}_{start}_{end}"
-            
-            # Update domain object name
-            if domain.object:
-                domain.object.name = f"{domain.name}_{chain_id}_{start}_{end}"
-                domain.object["domain_id"] = new_domain_id
-            
-            # Update domain node network
-            self._setup_domain_network(domain, chain_id, start, end)
-            
-            # Update domain mask nodes
-            self._delete_domain_mask_nodes(domain_id) # Delete old mask
-            self._create_domain_mask_nodes(new_domain_id, chain_id, start, end) # Create new mask
-            
-            # Update residue assignments
-            self._update_residue_assignments(domain)
-            
-            # If the domain ID has changed, update the dictionary
-            if domain_id != new_domain_id:
-                self.domains[new_domain_id] = domain
-                if domain_id in self.domains: # Ensure old ID exists before attempting to delete
-                    del self.domains[domain_id]
-                # Normalization called by the caller of update_domain, or if ID does not change, see below.
-                # For now, let's assume caller handles normalization for the *returned* ID.
-                # However, if the ID changes, the *new* domain should be normalized.
-                self._normalize_domain_name(new_domain_id)
-                self._mirror_domains_to_property_group()
-                return new_domain_id
 
-            # If domain ID didn't change, still normalize its name as its range or context might have.
-            self._normalize_domain_name(domain_id)
+            # Retarget the domain's own residue-range selection. This reuses the
+            # existing nodes (and so preserves the domain's colour and style)
+            # rather than rebuilding the tree from scratch.
+            self._setup_domain_network(domain, domain.chain_id, start, end)
+
+            # Re-punch the matching hole in the parent molecule. Same domain_id
+            # in and out, so `domain_mask_nodes` stays keyed consistently.
+            self._delete_domain_mask_nodes(domain_id)
+            self._create_domain_mask_nodes(domain_id, domain.chain_id, start, end)
+
+            self._update_residue_assignments(domain)
             self._mirror_domains_to_property_group()
-            return domain_id
-            
+            return True
+
         except Exception:
             import traceback
             traceback.print_exc()
-            return domain_id
+            return False
 
     def _delete_domain_mask_nodes(self, domain_id: str):
         """Delete mask nodes for a domain in the parent molecule's node group"""
