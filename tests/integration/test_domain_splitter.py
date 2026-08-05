@@ -384,6 +384,59 @@ def test_complete_layout_leaves_a_layout_that_already_tiles_alone():
 
 
 @pytest.mark.integration
+def test_complete_layout_fills_both_ends_at_once():
+    """Both ends can be open together - one drag each - and both must close."""
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 30, 66, "a"), spec("B", 67, 80, "b")]
+
+    result = domain_layout.complete_layout(rows, 1, 100)
+
+    assert [(s.start, s.end) for s in result] == [
+        (1, 29), (30, 66), (67, 80), (81, 100)]
+    assert [s.domain_id for s in result] == [None, "a", "b", None]
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_complete_layout_closes_an_interior_hole_too():
+    """A layout is completed, not just capped.
+
+    Interior holes should not arise - re-tiling keeps the middle contiguous -
+    but if one ever does, committing it would hand those residues to no domain
+    at all, which is the failure this whole function exists to prevent.
+    """
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 1, 30, "a"), spec("B", 61, 100, "b")]
+
+    result = domain_layout.complete_layout(rows, 1, 100)
+
+    assert [(s.start, s.end) for s in result] == [(1, 30), (31, 60), (61, 100)]
+    assert result[1].domain_id is None
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_complete_layout_of_nothing_is_the_whole_chain():
+    """The degenerate case still yields a chain that is fully owned."""
+    result = domain_layout.complete_layout([], 1, 100)
+
+    assert [(s.start, s.end) for s in result] == [(1, 100)]
+    assert result[0].domain_id is None
+
+
+@pytest.mark.integration
+def test_complete_layout_does_not_mutate_what_it_was_given():
+    """execute() validates the completed layout; the rows must be untouched."""
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 30, 100, "a")]
+    before = list(rows)
+
+    domain_layout.complete_layout(rows, 1, 100)
+
+    assert rows == before, "complete_layout edited the caller's list in place"
+
+
+@pytest.mark.integration
 def test_complete_layout_names_what_it_creates():
     """A filler domain reaches the user, so it needs a name a user recognises."""
     from proteinblender.utils.chain_utils import is_default_domain_name

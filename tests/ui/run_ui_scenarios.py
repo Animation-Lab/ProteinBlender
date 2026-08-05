@@ -450,8 +450,10 @@ def edit_chain_domains_first_start_drag():
               if row.item_type == "CHAIN" and row.parent_id in H.sm().molecules]
     assert len(chains) > 1, "expected a multi-chain fixture"
     chain = chains[-1]
-    chain_key = chain.item_id
-    molecule = H.sm().molecules[chain.parent_id]
+    # Plain values, not the row: build_outliner_hierarchy rebuilds the
+    # collection below and every bpy_struct into it goes stale.
+    chain_key, parent_id = chain.item_id, chain.parent_id
+    molecule = H.sm().molecules[parent_id]
     chain_letter = molecule.chain_mapping[int(chain.chain_id)]
     low, high = domain_layout.chain_residue_range(molecule, chain.chain_id)
     pieces = domain_layout.even_split(low, high, 3)
@@ -511,6 +513,9 @@ def edit_chain_domains_first_start_drag():
     instance.head_end = target - 1
     assert instance.rows[0].start == target, "the boundary did not come back"
 
+    # A name typed into the adjuster is the name the domain is created with.
+    instance.head_name = "Typed Head"
+
     # Commit through the dialog's own path - execute() on the live instance,
     # with no layout_json - because that is where the orphaned head is turned
     # into a domain. Going via layout_json would take the rows literally and
@@ -520,7 +525,7 @@ def edit_chain_domains_first_start_drag():
     ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance = None
     scene_manager.build_outliner_hierarchy(bpy.context)
 
-    molecule = H.sm().molecules[chain.parent_id]
+    molecule = H.sm().molecules[parent_id]
     spans = sorted((d.start, d.end) for d in molecule.domains.values()
                    if str(d.chain_id) == str(chain_letter))
     assert (low, target - 1) in spans, (
@@ -532,11 +537,107 @@ def edit_chain_domains_first_start_drag():
         covered |= set(range(start, end + 1))
     assert covered == set(range(low, high + 1)), (
         "committing left the chain not fully covered")
+    created = next(d for d in molecule.domains.values()
+                   if str(d.chain_id) == str(chain_letter)
+                   and (d.start, d.end) == (low, target - 1))
+    assert created.name == "Typed Head", (
+        f"the adjuster's name did not reach the domain: {created.name!r}")
 
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
-    return (f"first-domain Start dragged {low} -> {target}; "
-            f"head {low}-{target - 1} became a domain on commit")
+    return (f"first-domain Start dragged {low} -> {target}; head adjuster "
+            f"committed as {created.name!r}")
+
+
+def edit_chain_domains_last_end_drag():
+    """The mirror case: dragging the LAST domain's End opens a tail adjuster.
+
+    The same trap one row further down - except a row appended *below* the
+    dragged one never moves it, so this half was always safe. It still has to
+    produce an adjuster rather than silently orphaning the chain's tail, and
+    that adjuster has to drive the boundary above it.
+    """
+    from proteinblender.core import domain_layout
+    from proteinblender.operators import domain_splitter as ds
+
+    scene_manager = H.scene_manager_module()
+    chains = [row for row in bpy.context.scene.outliner_items
+              if row.item_type == "CHAIN" and row.parent_id in H.sm().molecules]
+    assert len(chains) > 2, "expected a multi-chain fixture"
+    # A chain of its own: the first belongs to the undo scenarios and the last
+    # to the head-adjuster scenario, and this one commits too.
+    chain = chains[-2]
+    # Plain values, not the row: build_outliner_hierarchy rebuilds the
+    # collection below and every bpy_struct into it goes stale.
+    chain_key, parent_id = chain.item_id, chain.parent_id
+    molecule = H.sm().molecules[parent_id]
+    chain_letter = molecule.chain_mapping[int(chain.chain_id)]
+    low, high = domain_layout.chain_residue_range(molecule, chain.chain_id)
+    pieces = domain_layout.even_split(low, high, 2)
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.edit_chain_domains(
+            "EXEC_DEFAULT", item_id=chain.item_id,
+            layout_json=json.dumps(
+                [{"name": f"Seed {i}", "start": a, "end": b, "domain_id": ""}
+                 for i, (a, b) in enumerate(pieces, start=1)])) == {"FINISHED"}
+    scene_manager.build_outliner_hierarchy(bpy.context)
+
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.edit_chain_domains(
+            "INVOKE_DEFAULT", item_id=chain_key) == {"RUNNING_MODAL"}
+    instance = ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance
+    assert instance is not None, "the dialog published no live instance"
+    seeded = len(instance.rows)
+    assert instance.rows[-1].end == high, "the last row should reach the chain end"
+    assert not instance.has_tail(), "nothing is orphaned yet"
+
+    target = high - 15
+    for _ in range(15):
+        instance.rows[-1].end = instance.rows[-1].end - 1
+        instance.check(bpy.context)
+
+    assert instance.rows[-1].end == target, (
+        f"the drag stalled: rows[-1].end reached {instance.rows[-1].end}, "
+        f"expected {target}")
+    assert len(instance.rows) == seeded, "a row was appended mid-drag"
+    assert instance.has_tail(), "no adjuster appeared for the orphaned tail"
+    assert instance.tail_start == target + 1, (
+        f"the tail adjuster starts at {instance.tail_start}, expected "
+        f"{target + 1}")
+    assert instance.tail_name, "the tail adjuster has no name to be created with"
+
+    # Editing the adjuster's Start moves the last domain's End.
+    instance.tail_start = target - 4
+    assert instance.rows[-1].end == target - 5, (
+        "editing the tail adjuster did not move the domain above it")
+    instance.tail_start = target + 1
+    assert instance.rows[-1].end == target, "the boundary did not come back"
+    instance.tail_name = "Typed Tail"
+
+    with ui_override("PROPERTIES"):
+        assert instance.execute(bpy.context) == {"FINISHED"}
+    ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance = None
+    scene_manager.build_outliner_hierarchy(bpy.context)
+
+    molecule = H.sm().molecules[parent_id]
+    domains = [d for d in molecule.domains.values()
+               if str(d.chain_id) == str(chain_letter)]
+    spans = sorted((d.start, d.end) for d in domains)
+    assert (target + 1, high) in spans, (
+        f"the orphaned tail {target + 1}-{high} did not become a domain: {spans}")
+    covered = set()
+    for start, end in spans:
+        covered |= set(range(start, end + 1))
+    assert covered == set(range(low, high + 1)), (
+        "committing left the chain not fully covered")
+    created = next(d for d in domains if (d.start, d.end) == (target + 1, high))
+    assert created.name == "Typed Tail", (
+        f"the adjuster's name did not reach the domain: {created.name!r}")
+
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return (f"last-domain End dragged {high} -> {target}; tail adjuster "
+            f"committed as {created.name!r}")
 
 
 def assert_splitter_preview_restored():
@@ -691,6 +792,8 @@ steps = [
     ("settle splitter modal", lambda: "modal cancellation processed"),
     ("domain splitter first-start drag", edit_chain_domains_first_start_drag),
     ("settle first-start modal", lambda: "modal cancellation processed"),
+    ("domain splitter last-end drag", edit_chain_domains_last_end_drag),
+    ("settle last-end modal", lambda: "modal cancellation processed"),
     ("assert splitter preview restored", assert_splitter_preview_restored),
     ("DNA edit mode", dna_edit_mode_roundtrip),
     ("membrane edit mode", membrane_edit_mode_roundtrip),
