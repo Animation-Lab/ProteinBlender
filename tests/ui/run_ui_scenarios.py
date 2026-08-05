@@ -489,73 +489,35 @@ def edit_chain_domains_first_start_drag():
         f"the drag stalled: rows[0].start reached {instance.rows[0].start}, "
         f"expected {target}")
     assert len(instance.rows) == seeded, (
-        f"a row was inserted mid-drag, which is what moves the edited row out "
-        f"from under the cursor: {[(r.start, r.end) for r in instance.rows]}")
+        f"dragging inserted rows mid-drag: {[(r.start, r.end) for r in instance.rows]}")
     assert instance.rows[0].end > target, "the first domain lost its body"
 
-    state["first_start"] = {"target": target, "seeded": seeded,
-                            "body_end": instance.rows[0].end,
-                            "low": low, "high": high, "chain_id": chain_id,
-                            "letter": chain_letter, "parent": chain.parent_id}
-    return f"first-domain Start dragged {low} -> {target} without stalling"
-
-
-def assert_first_start_settled_into_a_row():
-    """Once the value settles, the orphaned head becomes an editable row.
-
-    The row is what the user asked for - a range adjuster above the domain they
-    just moved - rather than a notice telling them one is coming. It cannot
-    appear during the drag without stealing it, so it appears just after.
-    """
-    from proteinblender.operators import domain_splitter as ds
-
-    saved = state["first_start"]
-    instance = ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance
-    assert instance is not None, "the dialog closed before the row settled"
-
-    assert len(instance.rows) == saved["seeded"] + 1, (
-        f"the settle never added the row: "
-        f"{[(r.start, r.end) for r in instance.rows]}")
-    head = instance.rows[0]
-    assert (head.start, head.end) == (saved["low"], saved["target"] - 1), (
-        f"the new row covers {head.start}-{head.end}, expected "
-        f"{saved['low']}-{saved['target'] - 1}")
-    assert not head.domain_id, "the new row must be a fresh domain, not a steal"
-    assert (instance.rows[1].start, instance.rows[1].end) == (
-        saved["target"], saved["body_end"]), (
-        "the dragged domain did not keep the range the user gave it")
-
-    # It is a real row: editable like any other, and its neighbour follows.
-    head.end = saved["target"] + 5
-    assert instance.rows[1].start == saved["target"] + 6, (
-        "the new row is not wired to its neighbour like a normal boundary")
-    head.end = saved["target"] - 1
-
     # Commit through the dialog's own path - execute() on the live instance,
-    # with no layout_json, because that takes the rows literally.
+    # with no layout_json - because that is where the orphaned head is turned
+    # into a domain. Going via layout_json would take the rows literally and
+    # prove nothing about the completion.
     with ui_override("PROPERTIES"):
         assert instance.execute(bpy.context) == {"FINISHED"}
     ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance = None
-    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    scene_manager.build_outliner_hierarchy(bpy.context)
 
-    molecule = H.sm().molecules[saved["parent"]]
+    molecule = H.sm().molecules[chain.parent_id]
     spans = sorted((d.start, d.end) for d in molecule.domains.values()
-                   if str(d.chain_id) == str(saved["letter"]))
-    head_span = (saved["low"], saved["target"] - 1)
-    assert head_span in spans, (
-        f"the new row {head_span} did not become a real domain: {spans}")
-    assert (saved["target"], saved["body_end"]) in spans, (
-        f"the dragged domain is not {saved['target']}-{saved['body_end']}: {spans}")
+                   if str(d.chain_id) == str(chain_letter))
+    assert (low, target - 1) in spans, (
+        f"the orphaned head {low}-{target - 1} did not become a domain: {spans}")
+    assert (target, pieces[0][1]) in spans, (
+        f"the dragged domain should now be {target}-{pieces[0][1]}: {spans}")
     covered = set()
     for start, end in spans:
         covered |= set(range(start, end + 1))
-    assert covered == set(range(saved["low"], saved["high"] + 1)), (
+    assert covered == set(range(low, high + 1)), (
         "committing left the chain not fully covered")
 
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
-    return (f"head row {head_span[0]}-{head_span[1]} settled in, stayed "
-            f"editable, and committed as a domain")
+    return (f"first-domain Start dragged {low} -> {target}; "
+            f"head {low}-{target - 1} became a domain on commit")
 
 
 def assert_splitter_preview_restored():
@@ -709,12 +671,6 @@ steps = [
     ("domain splitter live boundary drag", edit_chain_domains_live_boundary_drag),
     ("settle splitter modal", lambda: "modal cancellation processed"),
     ("domain splitter first-start drag", edit_chain_domains_first_start_drag),
-    # The new row lands on an app timer once the value stops changing, so give
-    # the event loop a few ticks to get there before asserting on it.
-    ("settle first-start row 1", lambda: "waiting for the settle timer"),
-    ("settle first-start row 2", lambda: "waiting for the settle timer"),
-    ("settle first-start row 3", lambda: "waiting for the settle timer"),
-    ("assert first-start settled into a row", assert_first_start_settled_into_a_row),
     ("settle first-start modal", lambda: "modal cancellation processed"),
     ("assert splitter preview restored", assert_splitter_preview_restored),
     ("DNA edit mode", dna_edit_mode_roundtrip),

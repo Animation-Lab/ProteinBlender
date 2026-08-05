@@ -13,17 +13,13 @@ in sync by hand.
 
 Pulling the first domain's start off the beginning of the chain (or the last
 domain's end off the end) leaves a stretch with no owner, and that stretch gets
-a row of its own so the user can size it like any other domain. The row is
-added when the value **settles**, not while it is moving: a row inserted ahead
-of the edited one shifts it, and every row after it, down by one, while
-Blender's number widget stays bound to the same position - so the user carries
-on dragging the row that was just inserted, which sits at the start of the
-chain and has nowhere to go. See `_queue_layout`.
-
-Between the drag and the settle the row list stops short of the chain's end.
-That is a legal state: the viewport preview already draws the domain forming,
-and `execute` completes the layout anyway, so committing mid-drag cannot lose
-those residues.
+its own domain - but only once the dialog is committed, never while the value
+is still being dragged. Inserting a row ahead of the edited one mid-drag moves
+it out from under the cursor, and what the user goes on dragging is the domain
+just inserted, which is pinned to the start of the chain and cannot move at
+all. So the row list is allowed to stop short of the chain's ends while it is
+being edited; `execute` completes it. The viewport preview shows the domain
+forming in the meantime, so nothing about it is invisible.
 
 While a range is being edited the viewport isolates the chain being edited, so
 the user can see the piece they are defining instead of guessing at residue
@@ -140,63 +136,7 @@ _state = {
     # fires that neighbour's callback, which adjusts the next one, and a single
     # click cascades down the whole chain.
     "suspended": False,
-    # A layout that needs a row the dialog does not have yet, waiting for the
-    # value to stop moving. See _queue_layout.
-    "pending_layout": None,
-    "pending_serial": 0,
-    "settled_serial": 0,
-    "settling": False,
 }
-
-# How long a boundary has to sit still before the row it orphaned residues for
-# is added. Long enough to outlast the gaps between a drag's updates, short
-# enough that letting go feels like it produced the row.
-_SETTLE_SECONDS = 0.25
-
-
-def _queue_layout(retiled):
-    """Ask for the row list to grow - once the value has stopped changing.
-
-    Growing it inside the property update callback is what broke dragging the
-    first domain's Start. The new row lands *ahead* of the edited one and
-    pushes it, and every row after it, down by one, while Blender's number
-    widget stays bound to row 0. From the next drag step on, the user is
-    dragging the domain that was just inserted, and that one sits at the start
-    of the chain with nowhere to go - so the drag died one residue in and left
-    a one-residue domain behind.
-
-    Waiting for the value to settle gets both halves: the drag runs to wherever
-    the user takes it, and the new range adjuster appears when they let go.
-    """
-    _state["pending_layout"] = retiled
-    _state["pending_serial"] += 1
-    if _state["settling"]:
-        return
-    _state["settling"] = True
-    _state["settled_serial"] = _state["pending_serial"]
-    bpy.app.timers.register(_settle, first_interval=_SETTLE_SECONDS)
-
-
-def _clear_queued_layout():
-    _state["pending_layout"] = None
-    _state["settling"] = False
-
-
-def _settle():
-    """Add the queued row, or wait another beat if the value is still moving."""
-    instance = _active()
-    pending = _state["pending_layout"]
-    if instance is None or pending is None:
-        _clear_queued_layout()
-        return None
-    if _state["settled_serial"] != _state["pending_serial"]:
-        _state["settled_serial"] = _state["pending_serial"]
-        return _SETTLE_SECONDS
-
-    _clear_queued_layout()
-    instance.reload_rows(pending)
-    _tag_redraw(bpy.context)
-    return None
 
 
 class _Suspend:
@@ -865,36 +805,18 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 self._refresh_default_names()
             else:
                 # The edit pushed a boundary off the end of the chain and
-                # orphaned the residues beyond it, which needs a row the dialog
-                # does not have. Write the edited row's own clamped value now
-                # and queue the row for when the value settles - adding it here
-                # would move this row out from under the cursor mid-drag.
+                # orphaned the residues beyond it. Write the edited row's own
+                # clamped value and stop: growing the row list here would move
+                # this row, and every row after it, down by one - out from
+                # under the cursor of the user who is still dragging it. The
+                # orphaned stretch gets its own domain when the dialog is
+                # committed, and the preview below already shows it forming.
                 edited = retiled[new_index]
                 row.start = edited.start
                 row.end = edited.end
                 self._refresh_default_names()
-                _queue_layout(retiled)
 
         self._preview_layout(retiled, new_index)
-
-    def reload_rows(self, specs):
-        """Rewrite the row list to ``specs``, growing or shrinking it to fit.
-
-        Only ever called from _settle, never from a property update callback:
-        resizing the collection Blender is mid-write on reallocates it.
-        """
-        with _Suspend():
-            while len(self.rows) > len(specs):
-                self.rows.remove(len(self.rows) - 1)
-            while len(self.rows) < len(specs):
-                self.rows.add()
-            for row, spec in zip(self.rows, specs):
-                row.name = spec.name
-                row.start = spec.start
-                row.end = spec.end
-                row.domain_id = spec.domain_id or ""
-            self._refresh_default_names()
-            self.domain_count = len(self.rows)
 
     def _completed_specs(self):
         """The dialog's rows, plus a domain for whatever they leave uncovered.
@@ -1025,7 +947,6 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             self.domain_count = max(1, len(specs))
             self._refresh_default_names()
 
-        _clear_queued_layout()
         type(self)._active_instance = self
         return context.window_manager.invoke_props_dialog(self, width=520)
 
@@ -1135,7 +1056,6 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
 
     def execute(self, context):
         restore_preview(context)
-        _clear_queued_layout()
 
         chain_row = self._chain_row(context)
         molecule = self._molecule(context, chain_row)
@@ -1221,7 +1141,6 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
 
     def cancel(self, context):
         restore_preview(context)
-        _clear_queued_layout()
         type(self)._active_instance = None
 
 
