@@ -854,6 +854,40 @@ on a membrane whose typical gap was 0.28 nm.
   colour to a plain tuple before applying it. Guarded by
   `test_domains.py::test_update_domain_color_operator_applies_color`.
 
+- **A headless Blender hung forever building the UI workspace.** Every leg of
+  the nightly artifact job (ubuntu, windows, macos) printed add-on registration
+  and then went silent until the 45-minute job timeout killed it; the lane had
+  never once passed in CI.
+  Root cause: `ProteinWorkspaceManager` rearranges editors with
+  `workspace.duplicate`, `screen.area_close` and `screen.area_split`. Those are
+  UI operators that complete via the window event loop, and `blender
+  --background` has no event loop, so `bpy.ops.screen.area_close()` in
+  `_reduce_to_main_viewport` never returns and spins at 100% CPU. Reached on
+  startup through the `create_workspace_on_load` load_post handler, which is why
+  Blender wedged before it ever ran the `--python` script - no watchdog inside
+  that script could observe it, and Blender's crash handler swallows SIGABRT.
+  Located by running the lane against a headless Linux Blender and profiling
+  with py-spy: 790 of 798 samples in that one stack. It terminates on Windows,
+  which is why local runs never showed it.
+  Fixed by no-opping both public entry points of `ProteinWorkspaceManager` when
+  `bpy.app.background` is set. Guarded by
+  `test_workspace_background.py` (asserts the guard, not the symptom: a hang
+  cannot be asserted on without wedging the suite, so the UI entry points are
+  replaced with something that raises; verified red pre-fix).
+
+- **`build.py` reported a missing module instead of the real install failure.**
+  The nightly's ubuntu leg died in 32s with `ModuleNotFoundError: No module
+  named 'tomlkit'`. Root cause: the import-time bootstrap ran `pip install
+  tomlkit` into a system Python whose `dist-packages` the CI user cannot write
+  (EACCES), and `run_python` called `subprocess.run` without `check=True`, so
+  that exit status was discarded and the failed re-import became the visible
+  error. Fixed by retrying into the user site directory and failing loudly with
+  pip's own output. `check=True` matters beyond the bootstrap: `run_python`
+  drives `pip download` for the whole release wheel matrix, so a swallowed
+  failure let `update_toml_whls` write a manifest from whatever wheels landed -
+  a partial dependency set shipping as a complete release. Guarded by
+  `test_build_tooling.py` (verified red pre-fix).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

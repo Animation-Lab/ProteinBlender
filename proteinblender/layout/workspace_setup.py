@@ -6,6 +6,20 @@ import bpy
 PANEL_WIDTH_FRACTION = 0.30
 
 
+def _is_headless():
+    """True when this Blender has no window event loop to finish UI operators.
+
+    Everything this module does - `workspace.duplicate`, `screen.area_close`,
+    `screen.area_split` - is a UI operator that completes via the window event
+    loop. `blender --background` has no such loop, so `screen.area_close` never
+    returns and spins at 100% CPU until something kills the process.
+
+    There is also nothing to build: a background Blender renders no editors, so
+    arranging them is pure cost even where it happens to terminate.
+    """
+    return bpy.app.background
+
+
 class ProteinWorkspaceManager:
     def __init__(self, name="Protein Blender"):
         self.name = name
@@ -17,6 +31,9 @@ class ProteinWorkspaceManager:
         self.timeline_area = None  # Bottom timeline (was bottom_area)
 
     def create_custom_workspace(self):
+        if _is_headless():
+            return None
+
         # Reuse and repair an existing workspace. Previously this returned
         # before binding window/screen/area references, so every subsequent
         # setup method was a no-op on the second Blender launch. Users saw the
@@ -150,6 +167,9 @@ class ProteinWorkspaceManager:
         return self.panel_area.width >= int(target * 0.85)
 
     def add_panels_to_workspace(self):
+        if _is_headless():
+            return
+
         self._discover_editor_areas()
         if not self.main_area:
             return
