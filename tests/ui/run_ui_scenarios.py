@@ -420,6 +420,106 @@ def edit_chain_domains_live_boundary_drag():
     return f"boundary drag re-tiled live; preview showed {shown}"
 
 
+def edit_chain_domains_first_start_drag():
+    """Dragging the FIRST domain's Start must move it, not stall at the chain.
+
+    Raising it orphans the residues below, and the fix for that used to be to
+    insert a domain in front - which moved every later row down by one, out
+    from under the cursor. What the user carried on dragging was the domain
+    just inserted ahead of theirs, and that one is pinned to the start of the
+    chain and cannot move at all, so the drag died one residue in and left a
+    stray 1-1 domain behind. Reported as "it just snaps to 2 and creates a new
+    domain from 1-1".
+
+    Only reachable through a live dialog: the row list is a CollectionProperty,
+    and Blender does not call check() for an edit to a collection *element*, so
+    the whole structural path this exercises never ran in the headless lane.
+    """
+    from proteinblender.core import domain_layout
+    from proteinblender.operators import domain_splitter as ds
+
+    scene_manager = H.scene_manager_module()
+    # Deliberately the LAST chain, not the first. This scenario is the only one
+    # here that *commits*, and the undo scenarios further down rebuild the
+    # first chain's domains from scratch and assume the domain covering its
+    # first residue is the one they delete. Committing a fourth domain onto
+    # that chain quietly broke them.
+    # Filtered by parent: earlier scenarios leave CHAIN rows parented to a
+    # puppet, and those are not molecules.
+    chains = [row for row in bpy.context.scene.outliner_items
+              if row.item_type == "CHAIN" and row.parent_id in H.sm().molecules]
+    assert len(chains) > 1, "expected a multi-chain fixture"
+    chain = chains[-1]
+    chain_key = chain.item_id
+    molecule = H.sm().molecules[chain.parent_id]
+    chain_letter = molecule.chain_mapping[int(chain.chain_id)]
+    low, high = domain_layout.chain_residue_range(molecule, chain.chain_id)
+    pieces = domain_layout.even_split(low, high, 3)
+    payload = json.dumps([{"name": f"Seed {i}", "start": a, "end": b,
+                           "domain_id": ""}
+                          for i, (a, b) in enumerate(pieces, start=1)])
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.edit_chain_domains(
+            "EXEC_DEFAULT", item_id=chain.item_id,
+            layout_json=payload) == {"FINISHED"}
+    scene_manager.build_outliner_hierarchy(bpy.context)
+
+    chain_id = next(row.item_id for row in bpy.context.scene.outliner_items
+                    if row.item_type == "CHAIN" and row.item_id == chain_key)
+    with ui_override("PROPERTIES"):
+        result = bpy.ops.proteinblender.edit_chain_domains(
+            "INVOKE_DEFAULT", item_id=chain_id)
+    assert result == {"RUNNING_MODAL"}, result
+
+    instance = ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance
+    assert instance is not None, "the dialog published no live instance"
+    assert instance.rows[0].start == low, (
+        f"the first row should start at the chain's first residue, "
+        f"got {instance.rows[0].start}")
+    seeded = len(instance.rows)
+
+    # A drag: Blender fires the update callback once per step, on whatever
+    # element sits at row 0 *at that moment*. That is the whole bug.
+    target = low + 12
+    for _ in range(12):
+        instance.rows[0].start = instance.rows[0].start + 1
+        instance.check(bpy.context)
+
+    assert instance.rows[0].start == target, (
+        f"the drag stalled: rows[0].start reached {instance.rows[0].start}, "
+        f"expected {target}")
+    assert len(instance.rows) == seeded, (
+        f"dragging inserted rows mid-drag: {[(r.start, r.end) for r in instance.rows]}")
+    assert instance.rows[0].end > target, "the first domain lost its body"
+
+    # Commit through the dialog's own path - execute() on the live instance,
+    # with no layout_json - because that is where the orphaned head is turned
+    # into a domain. Going via layout_json would take the rows literally and
+    # prove nothing about the completion.
+    with ui_override("PROPERTIES"):
+        assert instance.execute(bpy.context) == {"FINISHED"}
+    ds.PROTEINBLENDER_OT_edit_chain_domains._active_instance = None
+    scene_manager.build_outliner_hierarchy(bpy.context)
+
+    molecule = H.sm().molecules[chain.parent_id]
+    spans = sorted((d.start, d.end) for d in molecule.domains.values()
+                   if str(d.chain_id) == str(chain_letter))
+    assert (low, target - 1) in spans, (
+        f"the orphaned head {low}-{target - 1} did not become a domain: {spans}")
+    assert (target, pieces[0][1]) in spans, (
+        f"the dragged domain should now be {target}-{pieces[0][1]}: {spans}")
+    covered = set()
+    for start, end in spans:
+        covered |= set(range(start, end + 1))
+    assert covered == set(range(low, high + 1)), (
+        "committing left the chain not fully covered")
+
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return (f"first-domain Start dragged {low} -> {target}; "
+            f"head {low}-{target - 1} became a domain on commit")
+
+
 def assert_splitter_preview_restored():
     """Cancelling the dialog must un-hide everything it isolated."""
     from proteinblender.operators import domain_splitter as ds
@@ -570,6 +670,8 @@ steps = [
     ("settle split modal", lambda: "modal cancellation processed"),
     ("domain splitter live boundary drag", edit_chain_domains_live_boundary_drag),
     ("settle splitter modal", lambda: "modal cancellation processed"),
+    ("domain splitter first-start drag", edit_chain_domains_first_start_drag),
+    ("settle first-start modal", lambda: "modal cancellation processed"),
     ("assert splitter preview restored", assert_splitter_preview_restored),
     ("DNA edit mode", dna_edit_mode_roundtrip),
     ("membrane edit mode", membrane_edit_mode_roundtrip),

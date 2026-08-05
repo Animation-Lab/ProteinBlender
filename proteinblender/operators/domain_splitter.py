@@ -5,14 +5,21 @@ dialog edits a *desired layout* (a list of named residue ranges) and hands it
 to :mod:`core.domain_layout`, which reconciles it against the chain's current
 domains rather than rebuilding them - see that module for why that matters.
 
-The layout is kept **contiguous**: the rows always tile the chain end to end,
-with no gaps and no overlaps. That is what makes the boundaries directly
-draggable - moving one domain's start is the same edit as moving the previous
-domain's end, so the dialog adjusts the neighbour to match instead of leaving
-the user to keep two numbers in sync by hand. Pulling the first domain's start
-off the beginning of the chain (or the last domain's end off the end) leaves a
-stretch with no owner, so a new domain is created there to keep the tiling
-whole.
+The layout is kept **contiguous**: the rows never gap or overlap in the middle.
+That is what makes the boundaries directly draggable - moving one domain's
+start is the same edit as moving the previous domain's end, so the dialog
+adjusts the neighbour to match instead of leaving the user to keep two numbers
+in sync by hand.
+
+Pulling the first domain's start off the beginning of the chain (or the last
+domain's end off the end) leaves a stretch with no owner, and that stretch gets
+its own domain - but only once the dialog is committed, never while the value
+is still being dragged. Inserting a row ahead of the edited one mid-drag moves
+it out from under the cursor, and what the user goes on dragging is the domain
+just inserted, which is pinned to the start of the chain and cannot move at
+all. So the row list is allowed to stop short of the chain's ends while it is
+being edited; `execute` completes it. The viewport preview shows the domain
+forming in the meantime, so nothing about it is invisible.
 
 While a range is being edited the viewport isolates the chain being edited, so
 the user can see the piece they are defining instead of guessing at residue
@@ -129,10 +136,6 @@ _state = {
     # fires that neighbour's callback, which adjusts the next one, and a single
     # click cascades down the whole chain.
     "suspended": False,
-    # Layout computed by a range edit, applied in check(). The row collection
-    # must not be resized from inside a property update callback: that
-    # reallocates the collection Blender is mid-write on.
-    "pending_layout": None,
 }
 
 
@@ -801,36 +804,32 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 # auto-generated name on them is now advertising the wrong span.
                 self._refresh_default_names()
             else:
-                # A domain has to be created to own the residues this edit
-                # orphaned. Apply the edited row's own (clamped) value now so
-                # the field shows what it will keep, and let check() do the
-                # structural part.
+                # The edit pushed a boundary off the end of the chain and
+                # orphaned the residues beyond it. Write the edited row's own
+                # clamped value and stop: growing the row list here would move
+                # this row, and every row after it, down by one - out from
+                # under the cursor of the user who is still dragging it. The
+                # orphaned stretch gets its own domain when the dialog is
+                # committed, and the preview below already shows it forming.
                 edited = retiled[new_index]
                 row.start = edited.start
                 row.end = edited.end
-                _state["pending_layout"] = retiled
+                self._refresh_default_names()
 
         self._preview_layout(retiled, new_index)
 
-    def _apply_pending_layout(self):
-        """Write the re-tiled layout back onto the dialog's rows."""
-        pending = _state["pending_layout"]
-        _state["pending_layout"] = None
-        if not pending:
-            return
+    def _completed_specs(self):
+        """The dialog's rows, plus a domain for whatever they leave uncovered.
 
-        with _Suspend():
-            while len(self.rows) > len(pending):
-                self.rows.remove(len(self.rows) - 1)
-            while len(self.rows) < len(pending):
-                self.rows.add()
-            for row, spec in zip(self.rows, pending):
-                row.name = spec.name
-                row.start = spec.start
-                row.end = spec.end
-                row.domain_id = spec.domain_id or ""
-            self._refresh_default_names()
-            self.domain_count = len(self.rows)
+        The row list is allowed to stop short of either end of the chain while
+        a boundary is being dragged - see domain_layout.complete_layout for why
+        filling it in on the spot breaks the drag - so it is completed here,
+        once, on the way out.
+        """
+        return domain_layout.complete_layout(
+            self.current_specs(), self.chain_min, self.chain_max,
+            name_for=lambda start, end: default_domain_name(
+                self.chain_label, start, end))
 
     def _refresh_default_names(self):
         """Re-derive every auto-generated row name from its current range.
@@ -948,20 +947,20 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             self.domain_count = max(1, len(specs))
             self._refresh_default_names()
 
-        _state["pending_layout"] = None
         type(self)._active_instance = self
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def check(self, context):
-        """Apply the deferred re-tile and force the dialog to re-layout.
+        """Force the dialog to re-layout after something changed the rows.
 
         Blender only re-runs a dialog's draw() for property edits unless
         check() asks for it, and the row buttons add and remove rows rather
-        than editing a property. This is also the safe place to rewrite the row
-        collection after a boundary edit re-tiled the layout - see
-        range_edited.
+        than editing a property. Nothing structural is deferred to here: for an
+        edit to a CollectionProperty *element* - which is what every row field
+        is - Blender does not call check() at all, so anything parked here for
+        a boundary drag would be applied at some unrelated moment later, or
+        never.
         """
-        self._apply_pending_layout()
         return True
 
     def draw(self, context):
@@ -1035,14 +1034,25 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         op.index = index
 
     def _draw_feedback(self, layout):
-        errors = domain_layout.validate_layout(self.current_specs(),
-                                               self.chain_min, self.chain_max)
-        if not errors:
+        specs = self.current_specs()
+        errors = domain_layout.validate_layout(specs, self.chain_min,
+                                               self.chain_max)
+        if errors:
+            box = layout.box()
+            box.alert = True
+            for message in errors:
+                box.label(text=message, icon='ERROR')
             return
-        box = layout.box()
-        box.alert = True
-        for message in errors:
-            box.label(text=message, icon='ERROR')
+
+        # Residues no row claims are not an error - dragging a boundary off the
+        # end of the chain is how you carve a domain off it, and they become
+        # their own domain on OK. Say so, rather than leaving the user to press
+        # OK and count what came out.
+        for start, end in domain_layout.coverage_gaps(specs, self.chain_min,
+                                                      self.chain_max):
+            layout.box().label(
+                text=f"Residues {start}-{end} will become a new domain",
+                icon='INFO')
 
     def execute(self, context):
         restore_preview(context)
@@ -1067,7 +1077,11 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 type(self)._active_instance = None
                 return {'CANCELLED'}
         else:
-            specs = self.current_specs()
+            # The rows may stop short of either end of the chain: a boundary
+            # dragged off the end orphans the residues beyond it, and those are
+            # given their own domain here rather than mid-drag. layout_json is
+            # taken exactly as written - it is the explicit escape hatch.
+            specs = self._completed_specs()
 
         # Validate before touching anything, so a rejected layout leaves the
         # chain name unchanged too rather than half-applying the dialog.

@@ -221,6 +221,32 @@ def retile_after_edit(specs: List[DomainSpec], index: int, chain_min: int,
     return rows, index
 
 
+def complete_layout(specs: List[DomainSpec], chain_min: int, chain_max: int,
+                    name_for=None) -> List[DomainSpec]:
+    """Give every stretch of the chain ``specs`` leaves uncovered its own domain.
+
+    Deliberately *not* done while a boundary is being edited. Pushing the first
+    domain's start up the chain orphans the residues below it, and filling that
+    in on the spot means inserting a domain ahead of the edited one - which
+    moves it, and every row after it, down by one. A user mid-drag is then
+    dragging whatever landed at that position instead: the domain just
+    inserted, which is pinned to the start of the chain and cannot move at all.
+    The drag dies one residue in and leaves a one-residue domain behind.
+
+    So a layout is allowed to be open-ended while it is being edited, and is
+    completed once, here, when it is committed.
+
+    ``name_for(start, end)`` names the domains this creates; without it they
+    are left unnamed for the caller to fill in.
+    """
+    filled = list(specs)
+    for start, end in coverage_gaps(specs, chain_min, chain_max):
+        filled.append(DomainSpec(
+            name=name_for(start, end) if name_for else "",
+            start=start, end=end, domain_id=None))
+    return sorted(filled, key=lambda s: (s.start, s.end))
+
+
 def coverage_gaps(specs: List[DomainSpec], chain_min: int,
                   chain_max: int) -> List[Tuple[int, int]]:
     """Return the residue spans of the chain no domain covers.

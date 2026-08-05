@@ -341,6 +341,65 @@ def test_pulling_the_last_end_off_the_chain_creates_a_domain_below():
 
 
 @pytest.mark.integration
+def test_complete_layout_gives_an_orphaned_head_its_own_domain():
+    """Dragging the first Start up the chain leaves a head with no owner.
+
+    The row list is deliberately allowed to stop short while the value is being
+    dragged - inserting the domain on the spot moves the edited row out from
+    under the cursor - so the completion has to happen on commit instead.
+    """
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 30, 66, "a"), spec("B", 67, 100, "b")]
+
+    result = domain_layout.complete_layout(rows, 1, 100)
+
+    assert [(s.start, s.end) for s in result] == [(1, 29), (30, 66), (67, 100)]
+    assert result[0].domain_id is None, "the filler must be a fresh domain"
+    assert result[1].domain_id == "a", "the edited domain kept its identity"
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_complete_layout_gives_an_orphaned_tail_its_own_domain():
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 1, 40, "a"), spec("B", 41, 80, "b")]
+
+    result = domain_layout.complete_layout(rows, 1, 100)
+
+    assert [(s.start, s.end) for s in result] == [(1, 40), (41, 80), (81, 100)]
+    assert result[-1].domain_id is None
+    assert _tiles(result, 1, 100)
+
+
+@pytest.mark.integration
+def test_complete_layout_leaves_a_layout_that_already_tiles_alone():
+    """Committing an untouched chain must not invent anything."""
+    spec = domain_layout.DomainSpec
+    rows = [spec("A", 1, 50, "a"), spec("B", 51, 100, "b")]
+
+    result = domain_layout.complete_layout(rows, 1, 100)
+
+    assert [(s.name, s.start, s.end, s.domain_id) for s in result] == [
+        ("A", 1, 50, "a"), ("B", 51, 100, "b")]
+
+
+@pytest.mark.integration
+def test_complete_layout_names_what_it_creates():
+    """A filler domain reaches the user, so it needs a name a user recognises."""
+    from proteinblender.utils.chain_utils import is_default_domain_name
+
+    spec = domain_layout.DomainSpec
+    result = domain_layout.complete_layout(
+        [spec("A", 30, 100, "a")], 1, 100,
+        name_for=lambda start, end: f"Chain A: {start}-{end}")
+
+    assert result[0].name == "Chain A: 1-29"
+    assert is_default_domain_name(result[0].name), (
+        "an invented name must read back as auto-generated, or it freezes as "
+        "though the user had typed it")
+
+
+@pytest.mark.integration
 def test_a_boundary_cannot_swallow_its_neighbour():
     """Dragging through a neighbour stops at one residue instead of deleting it.
 
