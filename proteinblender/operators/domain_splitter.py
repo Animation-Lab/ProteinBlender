@@ -12,14 +12,19 @@ adjusts the neighbour to match instead of leaving the user to keep two numbers
 in sync by hand.
 
 Pulling the first domain's start off the beginning of the chain (or the last
-domain's end off the end) leaves a stretch with no owner, and that stretch gets
-its own domain - but only once the dialog is committed, never while the value
-is still being dragged. Inserting a row ahead of the edited one mid-drag moves
-it out from under the cursor, and what the user goes on dragging is the domain
-just inserted, which is pinned to the start of the chain and cannot move at
-all. So the row list is allowed to stop short of the chain's ends while it is
-being edited; `execute` completes it. The viewport preview shows the domain
-forming in the meantime, so nothing about it is invisible.
+domain's end off the end) leaves a stretch with no owner. That stretch is shown
+as its own adjuster - a grid line above the first row, or below the last - and
+`execute` turns it into a real domain.
+
+The adjuster is drawn from plain operator properties, **not** from a row added
+to the collection, and that is load-bearing rather than a shortcut. A row added
+ahead of the one being dragged shifts it, and every row after it, down by one,
+while Blender's number widget stays bound to the position. From the next drag
+step on the user is dragging the row that was just inserted, which sits at the
+chain's edge and has nowhere to go, so the drag dies one residue in and leaves
+a one-residue domain behind. That happens whenever the row is added - on the
+first edit, or on a timer once the value settles, since a real drag pauses for
+longer than any sane debounce. Operator properties have no such problem.
 
 While a range is being edited the viewport isolates the chain being edited, so
 the user can see the piece they are defining instead of guessing at residue
@@ -623,6 +628,24 @@ def _on_end_edited(row, context):
         instance.range_edited(row, moved_start=False)
 
 
+def _on_edge_end_edited(_operator, context):
+    """The head adjuster's End moved: it is the first domain's Start, minus one."""
+    if _state["suspended"]:
+        return
+    instance = _active()
+    if instance is not None and len(instance.rows):
+        instance.rows[0].start = instance.head_end + 1
+
+
+def _on_edge_start_edited(_operator, context):
+    """The tail adjuster's Start moved: it is the last domain's End, plus one."""
+    if _state["suspended"]:
+        return
+    instance = _active()
+    if instance is not None and len(instance.rows):
+        instance.rows[-1].end = instance.tail_start - 1
+
+
 def _on_count_edited(_operator, context):
     """Redistribute the chain evenly whenever the domain count changes.
 
@@ -693,10 +716,67 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     # "Chain A: 1-248" expects to see.
     chain_label: StringProperty(default="")
 
+    # The two domains-to-be at the ends of the chain. When a boundary is
+    # dragged off the start or end of the chain the residues beyond it have no
+    # row, and a row cannot be conjured for them: adding one ahead of the row
+    # being dragged shifts it out from under the cursor, and Blender's number
+    # widget stays bound to the position, so the user ends up dragging the row
+    # that was just inserted. It sits at the chain's edge and cannot move, so
+    # the drag dies. That is the "snaps to 2 and creates a 1-1 domain" bug, and
+    # it comes back however cleverly the insertion is timed.
+    #
+    # So these are drawn as an extra grid line from plain operator properties
+    # instead. They look and behave like a row - the range tracks the drag, the
+    # boundary is editable, the name is the name the domain will be created
+    # with - but they are not CollectionProperty elements, so no drag can be
+    # stolen. execute() turns them into real domains.
+    head_name: StringProperty(name="Name")
+    head_end: IntProperty(
+        name="End",
+        description="Last residue of the domain that will be created for the "
+                    "start of the chain. This is the boundary below the first "
+                    "domain",
+        update=_on_edge_end_edited)
+    tail_name: StringProperty(name="Name")
+    tail_start: IntProperty(
+        name="Start",
+        description="First residue of the domain that will be created for the "
+                    "end of the chain. This is the boundary above the last "
+                    "domain",
+        update=_on_edge_start_edited)
+
     # Headless escape hatch: a JSON list of {name, start, end, domain_id}. When
     # set, execute() uses it instead of the dialog rows, so the operator is
     # driveable from tests and scripts without a UI.
     layout_json: StringProperty(default="")
+
+    # ------------------------------------------------------------------
+    # The domains-to-be at the ends of the chain
+    # ------------------------------------------------------------------
+
+    def has_head(self):
+        return bool(len(self.rows)) and self.rows[0].start > self.chain_min
+
+    def has_tail(self):
+        return bool(len(self.rows)) and self.rows[-1].end < self.chain_max
+
+    def _sync_edges(self):
+        """Point the edge adjusters at the boundaries the rows currently have.
+
+        Suspended, because writing these fires their own update callbacks,
+        which write straight back into the rows.
+        """
+        if not len(self.rows):
+            return
+        with _Suspend():
+            self.head_end = self.rows[0].start - 1
+            self.tail_start = self.rows[-1].end + 1
+            if self.has_head() and is_default_domain_name(self.head_name):
+                self.head_name = default_domain_name(
+                    self.chain_label, self.chain_min, self.head_end)
+            if self.has_tail() and is_default_domain_name(self.tail_name):
+                self.tail_name = default_domain_name(
+                    self.chain_label, self.tail_start, self.chain_max)
 
     # ------------------------------------------------------------------
     # Resolution helpers
@@ -816,6 +896,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 row.end = edited.end
                 self._refresh_default_names()
 
+        self._sync_edges()
         self._preview_layout(retiled, new_index)
 
     def _completed_specs(self):
@@ -826,10 +907,16 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         filling it in on the spot breaks the drag - so it is completed here,
         once, on the way out.
         """
+        def name_for(start, end):
+            if start == self.chain_min and self.head_name.strip():
+                return self.head_name
+            if end == self.chain_max and self.tail_name.strip():
+                return self.tail_name
+            return default_domain_name(self.chain_label, start, end)
+
         return domain_layout.complete_layout(
             self.current_specs(), self.chain_min, self.chain_max,
-            name_for=lambda start, end: default_domain_name(
-                self.chain_label, start, end))
+            name_for=name_for)
 
     def _refresh_default_names(self):
         """Re-derive every auto-generated row name from its current range.
@@ -946,6 +1033,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             self.load_rows(specs)
             self.domain_count = max(1, len(specs))
             self._refresh_default_names()
+        self._sync_edges()
 
         type(self)._active_instance = self
         return context.window_manager.invoke_props_dialog(self, width=520)
@@ -976,8 +1064,12 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
 
         grid = body.column(align=True)
         self._draw_columns(grid.row(align=True), header=True)
+        if self.has_head():
+            self._draw_edge(grid.row(align=True), head=True)
         for index, row in enumerate(self.rows):
             self._draw_columns(grid.row(align=True), row=row, index=index)
+        if self.has_tail():
+            self._draw_edge(grid.row(align=True), head=False)
 
         add = body.row()
         add.enabled = len(self.rows) < MAX_DOMAINS
@@ -1033,6 +1125,37 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                              text="", icon='X')
         op.index = index
 
+    def _draw_edge(self, line, head):
+        """Draw the domain that will be created for one end of the chain.
+
+        Laid out on the same grid as a real row so it reads as one, with the
+        column it cannot change shown as a plain label: the head's Start is the
+        chain's first residue and the tail's End is its last, and neither can
+        be anything else. The other number *is* the boundary the neighbouring
+        row is dragging, and editing it here moves that row.
+        """
+        cell = line.row()
+        cell.ui_units_x = self._COL_INDEX
+        cell.label(text="", icon='ADD')
+
+        line.prop(self, "head_name" if head else "tail_name", text="")
+
+        columns = (((str(self.chain_min), None), (None, "head_end")) if head
+                   else ((None, "tail_start"), (str(self.chain_max), None)))
+        for text, prop in columns:
+            cell = line.row()
+            cell.ui_units_x = self._COL_NUMBER
+            if prop is None:
+                cell.enabled = False
+                cell.label(text=text)
+            else:
+                cell.prop(self, prop, text="")
+
+        tools = line.row(align=True)
+        tools.ui_units_x = self._COL_TOOLS
+        tools.enabled = False
+        tools.label(text="new")
+
     def _draw_feedback(self, layout):
         specs = self.current_specs()
         errors = domain_layout.validate_layout(specs, self.chain_min,
@@ -1044,15 +1167,10 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                 box.label(text=message, icon='ERROR')
             return
 
-        # Residues no row claims are not an error - dragging a boundary off the
-        # end of the chain is how you carve a domain off it, and they become
-        # their own domain on OK. Say so, rather than leaving the user to press
-        # OK and count what came out.
-        for start, end in domain_layout.coverage_gaps(specs, self.chain_min,
-                                                      self.chain_max):
-            layout.box().label(
-                text=f"Residues {start}-{end} will become a new domain",
-                icon='INFO')
+        # Residues no row claims are not an error: dragging a boundary off the
+        # end of the chain is how you carve a domain off it, and the grid now
+        # shows those stretches as their own rows, so there is nothing left to
+        # announce here.
 
     def execute(self, context):
         restore_preview(context)

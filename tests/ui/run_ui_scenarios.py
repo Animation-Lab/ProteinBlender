@@ -492,6 +492,25 @@ def edit_chain_domains_first_start_drag():
         f"dragging inserted rows mid-drag: {[(r.start, r.end) for r in instance.rows]}")
     assert instance.rows[0].end > target, "the first domain lost its body"
 
+    # The stretch the drag orphaned gets its own adjuster above the rows. It is
+    # drawn from operator properties, not a CollectionProperty element, which
+    # is the whole point: a real row there would move the dragged row down and
+    # steal the drag, however the insertion is timed.
+    assert instance.has_head(), "no adjuster appeared for the orphaned head"
+    assert instance.head_end == target - 1, (
+        f"the head adjuster ends at {instance.head_end}, expected {target - 1}")
+    assert instance.head_name, "the head adjuster has no name to be created with"
+    assert not instance.has_tail(), (
+        "the far end of the chain is still covered, so no tail adjuster is due")
+
+    # It is a real control, not a label: moving its End moves the boundary.
+    instance.head_end = target + 9
+    assert instance.rows[0].start == target + 10, (
+        f"editing the head adjuster did not move the first domain: "
+        f"{[(r.start, r.end) for r in instance.rows]}")
+    instance.head_end = target - 1
+    assert instance.rows[0].start == target, "the boundary did not come back"
+
     # Commit through the dialog's own path - execute() on the live instance,
     # with no layout_json - because that is where the orphaned head is turned
     # into a domain. Going via layout_json would take the rows literally and
