@@ -678,7 +678,7 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 4  # After domain maker
+    bl_order = 4  # After the Visual Set-up column
     
     def draw(self, context):
         layout = self.layout

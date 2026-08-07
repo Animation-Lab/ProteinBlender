@@ -479,9 +479,10 @@ on a membrane whose typical gap was 0.28 nm.
   Guarded by `test_domain_splitter.py::test_preview_isolates_the_chain_and_restores_everything_afterwards` (ground truth is the visibility flags and node ranges captured *before* isolating, and it also asserts a second preview call does not re-capture the previewed state as the original), `::test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized` (materials and colours read straight off the node graph, never through the splitter's own accessors), `::test_the_ghost_is_a_copy_of_the_domains_own_material` (asserts the ghost's node types and links match the real material's, which is the only assertion that catches the opaque-stand-in failure - one about colour or about which material is assigned passes straight through it), `::test_preview_puts_back_a_domain_that_lent_its_object_to_a_new_row` and `::test_restoring_a_preview_that_was_never_started_is_harmless`.
   Note for future work here: Blender does **not** expose a plain (non-RNA) class attribute through an operator *instance* inside a property update callback - `instance.suspended` raises AttributeError even with `suspended = False` on the class - so the dialog's re-entrancy guard and deferred-layout state are module-level, not class attributes.
 
-- **The Domain Maker panel drew an unreachable block calling two operators that do not exist.**
-  `domain_maker_panel.py` had an `elif selected_item.item_type == 'DOMAIN'` after an `if selected_item.item_type in ['CHAIN', 'DOMAIN']`, so it could never run - which is the only reason its `proteinblender.update_domain_range` and `proteinblender.delete_domain` buttons never raised in front of a user (neither `bl_idname` is defined anywhere; the real delete is `molecule.delete_domain`).
-  Removed, and replaced with an "Edit Domains..." button that opens the Domain Splitter for the selected chain (or the selected domain's parent chain).
+- **The Domain Maker panel has been removed.**
+  It offered Split, Merge and "Edit Domains...", all of which the Domain Splitter does in one place, reached from the pencil button on any chain row in the Protein Outliner. Keeping a second, weaker route to the same model edits was the source of its own bugs - it once drew an entire unreachable block wired to two operator ids that do not exist anywhere (`proteinblender.update_domain_range`, `proteinblender.delete_domain`), which only never raised in front of a user because the branch could not be reached.
+  Removed with it: `panels/domain_maker_panel.py`, its `PROTEINBLENDER_PT_domain_maker` registration, and the write-only `Scene.domain_maker_start` / `domain_maker_end` properties (nothing ever read their value - the Protein Outliner's selection handler wrote them and no one consumed them).
+  Deliberately *kept*: `PROTEINBLENDER_OT_split_domain_popup` and `PROTEINBLENDER_OT_merge_domains`. Both lose their only UI caller, but the popup is the split entrypoint the whole suite goes through (mandated by `test_repository_contracts.py`) and both remain scriptable and covered; deleting them would have meant deleting live coverage to justify deleting code.
 
 - **Renaming a domain never survived an outliner rebuild, and chains had no rename at all.**
   `build_outliner_hierarchy` unconditionally reset every non-copy DOMAIN row name to `"Residues N-M"`, clobbering any name set via the (UI-less) `rename_domain` operator - so renaming appeared not to work. Chains were regenerated from `auth_chain_id_map` with no custom-name store.
@@ -1119,8 +1120,9 @@ by passing that state directly (no dialog needed):
   user-driven depsgraph deselection handler; needs a human, not just a screen.
   (Its stated `context.screen.areas is None` reason is stale — screen is present
   headless on 5.2 — but it remains genuinely interactive.)
-- Panel `poll()` — 8 of 9 panels define no `poll` of their own (nothing to
-  test); `PROTEINBLENDER_PT_domain_maker`'s poll is exercised.
+- Panel `poll()` — no registered panel defines a `poll` of its own any more, so
+  there is nothing to exercise. The one that did, `PROTEINBLENDER_PT_domain_maker`,
+  was removed along with its panel.
 - Edit-mode operators (`dna_edit_bend`/`dna_finish_bend_edit`,
   `membrane_edit_deform`/`membrane_finish_deform`) degrade to a skip if
   headless mode-switching fails; their non-edit siblings are asserted.

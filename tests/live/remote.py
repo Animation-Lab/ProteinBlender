@@ -158,8 +158,7 @@ def reset_addon_settings():
     # dropdowns, split bounds) rather than inside a group.
     for name in ("molecule_style", "visual_setup_color", "visual_setup_style",
                  "temp_domain_color", "temp_domain_start", "temp_domain_end",
-                 "domain_start", "domain_end", "domain_maker_start",
-                 "domain_maker_end", "split_domain_new_start",
+                 "domain_start", "domain_end", "split_domain_new_start",
                  "split_domain_new_end", "active_splitting_domain_id",
                  "show_domain_preview", "selected_molecule_id"):
         try:

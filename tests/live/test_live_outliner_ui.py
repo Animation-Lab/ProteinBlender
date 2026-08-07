@@ -39,7 +39,6 @@ import pytest
 PANELS_VIA_UI_STATE = [
     "PROTEINBLENDER_PT_outliner",
     "PROTEINBLENDER_PT_visual_setup",
-    "PROTEINBLENDER_PT_domain_maker",
     "PROTEINBLENDER_PT_builders",
     "PROTEINBLENDER_PT_puppet_maker",
     "PROTEINBLENDER_PT_pose_library",
@@ -363,17 +362,13 @@ return sorted(result)
 @pytest.mark.live
 def test_every_proteinblender_panel_is_registered_and_polls_in_a_live_window(
         blender, single_chain):
-    """All nine panels must exist and accept the real context.
+    """All eight panels must exist and accept the real context.
 
     Headless can confirm registration and can call ``poll`` against an empty
     background context. It cannot confirm that poll returns True for a context
     that has a window, a screen, a Properties editor and a loaded molecule -
     which is the only context that matters, because it is the one the user is
     in. A panel that polls False here is a panel the user never sees.
-
-    ``PROTEINBLENDER_PT_domain_maker`` is excluded from the blanket
-    accept-everything assertion: it has a genuine poll() with a real refusal
-    condition, covered on its own below.
     """
     state = blender.call("""
 scene = bpy.context.scene
@@ -397,8 +392,6 @@ return R.ui_state()
         assert panel["space"] == "PROPERTIES", (
             f"{name} is placed in {panel['space']!r}; the add-on's UI lives in "
             f"the Properties editor and it will not appear where users look")
-        if name == "PROTEINBLENDER_PT_domain_maker":
-            continue
         assert panel["poll"] is True, (
             f"{name}.poll() returned {panel['poll']!r} against a live window "
             f"with a molecule loaded and selected, so the panel is invisible "
@@ -434,71 +427,6 @@ return {"space": getattr(cls, "bl_space_type", ""),
     assert panel["poll"] is True, (
         f"{IMPORT_PANEL}.poll() returned {panel['poll']!r}; the import panel "
         f"is the add-on's entry point and must always be visible")
-
-
-@pytest.mark.live
-def test_domain_maker_poll_refuses_and_accepts_the_right_selections(blender,
-                                                                    actin):
-    """The one panel with a real refusal condition, exercised both ways.
-
-    Its poll requires at least one selected row and requires *every* selected
-    row to be a CHAIN or a DOMAIN. Three states are checked, because a poll that
-    is stuck on True and a poll that is stuck on False both look correct if you
-    only ever test one of them:
-
-      * nothing selected      -> False (no target to split)
-      * a PROTEIN selected    -> False (the cascade selects the protein row too,
-                                        and a protein is not a splittable range)
-      * a CHAIN alone selected -> True
-
-    Note that selecting a PROTEIN also selects its chains, so the middle case is
-    genuinely a mixed selection - which is exactly the state the poll is written
-    to reject.
-    """
-    def poll_with(setup):
-        return blender.call("""
-scene = bpy.context.scene
-H.scene_manager_module().build_outliner_hierarchy(bpy.context)
-for item in scene.outliner_items:
-    item.is_selected = False
-target = None
-if want:
-    target = next((i.item_id for i in scene.outliner_items
-                   if i.item_type == want), None)
-    assert target, "no %s row to select" % want
-    with R.view3d_override():
-        bpy.ops.proteinblender.outliner_select(item_id=target)
-state = R.ui_state()
-panel = next(p for p in state["panels"]
-             if p["idname"] == "PROTEINBLENDER_PT_domain_maker")
-selected = sorted({i.item_type for i in scene.outliner_items if i.is_selected})
-return {"poll": panel["poll"], "selected_types": selected}
-""", want=setup)
-
-    empty = poll_with("")
-    assert empty["poll"] is False, (
-        f"Domain Maker polled True with nothing selected "
-        f"(types={empty['selected_types']}); it would offer to split nothing")
-
-    protein = poll_with("PROTEIN")
-    assert protein["poll"] is False, (
-        f"Domain Maker polled True for a selection containing a PROTEIN "
-        f"(types={protein['selected_types']}); a whole protein is not a "
-        f"splittable residue range")
-
-    chain = poll_with("CHAIN")
-    # A chain may cascade to its own domain rows, and DOMAIN is equally
-    # acceptable to the poll. What must not appear is a PROTEIN row, which is
-    # what makes this the accept case rather than a second refusal case.
-    assert chain["selected_types"], (
-        "selecting a chain selected nothing, so this case is not testing the "
-        "accept path it claims to")
-    assert set(chain["selected_types"]) <= {"CHAIN", "DOMAIN"}, (
-        f"selecting a chain produced {chain['selected_types']}, which the poll "
-        f"is entitled to reject; this case is not testing the accept path")
-    assert chain["poll"] is True, (
-        "Domain Maker polled False for a single selected chain - the exact "
-        "state in which a user goes looking for it")
 
 
 # ---------------------------------------------------------------------------

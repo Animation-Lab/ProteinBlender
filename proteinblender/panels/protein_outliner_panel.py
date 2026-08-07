@@ -495,22 +495,7 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         # Sync color picker to match selected item's color
         from ..panels.visual_setup_panel import sync_color_to_selection
         sync_color_to_selection(context)
-        
-        # Initialize domain maker values based on selection
-        if hasattr(scene, 'domain_maker_start'):
-            if clicked_item.item_type == 'CHAIN':
-                # Always update to the chain's range when selecting a chain
-                scene.domain_maker_start = clicked_item.chain_start
-                # Set end to a reasonable default within the chain
-                if clicked_item.chain_end > clicked_item.chain_start:
-                    scene.domain_maker_end = min(clicked_item.chain_start + 50, clicked_item.chain_end)
-                else:
-                    scene.domain_maker_end = clicked_item.chain_end
-            elif clicked_item.item_type == 'DOMAIN':
-                # Set to domain's current range
-                scene.domain_maker_start = clicked_item.domain_start
-                scene.domain_maker_end = clicked_item.domain_end
-        
+
         return {'FINISHED'}
     
     def update_parent_chain_selection(self, scene, chain_id):

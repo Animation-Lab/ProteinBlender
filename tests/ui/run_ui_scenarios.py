@@ -28,7 +28,6 @@ results = []
 EXPECTED_UI_PANELS = {
     "PROTEIN_PB_PT_import_protein",
     "PROTEINBLENDER_PT_outliner",
-    "PROTEINBLENDER_PT_domain_maker",
     "PROTEINBLENDER_PT_visual_setup",
     "PROTEINBLENDER_PT_puppet_maker",
     "PROTEINBLENDER_PT_pose_library",

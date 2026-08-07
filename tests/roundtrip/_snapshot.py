@@ -67,7 +67,7 @@ SCENE_PROPS = (
     "new_domain_chain", "new_domain_start", "new_domain_end",
     "selected_chain_for_domain", "show_domain_preview",
     "active_splitting_domain_id", "split_domain_new_start",
-    "split_domain_new_end", "domain_maker_start", "domain_maker_end",
+    "split_domain_new_end",
     "temp_domain_start", "temp_domain_end", "temp_domain_id",
     "temp_domain_color",
     # Visual setup + animation panel.
