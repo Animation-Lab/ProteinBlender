@@ -70,9 +70,11 @@ ProteinBlender supports multiple molecular representations:
 
 Like colors, the style reaches everything the row covers, immediately.
 
-If the row's parts currently disagree - say a chain whose domains are half
-cartoon and half surface - the dropdown reads **Multiple**. Picking a real
-style resolves them all; leaving it alone changes nothing.
+The dialog opens showing what the item currently looks like. If its parts
+disagree - say a chain whose domains are half cartoon and half surface - the
+dropdown reads **Multiple**, and the colour swatch shows a neutral grey with a
+note saying so, since a swatch has no way to draw "mixed". Picking a real value
+resolves them all; leaving it alone changes nothing.
 
 ## Independent Domain Styling
 

@@ -542,3 +542,161 @@ def test_edit_pivot_on_a_protein_moves_the_pivot_not_the_protein(scene, sm,
     assert offset < 1e-4, (
         f"the protein's origin is {offset:.6f} from where the helper was "
         f"left; the pivot was not applied")
+
+
+# --------------------------------------------------------------------------
+# What a dialog shows when it opens
+# --------------------------------------------------------------------------
+
+def _carbon_rgb(obj):
+    """The colour an untouched object draws with, straight off its per-object
+    "Color Common" node's Carbon socket.
+
+    Independent of ``visual_style.get_object_color``, which is the reader the
+    seeding goes through: asserting on that would pass whether it picked the
+    right object or not. A freshly imported protein has no "Custom Combine
+    Color" node yet, so this is where its per-chain colours actually live.
+    """
+    for modifier in obj.modifiers:
+        if modifier.type != 'NODES' or not modifier.node_group:
+            continue
+        for node in modifier.node_group.nodes:
+            if (node.type == 'GROUP' and node.node_tree
+                    and 'Color Common' in node.node_tree.name
+                    and 'Carbon' in node.inputs):
+                return tuple(round(c, 4)
+                             for c in node.inputs['Carbon'].default_value[:3])
+    return None
+
+
+def _seed(scene, item_id):
+    """(color, mixed, style) the dialog for this row would open showing."""
+    from proteinblender.operators import visual_edit as VE
+    from proteinblender.operators.pivot_operators import find_row
+
+    row = find_row(scene, item_id)
+    assert row is not None, f"no outliner row for {item_id}"
+    return VE.seed_from_objects(VE.appearance_objects_for_row(bpy.context, row))
+
+
+@pytest.mark.integration
+def test_protein_with_differently_colored_chains_seeds_grey(scene, sm,
+                                                            multi_chain):
+    """4hhb imports with a distinct colour per chain, so the swatch is grey.
+
+    Ground truth that the chains really do disagree is their own Color Common
+    Carbon sockets, read directly - not the reader the seeding uses.
+    """
+    from proteinblender.operators.visual_edit import MIXED_COLOR
+
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    carbons = {_carbon_rgb(d.object) for d in molecule.domains.values()
+               if d.object}
+    assert len(carbons) > 1, (
+        f"fixture must import with several chain colours, got {carbons}")
+
+    color, mixed, _style = _seed(scene, multi_chain)
+    assert mixed is True, "a multi-coloured protein did not report as mixed"
+    assert color == MIXED_COLOR, (
+        f"expected the neutral grey placeholder, got {color}")
+
+
+@pytest.mark.integration
+def test_protein_seeds_the_real_color_once_its_chains_agree(scene, sm,
+                                                            multi_chain):
+    """Paint the whole protein, reopen: the swatch shows that colour, not grey."""
+    _build_outliner()
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=multi_chain, vs_color=(0.3, 0.6, 0.9, 1.0)) == {'FINISHED'}
+
+    color, mixed, _style = _seed(scene, multi_chain)
+    assert mixed is False, "a uniformly coloured protein reported as mixed"
+    assert color == (0.3, 0.6, 0.9, 1.0), (
+        f"the dialog would open on {color}, not the protein's colour")
+
+
+@pytest.mark.integration
+def test_protein_seeding_ignores_the_molecule_object(scene, sm, multi_chain):
+    """The molecule object is written to but is not a witness.
+
+    It keeps its own untouched Color Common carbon grey, which is nothing that
+    appears on screen. Seeding read it first, so a freshly imported protein in
+    four colours opened showing that one grey - looking exactly like a correct
+    "mixed" answer while being an accident.
+    """
+    from proteinblender.operators import visual_edit as VE
+    from proteinblender.operators.pivot_operators import find_row, row_objects
+
+    _build_outliner()
+    parent = sm.molecules[multi_chain].object
+    row = find_row(scene, multi_chain)
+
+    assert parent in row_objects(bpy.context, row), (
+        "the molecule object must still be written to")
+    appearance = VE.appearance_objects_for_row(bpy.context, row)
+    assert parent not in appearance, (
+        "the molecule object must not be read as the protein's appearance")
+    assert appearance, "a protein must have something to read its colour from"
+
+    # And the grey it would have contributed is genuinely a different answer.
+    assert _carbon_rgb(parent) not in {_carbon_rgb(obj) for obj in appearance}
+
+
+@pytest.mark.integration
+def test_style_seeds_multiple_only_when_the_parts_disagree(scene, sm,
+                                                           multi_chain):
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=multi_chain, vs_style='surface') == {'FINISHED'}
+    _color, _mixed, style = _seed(scene, multi_chain)
+    assert style == 'surface', f"expected the protein's real style, got {style!r}"
+
+    # Restyle one domain from its own row: the protein now has no single style.
+    domain_id = next(iter(molecule.domains))
+    assert bpy.ops.proteinblender.rename_domain(
+        target_item_id=domain_id, item_type='DOMAIN',
+        new_name=molecule.domains[domain_id].name,
+        vs_style='cartoon') == {'FINISHED'}
+
+    _color, _mixed, style = _seed(scene, multi_chain)
+    assert style == '', (
+        f"a protein whose domains disagree must show Multiple, got {style!r}")
+
+
+@pytest.mark.integration
+def test_each_chain_seeds_its_own_color_not_a_siblings(scene, sm, multi_chain):
+    """Opening one chain's dialog shows that chain, not whichever came first.
+
+    Chain rows rather than domain rows: a full-chain auto-domain has no DOMAIN
+    row of its own (it renders as the CHAIN row), so the chain row is the one
+    the user actually clicks the pencil on.
+    """
+    from proteinblender.operators.visual_edit import appearance_objects_for_row
+
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    chain_rows = [r for r in scene.outliner_items if r.item_type == 'CHAIN']
+    assert len(chain_rows) > 1
+
+    painted = []
+    for row, rgba in zip(chain_rows[:2], ((1.0, 0.0, 0.0, 1.0),
+                                          (0.0, 0.0, 1.0, 1.0))):
+        objects = appearance_objects_for_row(bpy.context, row)
+        assert len(objects) == 1, f"{row.item_id} resolved to {objects}"
+        domain_id = next(
+            did for did, d in molecule.domains.items()
+            if d.object is not None and d.object.name == objects[0].name)
+        assert bpy.ops.proteinblender.rename_domain(
+            target_item_id=domain_id, item_type='DOMAIN',
+            new_name=molecule.domains[domain_id].name,
+            vs_color=rgba) == {'FINISHED'}
+        painted.append((row.item_id, rgba))
+
+    for item_id, expected in painted:
+        color, mixed, _style = _seed(scene, item_id)
+        assert mixed is False, f"{item_id} reported as mixed"
+        assert color == expected, (
+            f"{item_id} would open showing {color}, not its own {expected}")

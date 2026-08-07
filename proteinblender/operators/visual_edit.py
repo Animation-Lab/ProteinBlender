@@ -56,6 +56,77 @@ _state = {
 }
 
 
+# What the colour swatch shows when the item's parts disagree. A swatch cannot
+# render "mixed" the way the style dropdown can, so it shows a neutral grey and
+# says so in a note beside it. Never applied on its own: see
+# VisualEditMixin.commit_visual_edit.
+MIXED_COLOR = (0.5, 0.5, 0.5, 1.0)
+
+# Colour channels are compared at this many decimals when deciding whether the
+# parts of an item agree. Full float equality would call two domains painted
+# from the same picker "different" over a rounding bit.
+_COLOR_PLACES = 4
+
+
+def _rgba(color):
+    """A colour as a comparable 4-tuple, tolerating a 3-component read."""
+    channels = tuple(color)
+    if len(channels) == 3:
+        channels += (1.0,)
+    return tuple(round(float(c), _COLOR_PLACES) for c in channels[:4])
+
+
+def appearance_objects_for_row(context, row):
+    """The objects that represent what ``row`` currently looks like.
+
+    Not the same set an edit is *written* to (that is
+    :func:`pivot_operators.row_objects`). A protein's molecule object is
+    written to, but it is no witness: it keeps its own untouched Color Common
+    node, whose carbon grey (0.202) appears nowhere on screen, and after a
+    per-domain recolour its style is stale too. What draws a protein is its
+    domains. Reading the molecule object instead showed a freshly imported
+    4hhb - four chains in four distinct colours - as one dark grey.
+
+    So a protein reads its domains, falling back to the molecule object only
+    when it has none. A chain and a domain already resolve to what draws them.
+    """
+    if row is None:
+        return []
+    objects = row_objects(context, row)
+    if row.item_type not in ('PROTEIN', 'DNA_RNA'):
+        return objects
+
+    molecule = ProteinBlenderScene.get_instance().molecules.get(row.item_id)
+    parent = getattr(molecule, 'object', None) if molecule else None
+    if parent is None:
+        return objects
+    domains = [obj for obj in objects if obj.name != parent.name]
+    return domains or objects
+
+
+def seed_from_objects(objects):
+    """``(color, color_is_mixed, style)`` for a dialog opening on ``objects``.
+
+    Both fields are read across *every* object, not off the first one, and
+    both have an answer for "they disagree": the style dropdown has its empty
+    "Multiple" entry, and the colour swatch - which cannot render "mixed" -
+    gets :data:`MIXED_COLOR` and a note. Showing one domain's colour as if it
+    spoke for the rest is a lie the user then commits by pressing OK.
+    """
+    if not objects:
+        return MIXED_COLOR, False, ''
+
+    colors = {_rgba(visual_style.get_object_color(obj)) for obj in objects}
+    mixed = len(colors) > 1
+    color = MIXED_COLOR if mixed else next(iter(colors))
+
+    styles = {visual_style.get_object_style(obj) for obj in objects}
+    styles.discard(None)
+    style = styles.pop() if len(styles) == 1 else ''
+
+    return color, mixed, style
+
+
 class _Suspend:
     def __enter__(self):
         _state["suspended"] = True
@@ -135,6 +206,11 @@ class VisualEditMixin:
         default=1.5, min=0.0, soft_max=10.0,
         update=_on_force_field_edited,
     )
+    # Set while the swatch is showing MIXED_COLOR rather than a real colour, so
+    # draw() can say so. An operator property rather than module state because
+    # Blender rebuilds the operator behind a props dialog and draw() has to be
+    # able to ask the instance it is drawing.
+    vs_color_is_mixed: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
 
     # ------------------------------------------------------------------
     # What the dialog is editing. Subclasses supply the row.
@@ -156,6 +232,11 @@ class VisualEditMixin:
         if row is None:
             return []
         return row_objects(context, row)
+
+    def appearance_objects(self, context):
+        """What the item currently looks like. See
+        :func:`appearance_objects_for_row`."""
+        return appearance_objects_for_row(context, self.visual_row(context))
 
     def force_field_objects(self, context):
         """The objects the membrane force field is set on - a narrower set.
@@ -182,34 +263,36 @@ class VisualEditMixin:
     # ------------------------------------------------------------------
 
     def load_visual_state(self, context):
-        """Fill the fields from the objects the dialog is about to edit.
+        """Fill the fields from what the item currently looks like.
 
-        Colour and style are read from the *first* object, and the style falls
-        back to the empty "Multiple" entry when the objects disagree - a chain
-        whose domains are half cartoon and half surface has no single style to
-        show, and displaying either one would be a lie the user then commits by
-        pressing OK. Colour has no such sentinel (a colour field cannot show
-        "mixed"), so it shows the first object's and only repaints the rest if
-        the user actually picks something.
+        Both fields are read across *every* object that draws the item, not
+        off the first one, and both have an answer for "they disagree":
+
+        * style falls back to the empty "Multiple" entry in the dropdown;
+        * colour falls back to :data:`MIXED_COLOR`, a neutral grey, with a
+          note beside it. A colour swatch has no way to render "mixed", and
+          showing one domain's colour as if it spoke for the rest is a lie the
+          user then commits by pressing OK.
+
+        Neither placeholder is ever applied on the way out: ``commit_visual_edit``
+        only writes fields that differ from what they were seeded with, so a
+        dialog opened and OK'd without a choice leaves the variety intact.
 
         Suspended throughout: these writes are property writes like any other,
         and unguarded they would fire the apply callbacks and flatten exactly
         the variety they are trying to report.
         """
-        objects = self.visual_objects(context)
+        objects = self.appearance_objects(context)
         if not objects:
             return
 
+        color, mixed, style = seed_from_objects(objects)
+
         with _Suspend():
-            color = visual_style.get_object_color(objects[0])
-            if len(color) == 3:
-                color = (color[0], color[1], color[2], 1.0)
             for index in range(4):
                 self.vs_color[index] = color[index]
-
-            styles = {visual_style.get_object_style(obj) for obj in objects}
-            styles.discard(None)
-            self.vs_style = styles.pop() if len(styles) == 1 else ''
+            self.vs_color_is_mixed = mixed
+            self.vs_style = style
 
             owners = self.force_field_objects(context)
             first_owner = owners[0] if owners else objects[0]
@@ -246,6 +329,8 @@ class VisualEditMixin:
         self.before_visual_edit(context)
         for obj in self.visual_objects(context):
             visual_style.apply_color_to_object(obj, self.vs_color)
+        # Whatever the parts disagreed about, they now agree on this.
+        self.vs_color_is_mixed = False
         self._after_visual_edit(context)
 
     def apply_visual_style(self, context):
@@ -327,6 +412,13 @@ class VisualEditMixin:
         right = grid.column(align=True)
         right.label(text="Representation", icon='MESH_UVSPHERE')
         right.prop(self, "vs_style", text="")
+
+        # The style dropdown says "Multiple" for itself; the swatch cannot, so
+        # the grey placeholder is spelled out rather than passing for a colour
+        # the item actually has.
+        if self.vs_color_is_mixed:
+            box.label(text="Multiple colors: pick one to apply it to all.",
+                      icon='INFO')
 
         box.separator()
         pivot = box.column(align=True)

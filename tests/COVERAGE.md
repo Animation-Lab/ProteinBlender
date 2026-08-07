@@ -3,7 +3,7 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (offline lane): **436 passing, 7 skipped, 1 xfailed**, no
+Current status (offline lane): **441 passing, 7 skipped, 1 xfailed**, no
 failures, re-run on Blender 5.0, 5.1 and 5.2. The single xfail is intentional
 (a modal-dialog operator unreachable headless - see below), not a bug. The
 foreground UI lane (`python tests/run_ui_tests.py`) is green at 36 scenarios.
@@ -280,12 +280,43 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field (through the protein's edit dialog) |
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle |
-| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session |
+| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Edit dialogs opened showing the wrong colour and style.**
+  The Visual Set-up block seeded its fields from `objects[0]`, which for a
+  protein is the *molecule object*. That object is written to but is no
+  witness: it keeps its own untouched Color Common node, whose carbon grey
+  (0.202) appears on no screen, and after a per-domain recolour or restyle its
+  style is stale too. A freshly imported 4hhb - four chains in four distinct
+  colours - therefore opened showing one dark grey, which looked like a correct
+  "mixed" answer while being an accident of reading the wrong object. Reading
+  the first *domain* instead would have been just as wrong in the other
+  direction: one chain's colour presented as if it spoke for all four.
+  `appearance_objects_for_row` now returns what actually draws the item (a
+  protein's domains, falling back to the molecule object only when it has
+  none), and `seed_from_objects` reads across all of them: agreement gives the
+  real value, disagreement gives `MIXED_COLOR` grey with a note for colour and
+  the existing empty "Multiple" entry for style. Neither placeholder is ever
+  applied on the way out, because `commit_visual_edit` only writes fields that
+  differ from what they were seeded with.
+  Guarded by `test_visual_edit_dialogs.py::test_protein_with_differently_colored_chains_seeds_grey`,
+  `::test_protein_seeding_ignores_the_molecule_object`,
+  `::test_protein_seeds_the_real_color_once_its_chains_agree`,
+  `::test_style_seeds_multiple_only_when_the_parts_disagree` and
+  `::test_each_chain_seeds_its_own_color_not_a_siblings`. Ground truth is each
+  object's own Color Common **Carbon socket**, read straight off the node -
+  not `get_object_color`, which is the reader the seeding goes through and
+  would pass whichever object it picked. Verified red by mutating
+  `seed_from_objects` back to "first object, never mixed".
+  Seeding only happens in `invoke()`, which headless never runs, so the wiring
+  from invoke to the live fields is covered in the foreground UI lane
+  (`invoke_and_cancel_protein_visuals_dialog` asserts the open dialog's
+  `vs_color`, `vs_color_is_mixed` and `vs_style`).
 
 - **Moving a protein's pivot translated the whole protein.**
   Every chain domain is *parented* to its molecule object, and a child's world

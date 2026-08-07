@@ -272,10 +272,43 @@ def invoke_and_cancel_protein_visuals_dialog():
     objects = dialog.visual_objects(bpy.context)
     assert objects, "the protein dialog resolved no objects to style"
 
+    # The fields must arrive seeded from what is on screen. 4hhb imports with a
+    # different colour per chain, so the swatch has no single colour to show:
+    # it must be the neutral grey placeholder, flagged, with the shared style
+    # still reported properly. Only invoke() seeds - headless never runs it -
+    # so this wiring exists nowhere but here.
+    carbons = {tuple(round(c, 4) for c in _carbon_rgb(obj))
+               for obj in dialog.appearance_objects(bpy.context)
+               if _carbon_rgb(obj) is not None}
+    assert len(carbons) > 1, f"fixture chains must differ in colour: {carbons}"
+
+    seeded = tuple(round(c, 4) for c in dialog.vs_color)
+    assert dialog.vs_color_is_mixed, (
+        "a protein whose chains differ did not open flagged as mixed")
+    assert seeded == visual_edit.MIXED_COLOR, (
+        f"the swatch opened on {seeded}, not the grey placeholder "
+        f"{visual_edit.MIXED_COLOR}")
+    assert dialog.vs_style == "spheres", (
+        f"the style dropdown opened on {dialog.vs_style!r}, not the style "
+        f"every chain is actually wearing")
+
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
-    return (f"protein visuals dialog opened over {len(objects)} object(s) "
-            f"and cancelled")
+    return (f"protein visuals dialog opened over {len(objects)} object(s), "
+            f"seeded grey for {len(carbons)} chain colours, and cancelled")
+
+
+def _carbon_rgb(obj):
+    """An object's Color Common Carbon socket, read straight off the node."""
+    for modifier in obj.modifiers:
+        if modifier.type != "NODES" or not modifier.node_group:
+            continue
+        for node in modifier.node_group.nodes:
+            if (node.type == "GROUP" and node.node_tree
+                    and "Color Common" in node.node_tree.name
+                    and "Carbon" in node.inputs):
+                return tuple(node.inputs["Carbon"].default_value[:3])
+    return None
 
 
 def edit_pivot_opens_the_move_gizmo():
