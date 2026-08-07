@@ -38,7 +38,6 @@ import pytest
 # checked separately below rather than by widening the shared remote helper.
 PANELS_VIA_UI_STATE = [
     "PROTEINBLENDER_PT_outliner",
-    "PROTEINBLENDER_PT_visual_setup",
     "PROTEINBLENDER_PT_builders",
     "PROTEINBLENDER_PT_puppet_maker",
     "PROTEINBLENDER_PT_pose_library",
@@ -362,7 +361,7 @@ return sorted(result)
 @pytest.mark.live
 def test_every_proteinblender_panel_is_registered_and_polls_in_a_live_window(
         blender, single_chain):
-    """All eight panels must exist and accept the real context.
+    """All seven panels must exist and accept the real context.
 
     Headless can confirm registration and can call ``poll`` against an empty
     background context. It cannot confirm that poll returns True for a context

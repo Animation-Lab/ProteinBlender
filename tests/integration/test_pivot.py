@@ -11,7 +11,8 @@ Covered operators:
   * proteinblender.set_pivot_first   (N-terminal alpha carbon)
   * proteinblender.set_pivot_last    (C-terminal alpha carbon)
   * proteinblender.set_pivot_center  (alpha-carbon centroid)
-  * proteinblender.set_pivot_custom  (interactive gizmo — skipped, see below)
+  * proteinblender.set_pivot_custom  (Edit Pivot mode — covered in
+    test_visual_edit_dialogs.py, which drives the full open/drag/apply cycle)
 """
 
 import pytest
@@ -110,16 +111,6 @@ def test_pivot_reports_warning_when_nothing_selected(single_chain, scene):
     res = bpy.ops.proteinblender.set_pivot_first()
     # No selected outliner rows -> operator cancels rather than moving anything.
     assert res == {"CANCELLED"}
-
-
-@pytest.mark.integration
-@pytest.mark.skip(reason=(
-    "set_pivot_custom is interactive: it spawns an orange gizmo Empty, forces "
-    "the move tool via context.screen.areas (None in headless background) and "
-    "finalises through a depsgraph deselection handler. It takes no residue "
-    "index and cannot be driven non-interactively."))
-def test_set_pivot_custom_interactive():
-    pass
 
 
 # --------------------------------------------------------------------------

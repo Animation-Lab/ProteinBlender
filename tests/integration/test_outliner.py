@@ -1,4 +1,4 @@
-"""Integration tests for the PB Outliner + Visual Set-up operators.
+"""Integration tests for the PB Outliner's row operators.
 
 Drives the real operators against a headless Blender scene and asserts
 observable state (the ``scene.outliner_items`` selection/expansion flags and the
@@ -19,7 +19,9 @@ Covered operators:
   * proteinblender.toggle_expand
   * proteinblender.toggle_visibility
   * proteinblender.outliner_item_info
-  * proteinblender.toggle_force_fields
+  * proteinblender.edit_protein_visuals (the protein row's edit pencil, here
+    only for the membrane force field it owns; the rest of that dialog lives
+    in test_visual_edit_dialogs.py)
 """
 
 import bpy
@@ -115,33 +117,39 @@ def test_outliner_item_info_runs(scene, sm, single_chain):
 
 
 # --------------------------------------------------------------------------
-# Visual Set-up: toggle_force_fields flag
+# The protein row's edit dialog: membrane force field
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_toggle_force_fields_flag(scene, sm, single_chain):
+def test_protein_dialog_force_field_flag(scene, sm, single_chain):
+    """The protein row's edit dialog owns the membrane force-field toggle."""
     obj = sm.molecules[single_chain].object
     assert obj is not None
 
-    pit = next(it for it in scene.outliner_items
-               if it.item_type == "PROTEIN" and it.item_id == single_chain)
-    pit.is_selected = True
-
-    res = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+    res = bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, vs_force_field=True)
     assert res == {'FINISHED'}
     assert obj.pb_force_field_enabled is True
 
-    res = bpy.ops.proteinblender.toggle_force_fields(target_state="off")
+    res = bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, vs_force_field=False)
     assert res == {'FINISHED'}
     assert obj.pb_force_field_enabled is False
 
 
 @pytest.mark.integration
-def test_toggle_force_fields_no_selection_cancels(scene, sm, single_chain):
-    for it in scene.outliner_items:
-        it.is_selected = False
-    res = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
-    assert res == {'CANCELLED'}
+def test_edit_protein_visuals_unknown_row_cancels(scene, sm, single_chain):
+    """An item_id that matches no outliner row must refuse, not silently no-op.
+
+    The operator reports {'ERROR'} and cancels; Blender turns a reported
+    ERROR into a RuntimeError on the way out through ``bpy.ops``, which is the
+    same contract the Domain Splitter has for an unresolvable chain.
+    """
+    obj = sm.molecules[single_chain].object
+    with pytest.raises(RuntimeError, match="Could not resolve the protein"):
+        bpy.ops.proteinblender.edit_protein_visuals(
+            item_id="no_such_protein", vs_force_field=True)
+    assert getattr(obj, "pb_force_field_enabled", False) is False
 
 
 @pytest.mark.integration

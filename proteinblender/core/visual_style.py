@@ -1,242 +1,25 @@
-"""Visual Setup panel with context-aware styling"""
+"""Reading and writing a molecular object's colour and representation.
+
+Every colour and style ProteinBlender applies lands on a geometry-nodes tree:
+the colour on a "Custom Combine Color" node feeding Set Color, the style by
+swapping MolecularNodes' Style group node. This module owns that plumbing, and
+the per-item Visual Set-up dialogs, the pose library, the frame-change colour
+handler and the domain-layout code all go through it.
+
+It used to be ``panels/visual_setup_panel.py``, home of the selection-driven
+Visual Set-up panel. That panel is gone - colour, style, force field and pivot
+are now edited per item, from the pencil button on the item's own outliner row -
+but nothing about the geometry-nodes plumbing changed, so it moved here whole.
+
+``Scene.visual_setup_color`` / ``Scene.visual_setup_style`` survive it as the
+selection-scoped *scripted* path: no UI writes them any more, and the live
+render lane drives them as its independent control when checking that a colour
+change actually reaches pixels.
+"""
 
 import bpy
-from bpy.types import Panel, Operator
-from bpy.props import StringProperty
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.chain_utils import get_chain_objects, get_chain_domains
-
-
-def _resolve_selected_ff_objects(scene, selected_items):
-    """Return the dict ``{name: Object}`` of FF-eligible Blender objects
-    implied by the current selection.
-
-    Eligible types: PROTEIN, CHAIN, DOMAIN (any of the addon's
-    user-movable meshes). PUPPET rows, MEMBRANE rows, and puppet
-    member-references are ignored — a puppet member-ref points to the
-    same underlying chain mesh the canonical CHAIN row points to, so
-    including refs would just double-add.
-    """
-    objs = {}
-    for it in selected_items:
-        # Skip puppet member-references (mirrors of canonical chains).
-        # The convention is item_id contains "_ref_" for these rows.
-        if "_ref_" in it.item_id:
-            continue
-        if it.item_type == 'PROTEIN':
-            sm = ProteinBlenderScene.get_instance()
-            wrapper = sm.molecules.get(it.item_id)
-            obj = wrapper.molecule.object if (wrapper and wrapper.molecule) else None
-            if obj is not None:
-                objs[obj.name] = obj
-        elif it.item_type in ('CHAIN', 'DOMAIN'):
-            name = it.object_name
-            if name:
-                obj = bpy.data.objects.get(name)
-                if obj is not None and obj.type == 'MESH':
-                    objs[obj.name] = obj
-    return objs
-
-
-class PROTEINBLENDER_OT_toggle_force_fields(Operator):
-    """Bulk-toggle the Membrane Force Field on every FF-eligible object
-    the current selection resolves to (proteins, chains, domains).
-
-    Aggregate rule: if *all* are already on, the click turns them off;
-    otherwise (any off, or mixed) the click turns them all on. Matches
-    the panel label so the toggle is unambiguous even from a mixed
-    starting state.
-    """
-
-    bl_idname = "proteinblender.toggle_force_fields"
-    bl_label = "Toggle Membrane Force Fields"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    target_state: StringProperty(
-        name="Target State",
-        description="'on' or 'off' — explicit target so multi-click stays "
-                    "predictable even if state changes mid-click",
-        default="on",
-        options={'HIDDEN', 'SKIP_SAVE'},
-    )
-
-    def execute(self, context):
-        scene = context.scene
-        selected = [it for it in scene.outliner_items if it.is_selected]
-        ff_objs = _resolve_selected_ff_objects(scene, selected)
-        if not ff_objs:
-            self.report({'WARNING'}, "No FF-eligible objects in selection.")
-            return {'CANCELLED'}
-
-        new_state = (self.target_state == 'on')
-        for obj in ff_objs.values():
-            if getattr(obj, "pb_force_field_enabled", False) != new_state:
-                obj.pb_force_field_enabled = new_state  # update= syncs membranes
-
-        verb = "enabled" if new_state else "disabled"
-        self.report({'INFO'},
-                    f"Force field {verb} on {len(ff_objs)} object(s).")
-        return {'FINISHED'}
-
-
-class PROTEINBLENDER_PT_visual_setup(Panel):
-    """Visual Setup panel for color and representation"""
-    bl_label = "Visual Set-up"
-    bl_idname = "PROTEINBLENDER_PT_visual_setup"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = "scene"
-    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 2  # After outliner
-    
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        
-        # Create a box for the entire panel content
-        box = layout.box()
-
-        # Add panel title inside the box
-        box.label(text="Visual Set-up", icon='SHADING_RENDERED')
-        box.separator()
-        
-        # Check if anything is selected
-        # Filter out reference items (in puppets) to avoid double-counting
-        selected_items = [
-            item for item in scene.outliner_items 
-            if item.is_selected and "_ref_" not in item.item_id
-        ]
-        
-        if not selected_items:
-            box.label(text="Select items to apply settings to all selected", icon='INFO')
-            layout.separator()  # Add bottom spacing
-            return
-        
-        # Show what will be affected
-        info_box = box.box()
-        col = info_box.column(align=True)
-        
-        # Count selection types (excluding puppet references)
-        proteins = sum(1 for item in selected_items if item.item_type == 'PROTEIN')
-        chains = sum(1 for item in selected_items if item.item_type == 'CHAIN')
-        domains = sum(1 for item in selected_items if item.item_type == 'DOMAIN')
-        
-        if proteins > 0:
-            col.label(text=f"{proteins} protein(s) selected", icon='MESH_DATA')
-        if chains > 0:
-            col.label(text=f"{chains} chain(s) selected", icon='LINKED')
-        if domains > 0:
-            col.label(text=f"{domains} domain(s) selected", icon='GROUP_VERTEX')
-        
-        box.separator()
-        
-        # Create a 2x2 grid layout
-        # First row - labels
-        row = box.row(align=True)
-        row.alignment = 'CENTER'
-        
-        col_left = row.column(align=True)
-        col_left.label(text="Color", icon='COLOR')
-        
-        col_right = row.column(align=True)
-        col_right.label(text="Representation", icon='MESH_UVSPHERE')
-        
-        # Second row - controls
-        row = box.row(align=True)
-        row.scale_y = 1.5
-        
-        # Color picker on the left
-        col_left = row.column(align=True)
-        col_left.prop(scene, "visual_setup_color", text="")
-        
-        # Style dropdown on the right
-        col_right = row.column(align=True)
-        col_right.prop(scene, "visual_setup_style", text="")
-        
-        # Pivot Point controls - show when exactly 1 chain OR exactly 1 domain is selected
-        # Note: When a domain is selected, its parent chain might also auto-select
-        # So we prioritize: if any domains are selected, ignore chain count
-        show_pivot = (domains == 1) or (domains == 0 and chains == 1)
-
-        if show_pivot:
-            # Separator between color/style and pivot controls
-            box.separator()
-
-            col = box.column(align=True)
-            col.label(text="Pivot Point", icon='PIVOT_CURSOR')
-
-            # Row of pivot buttons
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.operator("proteinblender.set_pivot_first", text="First")
-            row.operator("proteinblender.set_pivot_center", text="Center")
-            row.operator("proteinblender.set_pivot_custom", text="Custom")
-            row.operator("proteinblender.set_pivot_last", text="Last")
-
-        # ---- Membrane Force Field (per-object) ----------------------------
-        # Surfaces whenever the selection contains at least one
-        # FF-eligible mesh object (protein, chain, or domain). PUPPET
-        # rows, MEMBRANE rows, and puppet member-references are ignored —
-        # a chain that lives inside a puppet still shows the FF toggle
-        # via its canonical CHAIN row.
-        #
-        # The FF flag lives directly on the chosen object as RNA prop
-        # ``pb_force_field_enabled`` (see ``membrane_builder.force_fields``).
-        # The anchor is parented to the object, so puppeting a chain
-        # carries its FF anchor along automatically.
-        #
-        #   1 object  → per-object checkbox + spacing slider
-        #   2+ objects → bulk-toggle button. "Turn Off" iff all on, else
-        #                "Turn On" (mixed coheres to On on next click).
-        ff_objs = _resolve_selected_ff_objects(scene, selected_items)
-        if ff_objs:
-            objs_list = list(ff_objs.values())
-            if len(objs_list) == 1:
-                box.separator()
-                ff_box = box.box()
-                obj = objs_list[0]
-                ff_box.prop(
-                    obj, "pb_force_field_enabled",
-                    text="Membrane Force Field",
-                    icon='FORCE_FORCE',
-                )
-                if obj.pb_force_field_enabled:
-                    spacing_row = ff_box.row(align=True)
-                    spacing_row.prop(obj, "pb_force_field_spacing",
-                                      text="Spacing (nm)")
-                    ff_box.label(
-                        text=f"Lipids part around {obj.name} in any membrane.",
-                        icon='INFO',
-                    )
-            else:
-                box.separator()
-                ff_box = box.box()
-                n_on = sum(1 for o in objs_list
-                           if getattr(o, "pb_force_field_enabled", False))
-                n = len(objs_list)
-                all_on = (n_on == n)
-                target = 'off' if all_on else 'on'
-                if all_on:
-                    label = f"Turn Membrane Force Field Off ({n} objects)"
-                elif n_on == 0:
-                    label = f"Turn Membrane Force Field On ({n} objects)"
-                else:
-                    label = (f"Turn Membrane Force Field On "
-                             f"(mixed: {n_on}/{n} on)")
-                row = ff_box.row()
-                row.scale_y = 1.2
-                op = row.operator(
-                    "proteinblender.toggle_force_fields",
-                    text=label, icon='FORCE_FORCE',
-                )
-                op.target_state = target
-                ff_box.label(
-                    text="Per-object spacing is editable when one object is selected.",
-                    icon='INFO',
-                )
-
-        # Add bottom spacing
-        layout.separator()
 
 
 # Standalone color application functions (for live updates)
@@ -656,117 +439,8 @@ def apply_color_to_object(obj, color):
     obj.select_set(True)
 
 
-# Global flags to prevent feedback loops
-_is_syncing_color = False
-_is_syncing_style = False
-
-def sync_color_to_selection(context):
-    """Sync the color picker to match the first selected item's color"""
-    global _is_syncing_color, _is_syncing_style
-
-    # Safety wrapper to prevent crashes during addon reload
-    try:
-        scene = context.scene
-
-        # Check if scene_manager is ready
-        try:
-            scene_manager = ProteinBlenderScene.get_instance()
-            if not scene_manager or not hasattr(scene_manager, 'molecules'):
-                return
-        except Exception:
-            return
-
-        # Find first selected item
-        selected_items = [item for item in scene.outliner_items if item.is_selected]
-        if not selected_items:
-            # No selection - don't change the color picker
-            return
-    
-        first_item = selected_items[0]
-        obj = None
-    
-        # Get the object based on item type
-        if first_item.item_type == 'PROTEIN':
-            molecule = scene_manager.molecules.get(first_item.item_id)
-            if molecule and molecule.object:
-                obj = molecule.object
-        elif first_item.item_type == 'CHAIN':
-            # Read the colour from the chain's first backing object. The
-            # resolver handles full chains, chain copies and split chains, and
-            # the chain-index vs. chain-letter mismatch in one place.
-            parent_molecule = scene_manager.molecules.get(first_item.parent_id)
-            chain_objs = get_chain_objects(parent_molecule, first_item)
-            if chain_objs:
-                obj = chain_objs[0]
-        elif first_item.item_type == 'DOMAIN':
-            # For domains, first try to find it in the scene_manager
-            domain_found = False
-            for molecule_id, molecule in scene_manager.molecules.items():
-                if first_item.item_id in molecule.domains:
-                    domain = molecule.domains[first_item.item_id]
-                    if hasattr(domain, 'object'):
-                        obj = domain.object
-                    elif hasattr(domain, 'object_name'):
-                        obj = bpy.data.objects.get(domain.object_name)
-                    domain_found = True
-                    break
-        
-            # Fallback to using object_name from the item
-            if not domain_found and first_item.object_name:
-                obj = bpy.data.objects.get(first_item.object_name)
-    
-        # Get color and style from the object and update the visual setup panel
-        if obj:
-            # Get and set color
-            color = get_object_color(obj)
-        
-            # Set a flag to prevent feedback loop
-            _is_syncing_color = True
-            try:
-                # Directly set the color property - ensure it's a tuple with 4 components
-                if len(color) == 3:
-                    color = (color[0], color[1], color[2], 1.0)
-            
-                # Set the color property using list assignment to ensure all components are set
-                scene.visual_setup_color[0] = color[0]  # R
-                scene.visual_setup_color[1] = color[1]  # G
-                scene.visual_setup_color[2] = color[2]  # B
-                scene.visual_setup_color[3] = color[3] if len(color) > 3 else 1.0  # A
-            
-                # Also get and set the style
-                _is_syncing_style = True
-                style = get_object_style(obj)
-                if style:
-                    scene.visual_setup_style = style
-                _is_syncing_style = False
-            
-                # Force UI update
-                for area in context.screen.areas:
-                    if area.type in ['PROPERTIES', 'VIEW_3D']:
-                        area.tag_redraw()
-            
-                # Also try to update the region
-                if context.region:
-                    context.region.tag_redraw()
-                
-            finally:
-                _is_syncing_color = False
-
-    except Exception:
-        # Catch all exceptions to prevent crashes during addon reload
-        # Reset flags
-        _is_syncing_color = False
-        _is_syncing_style = False
-
-
 def update_color(self, context):
     """Live update callback for color property"""
-    global _is_syncing_color
-
-    # Skip if we're syncing from selection to prevent feedback loop
-    if _is_syncing_color:
-        return
-
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
 
@@ -929,12 +603,6 @@ def apply_style_to_object(obj, style):
 
 def update_style(self, context):
     """Live update callback for style property"""
-    global _is_syncing_style
-
-    # Skip if we're syncing from selection to prevent feedback loop
-    if _is_syncing_style:
-        return
-
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
 
@@ -990,11 +658,27 @@ def update_style(self, context):
             area.tag_redraw()
 
 
+# The six representations a molecular object can wear, in the order they are
+# offered. STYLE_ITEMS prepends the empty "Multiple" sentinel: a chain or a
+# protein whose domains disagree has no single style to display, and choosing a
+# real entry from the list is what resolves them. Shared with the per-item
+# Visual Set-up dialogs so both lists can never drift apart.
+REAL_STYLE_ITEMS = [
+    ('spheres', "Spheres", "Sphere representation"),
+    ('cartoon', "Cartoon", "Cartoon representation"),
+    ('surface', "Surface", "Surface representation"),
+    ('ribbon', "Ribbon", "Ribbon representation"),
+    ('sticks', "Sticks", "Stick representation"),
+    ('ball_and_stick', "Ball & Stick", "Ball and stick representation"),
+]
+STYLE_ITEMS = [('', "Multiple", "Multiple styles selected")] + REAL_STYLE_ITEMS
+
+
 # Register color property
 def register_props():
     """Register scene properties for visual setup"""
     from bpy.props import FloatVectorProperty, EnumProperty
-    
+
     bpy.types.Scene.visual_setup_color = FloatVectorProperty(
         name="Color",
         subtype='COLOR',
@@ -1004,21 +688,10 @@ def register_props():
         default=(0.8, 0.1, 0.8, 1.0),
         update=update_color  # Live update callback
     )
-    
-    # Style property with empty option for multiple selections
-    style_items = [
-        ('', "Multiple", "Multiple styles selected"),
-        ('spheres', "Spheres", "Sphere representation"),
-        ('cartoon', "Cartoon", "Cartoon representation"),
-        ('surface', "Surface", "Surface representation"),
-        ('ribbon', "Ribbon", "Ribbon representation"),
-        ('sticks', "Sticks", "Stick representation"),
-        ('ball_and_stick', "Ball & Stick", "Ball and stick representation"),
-    ]
-    
+
     bpy.types.Scene.visual_setup_style = EnumProperty(
         name="Style",
-        items=style_items,
+        items=STYLE_ITEMS,
         default='surface',
         update=update_style  # Live update callback
     )

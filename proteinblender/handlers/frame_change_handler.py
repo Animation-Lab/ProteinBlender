@@ -17,7 +17,7 @@ from bpy.app.handlers import persistent
 def update_colors_on_frame_change(scene):
     """Update object colors from custom properties when frame changes"""
     # Import here to avoid circular imports
-    from ..panels.visual_setup_panel import apply_color_to_object
+    from ..core.visual_style import apply_color_to_object
 
     # Track which objects we've updated to avoid redundant updates
     updated_objects = set()

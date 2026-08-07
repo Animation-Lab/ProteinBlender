@@ -10,12 +10,6 @@ from .protein_outliner_panel import (
     PROTEINBLENDER_OT_outliner_item_info,
     PROTEINBLENDER_PT_outliner
 )
-from .visual_setup_panel import (
-    PROTEINBLENDER_OT_toggle_force_fields,
-    PROTEINBLENDER_PT_visual_setup,
-    register_props as visual_setup_register_props,
-    unregister_props as visual_setup_unregister_props
-)
 from .group_maker_panel import (
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,
@@ -49,8 +43,6 @@ __all__ = [
     'PROTEINBLENDER_OT_toggle_visibility',
     'PROTEINBLENDER_OT_outliner_item_info',
     'PROTEINBLENDER_PT_outliner',
-    'PROTEINBLENDER_OT_toggle_force_fields',
-    'PROTEINBLENDER_PT_visual_setup',
     'PROTEINBLENDER_OT_create_puppet',
     'PROTEINBLENDER_OT_edit_puppet',
     'PROTEINBLENDER_OT_delete_puppet',
@@ -75,7 +67,6 @@ CLASSES = [
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
     PROTEINBLENDER_OT_outliner_item_info,
-    PROTEINBLENDER_OT_toggle_force_fields,
     PROTEINBLENDER_OT_create_puppet,
     PROTEINBLENDER_OT_edit_puppet,
     PROTEINBLENDER_OT_delete_puppet,
@@ -96,7 +87,6 @@ CLASSES = [
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
-    PROTEINBLENDER_PT_visual_setup,    # 2: Visual Setup
     PROTEINBLENDER_PT_puppet_maker,    # 3: Puppet Maker
     PROTEINBLENDER_PT_pose_library,    # 4: Pose Library
     PROTEINBLENDER_PT_animation,       # 5: Animation
@@ -104,10 +94,8 @@ CLASSES = [
 
 def register():
     """Register all panel properties"""
-    visual_setup_register_props()
     animation_register_props()
 
 def unregister():
     """Unregister all panel properties"""
     animation_unregister_props()
-    visual_setup_unregister_props()

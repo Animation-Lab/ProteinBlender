@@ -9,6 +9,7 @@ from ..utils.chain_utils import (
     get_chain_objects,
     normalize_domain_residue_range,
 )
+from .visual_edit import VisualEditMixin
 
 
 def _is_identity_matrix(m, tol=1e-6):
@@ -594,7 +595,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
 
                         # If style property seems to be default, read actual style from geometry nodes
                         if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
-                            from ..panels.visual_setup_panel import get_object_style
+                            from ..core.visual_style import get_object_style
                             actual_style = get_object_style(domain.object)
                             if actual_style:
                                 parent_domain_style = actual_style
@@ -620,7 +621,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
 
                             # If style property seems to be default, read actual style from geometry nodes
                             if domain.object and (not parent_domain_style or parent_domain_style in ['ribbon', 'surface']):
-                                from ..panels.visual_setup_panel import get_object_style
+                                from ..core.visual_style import get_object_style
                                 actual_style = get_object_style(domain.object)
                                 if actual_style:
                                     parent_domain_style = actual_style
@@ -712,7 +713,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
 
                             # Also apply the style to the visual object
                             if domain.object:
-                                from ..panels.visual_setup_panel import apply_style_to_object
+                                from ..core.visual_style import apply_style_to_object
                                 apply_style_to_object(domain.object, parent_domain_style)
 
                     print(f"Created {domain_name}")
@@ -1086,10 +1087,10 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
         return {'FINISHED'}
 
 
-class PROTEINBLENDER_OT_rename_domain(Operator):
-    """Rename a chain or domain from the Protein Outliner"""
+class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
+    """Rename and restyle a domain (or a chain copy) from the Protein Outliner"""
     bl_idname = "proteinblender.rename_domain"
-    bl_label = "Rename"
+    bl_label = "Edit Domain"
     bl_options = {'REGISTER', 'UNDO'}
 
     new_name: StringProperty(
@@ -1113,6 +1114,34 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
                      if it.is_selected and it.item_type in ('CHAIN', 'DOMAIN')),
                     None)
 
+    def visual_row(self, context):
+        """The row the Visual Set-up block edits, if the target has one."""
+        target_id = self.target_item_id or self.domain_id
+        return self._find_row(context.scene, target_id) if target_id else None
+
+    def visual_objects(self, context):
+        """The objects to restyle, row or no row.
+
+        A full-chain auto-domain has no DOMAIN row of its own - it renders as
+        the CHAIN row - so the usual row-to-objects resolution comes back
+        empty for it. It is still a domain with an object to restyle, and the
+        rename half of this dialog already works off the bare id, so the
+        Visual Set-up half resolves the same way rather than silently doing
+        nothing.
+        """
+        objects = super().visual_objects(context)
+        if objects:
+            return objects
+
+        target_id = self.target_item_id or self.domain_id
+        if not target_id:
+            return []
+        for molecule in ProteinBlenderScene.get_instance().molecules.values():
+            domain = getattr(molecule, 'domains', {}).get(target_id)
+            if domain is not None and getattr(domain, 'object', None):
+                return [domain.object]
+        return []
+
     def invoke(self, context, event):
         scene = context.scene
         wanted = self.target_item_id or self.domain_id
@@ -1131,11 +1160,18 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
         else:
             self.report({'WARNING'}, "Please select a chain or domain to rename")
             return {'CANCELLED'}
-        return context.window_manager.invoke_props_dialog(self)
+        self.begin_visual_edit(context)
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def check(self, context):
+        """Re-lay-out when a field changes: the force-field spacing slider
+        only exists while the toggle is on."""
+        return True
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "new_name")
+        self.draw_visual_setup(layout, context)
 
     def _rename_chain(self, scene, item):
         """Persist a chain rename on the molecule's list item as JSON so it
@@ -1177,6 +1213,7 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
             row = self._selected_row(scene)
             if row is None:
                 self.report({'ERROR'}, "No chain or domain to rename")
+                self.end_visual_edit()
                 return {'CANCELLED'}
             target_id = row.item_id
         row = self._find_row(scene, target_id)
@@ -1188,10 +1225,17 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
         if item_type == 'CHAIN':
             if row is None:
                 self.report({'ERROR'}, "Chain not found")
+                self.end_visual_edit()
                 return {'CANCELLED'}
             self._rename_chain(scene, row)
         else:
             self._rename_domain(target_id)
+
+        # Colour / style / force field, before the rebuild: the block resolves
+        # its objects through the row, and the rebuild replaces every row.
+        # Untouched fields apply nothing - see commit_visual_edit.
+        self.commit_visual_edit(context)
+        self.end_visual_edit()
 
         # Rebuild the outliner so the rename reaches every derived field, not
         # just the row label. Rows carry a pre-rendered `tooltip` built from
@@ -1219,6 +1263,12 @@ class PROTEINBLENDER_OT_rename_domain(Operator):
                     if area.type in ("VIEW_3D", "PROPERTIES"):
                         area.tag_redraw()
         return {'FINISHED'}
+
+    def cancel(self, context):
+        # Colour and style edits were applied live and stay applied; this only
+        # lets go of the dialog so a stale instance cannot take a later
+        # property callback.
+        self.end_visual_edit()
 
 
 # Operator classes to register

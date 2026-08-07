@@ -51,6 +51,10 @@ from .domain_ops import (
     PROTEINBLENDER_OT_rename_domain,
 )
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
+from .visual_edit import (
+    PROTEINBLENDER_OT_edit_protein_visuals,
+    CLASSES as VISUAL_EDIT_CLASSES,
+)
 from .keyframe_operators import (
     PuppetKeyframeSettings,  # Must be imported and registered before operators that use it
     PROTEINBLENDER_OT_create_keyframe,
@@ -128,4 +132,6 @@ CLASSES = (
     PROTEINBLENDER_OT_brownian_clear_all,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
+    # Per-item Visual Set-up dialog (proteins)
+    *VISUAL_EDIT_CLASSES,
 )

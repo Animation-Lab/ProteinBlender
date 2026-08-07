@@ -473,13 +473,14 @@ return {
 
 @pytest.mark.live
 def test_toggle_pivot_edit_enters_edit_mode_in_a_real_window(blender, actin):
-    """``molecule.toggle_pivot_edit`` cannot run headless at all.
+    """``molecule.toggle_pivot_edit`` opens Edit Pivot in a real window.
 
-    It reads ``context.workspace.tools.from_space_view3d_mode`` and iterates
-    ``context.screen.areas`` to force the Move tool. Both are absent under
-    ``--background``, so this operator has no coverage anywhere except this
-    lane. The assertion is that it completes and leaves the helper Empty it
-    promises - the object a user then drags.
+    The session itself is driveable headless now (the offline lane runs the
+    whole open/drag/apply cycle), but the parts that need a window are not:
+    reading ``context.workspace.tools.from_space_view3d_mode`` and iterating
+    ``context.screen.areas`` to force the Move tool. This lane is the only
+    place those run. The assertion is that it completes and leaves the helper
+    Empty it promises - the object a user then drags.
     """
     result = blender.call("""
 scene = bpy.context.scene
@@ -506,10 +507,10 @@ return {"result": sorted(outcome), "created": sorted(after - before)}
 @pytest.mark.live
 def test_toggle_protein_pivot_edit_enters_edit_mode_in_a_real_window(
         blender, single_chain):
-    """The protein-level twin of the above, with the same headless blind spot.
+    """The protein-level twin of the above, exercising the same window-only path.
 
     It builds an ARROWS Empty at the protein origin and switches the workspace
-    tool, neither of which is possible without a window.
+    tool; the tool switch is what only a real window can do.
     """
     result = blender.call("""
 before = {o.name for o in bpy.data.objects}
@@ -526,14 +527,56 @@ return {"result": sorted(outcome), "created": sorted(after - before)}
 
 
 @pytest.mark.live
-@pytest.mark.skip(reason=(
-    "proteinblender.set_pivot_custom is not drivable from this lane. It does "
-    "not take a position: it spawns a PROTEINBLENDER_PIVOT_GIZMO Empty, forces "
-    "the builtin.move tool, and waits for a depsgraph deselection handler to "
-    "fire once the user clicks away. Completing it requires a real mouse drag "
-    "and a real click elsewhere in the viewport, which the BlenderMCP socket "
-    "cannot synthesise - calls arrive on a timer callback, outside the modal "
-    "event loop the gizmo lives in. Covering it needs a UI-automation lane "
-    "that injects events, not a remote-code lane."))
-def test_set_pivot_custom_is_interactive_only():
-    pass
+def test_set_pivot_custom_round_trips_in_a_real_window(blender, actin):
+    """The row button's Edit Pivot: open, drag the helper, apply.
+
+    A remote-code lane cannot synthesise a mouse drag, but it does not have
+    to any more: the mode is a plain two-click toggle around a helper Empty
+    the caller can move directly, which is exactly what a drag amounts to.
+    What this lane adds over the offline one is a real window - the Move tool
+    switch and the gizmo flags only exist here.
+    """
+    result = blender.call("""
+scene = bpy.context.scene
+H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+scene.selected_molecule_id = "1atn"
+from mathutils import Vector
+from proteinblender.operators.pivot_operators import PIVOT_HELPER, pivot_edit_key
+
+row = next(r for r in scene.outliner_items
+           if r.item_type == "CHAIN" and r.object_name)
+obj = bpy.data.objects[row.object_name]
+
+with R.view3d_override():
+    opened = bpy.ops.proteinblender.set_pivot_custom(item_id=row.item_id)
+    helper = bpy.data.objects.get(PIVOT_HELPER)
+    tool = bpy.context.workspace.tools.from_space_view3d_mode(
+        "OBJECT", create=False).idname
+    helper.location = helper.location + Vector((2.0, 0.0, 1.0))
+    bpy.context.view_layer.update()
+    dropped = list(helper.matrix_world.translation)
+    applied = bpy.ops.proteinblender.set_pivot_custom(item_id=row.item_id)
+
+bpy.context.view_layer.update()
+return {
+    "opened": sorted(opened),
+    "applied": sorted(applied),
+    "tool": tool,
+    "helper_gone": bpy.data.objects.get(PIVOT_HELPER) is None,
+    "session_closed": pivot_edit_key(scene) == "",
+    "dropped": dropped,
+    "origin": list(obj.matrix_world.translation),
+}
+""")
+    assert result["opened"] == ["FINISHED"]
+    assert result["applied"] == ["FINISHED"]
+    assert result["tool"] == "builtin.move", (
+        f"Edit Pivot left the active tool at {result['tool']!r}; the user has "
+        f"no translate gizmo to drag the helper with")
+    assert result["helper_gone"], "the helper survived the second click"
+    assert result["session_closed"], "the session stayed open"
+
+    offset = max(abs(a - b) for a, b in zip(result["dropped"], result["origin"]))
+    assert offset < 1e-4, (
+        f"the pivot landed {offset} from where the helper was dropped: "
+        f"helper={result['dropped']} origin={result['origin']}")

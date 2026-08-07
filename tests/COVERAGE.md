@@ -3,12 +3,10 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Current status (Blender 5.2, offline lane): **354 passing, 9 skipped,
-1 xfailed**, no failures. The single xfail is intentional (a
-modal-dialog operator unreachable headless - see below), not a bug. The suite
-was previously verified on Blender 5.0 and 5.1; the membrane Random Value fix
-addresses sockets by identity so it stays compatible with those versions, though
-the count above was re-run only on 5.2.
+Current status (offline lane): **436 passing, 7 skipped, 1 xfailed**, no
+failures, re-run on Blender 5.0, 5.1 and 5.2. The single xfail is intentional
+(a modal-dialog operator unreachable headless - see below), not a bug. The
+foreground UI lane (`python tests/run_ui_tests.py`) is green at 36 scenarios.
 
 ## Lanes
 
@@ -280,13 +278,42 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_rendering.py` | that an imported molecule actually draws: the geometry path from Group Input to Group Output survives import, pivot changes and style swaps (style-independent), plus a real Cycles render asserting non-zero pixel coverage |
 | `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves what is rendered (pixel render) and never writes to mesh data, First/Center/Last land on PDB-derived residues (biotite ground truth), the pivot input matches the raw first-residue coordinate, domains rotate about a fixed origin, rendered coverage stays in-band, and the mesh-sharing assertion. Ground truth is kept independent of the pivot code under test |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
-| `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field |
-| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, `toggle_force_fields` |
-| `test_panels.py` | all 9 Panels + 2 UILists registered; `poll()` safety |
+| `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field (through the protein's edit dialog) |
+| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle |
+| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session |
+| `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Moving a protein's pivot translated the whole protein.**
+  Every chain domain is *parented* to its molecule object, and a child's world
+  transform is `parent.matrix_world @ matrix_parent_inverse @ basis`. So when
+  `domain_space.set_pivot_world` rehomed the molecule object's origin, it
+  dragged every domain by the same vector - the pivot moved and the molecule
+  followed it across the scene. Reported from the UI: import 1atn, Edit Pivot
+  on the protein row, drag X, click again, and the protein has translated
+  instead of just its pivot. `set_pivot_world` now captures each direct child's
+  world matrix and writes it back after rehoming the parent, which re-derives
+  the child's basis and leaves it exactly where it was.
+  A second defect sat on top: the protein row wrote its pivot onto every domain
+  as well as the molecule object, which was both redundant (the domains are
+  parented, so the protein already rotates as one about that origin) and
+  destructive (it silently overwrote whatever pivot the user had set on each
+  domain from its own row). `row_pivot_objects` now narrows a PROTEIN row to
+  the molecule object, while `row_objects` - what colour and style use - still
+  covers every domain.
+  Guarded by `test_visual_edit_dialogs.py::test_edit_pivot_on_a_protein_moves_the_pivot_not_the_protein`,
+  whose ground truth is Blender's *renderer* (`H.render_coverage` pixel
+  coverage before vs after), the only witness that cannot move with the bug -
+  `matrix_world` and the GN Pivot input are rewritten together, so the add-on's
+  own `local_to_world` would report "nothing moved" either way. Verified red at
+  93 changed pixels via `git stash push -- proteinblender/core/domain_space.py`.
+  The pivot-clobbering half is guarded by
+  `::test_protein_pivot_moves_only_the_molecule_object` and
+  `::test_edit_pivot_on_a_protein_moves_only_the_molecule_object`, both verified
+  red by mutating `row_pivot_objects` back to the wide set.
 
 - **A renamed chain was wiped by the first undo.**
   `scene_manager._refresh_molecule_ui` rebuilds `scene.molecule_list_items` by
@@ -1116,10 +1143,6 @@ by passing that state directly (no dialog needed):
 
 ## Not reachable headless (skipped)
 
-- `set_pivot_custom` — spawns an interactive gizmo Empty and finalizes through a
-  user-driven depsgraph deselection handler; needs a human, not just a screen.
-  (Its stated `context.screen.areas is None` reason is stale — screen is present
-  headless on 5.2 — but it remains genuinely interactive.)
 - Panel `poll()` — no registered panel defines a `poll` of its own any more, so
   there is nothing to exercise. The one that did, `PROTEINBLENDER_PT_domain_maker`,
   was removed along with its panel.

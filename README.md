@@ -46,7 +46,7 @@ This method provides automatic update notifications when new versions are releas
 ### Basic Usage
 
 1. **Import a Protein**: Use the Importer panel to load a PDB file or fetch from online databases
-2. **Adjust Visuals**: Change colors and representation styles in the Visual Setup panel
+2. **Adjust Visuals**: Click the pencil on any protein, chain or domain row in the Protein Outliner to set its color, style, pivot and force field
 3. **Create Puppets**: Group chains/domains together in the Protein Puppet Maker
 4. **Save Poses**: Capture different conformations in the Pose Library
 5. **Animate**: Add keyframes in the Animation panel to bring your proteins to life

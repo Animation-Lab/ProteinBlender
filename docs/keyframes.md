@@ -82,7 +82,7 @@ The **Pose** option works with your saved poses:
 
 Animate color changes:
 
-1. At keyframe 1: Set color in Visual Setup, check Color, create keyframe
+1. At keyframe 1: Set the color from the item's pencil button, check Color, create keyframe
 2. At keyframe 60: Set different color, check Color, create keyframe
 3. Domain smoothly transitions between colors
 

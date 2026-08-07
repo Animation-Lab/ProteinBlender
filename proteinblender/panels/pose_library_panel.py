@@ -349,7 +349,7 @@ class PROTEINBLENDER_OT_create_pose(Operator):
                         transform.scale = obj.scale.copy()
 
                     # Capture color if available
-                    from ..panels.visual_setup_panel import get_object_color
+                    from ..core.visual_style import get_object_color
                     color = get_object_color(obj)
                     if color:
                         transform.color = color
@@ -557,7 +557,7 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
 
                     # Apply color if available
                     if transform.has_color:
-                        from ..panels.visual_setup_panel import apply_color_to_object
+                        from ..core.visual_style import apply_color_to_object
                         apply_color_to_object(obj, transform.color)
 
                     applied_count += 1
@@ -638,7 +638,7 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
                     transform.scale = obj.scale.copy()
 
                 # Capture color if available
-                from ..panels.visual_setup_panel import get_object_color
+                from ..core.visual_style import get_object_color
                 color = get_object_color(obj)
                 if color:
                     transform.color = color

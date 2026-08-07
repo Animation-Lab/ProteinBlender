@@ -250,10 +250,6 @@ def update_outliner_from_blender_selection():
     # Puppets no longer cascade their selection to members
     # The puppet checkbox only controls the Empty controller
     
-    # Sync color picker to match selected item's color
-    from ..panels.visual_setup_panel import sync_color_to_selection
-    sync_color_to_selection(bpy.context)
-    
     # Update UI - force redraw to show checkbox changes
     for area in bpy.context.screen.areas:
         if area.type in ['PROPERTIES', 'VIEW_3D']:

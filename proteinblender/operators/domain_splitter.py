@@ -56,6 +56,7 @@ from ..core import domain_layout
 from ..utils.chain_utils import (chain_match_tokens, chain_token_from_item,
                                  default_domain_name, is_default_domain_name)
 from ..utils.scene_manager import ProteinBlenderScene
+from .visual_edit import VisualEditMixin
 
 # Blender caps how tall a dialog can usefully get; past this the row list stops
 # being readable and the user is better served splitting in stages.
@@ -683,10 +684,10 @@ class PROTEINBLENDER_DomainLayoutRow(PropertyGroup):
     domain_id: StringProperty()
 
 
-class PROTEINBLENDER_OT_edit_chain_domains(Operator):
-    """Rename this chain and edit how it is split into domains"""
+class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
+    """Rename this chain, restyle it, and edit how it is split into domains"""
     bl_idname = "proteinblender.edit_chain_domains"
-    bl_label = "Domain Splitter"
+    bl_label = "Edit Chain"
     bl_options = {'REGISTER', 'UNDO'}
 
     # The live modal instance, so the in-dialog row buttons can edit its rows.
@@ -787,6 +788,22 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             if item.item_id == self.item_id:
                 return item
         return None
+
+    # The Visual Set-up block edits whatever the chain row resolves to: one
+    # object while the chain is whole, one per domain once it is split.
+    def visual_row(self, context):
+        return self._chain_row(context)
+
+    def before_visual_edit(self, context):
+        """Drop any live preview before a colour or style lands.
+
+        The preview ghosts the chain and re-colours the domain being sized,
+        remembering the real colours so it can put them back on close. A
+        colour set while that is in flight would be restored straight back
+        off again on the way out. Clearing first makes the edit the real
+        state; the preview rebuilds itself on the next boundary drag.
+        """
+        restore_preview(context)
 
     def _molecule(self, context, chain_row):
         if chain_row is None:
@@ -1036,6 +1053,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         self._sync_edges()
 
         type(self)._active_instance = self
+        self.begin_visual_edit(context)
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def check(self, context):
@@ -1077,6 +1095,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
                      text="Add Domain", icon='ADD')
 
         self._draw_feedback(layout)
+        self.draw_visual_setup(layout, context)
 
     # Column widths, shared by the header and every row so they line up
     # exactly. Blender lays a row out proportionally unless told otherwise, so
@@ -1180,6 +1199,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         if chain_row is None or molecule is None:
             self.report({'ERROR'}, "Could not resolve the chain to edit")
             type(self)._active_instance = None
+            self.end_visual_edit()
             return {'CANCELLED'}
 
         token = chain_token_from_item(chain_row)
@@ -1193,6 +1213,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             except (ValueError, KeyError, TypeError) as exc:
                 self.report({'ERROR'}, f"Bad layout_json: {exc}")
                 type(self)._active_instance = None
+                self.end_visual_edit()
                 return {'CANCELLED'}
         else:
             # The rows may stop short of either end of the chain: a boundary
@@ -1209,6 +1230,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
             for message in errors:
                 self.report({'ERROR'}, message)
             type(self)._active_instance = None
+            self.end_visual_edit()
             return {'CANCELLED'}
 
         # Store the chain name first: apply_layout rebuilds the outliner, and
@@ -1222,7 +1244,14 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
         if result.errors:
             for message in result.errors:
                 self.report({'ERROR'}, message)
+            self.end_visual_edit()
             return {'CANCELLED'}
+
+        # After the layout, so a colour or style the user picked also reaches
+        # the domains this run just created. Untouched fields apply nothing —
+        # see VisualEditMixin.commit_visual_edit.
+        self.commit_visual_edit(context)
+        self.end_visual_edit()
 
         _tag_redraw(context)
 
@@ -1260,6 +1289,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(Operator):
     def cancel(self, context):
         restore_preview(context)
         type(self)._active_instance = None
+        self.end_visual_edit()
 
 
 def _tag_redraw(context, area_types=frozenset({'VIEW_3D', 'PROPERTIES'})):

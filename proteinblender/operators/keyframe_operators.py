@@ -1001,7 +1001,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     if not keyframe_color_properties(domain_obj, self.frame_number):
                         # Try to apply color if it failed (meaning node probably didn't exist)
                         try:
-                            from ..panels.visual_setup_panel import get_object_color, apply_color_to_object
+                            from ..core.visual_style import get_object_color, apply_color_to_object
                             color = get_object_color(domain_obj)
                             if color:
                                 apply_color_to_object(domain_obj, color)

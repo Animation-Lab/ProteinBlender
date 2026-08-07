@@ -13,7 +13,7 @@ plus ``proteinblender.membrane_builder.force_fields``):
     membrane_remove_hole
   * proteinblender.membrane_reset_deform
   * proteinblender.delete_membrane
-  * proteinblender.toggle_force_fields      (+ Object.pb_force_field_enabled)
+  * proteinblender.edit_protein_visuals     (+ Object.pb_force_field_enabled)
   * proteinblender.membrane_edit_deform / membrane_finish_deform (edit-mode;
     tolerant — skipped when the headless context can't enter Lattice edit mode)
 
@@ -263,10 +263,10 @@ def test_delete_membrane_removes_root_and_children(scene):
 
 @pytest.mark.integration
 def test_force_field_toggle_creates_anchor_and_flag(scene, sm, single_chain):
-    """Enabling a protein's membrane force field (via the outliner selection +
-    proteinblender.toggle_force_fields) flips ``pb_force_field_enabled`` on the
-    protein object and spawns its hidden ``.ff_anchor`` Empty; disabling reaps
-    it."""
+    """Enabling a protein's membrane force field from its edit dialog
+    (proteinblender.edit_protein_visuals) flips ``pb_force_field_enabled`` on
+    the protein object and spawns its hidden ``.ff_anchor`` Empty; disabling
+    reaps it."""
     # A membrane must exist for the FF apply pass to create anchors.
     H.build_membrane(shape=SHAPE_FLAT, width=20.0, height=20.0)
 
@@ -274,12 +274,8 @@ def test_force_field_toggle_creates_anchor_and_flag(scene, sm, single_chain):
     assert obj is not None
     assert getattr(obj, "pb_force_field_enabled", False) is False
 
-    # Select the protein in the PB Outliner so the operator resolves it.
-    pit = next(it for it in scene.outliner_items
-               if it.item_type == "PROTEIN" and it.item_id == single_chain)
-    pit.is_selected = True
-
-    res = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+    res = bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, vs_force_field=True)
     assert res == {'FINISHED'}
     assert obj.pb_force_field_enabled is True
 
@@ -301,7 +297,8 @@ def test_force_field_toggle_creates_anchor_and_flag(scene, sm, single_chain):
         "the owner's world centre, height included")
 
     # Turning it off flips the flag back and sweeps the orphaned anchor.
-    res = bpy.ops.proteinblender.toggle_force_fields(target_state="off")
+    res = bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, vs_force_field=False)
     assert res == {'FINISHED'}
     assert obj.pb_force_field_enabled is False
     assert bpy.data.objects.get(f"{obj.name}.ff_anchor") is None, \

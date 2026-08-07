@@ -11,30 +11,37 @@ Customize the appearance of your proteins with colors and molecular representati
 
 ## Overview
 
-The **Visual Setup** panel lets you:
-- Change protein colors
-- Switch between molecular representation styles
-- Apply changes to selected proteins, chains, or domains
+Every protein, chain and domain carries its own **Visual Set-up**:
+- Color
+- Molecular representation style
+- Membrane force field
+- Pivot point
 
-## Accessing Visual Setup
+You reach it from the item itself, so what you are editing is never in doubt.
+
+## Accessing Visual Set-up
 
 1. Import a protein (see [Import Proteins](import.html))
-2. Find the **Visual Setup** panel below the Protein Outliner
-3. The panel shows color and style options
+2. In the **Protein Outliner**, find the row you want to change
+3. Click the **pencil** button on that row
+
+Each row opens the dialog that suits it:
+
+| Row | Pencil opens | Contains |
+|-----|--------------|----------|
+| Protein | **Edit Protein** | Visual Set-up for the whole molecule |
+| Chain | **Edit Chain** | chain name, domain layout, and Visual Set-up |
+| Domain | **Edit Domain** | domain name and Visual Set-up |
 
 ## Changing Colors
 
-### Apply Color to Selection
+1. Click the **pencil** on the row you want to recolor
+2. Click the **Color** swatch and pick a color
 
-1. **Select** an item in the Protein Outliner (protein, chain, or domain)
-2. In the **Visual Setup** panel, click the **color picker**
-3. Choose your desired color
-4. Click **Apply Color**
-
-The color will be applied based on your selection:
-- **Protein selected**: All chains and domains get the color
-- **Chain selected**: All domains in that chain get the color  
-- **Domain selected**: Only that specific domain gets the color
+The color applies as you pick it, to everything that row covers:
+- **Protein row**: the molecule and all of its chains and domains
+- **Chain row**: every domain in that chain
+- **Domain row**: only that domain
 
 ### Color Tips
 
@@ -56,32 +63,61 @@ ProteinBlender supports multiple molecular representations:
 - **Spheres**: Space-filling representation
 - **And more**: Additional styles from MolecularNodes
 
-### Apply Style to Selection
+### Apply a Style
 
-1. **Select** an item in the Protein Outliner
-2. In the **Visual Setup** panel, choose a **Style** from the dropdown
-3. Click **Apply Style**
+1. Click the **pencil** on the row you want to restyle
+2. Choose a **Representation** from the dropdown
 
-Like colors, styles are applied hierarchically based on selection.
+Like colors, the style reaches everything the row covers, immediately.
+
+If the row's parts currently disagree - say a chain whose domains are half
+cartoon and half surface - the dropdown reads **Multiple**. Picking a real
+style resolves them all; leaving it alone changes nothing.
 
 ## Independent Domain Styling
 
 One of ProteinBlender's powerful features is **independent domain styling**:
 
-1. Split a chain into domains (see Domain Maker panel)
-2. Select individual domains
-3. Apply different colors and styles to each domain
+1. Split a chain into domains with the **pencil** on its chain row
+2. Open each domain's own **pencil**
+3. Give each one its own color and style
 
 Example: Show an active site as ball-and-stick while keeping the rest as cartoon.
 
-## Combining Colors and Styles
+## Pivot Point
 
-You can apply both colors and styles together:
+The same dialog sets what the item rotates about:
 
-1. Select your target (protein/chain/domain)
-2. Choose a color
-3. Choose a style
-4. Apply both (or apply one at a time)
+- **Start** - the first residue (N-terminus)
+- **Center** - the centroid of the item's alpha carbons
+- **End** - the last residue (C-terminus)
+
+A protein gets a *single* pivot shared by all of its chains and domains, so the
+whole molecule swings about one point.
+
+### Edit Pivot
+
+To place a pivot by hand, use the **pivot** button on the outliner row rather
+than the dialog - it needs the viewport for as long as you are dragging, and a
+dialog would close over it.
+
+1. Click the **pivot** button on the row. An orange helper appears on the
+   item's current pivot and the Move tool activates
+2. Drag the helper where you want the pivot
+3. Click the **pivot** button again. The helper's position becomes the pivot
+   and the helper disappears
+
+The button stays pressed for as long as the mode is open, so you can orbit,
+select other things and come back - only the button ends it. Opening and
+closing it without dragging changes nothing.
+
+Clicking another row's pivot button applies the one you are holding and moves
+on to that row. Choosing Start, Center or End abandons an open placement.
+
+## Membrane Force Field
+
+Turn **Membrane Force Field** on to make the lipids of any membrane part around
+the item, and set how far they stand off with **Spacing**.
 
 ## Tips and Best Practices
 
@@ -107,9 +143,8 @@ You can apply both colors and styles together:
 
 ### Color Doesn't Change
 
-- Make sure you clicked **Apply Color** after selecting the color
-- Check that the correct item is selected in the outliner
-- If domain is in a puppet, color the puppet instead
+- Check you opened the pencil on the row you meant - the dialog names the item
+- If the domain is in a puppet, color the puppet instead
 
 ### Style Doesn't Update
 
@@ -131,7 +166,8 @@ For more advanced color control:
 2. Use Blender's shader editor to modify materials
 3. ProteinBlender creates unique materials per domain
 
-Note: Manual material edits may be overwritten if you use Apply Color again.
+Note: Manual material edits may be overwritten the next time you pick a color
+in the dialog.
 
 ## Next Steps
 

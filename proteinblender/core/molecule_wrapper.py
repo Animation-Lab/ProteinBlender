@@ -2577,7 +2577,7 @@ class MoleculeWrapper:
             # There are two colour paths into a domain and they use different
             # nodes. Import wires "Set Color".Color from the "Color Common"
             # group, which is what the loop below drives. But the Visual Set-up
-            # picker (panels/visual_setup_panel.apply_color_to_object) builds a
+            # picker (core/visual_style.apply_color_to_object) builds a
             # "Custom Combine Color" node and *relinks* Set Color.Color to it,
             # discarding the Color Common link. From then on this operator was
             # writing to a node that drives nothing: it reported FINISHED,

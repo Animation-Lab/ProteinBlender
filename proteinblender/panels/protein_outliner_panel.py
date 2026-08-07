@@ -164,15 +164,19 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     if reset_op:
                         reset_op.domain_id = primary_domain_id
 
-                    # Copy — duplicates the chain's primary domain
-                    copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
+                    # Copy — duplicates the chain's primary domain. Same icon
+                    # as the protein row's Duplicate: it is the same action at
+                    # a different level of the hierarchy.
+                    copy_op = row.operator("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
                     if copy_op:
                         copy_op.domain_id = primary_domain_id
 
-                    # Edit — the Domain Splitter: renames the chain and edits
-                    # how it is divided into domains. A chain *copy* is a single
-                    # domain rather than a splittable chain, so it keeps the
-                    # plain rename dialog.
+                    self._draw_custom_pivot_toggle(context, row, item)
+
+                    # Edit — the Domain Splitter: renames the chain, restyles
+                    # it, and edits how it is divided into domains. A chain
+                    # *copy* is a single domain rather than a splittable chain,
+                    # so it keeps the plain domain dialog.
                     if is_chain_copy:
                         rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
                         if rename_op:
@@ -206,12 +210,14 @@ class PROTEINBLENDER_UL_outliner(UIList):
                         if reset_op:
                             reset_op.domain_id = domain_id
 
-                        # Add copy button
-                        copy_op = row.operator("molecule.copy_domain", text="", icon='ADD', emboss=False)
+                        # Add copy button (same icon as every other copy)
+                        copy_op = row.operator("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
                         if copy_op:
                             copy_op.domain_id = domain_id
 
-                        # Add rename button
+                        self._draw_custom_pivot_toggle(context, row, item)
+
+                        # Edit — rename plus the Visual Set-up block
                         rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
                         if rename_op:
                             rename_op.target_item_id = domain_id
@@ -236,6 +242,22 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
                 if duplicate_op:
                     duplicate_op.molecule_id = item.item_id
+
+            if item.item_type == 'PROTEIN':
+                # Custom Pivot, then the edit pencil. DNA/RNA rows get neither:
+                # a strand's shape is driven by its own builder dialog and its
+                # bend rig, so a hand-placed pivot on it has no defined meaning
+                # yet.
+                self._draw_custom_pivot_toggle(context, row, item)
+
+                # Edit pencil — the protein's own Visual Set-up: colour, style,
+                # force field and pivot for the whole molecule at once.
+                edit_op = row.operator(
+                    "proteinblender.edit_protein_visuals",
+                    text="", icon='GREASEPENCIL', emboss=False,
+                )
+                if edit_op:
+                    edit_op.item_id = item.item_id
 
             if item.item_type == 'DNA_RNA':
                 # Edit pencil — opens the build_dna dialog pre-populated for
@@ -312,6 +334,37 @@ class PROTEINBLENDER_UL_outliner(UIList):
         op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
         op.item_id = item.item_id
     
+    def _draw_custom_pivot_toggle(self, context, row, item):
+        """The Edit Pivot button for a protein, chain or domain row.
+
+        One click opens the mode: an orange helper appears on the item's
+        current pivot and the Move gizmo becomes active, so the pivot can be
+        dragged wherever the user wants it. The next click on the same button
+        takes the helper's position as the new pivot and clears the helper
+        away. While the mode is open the button reads as pressed.
+
+        It lives on the row, not beside Start / Center / End in the edit
+        dialogs, because it is a *mode*: the placement lasts as long as the
+        user needs, and a dialog that closed over it would end the placement
+        at the moment it began. The row stays on screen, so in and out are the
+        same control. (Same reasoning as the membrane row's deform toggle.)
+        """
+        from ..operators.pivot_operators import pivot_edit_key
+
+        try:
+            editing = pivot_edit_key(context.scene) == item.item_id
+        except (ReferenceError, RuntimeError, AttributeError):
+            editing = False
+
+        op = row.operator(
+            "proteinblender.set_pivot_custom",
+            text="", icon='PIVOT_CURSOR',
+            emboss=editing,     # the row being edited reads as pressed
+            depress=editing,
+        )
+        if op:
+            op.item_id = item.item_id
+
     def _get_item_visibility(self, context, item):
         """Get visibility state directly from the Blender object."""
         if not item.object_name:
@@ -491,10 +544,6 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         # Sync to Blender selection (do this after UI update for better responsiveness)
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
         sync_outliner_to_blender_selection(context, actual_item_id)
-        
-        # Sync color picker to match selected item's color
-        from ..panels.visual_setup_panel import sync_color_to_selection
-        sync_color_to_selection(context)
 
         return {'FINISHED'}
     

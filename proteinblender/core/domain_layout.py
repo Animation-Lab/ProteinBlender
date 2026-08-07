@@ -304,7 +304,7 @@ def _read_style(domain) -> Optional[str]:
     obj = getattr(domain, "object", None)
     if obj is not None:
         try:
-            from ..panels.visual_setup_panel import get_object_style
+            from .visual_style import get_object_style
             actual = get_object_style(obj)
             if actual:
                 return actual
@@ -450,7 +450,7 @@ def apply_layout(context, molecule: Any, chain_token: Any,
                 domain.style = source[3]
                 if domain.object:
                     try:
-                        from ..panels.visual_setup_panel import apply_style_to_object
+                        from .visual_style import apply_style_to_object
                         apply_style_to_object(domain.object, source[3])
                     except Exception as exc:
                         print(f"apply_layout: could not apply style: {exc}")

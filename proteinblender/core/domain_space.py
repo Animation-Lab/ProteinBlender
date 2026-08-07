@@ -251,6 +251,17 @@ def set_pivot_world(obj, world_pos) -> bool:
     The maths: with ``world(co) = M @ (co - p)``, holding the linear part of M
     fixed and requiring the atoms not to move gives
     ``p_new = p_old + M.inverted() @ P`` and ``M_new.translation = P``.
+
+    **Children are held still.** "Without moving its atoms" has to mean the
+    object's *children's* atoms too, and that does not come for free: a child's
+    world transform is ``parent.matrix_world @ matrix_parent_inverse @ basis``,
+    so rehoming this object's origin drags every child along by the same
+    vector. Every chain domain is parented to its molecule object, so on a
+    protein that was the entire molecule sliding across the scene - the pivot
+    moved and the protein followed it. Each direct child's world matrix is
+    therefore captured and written back, which re-derives its basis against the
+    new parent transform and leaves it exactly where it was. Grandchildren need
+    no handling: they follow the child that is being held.
     """
     mod = pb_modifier(obj)
     if mod is None:
@@ -265,8 +276,13 @@ def set_pivot_world(obj, world_pos) -> bool:
     if not set_pivot_local(obj, new_pivot):
         return False
 
+    children = [(child, child.matrix_world.copy()) for child in obj.children]
+
     matrix.translation = target
     obj.matrix_world = matrix
+
+    for child, world in children:
+        child.matrix_world = world
     return True
 
 

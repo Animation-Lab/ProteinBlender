@@ -98,89 +98,35 @@ class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_toggle_protein_pivot_edit(bpy.types.Operator):
+    """Move a protein's pivot with a helper object. Click again to apply.
+
+    The scripted entry point to Edit Pivot for a whole protein; the outliner
+    row's button is the same session reached from the UI. Both go through
+    ``pivot_operators.toggle_pivot_edit``, so enter-and-leave is implemented
+    once. This used to carry its own copy of it, keyed on a class-level dict
+    holding a live ``helper`` pointer - which a source reload emptied and a
+    user deleting the helper turned into a pointer to freed memory.
+    """
+
     bl_idname = "molecule.toggle_protein_pivot_edit"
     bl_label = "Move/Set Protein Pivot"
     bl_description = "Interactively move the protein's pivot using a helper object."
 
-    _pivot_edit_active = dict()  # Class-level dict to track state per molecule
-
     molecule_id: bpy.props.StringProperty()
 
     def execute(self, context):
+        from .pivot_operators import toggle_pivot_edit
+
         scene_manager = ProteinBlenderScene.get_instance()
         molecule = scene_manager.molecules.get(self.molecule_id)
         if not molecule or not molecule.object:
             self.report({'ERROR'}, "Molecule object not found.")
             return {'CANCELLED'}
-        obj = molecule.object
-        # Toggle logic: if already editing, finish and set pivot; else, start editing
-        if self.molecule_id not in self._pivot_edit_active:
-            # Start pivot edit mode (match domain logic)
-            # Save state
-            self._pivot_edit_active[self.molecule_id] = {
-                'cursor_location': list(context.scene.cursor.location),
-                'previous_tool': context.workspace.tools.from_space_view3d_mode(context.mode, create=False).idname,
-                'object_location': obj.location.copy(),
-                'object_rotation': obj.rotation_euler.copy(),
-                'transform_orientation': context.scene.transform_orientation_slots[0].type,
-                'pivot_point': context.tool_settings.transform_pivot_point
-            }
-            # Deselect all
-            bpy.ops.object.select_all(action='DESELECT')
-            # Create ARROWS empty at protein origin
-            bpy.ops.object.empty_add(type='ARROWS', location=obj.location)
-            helper = context.active_object
-            helper.name = f"PB_PivotHelper_{self.molecule_id}"
-            helper.empty_display_size = 1.0
-            helper.show_in_front = True
-            helper.hide_select = False
-            helper.select_set(True)
-            context.view_layer.objects.active = helper
-            self._pivot_edit_active[self.molecule_id]['helper'] = helper
-            # Set up transform settings
-            context.scene.transform_orientation_slots[0].type = 'GLOBAL'
-            context.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
-            # Switch to move tool and show gizmo
-            for area in context.screen.areas:
-                if area.type == 'VIEW_3D':
-                    for region in area.regions:
-                        if region.type == 'WINDOW':
-                            override = context.copy()
-                            override['area'] = area
-                            override['region'] = region
-                            with context.temp_override(**override):
-                                bpy.ops.wm.tool_set_by_id(name="builtin.move")
-                    for space in area.spaces:
-                        if space.type == 'VIEW_3D':
-                            space.show_gizmo = True
-                            space.show_gizmo_tool = True
-                            space.show_gizmo_object_translate = True
-            obj["is_pivot_editing"] = True
-            self.report({'INFO'}, "Use the transform gizmo to move the helper. Click 'Set Pivot' to apply.")
-            return {'FINISHED'}
-        else:
-            # Finish pivot edit mode
-            stored_state = self._pivot_edit_active[self.molecule_id]
-            helper = stored_state['helper']
-            # Store location before deleting helper
-            new_pivot_location = helper.location.copy()
-            # Move the origin to where the user parked the helper. Carries the
-            # pivot on the geometry-nodes modifier, so the molecule's mesh -
-            # shared with every one of its domains - is left untouched.
-            domain_space.set_pivot_world(obj, new_pivot_location)
-            # Delete helper
-            bpy.ops.object.select_all(action='DESELECT')
-            helper.select_set(True)
-            context.view_layer.objects.active = helper
-            bpy.ops.object.delete()
-            # Restore previous selection/context
-            context.scene.cursor.location = stored_state['cursor_location']
-            context.scene.transform_orientation_slots[0].type = stored_state['transform_orientation']
-            context.tool_settings.transform_pivot_point = stored_state['pivot_point']
-            obj["is_pivot_editing"] = False
-            del self._pivot_edit_active[self.molecule_id]
-            self.report({'INFO'}, "Protein pivot updated.")
-            return {'FINISHED'}
+
+        # The molecule object alone, not its domains: this is the protein's
+        # own origin, and it is what the operator has always moved.
+        return toggle_pivot_edit(self, context, f"protein:{self.molecule_id}",
+                                 [molecule.object])
 
 # Add operator to toggle visibility of molecule and its domains
 class MOLECULE_PB_OT_toggle_visibility(Operator):

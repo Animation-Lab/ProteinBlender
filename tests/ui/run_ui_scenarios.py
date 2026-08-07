@@ -13,6 +13,7 @@ import traceback
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
 
 repo_root, report_path = sys.argv[sys.argv.index("--") + 1:]
@@ -28,7 +29,6 @@ results = []
 EXPECTED_UI_PANELS = {
     "PROTEIN_PB_PT_import_protein",
     "PROTEINBLENDER_PT_outliner",
-    "PROTEINBLENDER_PT_visual_setup",
     "PROTEINBLENDER_PT_puppet_maker",
     "PROTEINBLENDER_PT_pose_library",
     "PROTEINBLENDER_PT_animation",
@@ -36,6 +36,7 @@ EXPECTED_UI_PANELS = {
     "PB2_PT_linkers",
 }
 state = {"molecule_id": None, "puppet_id": None, "puppet_members": set(),
+         "pivot_row": None, "pivot_origin_before": None,
          "dna": None, "membrane": None, "undo_domains_before": set(),
          "undo_properties_before": set(), "workspace_area_count": None,
          "workspace_screen": None, "workspace_contexts": None}
@@ -216,7 +217,7 @@ def redraw_all_panels():
         area.tag_redraw()
     expected = [name for name in dir(bpy.types)
                 if name.startswith(("PROTEINBLENDER_PT_", "PROTEIN_PB_PT_", "PB2_PT_"))]
-    assert len(expected) >= 9, f"expected at least 9 add-on panels, got {expected}"
+    assert len(expected) >= 8, f"expected at least 8 add-on panels, got {expected}"
     return f"requested redraw for {len(expected)} panels"
 
 
@@ -249,27 +250,68 @@ def invoke_and_cancel_puppet_dialog():
     return "puppet dialog invoked and cancelled through window events"
 
 
-def start_custom_pivot_from_rotate():
+def invoke_and_cancel_protein_visuals_dialog():
+    """The protein row's edit pencil must open and draw in a real window.
+
+    Its Visual Set-up block seeds itself from the protein's objects in
+    invoke() and lays out colour, style, pivot and force-field controls in
+    draw(). Neither runs headless - background Blender sends INVOKE_DEFAULT
+    straight to execute() - so a draw() that raises would go unnoticed by the
+    offline lane entirely.
+    """
+    protein = next(row for row in bpy.context.scene.outliner_items
+                   if row.item_type == "PROTEIN")
+    with ui_override("PROPERTIES"):
+        result = bpy.ops.proteinblender.edit_protein_visuals(
+            "INVOKE_DEFAULT", item_id=protein.item_id)
+    assert result == {"RUNNING_MODAL"}, result
+
+    from proteinblender.operators import visual_edit
+    dialog = visual_edit.active_dialog()
+    assert dialog is not None, "the protein dialog did not register as active"
+    objects = dialog.visual_objects(bpy.context)
+    assert objects, "the protein dialog resolved no objects to style"
+
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return (f"protein visuals dialog opened over {len(objects)} object(s) "
+            f"and cancelled")
+
+
+def edit_pivot_opens_the_move_gizmo():
+    """First click on a chain row's Edit Pivot: the mode opens.
+
+    A helper Empty appears on the chain's current pivot, selected, with the
+    Move tool and only the translate gizmo active. Starting from the Rotate
+    tool proves the mode switches it rather than inheriting whatever was
+    active - a rotation gizmo on a pivot helper is meaningless and reads as
+    if the pivot could be spun.
+    """
+    from proteinblender.operators import pivot_operators as P
+
     scene = bpy.context.scene
     chain = next(row for row in scene.outliner_items if row.item_type == "CHAIN")
-    for row in scene.outliner_items:
-        row.is_selected = row.item_id == chain.item_id
+    state["pivot_row"] = chain.item_id
+
+    objects = P.row_pivot_objects(bpy.context, chain)
+    assert objects, "the chain row resolved to no objects"
+    state["pivot_origin_before"] = list(objects[0].matrix_world.translation)
+
     with ui_override("VIEW_3D"):
         assert bpy.ops.wm.tool_set_by_id(name="builtin.rotate") == {"FINISHED"}
-        active = bpy.context.workspace.tools.from_space_view3d_mode(
-            "OBJECT", create=False)
-        assert active.idname == "builtin.rotate", active.idname
-        result = bpy.ops.proteinblender.set_pivot_custom("EXEC_DEFAULT")
+        assert bpy.context.workspace.tools.from_space_view3d_mode(
+            "OBJECT", create=False).idname == "builtin.rotate"
+        result = bpy.ops.proteinblender.set_pivot_custom(
+            "EXEC_DEFAULT", item_id=chain.item_id)
     assert result == {"FINISHED"}, result
-    return "started first custom pivot from Rotate tool"
 
+    assert P.pivot_edit_key(scene) == chain.item_id, (
+        "Edit Pivot did not open a session for the row that was clicked")
 
-def assert_custom_pivot_uses_translation_and_finish():
-    scene = bpy.context.scene
     active = bpy.context.workspace.tools.from_space_view3d_mode(
         "OBJECT", create=False)
     assert active.idname == "builtin.move", (
-        f"first Custom Pivot click left active tool at {active.idname}")
+        f"Edit Pivot left the active tool at {active.idname}")
     view = next(area for area in active_window().screen.areas
                 if area.type == "VIEW_3D")
     space = view.spaces.active
@@ -277,41 +319,89 @@ def assert_custom_pivot_uses_translation_and_finish():
     assert space.show_gizmo_object_translate
     assert not space.show_gizmo_object_rotate
     assert not space.show_gizmo_object_scale
-    empty = next((obj for obj in bpy.data.objects if obj.type == "EMPTY" and obj.select_get()), None)
-    assert empty is not None, "custom pivot created no selected gizmo Empty"
-    assert empty.empty_display_type == "PLAIN_AXES", (
-        f"custom pivot helper draws {empty.empty_display_type} geometry; "
+
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    assert helper is not None, "Edit Pivot created no helper"
+    assert helper.select_get(), "the helper is not selected, so it cannot be dragged"
+    assert helper.empty_display_type == "ARROWS", (
+        f"the pivot helper draws {helper.empty_display_type} geometry; "
         "SPHERE creates rotation-like circles")
-    empty_name = empty.name
-    bpy.ops.object.select_all(action="DESELECT")
-    from proteinblender.operators.pivot_operators import custom_pivot_deselection_handler
-    custom_pivot_deselection_handler(scene)
-    assert bpy.data.objects.get(empty_name) is None, "custom pivot gizmo survived finalization"
-    return "first custom pivot displayed translation controls and finalized"
+    return "Edit Pivot opened with the translate gizmo on a selected helper"
+
+
+def edit_pivot_second_click_applies_and_closes():
+    """Second click: the helper's position becomes the pivot, and it goes away.
+
+    The helper is dragged first, the way a user would, so the applied pivot is
+    somewhere the item's pivot demonstrably was not. Ground truth is the
+    helper's own world position, read before the click - not anything the
+    pivot code derives.
+    """
+    from proteinblender.operators import pivot_operators as P
+
+    scene = bpy.context.scene
+    chain = next(row for row in scene.outliner_items
+                 if row.item_id == state["pivot_row"])
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    assert helper is not None, "the Edit Pivot session did not survive the tick"
+
+    helper.location = helper.location + Vector((1.5, -0.75, 0.5))
+    bpy.context.view_layer.update()
+    dropped_at = helper.matrix_world.translation.copy()
+    assert (dropped_at - Vector(state["pivot_origin_before"])).length > 1e-3, (
+        "the helper was not actually moved, so applying it proves nothing")
+
+    with ui_override("VIEW_3D"):
+        result = bpy.ops.proteinblender.set_pivot_custom(
+            "EXEC_DEFAULT", item_id=chain.item_id)
+    assert result == {"FINISHED"}, result
+
+    assert P.pivot_edit_key(scene) == "", "the Edit Pivot session stayed open"
+    assert bpy.data.objects.get(P.PIVOT_HELPER) is None, (
+        "the pivot helper survived the second click")
+
+    bpy.context.view_layer.update()
+    for obj in P.row_pivot_objects(bpy.context, chain):
+        offset = (obj.matrix_world.translation - dropped_at).length
+        assert offset < 1e-4, (
+            f"{obj.name}'s origin is {offset:.6f} from where the helper was "
+            f"dropped; the pivot was not applied")
+    return "Edit Pivot applied the dropped position and closed"
 
 
 def parent_and_domain_pivot_edit_roundtrip():
+    """The two scripted Edit Pivot entry points, in a real window.
+
+    ``molecule.toggle_protein_pivot_edit`` and ``molecule.toggle_pivot_edit``
+    now share the row button's session, so they use the one helper name and
+    the one open/close path. Both still have to complete their own round trip.
+    """
+    from proteinblender.operators.pivot_operators import PIVOT_HELPER, pivot_edit_key
+
     molecule = H.sm().molecules[state["molecule_id"]]
     domain_id, domain = next(iter(molecule.domains.items()))
     with ui_override("VIEW_3D"):
         assert bpy.ops.molecule.toggle_protein_pivot_edit(
             molecule_id=state["molecule_id"]) == {"FINISHED"}
-        parent_helper = bpy.data.objects.get(f"PB_PivotHelper_{state['molecule_id']}")
-        assert parent_helper is not None
-        parent_helper_name = parent_helper.name
+        parent_helper = bpy.data.objects.get(PIVOT_HELPER)
+        assert parent_helper is not None, "protein Edit Pivot created no helper"
         parent_helper.location.x += 0.05
         assert bpy.ops.molecule.toggle_protein_pivot_edit(
             molecule_id=state["molecule_id"]) == {"FINISHED"}
-        assert bpy.data.objects.get(parent_helper_name) is None
+        assert bpy.data.objects.get(PIVOT_HELPER) is None
+        assert pivot_edit_key(bpy.context.scene) == ""
 
         bpy.context.scene.selected_molecule_id = state["molecule_id"]
         assert bpy.ops.molecule.toggle_pivot_edit(domain_id=domain_id) == {"FINISHED"}
-        domain_helper = bpy.context.active_object
+        domain_helper = bpy.data.objects.get(PIVOT_HELPER)
         assert domain_helper is not None and domain_helper.type == "EMPTY"
-        domain_helper_name = domain_helper.name
+        assert bpy.context.active_object == domain_helper, (
+            "the helper is not the active object, so the gizmo has nothing to "
+            "drag")
         domain_helper.location.z += 0.05
         assert bpy.ops.molecule.toggle_pivot_edit(domain_id=domain_id) == {"FINISHED"}
-        assert bpy.data.objects.get(domain_helper_name) is None
+        assert bpy.data.objects.get(PIVOT_HELPER) is None
+        assert pivot_edit_key(bpy.context.scene) == ""
     return f"parent and domain pivot helpers completed for {domain.name}"
 
 
@@ -781,9 +871,12 @@ steps = [
     ("settle pose modal", lambda: "modal cancellation processed"),
     ("puppet invoke dialog", invoke_and_cancel_puppet_dialog),
     ("settle puppet modal", lambda: "modal cancellation processed"),
-    ("start custom pivot from Rotate", start_custom_pivot_from_rotate),
-    ("assert first custom pivot translation gizmo",
-     assert_custom_pivot_uses_translation_and_finish),
+    ("protein visuals invoke dialog", invoke_and_cancel_protein_visuals_dialog),
+    ("settle protein visuals modal", lambda: "modal cancellation processed"),
+    ("edit pivot opens the move gizmo", edit_pivot_opens_the_move_gizmo),
+    ("settle edit pivot open", lambda: "gizmo activation processed"),
+    ("edit pivot second click applies",
+     edit_pivot_second_click_applies_and_closes),
     ("parent and domain pivot edit", parent_and_domain_pivot_edit_roundtrip),
     ("split domain invoke dialog", invoke_and_cancel_split_dialog),
     ("settle split modal", lambda: "modal cancellation processed"),

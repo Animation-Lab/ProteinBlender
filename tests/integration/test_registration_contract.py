@@ -69,7 +69,6 @@ def test_every_required_handler_is_installed_exactly_once():
     from proteinblender.linkers import linker_handlers
     from proteinblender.dna_builder import dna_props, bender
     from proteinblender.membrane_builder import force_fields, membrane_props
-    from proteinblender.operators import pivot_operators
     from proteinblender.utils import scene_manager
 
     expected = {
@@ -95,7 +94,6 @@ def test_every_required_handler_is_installed_exactly_once():
         ),
         "depsgraph_update_post": (
             scene_manager.detect_deleted_molecules,
-            pivot_operators.custom_pivot_deselection_handler,
             linker_handlers.linker_constraint_and_update_handler,
             bender._on_depsgraph_update,
             force_fields._on_depsgraph_check,

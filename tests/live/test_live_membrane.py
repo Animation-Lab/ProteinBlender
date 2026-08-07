@@ -828,12 +828,9 @@ def test_a_protein_force_field_parts_the_lipids_around_it(blender, single_chain)
     root = facts["root"]
 
     enabled = blender.call("""
-        scene = bpy.context.scene
-        for item in scene.outliner_items:
-            item.is_selected = (item.item_type == "PROTEIN"
-                                and item.item_id == molecule_id)
         with R.view3d_override():
-            result = bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+            result = bpy.ops.proteinblender.edit_protein_visuals(
+                item_id=molecule_id, vs_force_field=True)
         obj = H.sm().molecules[molecule_id].object
         anchor = bpy.data.objects.get(obj.name + ".ff_anchor")
         if anchor is not None:
@@ -858,12 +855,9 @@ def test_a_protein_force_field_parts_the_lipids_around_it(blender, single_chain)
     with_field = lipid_stats(blender, root, origin=anchor_point)
 
     disabled = blender.call("""
-        scene = bpy.context.scene
-        for item in scene.outliner_items:
-            item.is_selected = (item.item_type == "PROTEIN"
-                                and item.item_id == molecule_id)
         with R.view3d_override():
-            result = bpy.ops.proteinblender.toggle_force_fields(target_state="off")
+            result = bpy.ops.proteinblender.edit_protein_visuals(
+                item_id=molecule_id, vs_force_field=False)
         obj = H.sm().molecules[molecule_id].object
         return {
             "result": sorted(result),
@@ -1104,12 +1098,9 @@ def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
     root = facts["root"]
 
     anchor_point = blender.call("""
-        scene = bpy.context.scene
-        for item in scene.outliner_items:
-            item.is_selected = (item.item_type == "PROTEIN"
-                                and item.item_id == molecule_id)
         with R.view3d_override():
-            bpy.ops.proteinblender.toggle_force_fields(target_state="on")
+            bpy.ops.proteinblender.edit_protein_visuals(
+                item_id=molecule_id, vs_force_field=True)
         obj = H.sm().molecules[molecule_id].object
         obj.pb_force_field_spacing = 1.0
         anchor = bpy.data.objects.get(obj.name + ".ff_anchor")
