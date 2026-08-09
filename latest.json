@@ -1,49 +1,49 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-08-08T02:18:55+00:00",
+  "generated_at": "2026-08-09T02:26:02+00:00",
   "summary": {
-    "views": 102,
+    "views": 93,
     "visitors": 24,
-    "clones": 447,
-    "cloners": 122
+    "clones": 438,
+    "cloners": 120
   },
   "all_time": {
-    "views": 653,
-    "visitors": 292,
-    "clones": 3761,
-    "cloners": 1661,
-    "days_tracked": 143
+    "views": 655,
+    "visitors": 294,
+    "clones": 3777,
+    "cloners": 1665,
+    "days_tracked": 144
   },
   "current_day": {
+    "date": "2026-08-07",
+    "views": 2,
+    "visitors": 2,
+    "clones": 16,
+    "cloners": 4
+  },
+  "previous_day": {
     "date": "2026-08-06",
     "views": 1,
     "visitors": 1,
     "clones": 12,
     "cloners": 3
   },
-  "previous_day": {
-    "date": "2026-08-05",
+  "delta_since_previous_day": {
     "views": 1,
     "visitors": 1,
-    "clones": 15,
-    "cloners": 6
-  },
-  "delta_since_previous_day": {
-    "views": 0,
-    "visitors": 0,
-    "clones": -3,
-    "cloners": -3
+    "clones": 4,
+    "cloners": 1
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 41,
+      "count": 42,
       "uniques": 22
     },
     {
       "referrer": "github.com",
-      "count": 19,
-      "uniques": 4
+      "count": 17,
+      "uniques": 3
     },
     {
       "referrer": "Bing",
@@ -60,20 +60,14 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 43,
+      "count": 44,
       "uniques": 22
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 17,
+      "count": 15,
       "uniques": 3
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/actions",
-      "title": "/actions",
-      "count": 8,
-      "uniques": 1
     },
     {
       "path": "/Animation-Lab/ProteinBlender/blob/gh-pages/index.html",
@@ -114,6 +108,12 @@
     {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/1.0.0",
       "title": "/releases/tag/1.0.0",
+      "count": 2,
+      "uniques": 1
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/tree/main/docs",
+      "title": "/tree/main/docs",
       "count": 2,
       "uniques": 1
     }
