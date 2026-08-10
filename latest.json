@@ -1,49 +1,49 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-08-09T02:26:02+00:00",
+  "generated_at": "2026-08-10T02:30:54+00:00",
   "summary": {
-    "views": 93,
-    "visitors": 24,
-    "clones": 438,
-    "cloners": 120
+    "views": 92,
+    "visitors": 23,
+    "clones": 373,
+    "cloners": 111
   },
   "all_time": {
-    "views": 655,
-    "visitors": 294,
-    "clones": 3777,
-    "cloners": 1665,
-    "days_tracked": 144
+    "views": 656,
+    "visitors": 295,
+    "clones": 3791,
+    "cloners": 1670,
+    "days_tracked": 145
   },
   "current_day": {
+    "date": "2026-08-08",
+    "views": 1,
+    "visitors": 1,
+    "clones": 14,
+    "cloners": 5
+  },
+  "previous_day": {
     "date": "2026-08-07",
     "views": 2,
     "visitors": 2,
     "clones": 16,
     "cloners": 4
   },
-  "previous_day": {
-    "date": "2026-08-06",
-    "views": 1,
-    "visitors": 1,
-    "clones": 12,
-    "cloners": 3
-  },
   "delta_since_previous_day": {
-    "views": 1,
-    "visitors": 1,
-    "clones": 4,
+    "views": -1,
+    "visitors": -1,
+    "clones": -2,
     "cloners": 1
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
       "count": 42,
-      "uniques": 22
+      "uniques": 21
     },
     {
       "referrer": "github.com",
-      "count": 17,
-      "uniques": 3
+      "count": 16,
+      "uniques": 2
     },
     {
       "referrer": "Bing",
@@ -61,7 +61,7 @@
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
       "count": 44,
-      "uniques": 22
+      "uniques": 21
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
@@ -82,12 +82,6 @@
       "uniques": 1
     },
     {
-      "path": "/Animation-Lab/proteinblender/issues",
-      "title": "/issues",
-      "count": 3,
-      "uniques": 3
-    },
-    {
       "path": "/Animation-Lab/ProteinBlender/tree/gh-pages",
       "title": "/tree/gh-pages",
       "count": 3,
@@ -96,6 +90,12 @@
     {
       "path": "/Animation-Lab/ProteinBlender/projects",
       "title": "/projects",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/proteinblender/issues",
+      "title": "/issues",
       "count": 2,
       "uniques": 2
     },
