@@ -410,14 +410,7 @@ class ProteinBlenderScene:
 
         # Prune poses that only referenced the orphaned puppets and are now
         # empty, so the library reflects reality after the model is gone.
-        if hasattr(scene, 'pose_library'):
-            for i in range(len(scene.pose_library) - 1, -1, -1):
-                pose = scene.pose_library[i]
-                if len(pose.transforms) == 0 and not pose.puppet_ids:
-                    scene.pose_library.remove(i)
-            if hasattr(scene, 'active_pose_index') and \
-                    scene.active_pose_index >= len(scene.pose_library):
-                scene.active_pose_index = max(0, len(scene.pose_library) - 1)
+        prune_empty_poses(scene)
 
     def _refresh_ui(self):
         """Force a redraw of all UI areas"""
@@ -470,6 +463,142 @@ class ProteinBlenderScene:
         
         # Force UI refresh
         self._refresh_ui()
+
+
+def molecule_would_be_emptied(molecule, doomed_domain_ids) -> bool:
+    """True if deleting exactly these domains leaves the protein with none.
+
+    Lets a delete operator warn - before the user confirms - that the chain or
+    domain they clicked is the protein's last, and that confirming therefore
+    deletes the whole protein.
+    """
+    domains = getattr(molecule, 'domains', None)
+    if not domains or not doomed_domain_ids:
+        return False
+    return not (set(domains) - set(doomed_domain_ids))
+
+
+def prune_empty_poses(scene) -> int:
+    """Drop pose-library entries that no longer pose anything.
+
+    A pose is empty once its last puppet has been stripped out of it (no
+    transforms and no puppet ids left). Keeping it would leave the Protein Pose
+    Library listing a pose that applies nothing.
+    """
+    if not hasattr(scene, 'pose_library'):
+        return 0
+    removed = 0
+    for i in range(len(scene.pose_library) - 1, -1, -1):
+        pose = scene.pose_library[i]
+        if len(pose.transforms) == 0 and not pose.puppet_ids:
+            scene.pose_library.remove(i)
+            removed += 1
+    if hasattr(scene, 'active_pose_index') and \
+            scene.active_pose_index >= len(scene.pose_library):
+        scene.active_pose_index = max(0, len(scene.pose_library) - 1)
+    return removed
+
+
+def prune_emptied_puppets(context) -> List[str]:
+    """Delete puppets whose last member has just been deleted.
+
+    Call this from a chain/domain delete path, after the deleted rows have been
+    stripped from puppet memberships. A memberless puppet is dropped from the
+    outliner on the next rebuild anyway - but silently, which left the pose
+    library listing poses for a puppet that no longer existed. Routing it
+    through the real ``delete_puppet`` operator tears down the controller
+    Empty, its linkers and its pose entries exactly as a manual delete would.
+
+    Returns the ids of the puppets that were deleted.
+    """
+    scene = context.scene if context else bpy.context.scene
+
+    emptied = [item.item_id for item in scene.outliner_items
+               if item.item_type == 'PUPPET'
+               and item.item_id != 'puppets_separator'
+               and not item.puppet_memberships]
+    for puppet_id in emptied:
+        try:
+            bpy.ops.proteinblender.delete_puppet('EXEC_DEFAULT', puppet_id=puppet_id)
+        except Exception as e:
+            print(f"prune_emptied_puppets: delete_puppet({puppet_id}) failed: {e}")
+
+    if emptied:
+        prune_empty_poses(scene)
+    return emptied
+
+
+def delete_molecule_cascade(context, molecule_id) -> bool:
+    """Delete a molecule and everything that hangs off it.
+
+    The single entry point behind every route that removes a whole protein -
+    the protein row's trash can, and a chain/domain deletion that empties the
+    protein. Routing them all through here is what keeps a stale puppet, pose,
+    keyframe or linker from outliving the molecule it was built on: any gap in
+    the cascade is a gap for all of them, never for one route only.
+
+    Returns True if a molecule was actually deleted.
+    """
+    if context is None:
+        context = bpy.context
+
+    scene_manager = ProteinBlenderScene.get_instance()
+
+    try:
+        scene_manager.refresh_domain_refs_before_destructive_op(molecule_id)
+    except Exception:
+        pass
+
+    # Linkers first: an endpoint's ancestry can only be traced back to its
+    # molecule while that molecule's objects and outliner rows still exist.
+    try:
+        from ..linkers.linker_handlers import on_molecule_deleted
+        on_molecule_deleted(molecule_id)
+    except Exception:
+        pass
+
+    # Removes the wrapper, its objects and datablocks, the UI list item, and
+    # the puppets/poses left orphaned by their disappearance.
+    deleted = scene_manager.delete_molecule(molecule_id)
+
+    # Rebuild so the protein's rows are gone immediately rather than at the
+    # next sync.
+    build_outliner_hierarchy(context)
+
+    return bool(deleted)
+
+
+def delete_molecule_if_empty(context, molecule_id) -> bool:
+    """Delete the molecule if the chain/domain just removed was its last one.
+
+    A protein in the outliner is nothing but its chains, and every chain is
+    carried by at least one domain (import creates one per chain, and a chain
+    row with no domains is dropped from the outliner). So an empty ``domains``
+    dict means the protein has nothing left to show, and leaving it behind
+    strands an empty PROTEIN row plus everything built on it.
+
+    Call this only from a *deletion* path. The Domain Splitter also empties a
+    chain transiently while re-laying it out, and must not be cascaded on.
+
+    Returns True if the molecule was deleted.
+    """
+    scene_manager = ProteinBlenderScene.get_instance()
+    molecule = scene_manager.molecules.get(molecule_id)
+    if molecule is None:
+        return False
+    if getattr(molecule, 'domains', None):
+        return False
+
+    # DNA/RNA strands are built without domains at all, so "no domains" says
+    # nothing about whether one is empty. They have no chain/domain delete
+    # route today; this keeps the rule from misfiring if they ever get one.
+    try:
+        if molecule.object and molecule.object.get("pb_is_nucleic_acid", False):
+            return False
+    except (ReferenceError, AttributeError):
+        pass
+
+    return delete_molecule_cascade(context, molecule_id)
 
 
 def _is_molecule_valid(molecule):

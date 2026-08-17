@@ -2,7 +2,11 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty
 from mathutils import Vector
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy,
+                                   delete_molecule_cascade,
+                                   delete_molecule_if_empty,
+                                   molecule_would_be_emptied,
+                                   prune_emptied_puppets)
 from ..utils.chain_utils import chain_match_tokens
 from ..core import domain_space
 
@@ -15,27 +19,7 @@ class MOLECULE_PB_OT_delete(Operator):
     molecule_id: StringProperty()
     
     def execute(self, context):
-        scene_manager = ProteinBlenderScene.get_instance()
-        # Capture current state for potential undo restoration
-        try:
-            scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
-        except Exception:
-            pass
-
-        # Clean up any linkers referencing this molecule
-        try:
-            from ..linkers.linker_handlers import on_molecule_deleted
-            on_molecule_deleted(self.molecule_id)
-        except Exception:
-            pass
-
-        # Perform deletion
-        scene_manager.delete_molecule(self.molecule_id)
-
-        # Rebuild the outliner hierarchy to reflect the deletion
-        from ..utils.scene_manager import build_outliner_hierarchy
-        build_outliner_hierarchy(context)
-
+        delete_molecule_cascade(context, self.molecule_id)
         return {'FINISHED'}
 
 class MOLECULE_PB_OT_update_identifier(Operator):
@@ -452,7 +436,6 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
             scene_manager.molecules[new_identifier] = new_molecule
 
             # 17. Rebuild outliner to show the new protein
-            from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
 
             # 18. The copy is placed as an exact overlay of the source (steps 2
@@ -587,8 +570,29 @@ class MOLECULE_PB_OT_delete_chain(Operator):
     chain_id: StringProperty()
     molecule_id: StringProperty()
 
+    def _domains_in_chain(self, molecule):
+        """Domain ids belonging to this chain.
+
+        ``self.chain_id`` arrives as the chain *index* ("2") from the outliner
+        row while domains store the chain *letter* ("D"); match on any of the
+        chain's identity forms.
+        """
+        chain_tokens = chain_match_tokens(molecule, self.chain_id)
+        return [domain_id for domain_id, domain in molecule.domains.items()
+                if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens]
+
     def invoke(self, context, event):
-        # Show confirmation dialog
+        # Deleting the protein's last chain deletes the protein itself, so say
+        # so before the user commits to it: a confirmation that just reads
+        # "Delete Chain" would understate what is about to happen.
+        molecule = ProteinBlenderScene.get_instance().molecules.get(self.molecule_id)
+        if molecule and molecule_would_be_emptied(molecule, self._domains_in_chain(molecule)):
+            return context.window_manager.invoke_confirm(
+                self, event,
+                title="Delete Chain",
+                message="This is the protein's last chain. Deleting it deletes "
+                        "the whole protein, along with its puppets and poses.",
+                confirm_text="Delete Protein")
         return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
@@ -602,14 +606,7 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         # Capture state for undo (reuse existing pattern)
         scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
 
-        # Find all domains belonging to this chain. self.chain_id arrives as
-        # the chain *index* ("2") from the outliner row while domains store the
-        # chain *letter* ("D"); match on any of the chain's identity forms.
-        chain_tokens = chain_match_tokens(molecule, self.chain_id)
-        domains_to_delete = []
-        for domain_id, domain in molecule.domains.items():
-            if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
-                domains_to_delete.append(domain_id)
+        domains_to_delete = self._domains_in_chain(molecule)
 
         if not domains_to_delete:
             self.report({'WARNING'}, f"No domains found for chain {self.chain_id}")
@@ -626,8 +623,16 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         # Remove chain from puppet memberships
         self._remove_chain_from_puppets(context, self.molecule_id, self.chain_id)
 
+        # A protein with no chains left is not a protein any more: delete it
+        # outright so nothing (puppets, poses, keyframes, linkers) is left
+        # holding on to an empty one.
+        prune_emptied_puppets(context)
+        if delete_molecule_if_empty(context, self.molecule_id):
+            self.report({'INFO'}, f"Deleted chain {self.chain_id} - the "
+                                  "protein's last, so it was deleted too")
+            return {'FINISHED'}
+
         # Rebuild outliner (reuse existing function)
-        from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
 
         # Cascade: remove any linker left dangling by the chain deletion.

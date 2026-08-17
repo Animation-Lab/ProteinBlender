@@ -282,6 +282,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle |
 | `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
+| `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
@@ -1099,6 +1100,26 @@ on a membrane whose typical gap was 0.28 nm.
   failure let `update_toml_whls` write a manifest from whatever wheels landed -
   a partial dependency set shipping as a complete release. Guarded by
   `test_build_tooling.py` (verified red pre-fix).
+
+- **Deleting a protein's last chain/domain left an empty protein behind.**
+  The trash can on a chain or domain row deleted only that chain's domains, so
+  removing the last one left a PROTEIN row with nothing under it - plus its
+  wrapper, its Blender object and everything built on it (puppets, poses,
+  keyframes, linkers) still holding on to a protein the user had emptied.
+  Two older leaks sat behind it. A puppet whose members were all deleted was
+  dropped silently by the outliner rebuild rather than through
+  `delete_puppet`, so the Protein Pose Library kept listing its poses. And
+  `delete_domain` stripped only the *chain* row from puppet memberships -
+  never the deleted domain's own id, and via a `"{mol}_chain_{letter}"` string
+  that never matched the index-keyed rows anyway - so a puppet built on a
+  single domain went stale the same way. Every route now goes through
+  `delete_molecule_cascade` / `delete_molecule_if_empty` /
+  `prune_emptied_puppets`, the same cascade the protein row's own Delete uses,
+  and the confirmation dialog says the whole protein is about to go. The
+  Domain Splitter, which empties a chain transiently while re-laying it out,
+  deliberately does not go through this. Guarded by
+  `test_delete_last_chain_deletes_protein.py` (verified red pre-fix, green on
+  Blender 5.0/5.1/5.2).
 
 ## Crash regressions (guard against reintroduction)
 

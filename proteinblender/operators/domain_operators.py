@@ -1,7 +1,11 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatVectorProperty
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy,
+                                   delete_molecule_if_empty,
+                                   molecule_would_be_emptied,
+                                   prune_emptied_puppets)
+from ..utils.chain_utils import chain_match_tokens
 from ..utils.animation import (
     keyframe_transforms, 
     refresh_timeline, 
@@ -127,7 +131,6 @@ class MOLECULE_PB_OT_copy_domain(Operator):
         if new_domain_id:
             self.report({'INFO'}, f"Domain copied successfully")
             # Rebuild outliner to show the new copy
-            from ..utils.scene_manager import build_outliner_hierarchy
             build_outliner_hierarchy(context)
             return {'FINISHED'}
         else:
@@ -144,27 +147,38 @@ class MOLECULE_PB_OT_delete_domain(Operator):
     molecule_id: StringProperty()
 
     def invoke(self, context, event):
-        # Show confirmation dialog
+        # Deleting the protein's last domain deletes the protein itself, so say
+        # so before the user commits to it: a confirmation that just reads
+        # "Delete Domain" would understate what is about to happen.
+        molecule, _ = self._resolve_molecule()
+        if molecule and molecule_would_be_emptied(molecule, [self.domain_id]):
+            return context.window_manager.invoke_confirm(
+                self, event,
+                title="Delete Domain",
+                message="This is the protein's last domain. Deleting it deletes "
+                        "the whole protein, along with its puppets and poses.",
+                confirm_text="Delete Protein")
         return context.window_manager.invoke_confirm(self, event)
+
+    def _resolve_molecule(self):
+        """The molecule owning ``self.domain_id``, as (molecule, molecule_id).
+
+        ``molecule_id`` is optional on this operator - the outliner's domain
+        rows pass it, other callers leave it blank - so fall back to searching
+        for whichever molecule holds the domain.
+        """
+        scene_manager = ProteinBlenderScene.get_instance()
+        if self.molecule_id:
+            return scene_manager.molecules.get(self.molecule_id), self.molecule_id
+        for mol_id, mol in scene_manager.molecules.items():
+            if self.domain_id in mol.domains:
+                return mol, mol_id
+        return None, None
 
     def execute(self, context):
         scene_manager = ProteinBlenderScene.get_instance()
 
-        # Find which molecule owns this domain
-        molecule = None
-        mol_id = None
-
-        # If molecule_id is provided, use it directly
-        if self.molecule_id:
-            molecule = scene_manager.molecules.get(self.molecule_id)
-            mol_id = self.molecule_id
-        else:
-            # Otherwise search for the molecule that contains this domain
-            for m_id, mol in scene_manager.molecules.items():
-                if self.domain_id in mol.domains:
-                    molecule = mol
-                    mol_id = m_id
-                    break
+        molecule, mol_id = self._resolve_molecule()
 
         if not molecule:
             self.report({'ERROR'}, "Domain not found in any molecule")
@@ -184,15 +198,25 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         # Delete the domain and check if chain should be removed
         result = molecule.delete_domain(self.domain_id)
 
-        # If this was the last domain on the chain, clean up puppet memberships
+        # Nothing may keep pointing at what was just deleted.
+        self._strip_from_puppets(context, molecule, mol_id, chain_id,
+                                 chain_deleted=(result == "DELETE_CHAIN"))
         if result == "DELETE_CHAIN":
-            self._remove_chain_from_puppets(context, mol_id, chain_id)
             self.report({'INFO'}, f"Deleted last domain on chain {chain_id}")
         else:
             self.report({'INFO'}, "Domain deleted successfully")
 
+        # That chain may have been the protein's last one, which leaves an
+        # empty protein behind - delete it, cascading to everything built on
+        # it (puppets, poses, keyframes, linkers).
+        prune_emptied_puppets(context)
+        if delete_molecule_if_empty(context, mol_id):
+            self.report({'INFO'},
+                        "Deleted the protein's last domain, so the protein "
+                        "was deleted too")
+            return {'FINISHED'}
+
         # Rebuild outliner to reflect the deletion
-        from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
 
         # Cascade: remove any linker left dangling by the domain deletion.
@@ -204,19 +228,37 @@ class MOLECULE_PB_OT_delete_domain(Operator):
 
         return {'FINISHED'}
 
-    def _remove_chain_from_puppets(self, context, molecule_id, chain_id):
-        """Remove chain from any puppet group memberships"""
-        chain_outliner_id = f"{molecule_id}_chain_{chain_id}"
+    def _strip_from_puppets(self, context, molecule, molecule_id, chain_id,
+                            chain_deleted):
+        """Drop the deleted domain - and the chain row it took with it - from
+        every puppet's membership list.
 
-        # Remove from puppet memberships
+        The *domain* id has to go, not just the chain row: a puppet can be
+        built on a domain directly, and leaving its id behind means the
+        outliner silently drops the now-memberless puppet on its next rebuild,
+        stranding the poses that referenced it.
+
+        The chain row is resolved through ``chain_match_tokens`` rather than
+        formatted from ``chain_id``: domains carry the author letter ("A")
+        while outliner rows are keyed by the chain *index*
+        ("<molecule>_chain_0"), so the formatted-name shortcut matched nothing.
+
+        Must run before the outliner is rebuilt, while the rows still exist.
+        """
+        doomed = {self.domain_id}
+        if chain_deleted:
+            tokens = chain_match_tokens(molecule, chain_id)
+            doomed.update(item.item_id for item in context.scene.outliner_items
+                          if item.item_type == 'CHAIN'
+                          and item.parent_id == molecule_id
+                          and str(item.chain_id) in tokens)
+
         for item in context.scene.outliner_items:
-            if item.item_type == 'PUPPET' and item.puppet_memberships:
-                members = set(item.puppet_memberships.split(','))
-
-                # Remove chain outliner ID
-                if chain_outliner_id in members:
-                    members.remove(chain_outliner_id)
-                    item.puppet_memberships = ','.join(members) if members else ""
+            if item.item_type != 'PUPPET' or not item.puppet_memberships:
+                continue
+            members = [m for m in item.puppet_memberships.split(',')
+                       if m and m not in doomed]
+            item.puppet_memberships = ','.join(members)
 
 class MOLECULE_PB_OT_keyframe_protein(Operator):
     bl_idname = "molecule.keyframe_protein"
