@@ -8,14 +8,11 @@ for why "the file mentions an assembly" is not that test.
 from bpy.types import Panel
 
 from ..core import assembly as assembly_core
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import resolve_active_molecule
 
 
 def _active_molecule(context):
-    molecule_id = getattr(context.scene, "selected_molecule_id", "")
-    if not molecule_id:
-        return None
-    return ProteinBlenderScene.get_instance().molecules.get(molecule_id)
+    return resolve_active_molecule(context)
 
 
 class PROTEINBLENDER_PT_symmetry(Panel):

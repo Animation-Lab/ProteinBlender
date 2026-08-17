@@ -1159,6 +1159,18 @@ on a membrane whose typical gap was 0.28 nm.
   both were confirmed to fail when the node is wired into the molecule object
   only (green on Blender 5.0/5.1/5.2).
 
+- **The Symmetry panel would never have appeared in a real session.**
+  It resolved the active protein through `scene.selected_molecule_id`, which
+  reads like the obvious accessor but is written by nothing except the rename
+  operator - import does not set it. The panel therefore polled False forever
+  while its tests passed, because those tests assigned the property by hand
+  before polling. Fixed by `scene_manager.resolve_active_molecule_id`, which
+  falls back from that property to the active `molecule_list_items` row and
+  then to the manager's own `active_molecule`. The test helper no longer sets
+  the property at all, so every panel/operator test now exercises the path a
+  plain import leaves behind (verified red pre-fix: the poll, enum and
+  no-argument operator tests all failed).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

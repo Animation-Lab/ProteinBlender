@@ -38,8 +38,13 @@ def _assembly_core():
 
 
 def _import(fixture=FIXTURE, ident="4ins"):
+    """Import exactly the way the UI does - and set nothing else.
+
+    Deliberately does *not* assign ``scene.selected_molecule_id``. Nothing in
+    the add-on writes that property except the rename operator, so a test that
+    sets it by hand would hide a panel that never appears in a real session.
+    """
     mol_id = H.import_local(fixture, ident)
-    bpy.context.scene.selected_molecule_id = mol_id
     bpy.context.view_layer.update()
     return H.sm().molecules.get(mol_id)
 
@@ -128,6 +133,34 @@ def test_panel_polls_itself_away_without_symmetry(scene, sm, fixture, ident, exp
 
     _import(fixture, ident)
     assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is expected
+
+
+def test_panel_appears_after_a_plain_import(scene, sm):
+    """Importing a symmetric structure is enough to get the panel.
+
+    Nothing writes ``scene.selected_molecule_id`` except the rename operator,
+    so a panel resolving the active protein through that alone would be
+    invisible in every real session while still passing any test that set the
+    property by hand.
+    """
+    from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
+
+    _import()
+    assert not bpy.context.scene.selected_molecule_id, (
+        "import set selected_molecule_id after all - this test is now moot")
+    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True
+
+
+def test_operators_find_the_active_protein_without_being_told(scene, sm):
+    """The panel passes molecule_id, but the operators must stand alone too."""
+    molecule = _import()
+
+    assert bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", assembly_id="3") == {"FINISHED"}
+    assert _assembly_core().built_assembly_id(molecule) == "3"
+
+    assert bpy.ops.molecule.clear_assembly("EXEC_DEFAULT") == {"FINISHED"}
+    assert _assembly_core().built_assembly_id(molecule) is None
 
 
 # --------------------------------------------------------------------------

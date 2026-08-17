@@ -9,7 +9,7 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import ProteinBlenderScene, resolve_active_molecule_id
 
 #: Blender does not keep a reference to the strings an EnumProperty items
 #: callback returns, so anything built on the fly there must be held alive on
@@ -22,7 +22,7 @@ def _molecule(molecule_id):
 
 
 def _active_molecule_id(context):
-    return getattr(context.scene, "selected_molecule_id", "") or ""
+    return resolve_active_molecule_id(context) or ""
 
 
 def assembly_enum_items(self, context):
