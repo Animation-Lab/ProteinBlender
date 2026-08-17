@@ -17,10 +17,16 @@ parser in ``test_biological_assembly``.
 """
 
 import bpy
+import numpy as np
 import pytest
+from mathutils import Vector
 
 import helpers as H
 from test_biological_assembly import _remark_350_transforms
+
+#: MolecularNodes stores structures at 1/100 scale, so an Angstrom in the file
+#: is 0.01 Blender units on screen.
+WORLD_SCALE = 0.01
 
 FIXTURE = "4ins.pdb"
 
@@ -67,6 +73,37 @@ def _instances_by_object():
         name = instance.parent.original.name
         counts[name] = counts.get(name, 0) + 1
     return counts
+
+
+def _instance_matrices():
+    """World matrices of every instance, keyed by originating object name."""
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph.update()
+
+    matrices = {}
+    for instance in depsgraph.object_instances:
+        if not instance.is_instance or instance.parent is None:
+            continue
+        name = instance.parent.original.name
+        matrices.setdefault(name, []).append(instance.matrix_world.copy())
+    return matrices
+
+
+def _instance_positions():
+    """World positions of every instance, keyed by originating object name."""
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph.update()
+
+    positions = {}
+    for instance in depsgraph.object_instances:
+        if not instance.is_instance or instance.parent is None:
+            continue
+        name = instance.parent.original.name
+        positions.setdefault(name, []).append(
+            np.array(instance.matrix_world.translation))
+    return positions
 
 
 def _domain_object_names(molecule):
@@ -196,6 +233,88 @@ def test_building_places_one_copy_per_deposited_operator(scene, sm):
         assert counts.get(obj.name, 0) == expected, (
             f"{obj.name} (chain {domain.chain_id}) was placed "
             f"{counts.get(obj.name, 0)} times, REMARK 350 declares {expected}")
+
+
+def _chain_centroid_angstrom(chain_letter):
+    """Centroid of a chain, read straight out of the fixture's ATOM records.
+
+    Ground truth for *where* a copy belongs, from the file rather than from
+    anything the add-on computed.
+    """
+    coords = []
+    with open(H.data_path(FIXTURE)) as handle:
+        for line in handle:
+            if line.startswith("ATOM") and line[21] == chain_letter:
+                coords.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+    return np.array(coords).mean(axis=0)
+
+
+def test_copies_land_where_the_operators_put_them(scene, sm):
+    """The copies must be placed by the operator, in the deposited frame.
+
+    This is the assertion that copy-counting cannot make. MolecularNodes'
+    assembly node splits the structure into per-chain *centred* instances
+    before transforming, which discards where each chain sits relative to the
+    crystallographic origin - the very thing a BIOMT operator is defined
+    against. The copies then rotate about each chain's own centroid and land
+    on top of each other: correct in number, wrong in space.
+
+    Chain A of 4ins sits 19.2 A off the origin, so the three-fold of assembly
+    3 must separate consecutive copies by ~30.3 A - 0.303 in Blender units at
+    MolecularNodes' 0.01 world scale. The observed separation before this was
+    fixed was 0.0095, a factor of 32 too small.
+
+    ChimeraX's `sym` gets this right by never touching coordinates: it applies
+    each operator as a placement matrix on the whole model, in the frame the
+    file deposited it in.
+    """
+    molecule = _import()
+
+    centroid = _chain_centroid_angstrom("A")
+    truth = _remark_350_transforms(FIXTURE)
+    rotations = [np.array(matrix)[:3, :3] for _chains, matrix in truth["3"]]
+
+    placed = [rotation @ centroid for rotation in rotations]
+    expected = [
+        float(np.linalg.norm(placed[i] - placed[j])) * WORLD_SCALE
+        for i in range(len(placed)) for j in range(i + 1, len(placed))
+    ]
+    assert min(expected) > 0.1, (
+        "fixture changed - assembly 3 no longer separates its copies")
+
+    assert _assembly_core().build_assembly(molecule, "3")
+
+    chain_a = next(d.object for d in molecule.domains.values()
+                   if str(d.chain_id) == "A")
+
+    # Compare where the chain's *atoms* land, not where the instance origins
+    # land. An instance origin sits at the object origin, so the gap between
+    # origins is governed by ProteinBlender's pivot rather than by the chain's
+    # position - close to the right answer for the wrong reason, and off by a
+    # few percent because the pivot is mass-weighted.
+    #
+    # Transforming one known point by each instance matrix removes that: the
+    # pivot cancels out of the *difference* between two copies, leaving exactly
+    # s*(R_i - R_j) @ centroid.
+    from proteinblender.core import domain_space
+
+    pivot = np.array(domain_space.get_pivot(chain_a))
+    local = np.array(centroid) * WORLD_SCALE - pivot
+
+    matrices = _instance_matrices()[chain_a.name]
+    assert len(matrices) == len(placed)
+    landed = [np.array(m @ Vector(local.tolist())) for m in matrices]
+
+    observed = sorted(
+        float(np.linalg.norm(landed[i] - landed[j]))
+        for i in range(len(landed)) for j in range(i + 1, len(landed))
+    )
+
+    for got, want in zip(observed, sorted(expected)):
+        assert got == pytest.approx(want, rel=0.01), (
+            f"a copy's atoms land {got:.4f} from its neighbour but the "
+            f"operators put them {want:.4f} apart - the copies are being "
+            f"rotated about the wrong origin")
 
 
 def test_building_puts_the_copies_on_screen(scene, sm, tmp_path):

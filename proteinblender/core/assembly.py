@@ -45,10 +45,13 @@ logger = logging.getLogger(__name__)
 #: ``nodes.new()``/``nodes.remove()`` would silently invalidate).
 ASSEMBLY_NODE_NAME = "PB_Assembly"
 
-#: Rotation/translation blend factors are exposed on the node as 0-1 sliders.
-#: At 0 every copy sits on the asymmetric unit; at 1 the assembly is complete.
-#: Phase 2 animates this; Phase 1 just pins it to "assembled".
-_FULLY_ASSEMBLED = 1.0
+#: Where the built assembly id is stashed, on the inserted node itself, so it
+#: survives a save/load without needing a parallel property to keep in sync.
+_ASSEMBLY_ID_KEY = "pb_assembly_id"
+
+#: MolecularNodes stores structures at 1/100 scale, so an Angstrom of operator
+#: translation is 0.01 Blender units.
+WORLD_SCALE = 0.01
 
 
 @dataclass(frozen=True)
@@ -222,65 +225,208 @@ def built_assembly_id(molecule) -> Optional[str]:
         if group is None:
             continue
         for node in _existing_assembly_nodes(group):
-            socket = node.inputs.get("assembly_id")
-            if socket is not None:
-                return str(socket.default_value)
+            stored = node.get(_ASSEMBLY_ID_KEY)
+            if stored is not None:
+                return str(stored)
     return None
+
+
 
 
 def build_assembly(molecule, assembly_id: str) -> bool:
     """Build a deposited assembly, replacing whatever was built before.
 
-    Returns True if the assembly node reached at least one object.
+    Each operator is applied as a *placement* of the whole structure, in the
+    coordinate frame the file deposited it in - which is what ChimeraX's
+    ``sym`` does, and the only way the copies land where the depositor meant.
+
+    MolecularNodes' own assembly node cannot be reused for this. It splits the
+    structure into per-chain *centred* instances first, which throws away where
+    each chain sits relative to the crystallographic origin - the exact thing a
+    BIOMT operator is defined against. The copies then rotate about each
+    chain's own centroid and pile up on the original: right in number, wrong in
+    space. For 4ins that put consecutive copies 0.0095 apart instead of 0.303.
+
+    Returns True if the assembly reached at least one object.
     """
     info = get_assembly_info(molecule, assembly_id)
     if info is None:
         logger.warning("no assembly %r on %s", assembly_id, molecule)
         return False
 
-    molobj = _molecule_object(molecule)
-    if molobj is None:
+    operators = _operators_for(molecule, assembly_id)
+    if not operators:
         return False
 
-    # Rebuilding from scratch each time keeps this idempotent and means a
-    # failed half-build cannot leave two assembly nodes stacked in one tree.
+    # Rebuilding from scratch keeps this idempotent, and means a failed
+    # half-build cannot leave two assembly nodes stacked in one tree.
     clear_assembly(molecule)
 
-    from ..utils.molecularnodes.blender import nodes as mn_nodes
-
-    try:
-        # Creates the shared transforms data object (once per molecule) and the
-        # "Assembly <name>" node tree that reads it.
-        assembly_tree = mn_nodes.assembly_initialise(molobj)
-    except Exception:
-        logger.exception("could not initialise the assembly node tree")
-        return False
-
-    numeric_id = _as_socket_id(assembly_id)
     wired = 0
-
     for obj in _target_objects(molecule):
         group = _node_group_of(obj)
         if group is None:
             continue
         try:
-            node = group.nodes.new("GeometryNodeGroup")
-            node.node_tree = assembly_tree
-            node.name = ASSEMBLY_NODE_NAME
-            node.label = f"Assembly {assembly_id}"
-            mn_nodes.insert_last_node(group, node)
-
-            # Re-resolve by name: insert_last_node ran nodes.new() above, and
-            # anything held across that is no longer safe to touch.
-            for inserted in _existing_assembly_nodes(group):
-                _set_socket(inserted, "assembly_id", numeric_id)
-                _set_socket(inserted, "Rotation", _FULLY_ASSEMBLED)
-                _set_socket(inserted, "Translation", _FULLY_ASSEMBLED)
-            wired += 1
+            if _wire_assembly_into(obj, group, molecule, assembly_id, operators):
+                wired += 1
         except Exception:
-            logger.exception("could not wire the assembly node into %s", obj.name)
+            logger.exception("could not wire the assembly into %s", obj.name)
 
     return wired > 0
+
+
+def _operators_for(molecule, assembly_id: str):
+    """(rotation 3x3, translation 3) for each operator of this assembly.
+
+    Only the operators that apply to chains this molecule actually has; a
+    transform naming chains that were never imported would place an empty copy.
+    """
+    operators = []
+    for transform in _raw_assemblies(molecule).get(str(assembly_id), []):
+        if not isinstance(transform, dict):
+            continue
+        matrix = np.array(transform.get("matrix"), dtype=float)
+        if matrix.shape != (4, 4):
+            continue
+        operators.append((matrix[:3, :3], matrix[:3, 3]))
+    return operators
+
+
+def _wire_assembly_into(obj, group, molecule, assembly_id, operators) -> bool:
+    """Instance this object's whole geometry once per operator."""
+    points = _build_points_object(obj, molecule, assembly_id, operators)
+    if points is None:
+        return False
+
+    node = _add_assembly_node(group, points)
+    if node is None:
+        return False
+
+    node[_ASSEMBLY_ID_KEY] = str(assembly_id)
+    return True
+
+
+def _build_points_object(obj, molecule, assembly_id, operators):
+    """One point per operator, carrying that operator's rotation.
+
+    The position is not simply the operator's translation. ProteinBlender's
+    node tree has already shifted the geometry by ``-pivot`` by the time our
+    node sees it, so for a point ``co`` the tree is handing us ``co - pivot``
+    and we need the copy to land at ``R @ co + s*t - pivot``. Solving for the
+    translation to apply to what we actually receive:
+
+        R @ (co - pivot) + x  ==  R @ co + s*t - pivot
+        x                     ==  R @ pivot + s*t - pivot
+
+    Miss that term and every copy is offset by the pivot, which for a domain
+    is nowhere near the origin.
+    """
+    from mathutils import Matrix as BlenderMatrix
+
+    from . import domain_space
+
+    try:
+        pivot = np.array(domain_space.get_pivot(obj), dtype=float)
+    except Exception:
+        pivot = np.zeros(3)
+
+    name = f".pb_assembly_{molecule.identifier}_{assembly_id}_{obj.name}"
+
+    existing = bpy.data.objects.get(name)
+    if existing is not None:
+        bpy.data.objects.remove(existing, do_unlink=True)
+
+    positions, rotations = [], []
+    for rotation, translation in operators:
+        offset = rotation @ pivot + translation * WORLD_SCALE - pivot
+        positions.append(offset.tolist())
+        rotations.append(BlenderMatrix(rotation.tolist()).to_quaternion())
+
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(positions, [], [])
+    mesh.update()
+
+    attribute = mesh.attributes.new("rotation", "QUATERNION", "POINT")
+    for i, quaternion in enumerate(rotations):
+        attribute.data[i].value = quaternion
+
+    points = bpy.data.objects.new(name, mesh)
+    points.hide_viewport = True
+    points.hide_render = True
+    points.hide_select = True
+    for collection in obj.users_collection:
+        collection.objects.link(points)
+        break
+    else:
+        bpy.context.scene.collection.objects.link(points)
+
+    return points
+
+
+def _add_assembly_node(group, points):
+    """Instance the incoming geometry onto the operator points."""
+    tree = _assembly_node_tree(points)
+    if tree is None:
+        return None
+
+    from ..utils.molecularnodes.blender import nodes as mn_nodes
+
+    node = group.nodes.new("GeometryNodeGroup")
+    node.node_tree = tree
+    node.name = ASSEMBLY_NODE_NAME
+    mn_nodes.insert_last_node(group, node)
+
+    # Re-resolve by name: insert_last_node ran nodes.new(), and any reference
+    # held across that is no longer safe to touch.
+    return next((n for n in group.nodes if n.name.startswith(ASSEMBLY_NODE_NAME)),
+                None)
+
+
+def _assembly_node_tree(points):
+    """Geometry in, the same geometry placed at every operator out."""
+    name = f"Assembly {points.name.lstrip('.')}"
+    existing = bpy.data.node_groups.get(name)
+    if existing is not None:
+        bpy.data.node_groups.remove(existing)
+
+    tree = bpy.data.node_groups.new(name, "GeometryNodeTree")
+    tree.interface.new_socket("Geometry", in_out="INPUT",
+                              socket_type="NodeSocketGeometry")
+    tree.interface.new_socket("Geometry", in_out="OUTPUT",
+                              socket_type="NodeSocketGeometry")
+
+    group_in = tree.nodes.new("NodeGroupInput")
+    group_in.location = (-400, 0)
+    group_out = tree.nodes.new("NodeGroupOutput")
+    group_out.location = (400, 0)
+
+    to_instance = tree.nodes.new("GeometryNodeGeometryToInstance")
+    to_instance.location = (-200, 100)
+
+    object_info = tree.nodes.new("GeometryNodeObjectInfo")
+    object_info.location = (-200, -150)
+    object_info.transform_space = "ORIGINAL"
+    object_info.inputs["Object"].default_value = points
+
+    rotation_attr = tree.nodes.new("GeometryNodeInputNamedAttribute")
+    rotation_attr.location = (-200, -320)
+    rotation_attr.data_type = "QUATERNION"
+    rotation_attr.inputs["Name"].default_value = "rotation"
+
+    instance_on = tree.nodes.new("GeometryNodeInstanceOnPoints")
+    instance_on.location = (100, 0)
+
+    link = tree.links.new
+    link(group_in.outputs[0], to_instance.inputs[0])
+    link(object_info.outputs["Geometry"], instance_on.inputs["Points"])
+    link(to_instance.outputs[0], instance_on.inputs["Instance"])
+    link(rotation_attr.outputs["Attribute"], instance_on.inputs["Rotation"])
+    link(instance_on.outputs[0], group_out.inputs[0])
+
+    if hasattr(tree, "color_tag"):
+        tree.color_tag = "GEOMETRY"
+    return tree
 
 
 def clear_assembly(molecule) -> bool:
@@ -295,8 +441,8 @@ def clear_assembly(molecule) -> bool:
         if group is None:
             continue
 
-        # Re-resolve the list after every removal: nodes.remove() reallocates
-        # the collection, so a list captured up front goes stale mid-loop.
+        # Re-resolve after every removal: nodes.remove() reallocates the
+        # collection, so a list captured up front goes stale mid-loop.
         while True:
             nodes = _existing_assembly_nodes(group)
             if not nodes:
@@ -304,7 +450,24 @@ def clear_assembly(molecule) -> bool:
             _unlink_and_remove(group, nodes[0])
             removed = True
 
+    _purge_assembly_datablocks(molecule)
     return removed
+
+
+def _purge_assembly_datablocks(molecule) -> None:
+    """Drop the per-object point clouds and node groups a build created."""
+    prefix = f".pb_assembly_{molecule.identifier}_"
+
+    for obj in [o for o in bpy.data.objects if o.name.startswith(prefix)]:
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    tree_prefix = f"Assembly pb_assembly_{molecule.identifier}_"
+    for tree in [t for t in bpy.data.node_groups if t.name.startswith(tree_prefix)]:
+        if tree.users == 0:
+            bpy.data.node_groups.remove(tree)
 
 
 def _unlink_and_remove(group, node) -> None:
@@ -320,27 +483,3 @@ def _unlink_and_remove(group, node) -> None:
     if upstream is not None:
         for socket in downstream:
             group.links.new(upstream, socket)
-
-
-def _as_socket_id(assembly_id: str) -> int:
-    """The node's ``assembly_id`` socket is an int index into the data object.
-
-    MolecularNodes numbers assemblies 1..N in file order when it writes that
-    object, so a file whose assemblies are named non-numerically still maps by
-    position rather than by name.
-    """
-    try:
-        return int(assembly_id)
-    except (TypeError, ValueError):
-        return 1
-
-
-def _set_socket(node, name: str, value) -> None:
-    socket = node.inputs.get(name)
-    if socket is None:
-        logger.warning("assembly node has no %r input", name)
-        return
-    try:
-        socket.default_value = value
-    except (TypeError, AttributeError):
-        logger.warning("could not set %r on the assembly node", name)

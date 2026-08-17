@@ -1176,6 +1176,26 @@ on a membrane whose typical gap was 0.28 nm.
   precisely what let this ship. Found by driving the live GUI, not by the
   suite.
 
+- **Assembly copies landed on top of each other instead of forming the assembly.**
+  The copies were built with MolecularNodes' assembly node, which splits the
+  structure into per-chain *centred* instances before transforming. Centring
+  discards where each chain sits relative to the crystallographic origin -
+  the exact thing a BIOMT operator is defined against - so the copies rotated
+  about each chain's own centroid and piled up on the original: correct in
+  number, wrong in space. For 4ins assembly 3, consecutive copies sat 0.0095
+  apart where the operators put them 0.303 apart, a factor of 32.
+  Neither the copy-count test nor the render-coverage test can see this: both
+  pass with the copies stacked. ProteinBlender now applies each operator as a
+  placement of the whole structure in the deposited frame, which is what
+  ChimeraX's `sym` does. The translation carries a `R @ pivot - pivot`
+  correction because the node tree has already shifted geometry by `-pivot`
+  before our node sees it. Guarded by
+  `test_assembly_build.py::test_copies_land_where_the_operators_put_them`,
+  which takes chain A's centroid from the fixture's own ATOM records and
+  asserts where the copies' *atoms* land - not where instance origins land,
+  which is governed by the mass-weighted pivot and is right for the wrong
+  reason. Found by driving the live GUI; verified red at 0.0095 pre-fix.
+
 - **The Symmetry panel would never have appeared in a real session.**
   It resolved the active protein through `scene.selected_molecule_id`, which
   reads like the obvious accessor but is written by nothing except the rename
