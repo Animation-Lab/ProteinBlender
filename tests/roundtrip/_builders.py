@@ -143,6 +143,27 @@ def build_domains():
         "toggle_domain_expanded left no object expanded"
 
 
+def build_biological_assembly():
+    """Build a deposited biological assembly and expect it to survive a reload.
+
+    The copies live as a geometry-nodes assembly node in every domain object's
+    tree, reading a shared transforms data object. Both are ordinary datablocks,
+    so a reload should return the assembled structure - which is what lets
+    Scene.pb_assembly_id (the transient picker) be excluded from the snapshot.
+    """
+    from proteinblender.core import assembly as assembly_core
+
+    mid = H.import_local("4ins.pdb", "4ins")
+    bpy.context.scene.selected_molecule_id = mid
+    molecule = H.sm().molecules[mid]
+
+    assert assembly_core.has_buildable_symmetry(molecule), \
+        "4ins should offer a symmetric assembly"
+    assert assembly_core.build_assembly(molecule, "3"), "assembly 3 failed to build"
+    assert assembly_core.built_assembly_id(molecule) == "3"
+    _build_outliner()
+
+
 def build_chain_rename():
     """A user-renamed chain.
 
@@ -627,6 +648,7 @@ BUILDERS = {
     "empty": build_empty,
     "single_protein": build_single_protein,
     "multi_chain": build_multi_chain,
+    "biological_assembly": build_biological_assembly,
     "domains": build_domains,
     "chain_rename": build_chain_rename,
     "pivots": build_pivots,
@@ -650,6 +672,7 @@ BUILDER_SUBSYSTEMS = {
     "empty": (),
     "single_protein": ("core",),
     "multi_chain": ("core",),
+    "biological_assembly": ("core", "operators", "panels"),
     "domains": ("core", "operators", "panels", "addon"),
     "chain_rename": ("core", "panels"),
     "pivots": ("core",),

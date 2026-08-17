@@ -284,6 +284,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
 | `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
+| `test_assembly_build.py` | building a deposited assembly inside ProteinBlender: which assemblies a structure offers, identity-only ones being withheld, the Symmetry panel polling itself away without symmetry, one instance placed per `REMARK 350` operator *on the domain objects* (measured from the depsgraph and from rendered pixels, not the node graph), clear restoring the asymmetric unit exactly, rebuilds not stacking, and the build/clear operators |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
@@ -1142,6 +1143,21 @@ on a membrane whose typical gap was 0.28 nm.
   Guarded by `test_biological_assembly.py`, whose expected transforms come
   from the fixture's own `REMARK 350` text rather than from the parser
   (verified red pre-fix, green on Blender 5.0/5.1/5.2).
+
+- **An assembly built on the molecule object alone would be invisible.**
+  A ProteinBlender import creates one object per domain on top of the molecule
+  object, all sharing one mesh, and the molecule object draws only the atoms
+  *no* domain covers - which after a normal import is none of them. Rendering
+  it in isolation produces zero covered pixels. MolecularNodes' own
+  `assembly_insert` targets the molecule object, so reusing it directly would
+  have produced a perfectly correct assembly that never appeared on screen,
+  and every node-graph assertion about it would still have passed.
+  `core.assembly` therefore wires the assembly node into every domain object
+  as well. Guarded by `test_assembly_build.py`, which counts the instances the
+  depsgraph places per domain object against the operator count in
+  `REMARK 350` and separately asserts that rendered coverage increases;
+  both were confirmed to fail when the node is wired into the molecule object
+  only (green on Blender 5.0/5.1/5.2).
 
 ## Crash regressions (guard against reintroduction)
 

@@ -94,6 +94,14 @@ EXCLUSIONS = {
         "Embedded MolecularNodes' own object properties. Upstream-owned; the "
         "ProteinBlender state that matters (domain_*, pb_*) is captured "
         "separately, as are the custom ID properties MN writes."),
+    "Scene.pb_assembly_id": (
+        "Transient UI choice - which deposited assembly the Symmetry panel "
+        "would build next. The assembly actually *built* persists as the "
+        "geometry-nodes assembly node in each object's tree and is read back "
+        "from there by core.assembly.built_assembly_id, so nothing is lost "
+        "when this resets on load. Its enum items are also computed from the "
+        "active molecule, so a stored value would be meaningless against a "
+        "different selection."),
 }
 
 # Per-PropertyGroup fields excluded from the RNA walk, with reasons.

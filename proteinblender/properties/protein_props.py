@@ -178,21 +178,39 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default='cif',
     )
 
+def _assembly_enum_items(self, context):
+    """Deposited assemblies worth offering for the active protein.
+
+    Imported lazily: ``core.assembly`` reaches the scene manager, which imports
+    this module back.
+    """
+    from ..operators.assembly_operators import assembly_enum_items
+    return assembly_enum_items(self, context)
+
+
 def register():
     from bpy.utils import register_class
-    
+
     # Safe registration - unregister first if already registered
     try:
         unregister()
     except Exception:
         pass
-    
+
     # Now register
     register_class(ProteinOutlinerItem)
     register_class(ProteinProperties)
-    
+
     # Add properties to scene
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
+    # Which deposited assembly the Symmetry panel will build. Scene-level
+    # rather than per-molecule because it is a transient UI choice, not state
+    # worth persisting - what is *built* is read back off the node itself.
+    bpy.types.Scene.pb_assembly_id = EnumProperty(
+        name="Assembly",
+        description="Which deposited biological assembly to build",
+        items=_assembly_enum_items,
+    )
     bpy.types.Scene.outliner_items = CollectionProperty(type=ProteinOutlinerItem)
     # outliner_index is kept for UIList compatibility but has no update callback
     # We don't use row selection - only checkbox selection
@@ -205,6 +223,9 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
+    if hasattr(bpy.types.Scene, "pb_assembly_id"):
+        del bpy.types.Scene.pb_assembly_id
+
     if hasattr(bpy.types.Scene, "outliner_index"):
         del bpy.types.Scene.outliner_index
     

@@ -50,6 +50,11 @@ from .domain_ops import (
     PROTEINBLENDER_OT_merge_domains,
     PROTEINBLENDER_OT_rename_domain,
 )
+from .assembly_operators import (
+    MOLECULE_PB_OT_build_assembly,
+    MOLECULE_PB_OT_clear_assembly,
+    CLASSES as ASSEMBLY_CLASSES,
+)
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
 from .visual_edit import (
     PROTEINBLENDER_OT_edit_protein_visuals,
@@ -130,6 +135,8 @@ CLASSES = (
     PROTEINBLENDER_OT_brownian_disable,
     PROTEINBLENDER_OT_brownian_rebuild,
     PROTEINBLENDER_OT_brownian_clear_all,
+    # Deposited biological assemblies
+    *ASSEMBLY_CLASSES,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)
