@@ -149,6 +149,103 @@ def test_parser_returns_the_documented_dict_contract(filename):
             assert all(isinstance(c, str) for c in transform["chain_ids"])
 
 
+@pytest.mark.parametrize("filename", [FIXTURE_PDB, FIXTURE_CIF])
+def test_matrices_are_proper_homogeneous_transforms(filename):
+    """The bottom row of every 4x4 must be exactly [0, 0, 0, 1].
+
+    The mmCIF extractor allocated its matrices with ``np.empty`` and then
+    filled only rows 0-2, leaving the homogeneous row as whatever happened to
+    be in memory - denormal floats like 1.5e-312. A shape check passes on that
+    happily, and the damage shows up much later: an identity operator no
+    longer compares equal to the identity, so a monomer looks like it has
+    symmetry.
+    """
+    for assembly_id, transforms in _parsed_assemblies(filename).items():
+        for i, transform in enumerate(transforms):
+            bottom = np.array(transform["matrix"], dtype=float)[3, :]
+            assert np.array_equal(bottom, [0.0, 0.0, 0.0, 1.0]), (
+                f"{filename} assembly {assembly_id} transform {i}: bottom row "
+                f"is {bottom.tolist()}, not [0, 0, 0, 1] - uninitialised memory")
+
+
+def test_mmcif_matrices_do_not_leak_uninitialised_memory(monkeypatch):
+    """The mmCIF extractor must write the homogeneous row, not inherit it.
+
+    ``_extract_matrices`` allocated with ``np.empty`` and filled only rows 0-2,
+    so the bottom row was whatever happened to be in that memory. That is not
+    reliably observable - a fresh allocation often *does* come back looking
+    like a valid matrix, which is exactly what makes it dangerous - so this
+    test poisons the allocator to make the defect deterministic.
+
+    Seen for real: a downloaded 1ubq came back with a bottom row of
+    ``[1.5e-312, 1.1e-312, 1.5e-312, 1.1e-312]``, which stopped its identity
+    operator comparing equal to the identity and put a Symmetry panel on a
+    monomer.
+    """
+    import numpy
+
+    real_empty = numpy.empty
+
+    def poisoned_empty(*args, **kwargs):
+        array = real_empty(*args, **kwargs)
+        try:
+            array.fill(numpy.nan)
+        except (ValueError, TypeError):
+            pass
+        return array
+
+    monkeypatch.setattr(numpy, "empty", poisoned_empty)
+
+    for assembly_id, transforms in _parsed_assemblies(FIXTURE_CIF).items():
+        for i, transform in enumerate(transforms):
+            matrix = np.array(transform["matrix"], dtype=float)
+            assert not np.isnan(matrix).any(), (
+                f"assembly {assembly_id} transform {i} carries uninitialised "
+                f"memory:\n{matrix}")
+            assert np.array_equal(matrix[3, :], [0.0, 0.0, 0.0, 1.0]), (
+                f"assembly {assembly_id} transform {i}: bottom row is "
+                f"{matrix[3, :].tolist()}, not [0, 0, 0, 1]")
+
+
+def test_an_identity_operator_is_recognised_as_one():
+    """An identity transform must compare equal to the identity in both formats.
+
+    This is what the symmetry gate rests on: assembly 1 of 4ins is a single
+    identity operator, so neither format may report it as symmetry.
+    """
+    for filename in (FIXTURE_PDB, FIXTURE_CIF):
+        assemblies = _parsed_assemblies(filename)
+        first = assemblies[list(assemblies)[0]]
+        matrix = np.array(first[0]["matrix"], dtype=float)
+        assert np.allclose(matrix, np.eye(4), atol=1e-6), (
+            f"{filename}: the first operator should be the identity, got "
+            f"{matrix.tolist()}")
+
+
+def test_both_formats_agree_on_the_rotation_values():
+    """The same structure must give the same operators either way.
+
+    Compares the rotation+translation rows only, and with a tolerance: the
+    formats legitimately differ on chain naming, on assembly ordering, and on
+    stored precision (``REMARK 350`` writes 0.866025 where mmCIF carries more
+    digits). What they must not differ on is the geometry.
+    """
+    def operator_rows(assemblies):
+        return [
+            np.array(transform["matrix"], dtype=float)[:3, :]
+            for transforms in assemblies.values()
+            for transform in transforms
+        ]
+
+    pdb_ops = operator_rows(_parsed_assemblies(FIXTURE_PDB))
+    cif_ops = operator_rows(_parsed_assemblies(FIXTURE_CIF))
+
+    for operator in pdb_ops:
+        assert any(np.allclose(operator, other, atol=1e-4) for other in cif_ops), (
+            f"this operator appears in the PDB file but in no mmCIF operator:\n"
+            f"{operator}")
+
+
 def test_both_parsers_agree_on_the_contract():
     """The same structure in either format must yield the same shape.
 

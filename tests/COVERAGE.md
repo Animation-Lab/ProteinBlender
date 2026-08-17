@@ -1159,6 +1159,23 @@ on a membrane whose typical gap was 0.28 nm.
   both were confirmed to fail when the node is wired into the molecule object
   only (green on Blender 5.0/5.1/5.2).
 
+- **mmCIF assembly matrices carried uninitialised memory.**
+  `pdbx._extract_matrices` allocated with `np.empty` and filled only rows 0-2,
+  so the homogeneous bottom row was whatever happened to be in that memory -
+  a downloaded 1ubq came back with `[1.5e-312, 1.1e-312, 1.5e-312,
+  1.1e-312]` instead of `[0, 0, 0, 1]`. Nothing validates that row, and the
+  damage surfaced far away: an identity operator no longer compared equal to
+  the identity, so a *monomer* reported symmetry and put a Symmetry panel on
+  screen whose Build button placed one identity copy and appeared to do
+  nothing. Switching the download default to mmCIF made this the primary
+  path. Both extractors now start from the identity. Guarded by
+  `test_biological_assembly.py::test_mmcif_matrices_do_not_leak_uninitialised_memory`,
+  which poisons `np.empty` with NaN to make the defect deterministic - a
+  plain assertion on the bottom row is *not* reliably red, because a fresh
+  `np.empty` often does come back looking like a valid matrix, which is
+  precisely what let this ship. Found by driving the live GUI, not by the
+  suite.
+
 - **The Symmetry panel would never have appeared in a real session.**
   It resolved the active protein through `scene.selected_molecule_id`, which
   reads like the obvious accessor but is written by nothing except the rename

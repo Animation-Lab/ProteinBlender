@@ -103,7 +103,15 @@ class PDBX(Molecule):
         ]
 
         columns = [category[name].as_array().astype(float) for name in matrix_columns]
-        matrices = np.empty((len(columns[0]), 4, 4), float)
+
+        # Start from the identity, not np.empty. Only rows 0-2 are filled from
+        # the file, so an uninitialised allocation leaves the homogeneous
+        # bottom row as whatever was in that memory - denormals like 1.5e-312.
+        # Nothing downstream validates it, and the damage surfaces far away:
+        # an identity operator stops comparing equal to the identity, so a
+        # monomer looks like it has symmetry. np.empty is especially nasty here
+        # because a fresh allocation often *does* come back looking correct.
+        matrices = np.tile(np.identity(4, dtype=float), (len(columns[0]), 1, 1))
 
         col_mask = np.tile((0, 1, 2, 3), 3)
         row_mask = np.repeat((0, 1, 2), 4)
@@ -402,7 +410,15 @@ def _extract_matrices(category, scale=True):
 
     columns = [category[name].as_array().astype(float) for name in matrix_columns]
     n = 4 if scale else 3
-    matrices = np.empty((len(columns[0]), n, 4), float)
+
+    # Start from the identity, not np.empty. Only rows 0-2 are filled from the
+    # file, so an uninitialised allocation leaves the homogeneous bottom row as
+    # whatever was in that memory - denormals like 1.5e-312. Nothing
+    # downstream validates it and the damage surfaces far away: an identity
+    # operator stops comparing equal to the identity, so a monomer looks like
+    # it has symmetry. np.empty is especially nasty here because a fresh
+    # allocation often does come back looking like a valid matrix.
+    matrices = np.tile(np.identity(4, dtype=float)[:n, :], (len(columns[0]), 1, 1))
 
     col_mask = np.tile((0, 1, 2, 3), 3)
     row_mask = np.repeat((0, 1, 2), 4)
