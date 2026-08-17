@@ -283,6 +283,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
+| `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
@@ -1120,6 +1121,27 @@ on a membrane whose typical gap was 0.28 nm.
   deliberately does not go through this. Guarded by
   `test_delete_last_chain_deletes_protein.py` (verified red pre-fix, green on
   Blender 5.0/5.1/5.2).
+
+- **Biological assemblies could not be built from a `.pdb` file at all.**
+  Two defects in the embedded MolecularNodes, both on the PDB side only.
+  `PDBAssemblyParser.get_transformations` returned `(chain_ids, matrix)`
+  tuples while its only consumer, `utils.array_quaternions_from_dict`, indexes
+  them as dicts by `chain_ids`/`matrix`/`pdb_model_num`, so building raised
+  `TypeError: list indices must be integers or slices, not str`.
+  `CIFAssemblyParser` already returned dicts, so the two implementations of
+  one abstract interface disagreed about what that interface was - and the
+  `AssemblyParser` docstring still documented the tuple neither consumer
+  accepted. Behind it sat a worse one: a chain set was sliced up to the start
+  of the next one, sweeping in the blank separator line `REMARK 350` writes
+  between BIOMOLECULE blocks, and `_parse_transformations` requires exactly
+  three lines per transformation - so every assembly except the file's *last*
+  raised `Invalid number of transformation vectors`. 4hhb hid this by having
+  only one assembly. Both parsers now return the documented dict, the slice
+  keeps only `BIOMT` records, and the download default moved to mmCIF (legacy
+  PDB cannot express a large assembly: 99,999 atom serials, 62 chain ids).
+  Guarded by `test_biological_assembly.py`, whose expected transforms come
+  from the fixture's own `REMARK 350` text rather than from the parser
+  (verified red pre-fix, green on Blender 5.0/5.1/5.2).
 
 ## Crash regressions (guard against reintroduction)
 

@@ -168,10 +168,14 @@ class ProteinProperties(bpy.types.PropertyGroup):
         name="Remote Format",
         description="File format to download from the PDB",
         items=[
-            ('pdb', 'PDB', 'Download as .pdb'),
             ('cif', 'mmCIF', 'Download as .cif (mmCIF)'),
+            ('pdb', 'PDB', 'Download as .pdb (legacy format)'),
         ],
-        default='pdb',
+        # mmCIF is the wwPDB's own default and the only format that can carry a
+        # large structure at all: legacy PDB runs out of atom serial numbers at
+        # 99,999 and chain identifiers at 62, so a viral capsid or a big
+        # biological assembly is unreachable through it.
+        default='cif',
     )
 
 def register():

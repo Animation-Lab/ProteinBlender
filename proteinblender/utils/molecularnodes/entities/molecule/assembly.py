@@ -22,14 +22,18 @@ class AssemblyParser(metaclass=ABCMeta):
         Parse the necessary transformations for a given
         assembly ID.
 
-        Return a ``list`` of transformations for a set of chains
-        transformations:
+        Return a ``list`` of transformations, each a ``dict``:
 
-        transformations on sets of chains for this assembly
-        |          chain IDs affected by the transformation
-        |          |        4x4 rotation, translation & scale matrix
-        |          |        |
-        list[tuple[ndarray, ndarray]]]
+            {
+                "chain_ids":     list[str],    # chains this transform applies to
+                "matrix":        list[list[float]],  # 4x4 rotation + translation
+                "pdb_model_num": int,          # which chain-set block it came from
+            }
+
+        The keys are not optional. ``utils.array_quaternions_from_dict``
+        consumes these by name to build the transforms data object, so a
+        parser returning any other shape breaks assembly building at the point
+        of use rather than at the point of parsing.
         """
 
     @abstractmethod

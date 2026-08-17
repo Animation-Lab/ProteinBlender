@@ -204,10 +204,29 @@ class PDBAssemblyParser(AssemblyParser):
             if transform_start is None:
                 raise InvalidFileError("No 'BIOMT' records found for chosen assembly")
 
-            matrices = _parse_transformations(assembly_lines[transform_start:stop])
+            # Keep only the BIOMT records. A chain set runs to the start of the
+            # next one, which sweeps up the blank separator line REMARK 350
+            # writes between BIOMOLECULE blocks - and _parse_transformations
+            # demands exactly three lines per transformation, so that stray
+            # line made every assembly but the file's last one unparseable.
+            biomt_lines = [
+                line
+                for line in assembly_lines[transform_start:stop]
+                if line.strip().startswith("BIOMT")
+            ]
+
+            matrices = _parse_transformations(biomt_lines)
 
             for matrix in matrices:
-                transformations.append((affected_chain_ids, matrix.tolist()))
+                transformations.append(
+                    {
+                        "chain_ids": list(affected_chain_ids),
+                        "matrix": matrix.tolist(),
+                        # Mirrors CIFAssemblyParser: which chain-set block of
+                        # this assembly the transformation came from.
+                        "pdb_model_num": i,
+                    }
+                )
 
         return transformations
 
