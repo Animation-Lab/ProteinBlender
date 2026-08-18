@@ -153,6 +153,15 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         anim.prop(scene, "pb_assembly_factor", slider=True)
         anim.prop(scene, "pb_assembly_stagger", slider=True)
 
+        from ..core import symmetry_axes
+        axes_row = box.row(align=True)
+        showing = bool(symmetry_axes.symmetry_axis_objects(molecule))
+        axes_op = axes_row.operator(
+            "molecule.toggle_symmetry_axes",
+            text="Hide Symmetry Axes" if showing else "Show Symmetry Axes",
+            icon='EMPTY_AXIS')
+        axes_op.molecule_id = molecule.identifier
+
         row = box.row(align=True)
         row.scale_y = 1.1
         key = row.operator("molecule.keyframe_assembly",

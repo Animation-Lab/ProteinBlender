@@ -192,6 +192,53 @@ class MOLECULE_PB_OT_build_symmetry(Operator):
         return {"FINISHED"}
 
 
+class MOLECULE_PB_OT_toggle_symmetry_axes(Operator):
+    """Show or hide the assembly's symmetry axes"""
+
+    bl_idname = "molecule.toggle_symmetry_axes"
+    bl_label = "Symmetry Axes"
+    bl_description = (
+        "Draw the rotation axes of the built symmetry as renderable objects - "
+        "the five-fold through a capsid vertex, the two-fold between subunits")
+    bl_options = {"REGISTER", "UNDO"}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        from ..core import symmetry_axes
+
+        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
+        if molecule is None:
+            self.report({"ERROR"}, "No protein selected")
+            return {"CANCELLED"}
+
+        if symmetry_axes.symmetry_axis_objects(molecule):
+            symmetry_axes.clear_symmetry_axes(molecule)
+            self.report({"INFO"}, "Symmetry axes hidden")
+            _refresh(context)
+            return {"FINISHED"}
+
+        tag = assembly_core.built_assembly_id(molecule)
+        if tag is None:
+            self.report({"WARNING"}, "Build a symmetry before showing its axes")
+            return {"CANCELLED"}
+
+        operators = _operators_of_built(context, molecule, tag)
+        if not operators:
+            self.report({"WARNING"}, "Could not recover the built operators")
+            return {"CANCELLED"}
+
+        created = symmetry_axes.show_symmetry_axes(molecule, operators)
+        if not created:
+            self.report({"INFO"}, "This symmetry has no axes to draw")
+            return {"CANCELLED"}
+
+        folds = ", ".join(sorted({a.label for a in symmetry_axes.axes_of(operators)}))
+        self.report({"INFO"}, f"Showing {len(created)} axes ({folds})")
+        _refresh(context)
+        return {"FINISHED"}
+
+
 class MOLECULE_PB_OT_clear_assembly(Operator):
     """Drop the assembly copies, leaving the deposited asymmetric unit"""
 
@@ -220,6 +267,29 @@ class MOLECULE_PB_OT_clear_assembly(Operator):
         return {"FINISHED"}
 
 
+def _operators_of_built(context, molecule, tag):
+    """Rebuild the operator list behind whatever is currently built.
+
+    The tag on the node says which: a deposited assembly id, or
+    ``generated:<kind>``. The panel's current builder settings stand in for a
+    generated one, which is right as long as they have not been changed since.
+    """
+    from ..core import symmetry_builder
+
+    tag = str(tag)
+    if tag.startswith("generated:"):
+        scene = context.scene
+        return symmetry_builder.build_operators(
+            tag.split(":", 1)[1],
+            order=getattr(scene, "pb_symmetry_order", 3),
+            count=getattr(scene, "pb_symmetry_count", 10),
+            rise=getattr(scene, "pb_symmetry_rise", 0.0),
+            twist=getattr(scene, "pb_symmetry_twist", 0.0),
+            axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
+        )
+    return assembly_core._operators_for(molecule, tag)
+
+
 def _filtered(context, molecule, operators):
     """Apply the panel's range and contact limits. 0 means "no limit"."""
     scene = context.scene
@@ -239,6 +309,7 @@ def _refresh(context):
 CLASSES = (
     MOLECULE_PB_OT_build_assembly,
     MOLECULE_PB_OT_build_symmetry,
+    MOLECULE_PB_OT_toggle_symmetry_axes,
     MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
 )

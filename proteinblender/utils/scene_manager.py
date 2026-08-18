@@ -615,9 +615,11 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
     # rest of the session.
     try:
         from ..core import assembly as assembly_core
+        from ..core import symmetry_axes
         molecule = scene_manager.molecules.get(molecule_id)
         if molecule is not None:
             assembly_core.clear_assembly(molecule)
+            symmetry_axes.clear_symmetry_axes(molecule)
     except Exception:
         logger.exception("could not clear the assembly of %s", molecule_id)
 
