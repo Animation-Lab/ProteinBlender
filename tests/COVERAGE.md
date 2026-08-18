@@ -1163,6 +1163,19 @@ on a membrane whose typical gap was 0.28 nm.
   both were confirmed to fail when the node is wired into the molecule object
   only (green on Blender 5.0/5.1/5.2).
 
+- **A cancelled Realize Copies destroyed the assembly it refused to realize.**
+  Reachable from the UI in two clicks: cut an assembly down until only the
+  original is left, then press Realize Copies. There was nothing to realize,
+  so the operator reported as much and returned CANCELLED - but
+  `realize_copies` had already called `clear_assembly` unconditionally on the
+  way out, so the build still on screen was silently thrown away. A cancelled
+  operator has to leave the scene as it found it. The teardown now happens
+  only when copies were actually created. Guarded by
+  `test_symmetry_realize_cutaway.py::test_realizing_nothing_leaves_the_assembly_alone`,
+  plus an end-to-end test of the cutaway-then-realize sequence that surfaced
+  it. Found by driving the panel in a live Blender session; no headless test
+  covered the combination.
+
 - **mmCIF assembly matrices carried uninitialised memory.**
   `pdbx._extract_matrices` allocated with `np.empty` and filled only rows 0-2,
   so the homogeneous bottom row was whatever happened to be in that memory -

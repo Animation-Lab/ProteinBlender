@@ -84,15 +84,6 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         col = box.column(align=True)
         col.prop(scene, "pb_assembly_id", text="")
 
-        info = assembly_core.get_assembly_info(
-            molecule, getattr(scene, "pb_assembly_id", "") or "")
-        if info is not None:
-            row = col.row()
-            row.enabled = False
-            row.label(text=f"{info.transform_count} copies of "
-                           f"{len(info.chain_ids)} chain"
-                           f"{'' if len(info.chain_ids) == 1 else 's'}")
-
         build = box.row(align=True)
         build.scale_y = 1.2
         op = build.operator("molecule.build_assembly", text="Build Assembly")
@@ -114,7 +105,9 @@ class PROTEINBLENDER_PT_symmetry(Panel):
             col.prop(scene, "pb_symmetry_count")
             col.prop(scene, "pb_symmetry_rise")
             col.prop(scene, "pb_symmetry_twist")
-        col.prop(scene, "pb_symmetry_axis")
+        axis_row = col.row(align=True)
+        axis_row.label(text="Axis")
+        axis_row.prop(scene, "pb_symmetry_axis", text="")
 
         summary = box.row()
         summary.enabled = False
@@ -173,7 +166,9 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         box.separator(factor=0.5)
         box.label(text="Cutaway")
         cut = box.column(align=True)
-        cut.prop(scene, "pb_cutaway_normal")
+        cut_row = cut.row(align=True)
+        cut_row.label(text="Direction")
+        cut_row.prop(scene, "pb_cutaway_normal", text="")
         cut.prop(scene, "pb_cutaway_offset")
         cut_row = box.row(align=True)
         cut_op = cut_row.operator("molecule.cutaway", text="Cut Away",

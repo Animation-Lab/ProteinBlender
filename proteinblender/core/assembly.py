@@ -840,8 +840,13 @@ def realize_copies(molecule, force: bool = False):
                 continue
             created.append(_realized_copy(obj, group, rotation, offset, index))
 
-    # The originals go back to showing one copy; the rest are real objects now.
-    clear_assembly(molecule)
+    # Only tear the instanced assembly down if something replaced it. An
+    # assembly trimmed to the original alone has nothing to realize, and
+    # clearing it here would silently throw away the build still on screen -
+    # from a UI step as ordinary as cutting away and then pressing Realize.
+    if created:
+        clear_assembly(molecule)
+
     return created
 
 

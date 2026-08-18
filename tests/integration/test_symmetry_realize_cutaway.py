@@ -297,3 +297,46 @@ def test_cutting_away_everything_is_refused(scene, sm):
     assert bpy.ops.molecule.cutaway(
         "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"CANCELLED"}
     scene.pb_cutaway_offset = 0.0
+
+
+def test_realizing_nothing_leaves_the_assembly_alone(scene, sm):
+    """A realize that creates nothing must not destroy what was built.
+
+    Reachable from the UI in one step: cut an assembly down until only the
+    original is left, then press Realize Copies. There is nothing to realize,
+    the operator reports as much and cancels - and clearing the assembly on the
+    way out would silently throw away the build still on screen. A cancelled
+    operator must leave the scene as it found it.
+    """
+    core = _core()
+    molecule = _import()
+
+    identity = [(np.eye(3), np.zeros(3))]
+    assert core.apply_operators(molecule, identity, "solo")
+    assert core.built_assembly_id(molecule) == "solo"
+
+    assert core.realize_copies(molecule) == []
+
+    assert core.built_assembly_id(molecule) == "solo", (
+        "a realize that created nothing cleared the assembly anyway")
+
+
+def test_a_cutaway_then_realize_keeps_the_survivors(scene, sm):
+    """The exact sequence that surfaced the bug, end to end."""
+    core, builder = _core(), _builder()
+    molecule = _import()
+
+    assert builder.apply_symmetry(molecule, "C", order=6)
+    kept = core.cutaway_operators(
+        molecule, builder.cyclic(6), normal=(0.0, -1.0, 0.0), offset=0.0)
+    assert core.apply_operators(molecule, kept, "cut")
+
+    survivors = _placed(molecule)
+    assert survivors >= 1
+
+    created = core.realize_copies(molecule)
+    if created:
+        assert core.built_assembly_id(molecule) is None
+    else:
+        assert core.built_assembly_id(molecule) == "cut", (
+            "nothing was realized, so the cutaway should still be on screen")
