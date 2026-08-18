@@ -99,6 +99,39 @@ class MOLECULE_PB_OT_build_assembly(Operator):
         return {"FINISHED"}
 
 
+class MOLECULE_PB_OT_keyframe_assembly(Operator):
+    """Key the current assembly state at the playhead"""
+
+    bl_idname = "molecule.keyframe_assembly"
+    bl_label = "Keyframe Assembly"
+    bl_description = (
+        "Key how far assembled the copies are at the current frame. Key 0 on "
+        "one frame and 1 on another to animate the assembly forming")
+    bl_options = {"REGISTER", "UNDO"}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
+        if molecule is None:
+            self.report({"ERROR"}, "No protein selected")
+            return {"CANCELLED"}
+
+        if assembly_core.built_assembly_id(molecule) is None:
+            self.report({"WARNING"}, "Build an assembly before keyframing it")
+            return {"CANCELLED"}
+
+        keyed = assembly_core.keyframe_assembly(molecule)
+        if not keyed:
+            self.report({"ERROR"}, "Could not key the assembly")
+            return {"CANCELLED"}
+
+        self.report({"INFO"},
+                    f"Keyed the assembly at frame {context.scene.frame_current}")
+        _refresh(context)
+        return {"FINISHED"}
+
+
 class MOLECULE_PB_OT_clear_assembly(Operator):
     """Drop the assembly copies, leaving the deposited asymmetric unit"""
 
@@ -134,5 +167,6 @@ def _refresh(context):
 
 CLASSES = (
     MOLECULE_PB_OT_build_assembly,
+    MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
 )

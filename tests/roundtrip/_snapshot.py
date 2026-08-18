@@ -94,6 +94,16 @@ EXCLUSIONS = {
         "Embedded MolecularNodes' own object properties. Upstream-owned; the "
         "ProteinBlender state that matters (domain_*, pb_*) is captured "
         "separately, as are the custom ID properties MN writes."),
+    "Scene.pb_assembly_factor": (
+        "Live handle on the assembly nodes, not the state itself. How far "
+        "assembled a protein is lives on its geometry-nodes assembly node - "
+        "that is what keyframe_assembly keys and what the .blend carries - so "
+        "this resets on load without losing anything. It is also a single "
+        "scene-level slider standing in for whichever protein is active, so a "
+        "stored value would be meaningless against a different selection."),
+    "Scene.pb_assembly_stagger": (
+        "Same as pb_assembly_factor: a live handle on the assembly nodes, "
+        "where the value actually lives and persists."),
     "Scene.pb_assembly_id": (
         "Transient UI choice - which deposited assembly the Symmetry panel "
         "would build next. The assembly actually *built* persists as the "

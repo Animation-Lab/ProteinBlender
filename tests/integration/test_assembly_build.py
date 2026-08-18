@@ -421,3 +421,248 @@ def test_assembly_enum_offers_only_symmetric_assemblies(scene, sm):
     identifiers = {item[0] for item in assembly_enum_items(None, bpy.context)}
 
     assert identifiers == WITH_SYMMETRY
+
+
+# --------------------------------------------------------------------------
+# Animation - the assemble / disassemble factor
+# --------------------------------------------------------------------------
+
+def _landing_points(molecule, chain_letter="A"):
+    """Where the chain's centroid lands under each copy, in world space.
+
+    Transforming one known point by each instance matrix, rather than reading
+    instance origins, so the pivot cancels out of any comparison between two
+    copies.
+    """
+    from proteinblender.core import domain_space
+
+    obj = next(d.object for d in molecule.domains.values()
+               if str(d.chain_id) == chain_letter)
+    pivot = np.array(domain_space.get_pivot(obj))
+    local = np.array(_chain_centroid_angstrom(chain_letter)) * WORLD_SCALE - pivot
+
+    return [np.array(m @ Vector(local.tolist()))
+            for m in _instance_matrices()[obj.name]]
+
+
+def _expected_spread(factor, chain_letter="A"):
+    """How far apart the copies should be at this factor, from the file.
+
+    Interpolating from the identity to an operator means rotating about that
+    operator's own axis by a fraction of its angle, so the expected geometry at
+    any factor is computable from `REMARK 350` alone.
+    """
+    from mathutils import Matrix as BM, Vector as V
+
+    centroid = V((np.array(_chain_centroid_angstrom(chain_letter)) * WORLD_SCALE).tolist())
+    truth = _remark_350_transforms(FIXTURE)
+
+    placed = []
+    for _chains, matrix in truth["3"]:
+        quaternion = BM([row[:3] for row in matrix[:3]]).to_quaternion()
+        angle = quaternion.angle
+        axis = quaternion.axis if abs(angle) > 1e-9 else V((0.0, 0.0, 1.0))
+        partial = BM.Rotation(angle * factor, 3, axis)
+        placed.append(np.array(partial @ centroid))
+
+    return max(
+        float(np.linalg.norm(placed[i] - placed[j]))
+        for i in range(len(placed)) for j in range(i + 1, len(placed))
+    )
+
+
+def _observed_spread(molecule):
+    points = _landing_points(molecule)
+    return max(
+        float(np.linalg.norm(points[i] - points[j]))
+        for i in range(len(points)) for j in range(i + 1, len(points))
+    )
+
+
+def test_factor_zero_puts_every_copy_back_on_the_asymmetric_unit(scene, sm):
+    """Fully disassembled means the copies coincide with the original.
+
+    Not "close to" - exactly. Factor 0 must make the assembly indistinguishable
+    from the unbuilt structure, otherwise an animation starting at 0 opens with
+    a visible jolt.
+    """
+    molecule = _import()
+    assert _assembly_core().build_assembly(molecule, "3")
+
+    _assembly_core().set_assembly_factor(molecule, 0.0)
+    points = _landing_points(molecule)
+
+    assert len(points) > 1
+    for point in points[1:]:
+        assert np.allclose(point, points[0], atol=1e-6), (
+            "at factor 0 the copies should sit exactly on top of each other")
+
+
+def test_factor_one_reproduces_the_deposited_assembly(scene, sm):
+    """The end of the animation must be the assembly Phase 1 builds."""
+    molecule = _import()
+    assert _assembly_core().build_assembly(molecule, "3")
+
+    _assembly_core().set_assembly_factor(molecule, 1.0)
+
+    assert _observed_spread(molecule) == pytest.approx(_expected_spread(1.0), rel=0.01)
+
+
+@pytest.mark.parametrize("factor", [0.25, 0.5, 0.75])
+def test_intermediate_factors_are_real_intermediates(scene, sm, factor):
+    """Halfway through must be halfway rotated, not halfway faded.
+
+    The expected spread comes from rotating the file's own centroid about the
+    operator's own axis by a fraction of its angle - independent of how the
+    node tree chooses to interpolate.
+    """
+    molecule = _import()
+    assert _assembly_core().build_assembly(molecule, "3")
+
+    _assembly_core().set_assembly_factor(molecule, factor)
+
+    assert _observed_spread(molecule) == pytest.approx(
+        _expected_spread(factor), rel=0.02)
+
+
+def test_the_assembly_opens_monotonically(scene, sm):
+    """Sweeping the factor must open the assembly, never jump about.
+
+    Measured as each copy's displacement from where it started, *not* as the
+    spread between copies. For a three-fold the widest gap is genuinely not
+    monotonic: the two outer copies swing past each other, so the chord
+    2r*sin(theta/2) peaks at 180 degrees (factor 0.75) and closes again by
+    240 degrees. Asserting on the spread would fail on correct geometry.
+    """
+    core = _assembly_core()
+    molecule = _import()
+    assert core.build_assembly(molecule, "3")
+
+    core.set_assembly_factor(molecule, 0.0)
+    start = _landing_points(molecule)
+
+    tracks = [[] for _ in start]
+    for factor in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        core.set_assembly_factor(molecule, factor)
+        for i, point in enumerate(_landing_points(molecule)):
+            tracks[i].append(float(np.linalg.norm(point - start[i])))
+
+    moved = 0
+    for i, track in enumerate(tracks):
+        assert track[0] == pytest.approx(0.0, abs=1e-6)
+        for earlier, later in zip(track, track[1:]):
+            assert later > earlier - 1e-6, (
+                f"copy {i} moved backwards as the factor rose: {track}")
+        if track[-1] > 1e-4:
+            moved += 1
+
+    assert moved >= 2, f"the copies never travelled anywhere: {tracks}"
+
+
+def test_stagger_makes_the_copies_arrive_at_different_times(scene, sm):
+    """With stagger on, copies must be at different stages mid-animation.
+
+    Without it every copy shares one factor and they move in lockstep; the
+    interesting version has them arriving in sequence.
+    """
+    core = _assembly_core()
+    molecule = _import()
+    assert core.build_assembly(molecule, "3")
+
+    def progress():
+        """Each copy's distance from where it started, as a spread."""
+        points = _landing_points(molecule)
+        origin = points[0]
+        return [float(np.linalg.norm(p - origin)) for p in points[1:]]
+
+    core.set_assembly_factor(molecule, 0.5, stagger=0.0)
+    together = progress()
+
+    core.set_assembly_factor(molecule, 0.5, stagger=1.0)
+    staggered = progress()
+
+    assert together, "no copies to compare"
+    # In lockstep the copies are symmetric about the original; staggered, the
+    # later ones have not caught up.
+    assert max(staggered) < max(together) + 1e-6
+    assert min(staggered) < min(together) - 1e-6, (
+        f"stagger changed nothing: together={together} staggered={staggered}")
+
+
+def test_the_factor_can_be_keyframed(scene, sm):
+    """The animation has to survive as keyframes, not just a live slider."""
+    core = _assembly_core()
+    molecule = _import()
+    assert core.build_assembly(molecule, "3")
+
+    core.set_assembly_factor(molecule, 0.0)
+    assert core.keyframe_assembly(molecule, frame=1) > 0
+    core.set_assembly_factor(molecule, 1.0)
+    assert core.keyframe_assembly(molecule, frame=50) > 0
+
+    scene.frame_set(1)
+    assert _observed_spread(molecule) == pytest.approx(0.0, abs=1e-5)
+
+    scene.frame_set(50)
+    assert _observed_spread(molecule) == pytest.approx(_expected_spread(1.0), rel=0.02)
+
+    scene.frame_set(25)
+    midway = _observed_spread(molecule)
+    assert 0.0 < midway < _expected_spread(1.0)
+
+
+def test_keyframe_operator_keys_the_assembly(scene, sm):
+    molecule = _import()
+    bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="3")
+
+    scene.frame_set(1)
+    _assembly_core().set_assembly_factor(molecule, 0.0)
+    assert bpy.ops.molecule.keyframe_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
+
+    scene.frame_set(40)
+    _assembly_core().set_assembly_factor(molecule, 1.0)
+    assert bpy.ops.molecule.keyframe_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
+
+    scene.frame_set(1)
+    assert _observed_spread(molecule) == pytest.approx(0.0, abs=1e-5)
+    scene.frame_set(40)
+    assert _observed_spread(molecule) > 0.1
+
+
+def test_keyframing_without_an_assembly_is_refused(scene, sm):
+    molecule = _import()
+    assert bpy.ops.molecule.keyframe_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"CANCELLED"}
+
+
+def test_the_panel_sliders_reach_the_nodes(scene, sm):
+    """The scene sliders are only a handle - they must drive the real value."""
+    molecule = _import()
+    bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="3")
+
+    scene.pb_assembly_factor = 0.0
+    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(0.0)
+    assert _observed_spread(molecule) == pytest.approx(0.0, abs=1e-6)
+
+    scene.pb_assembly_factor = 1.0
+    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(1.0)
+
+    scene.pb_assembly_stagger = 1.0
+    assert _assembly_core().get_assembly_stagger(molecule) == pytest.approx(1.0)
+
+
+def test_clearing_removes_the_animation_too(scene, sm):
+    """Clearing must not leave orphaned point clouds or node groups behind."""
+    core = _assembly_core()
+    molecule = _import()
+    core.build_assembly(molecule, "3")
+
+    prefix = f".pb_assembly_{molecule.identifier}_"
+    assert [o for o in bpy.data.objects if o.name.startswith(prefix)]
+
+    core.clear_assembly(molecule)
+    assert not [o for o in bpy.data.objects if o.name.startswith(prefix)]

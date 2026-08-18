@@ -79,9 +79,19 @@ class PROTEINBLENDER_PT_symmetry(Panel):
 
         if built_id is not None:
             box.label(text=f"Assembly {built_id} built", icon='CHECKMARK')
-            box.label(
-                text="Copies are instances - one set of atoms",
-                icon='INFO')
+
+            anim = box.column(align=True)
+            anim.prop(scene, "pb_assembly_factor", slider=True)
+            anim.prop(scene, "pb_assembly_stagger", slider=True)
+
+            key = box.row(align=True)
+            key.scale_y = 1.1
+            key_op = key.operator("molecule.keyframe_assembly",
+                                  text="Keyframe Assembly", icon='KEY_HLT')
+            key_op.molecule_id = molecule.identifier
+
+            box.label(text="Copies are instances - one set of atoms",
+                      icon='INFO')
 
         box.separator(factor=0.5)
 

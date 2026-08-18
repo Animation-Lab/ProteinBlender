@@ -53,6 +53,13 @@ _ASSEMBLY_ID_KEY = "pb_assembly_id"
 #: translation is 0.01 Blender units.
 WORLD_SCALE = 0.01
 
+#: Node group inputs driving the assembly animation. Factor 0 puts every copy
+#: back on the asymmetric unit, 1 builds the deposited assembly; Stagger
+#: spreads the copies' arrivals across that span instead of moving them
+#: together.
+FACTOR_SOCKET = "Factor"
+STAGGER_SOCKET = "Stagger"
+
 
 @dataclass(frozen=True)
 class AssemblyInfo:
@@ -337,19 +344,50 @@ def _build_points_object(obj, molecule, assembly_id, operators):
     if existing is not None:
         bpy.data.objects.remove(existing, do_unlink=True)
 
-    positions, rotations = [], []
-    for rotation, translation in operators:
-        offset = rotation @ pivot + translation * WORLD_SCALE - pivot
-        positions.append(offset.tolist())
-        rotations.append(BlenderMatrix(rotation.tolist()).to_quaternion())
+    # Each operator is stored as an axis and an angle rather than a finished
+    # matrix, because that is what makes the assembly animatable: rotating
+    # about the same axis by a fraction of the angle *is* the interpolation
+    # from the identity to that operator, exactly, with no approximation. The
+    # node tree scales the angle and the translation by a factor, so factor 0
+    # lands every copy back on the asymmetric unit and factor 1 reproduces the
+    # deposited assembly.
+    axes, angles, translations, delays = [], [], [], []
+    last = max(len(operators) - 1, 1)
+
+    for i, (rotation, translation) in enumerate(operators):
+        quaternion = BlenderMatrix(rotation.tolist()).to_quaternion()
+        angle = float(quaternion.angle)
+        # A zero rotation leaves the axis undefined; pick one so the maths
+        # downstream stays finite.
+        axis = tuple(quaternion.axis) if abs(angle) > 1e-9 else (0.0, 0.0, 1.0)
+
+        axes.append(axis)
+        angles.append(angle)
+        translations.append((translation * WORLD_SCALE).tolist())
+        # Arrival order for the stagger, normalised so the last copy leaves at
+        # the latest possible moment and still finishes at factor 1.
+        delays.append(i / last)
 
     mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(positions, [], [])
+    # Points start at the origin; the node tree positions them from the
+    # attributes below, so that a factor change re-places them without a
+    # rebuild.
+    mesh.from_pydata([(0.0, 0.0, 0.0)] * len(operators), [], [])
     mesh.update()
 
-    attribute = mesh.attributes.new("rotation", "QUATERNION", "POINT")
-    for i, quaternion in enumerate(rotations):
-        attribute.data[i].value = quaternion
+    for attr_name, attr_type, values in (
+        ("axis", "FLOAT_VECTOR", axes),
+        ("trans", "FLOAT_VECTOR", translations),
+        ("pivot", "FLOAT_VECTOR", [pivot.tolist()] * len(operators)),
+        ("angle", "FLOAT", angles),
+        ("delay", "FLOAT", delays),
+    ):
+        attribute = mesh.attributes.new(attr_name, attr_type, "POINT")
+        for i, value in enumerate(values):
+            if attr_type == "FLOAT":
+                attribute.data[i].value = value
+            else:
+                attribute.data[i].vector = value
 
     points = bpy.data.objects.new(name, mesh)
     points.hide_viewport = True
@@ -393,40 +431,123 @@ def _assembly_node_tree(points):
     tree = bpy.data.node_groups.new(name, "GeometryNodeTree")
     tree.interface.new_socket("Geometry", in_out="INPUT",
                               socket_type="NodeSocketGeometry")
+    factor = tree.interface.new_socket(
+        FACTOR_SOCKET, in_out="INPUT", socket_type="NodeSocketFloat")
+    factor.min_value, factor.max_value, factor.default_value = 0.0, 1.0, 1.0
+    stagger = tree.interface.new_socket(
+        STAGGER_SOCKET, in_out="INPUT", socket_type="NodeSocketFloat")
+    stagger.min_value, stagger.max_value, stagger.default_value = 0.0, 1.0, 0.0
     tree.interface.new_socket("Geometry", in_out="OUTPUT",
                               socket_type="NodeSocketGeometry")
 
-    group_in = tree.nodes.new("NodeGroupInput")
-    group_in.location = (-400, 0)
-    group_out = tree.nodes.new("NodeGroupOutput")
-    group_out.location = (400, 0)
+    node = tree.nodes.new
+    link = tree.links.new
 
-    to_instance = tree.nodes.new("GeometryNodeGeometryToInstance")
-    to_instance.location = (-200, 100)
+    group_in = node("NodeGroupInput");  group_in.location = (-900, 0)
+    group_out = node("NodeGroupOutput"); group_out.location = (700, 0)
 
-    object_info = tree.nodes.new("GeometryNodeObjectInfo")
-    object_info.location = (-200, -150)
+    def attribute(attr_name, data_type, y):
+        reader = node("GeometryNodeInputNamedAttribute")
+        reader.location = (-900, y)
+        reader.data_type = data_type
+        reader.inputs["Name"].default_value = attr_name
+        return reader.outputs["Attribute"]
+
+    axis = attribute("axis", "FLOAT_VECTOR", -200)
+    trans = attribute("trans", "FLOAT_VECTOR", -340)
+    pivot_attr = attribute("pivot", "FLOAT_VECTOR", -480)
+    angle = attribute("angle", "FLOAT", -620)
+    delay = attribute("delay", "FLOAT", -760)
+
+    def math(operation, a, b=None, loc=(0, 0)):
+        m = node("ShaderNodeMath")
+        m.operation = operation
+        m.location = loc
+        _plug(link, m.inputs[0], a)
+        if b is not None:
+            _plug(link, m.inputs[1], b)
+        return m.outputs[0]
+
+    def vector_math(operation, a, b=None, loc=(0, 0), scale=None):
+        m = node("ShaderNodeVectorMath")
+        m.operation = operation
+        m.location = loc
+        _plug(link, m.inputs[0], a)
+        if b is not None:
+            _plug(link, m.inputs[1], b)
+        if scale is not None:
+            _plug(link, m.inputs["Scale"], scale)
+        return m.outputs["Vector"]
+
+    # Each copy waits for its share of the timeline before it starts moving.
+    # With Stagger at 0 every copy shares the same factor and they assemble
+    # together; at 1 the last copy only begins as the first one finishes.
+    start = math("MULTIPLY", delay, group_in.outputs[STAGGER_SOCKET], loc=(-650, -700))
+    span = math("SUBTRACT", 1.0, start, loc=(-500, -700))
+    safe_span = math("MAXIMUM", span, 1e-4, loc=(-350, -700))
+    elapsed = math("SUBTRACT", group_in.outputs[FACTOR_SOCKET], start, loc=(-350, -560))
+    raw = math("DIVIDE", elapsed, safe_span, loc=(-200, -620))
+
+    clamp = node("ShaderNodeClamp")
+    clamp.location = (-50, -620)
+    link(raw, clamp.inputs["Value"])
+    clamp.inputs["Min"].default_value = 0.0
+    clamp.inputs["Max"].default_value = 1.0
+    local_factor = clamp.outputs["Result"]
+
+    # Rotating about the operator's own axis by a fraction of its angle is the
+    # exact interpolation from the identity to that operator.
+    partial_angle = math("MULTIPLY", angle, local_factor, loc=(100, -500))
+    rotation = node("FunctionNodeAxisAngleToRotation")
+    rotation.location = (250, -420)
+    link(axis, rotation.inputs["Axis"])
+    link(partial_angle, rotation.inputs["Angle"])
+
+    # The tree has already shifted geometry by -pivot, so a copy belongs at
+    # rotate(pivot) - pivot + factor * translation. At factor 0 that is zero,
+    # putting every copy back exactly on the asymmetric unit.
+    rotate_pivot = node("FunctionNodeRotateVector")
+    rotate_pivot.location = (400, -250)
+    link(pivot_attr, rotate_pivot.inputs["Vector"])
+    link(rotation.outputs["Rotation"], rotate_pivot.inputs["Rotation"])
+
+    swung = vector_math("SUBTRACT", rotate_pivot.outputs["Vector"], pivot_attr,
+                        loc=(550, -250))
+    moved = vector_math("SCALE", trans, scale=local_factor, loc=(550, -400))
+    position = vector_math("ADD", swung, moved, loc=(700, -320))
+
+    object_info = node("GeometryNodeObjectInfo")
+    object_info.location = (-650, 200)
     object_info.transform_space = "ORIGINAL"
     object_info.inputs["Object"].default_value = points
 
-    rotation_attr = tree.nodes.new("GeometryNodeInputNamedAttribute")
-    rotation_attr.location = (-200, -320)
-    rotation_attr.data_type = "QUATERNION"
-    rotation_attr.inputs["Name"].default_value = "rotation"
+    set_position = node("GeometryNodeSetPosition")
+    set_position.location = (250, 200)
+    link(object_info.outputs["Geometry"], set_position.inputs["Geometry"])
+    link(position, set_position.inputs["Position"])
 
-    instance_on = tree.nodes.new("GeometryNodeInstanceOnPoints")
-    instance_on.location = (100, 0)
-
-    link = tree.links.new
+    to_instance = node("GeometryNodeGeometryToInstance")
+    to_instance.location = (-650, 60)
     link(group_in.outputs[0], to_instance.inputs[0])
-    link(object_info.outputs["Geometry"], instance_on.inputs["Points"])
+
+    instance_on = node("GeometryNodeInstanceOnPoints")
+    instance_on.location = (500, 120)
+    link(set_position.outputs["Geometry"], instance_on.inputs["Points"])
     link(to_instance.outputs[0], instance_on.inputs["Instance"])
-    link(rotation_attr.outputs["Attribute"], instance_on.inputs["Rotation"])
+    link(rotation.outputs["Rotation"], instance_on.inputs["Rotation"])
     link(instance_on.outputs[0], group_out.inputs[0])
 
     if hasattr(tree, "color_tag"):
         tree.color_tag = "GEOMETRY"
     return tree
+
+
+def _plug(link, socket, value):
+    """Link ``value`` into ``socket`` if it is a socket, else set it."""
+    if hasattr(value, "is_output"):
+        link(value, socket)
+    else:
+        socket.default_value = value
 
 
 def clear_assembly(molecule) -> bool:
@@ -483,3 +604,87 @@ def _unlink_and_remove(group, node) -> None:
     if upstream is not None:
         for socket in downstream:
             group.links.new(upstream, socket)
+
+
+# --------------------------------------------------------------------------
+# Animation
+# --------------------------------------------------------------------------
+
+def _assembly_nodes(molecule):
+    """Every assembly node across the molecule's objects, freshly resolved."""
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            yield group, node
+
+
+def set_assembly_factor(molecule, factor: float, stagger: Optional[float] = None) -> bool:
+    """How far through assembling the copies are.
+
+    0 leaves every copy sitting on the asymmetric unit, 1 is the deposited
+    assembly, and anything between is a real intermediate - each copy rotated
+    part of the way about its own operator's axis.
+    """
+    touched = False
+    for _group, node in _assembly_nodes(molecule):
+        _set_socket(node, FACTOR_SOCKET, float(factor))
+        if stagger is not None:
+            _set_socket(node, STAGGER_SOCKET, float(stagger))
+        touched = True
+    return touched
+
+
+def get_assembly_factor(molecule) -> Optional[float]:
+    for _group, node in _assembly_nodes(molecule):
+        socket = node.inputs.get(FACTOR_SOCKET)
+        if socket is not None:
+            return float(socket.default_value)
+    return None
+
+
+def get_assembly_stagger(molecule) -> Optional[float]:
+    for _group, node in _assembly_nodes(molecule):
+        socket = node.inputs.get(STAGGER_SOCKET)
+        if socket is not None:
+            return float(socket.default_value)
+    return None
+
+
+def keyframe_assembly(molecule, frame: Optional[int] = None) -> int:
+    """Key the current factor on every assembly node.
+
+    Keyed on the nodes themselves rather than on a scene property, so the
+    animation travels with the .blend and survives the molecule being
+    renamed or reselected. Returns how many sockets were keyed.
+    """
+    if frame is None:
+        frame = bpy.context.scene.frame_current
+
+    keyed = 0
+    for group, node in _assembly_nodes(molecule):
+        socket = node.inputs.get(FACTOR_SOCKET)
+        if socket is None:
+            continue
+        try:
+            index = list(node.inputs).index(socket)
+            group.keyframe_insert(
+                data_path=f'nodes["{node.name}"].inputs[{index}].default_value',
+                frame=frame)
+            keyed += 1
+        except Exception:
+            logger.exception("could not keyframe the assembly factor on %s",
+                             group.name)
+    return keyed
+
+
+def _set_socket(node, name: str, value) -> None:
+    socket = node.inputs.get(name)
+    if socket is None:
+        logger.warning("assembly node has no %r input", name)
+        return
+    try:
+        socket.default_value = value
+    except (TypeError, AttributeError):
+        logger.warning("could not set %r on the assembly node", name)

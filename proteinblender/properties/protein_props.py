@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, CollectionProperty
+from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, FloatProperty, CollectionProperty
 from bpy.types import PropertyGroup
 
 # REMOVED: on_outliner_selection_change callback
@@ -178,6 +178,22 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default='cif',
     )
 
+def _push_assembly_factor(self, context):
+    """Send the sliders straight to the assembly nodes of the active protein.
+
+    The value lives on the nodes, not here: that is what a keyframe keys and
+    what a .blend carries, so this property is only ever a live handle on it.
+    """
+    from ..core import assembly as assembly_core
+    from ..utils.scene_manager import resolve_active_molecule
+
+    molecule = resolve_active_molecule(context)
+    if molecule is None:
+        return
+    assembly_core.set_assembly_factor(
+        molecule, self.pb_assembly_factor, stagger=self.pb_assembly_stagger)
+
+
 def _assembly_enum_items(self, context):
     """Deposited assemblies worth offering for the active protein.
 
@@ -211,6 +227,21 @@ def register():
         description="Which deposited biological assembly to build",
         items=_assembly_enum_items,
     )
+    bpy.types.Scene.pb_assembly_factor = FloatProperty(
+        name="Assembled",
+        description=("How far the copies have travelled from the asymmetric "
+                     "unit to the full assembly. Keyframe this to animate the "
+                     "assembly forming"),
+        min=0.0, max=1.0, default=1.0, subtype="FACTOR",
+        update=_push_assembly_factor,
+    )
+    bpy.types.Scene.pb_assembly_stagger = FloatProperty(
+        name="Stagger",
+        description=("Spread the copies' arrivals across the animation "
+                     "instead of moving them together"),
+        min=0.0, max=1.0, default=0.0, subtype="FACTOR",
+        update=_push_assembly_factor,
+    )
     bpy.types.Scene.outliner_items = CollectionProperty(type=ProteinOutlinerItem)
     # outliner_index is kept for UIList compatibility but has no update callback
     # We don't use row selection - only checkbox selection
@@ -223,8 +254,9 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
-    if hasattr(bpy.types.Scene, "pb_assembly_id"):
-        del bpy.types.Scene.pb_assembly_id
+    for name in ("pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
+        if hasattr(bpy.types.Scene, name):
+            delattr(bpy.types.Scene, name)
 
     if hasattr(bpy.types.Scene, "outliner_index"):
         del bpy.types.Scene.outliner_index
