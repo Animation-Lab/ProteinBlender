@@ -265,6 +265,19 @@ def build_assembly(molecule, assembly_id: str) -> bool:
     if not operators:
         return False
 
+    return apply_operators(molecule, operators, str(assembly_id))
+
+
+def apply_operators(molecule, operators, tag: str) -> bool:
+    """Place a copy of the molecule under each operator.
+
+    The one path both deposited assemblies and generated symmetry go through:
+    an operator is a (3x3 rotation, 3-vector translation in Angstrom) pair, and
+    where it came from makes no difference past this point.
+    """
+    if not operators:
+        return False
+
     # Rebuilding from scratch keeps this idempotent, and means a failed
     # half-build cannot leave two assembly nodes stacked in one tree.
     clear_assembly(molecule)
@@ -275,7 +288,7 @@ def build_assembly(molecule, assembly_id: str) -> bool:
         if group is None:
             continue
         try:
-            if _wire_assembly_into(obj, group, molecule, assembly_id, operators):
+            if _wire_assembly_into(obj, group, molecule, tag, operators):
                 wired += 1
         except Exception:
             logger.exception("could not wire the assembly into %s", obj.name)

@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, FloatProperty, CollectionProperty
+from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, FloatProperty, FloatVectorProperty, CollectionProperty
 from bpy.types import PropertyGroup
 
 # REMOVED: on_outliner_selection_change callback
@@ -194,6 +194,11 @@ def _push_assembly_factor(self, context):
         molecule, self.pb_assembly_factor, stagger=self.pb_assembly_stagger)
 
 
+def _symmetry_kind_items(self, context):
+    from ..core.symmetry_builder import SYMMETRY_KINDS
+    return list(SYMMETRY_KINDS)
+
+
 def _assembly_enum_items(self, context):
     """Deposited assemblies worth offering for the active protein.
 
@@ -235,6 +240,36 @@ def register():
         min=0.0, max=1.0, default=1.0, subtype="FACTOR",
         update=_push_assembly_factor,
     )
+    bpy.types.Scene.pb_symmetry_kind = EnumProperty(
+        name="Symmetry",
+        description="What kind of symmetry to generate",
+        items=_symmetry_kind_items,
+    )
+    bpy.types.Scene.pb_symmetry_order = IntProperty(
+        name="Order",
+        description="n, for Cn or Dn - how many copies around the axis",
+        default=3, min=1, max=60,
+    )
+    bpy.types.Scene.pb_symmetry_count = IntProperty(
+        name="Subunits",
+        description="How many subunits to place along the helix",
+        default=10, min=1, max=200,
+    )
+    bpy.types.Scene.pb_symmetry_rise = FloatProperty(
+        name="Rise",
+        description="Angstrom advanced along the axis per subunit",
+        default=27.5, min=-500.0, max=500.0,
+    )
+    bpy.types.Scene.pb_symmetry_twist = FloatProperty(
+        name="Twist",
+        description="Degrees rotated about the axis per subunit",
+        default=-166.7, min=-360.0, max=360.0,
+    )
+    bpy.types.Scene.pb_symmetry_axis = FloatVectorProperty(
+        name="Axis",
+        description="Direction of the symmetry axis",
+        default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
+    )
     bpy.types.Scene.pb_assembly_stagger = FloatProperty(
         name="Stagger",
         description=("Spread the copies' arrivals across the animation "
@@ -254,7 +289,9 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
-    for name in ("pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
+    for name in ("pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+                 "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
+                 "pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)
 

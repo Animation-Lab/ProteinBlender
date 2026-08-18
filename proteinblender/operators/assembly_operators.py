@@ -132,6 +132,52 @@ class MOLECULE_PB_OT_keyframe_assembly(Operator):
         return {"FINISHED"}
 
 
+class MOLECULE_PB_OT_build_symmetry(Operator):
+    """Generate symmetry copies from parameters, not from the file"""
+
+    bl_idname = "molecule.build_symmetry"
+    bl_label = "Build Symmetry"
+    bl_description = (
+        "Generate a symmetric assembly - a ring, a double ring or a filament - "
+        "for a structure whose file does not describe one")
+    bl_options = {"REGISTER", "UNDO"}
+
+    molecule_id: StringProperty()
+    kind: StringProperty(default="")
+
+    def execute(self, context):
+        from ..core import symmetry_builder
+
+        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
+        if molecule is None:
+            self.report({"ERROR"}, "No protein selected")
+            return {"CANCELLED"}
+
+        scene = context.scene
+        kind = self.kind or getattr(scene, "pb_symmetry_kind", "C")
+
+        ok = symmetry_builder.apply_symmetry(
+            molecule, kind,
+            order=getattr(scene, "pb_symmetry_order", 3),
+            count=getattr(scene, "pb_symmetry_count", 10),
+            rise=getattr(scene, "pb_symmetry_rise", 0.0),
+            twist=getattr(scene, "pb_symmetry_twist", 0.0),
+            axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
+        )
+        if not ok:
+            self.report({"ERROR"}, "Could not build that symmetry")
+            return {"CANCELLED"}
+
+        self.report({"INFO"}, symmetry_builder.describe(
+            kind,
+            order=getattr(scene, "pb_symmetry_order", 3),
+            count=getattr(scene, "pb_symmetry_count", 10),
+            rise=getattr(scene, "pb_symmetry_rise", 0.0),
+            twist=getattr(scene, "pb_symmetry_twist", 0.0)))
+        _refresh(context)
+        return {"FINISHED"}
+
+
 class MOLECULE_PB_OT_clear_assembly(Operator):
     """Drop the assembly copies, leaving the deposited asymmetric unit"""
 
@@ -167,6 +213,7 @@ def _refresh(context):
 
 CLASSES = (
     MOLECULE_PB_OT_build_assembly,
+    MOLECULE_PB_OT_build_symmetry,
     MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
 )

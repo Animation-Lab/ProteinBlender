@@ -70,6 +70,13 @@ SCENE_PROPS = (
     "split_domain_new_end",
     "temp_domain_start", "temp_domain_end", "temp_domain_id",
     "temp_domain_color",
+    # Symmetry builder settings. Snapshotted rather than excluded: unlike the
+    # assembly factor sliders, these are the user's own input with no other
+    # home - nothing on the nodes records that they asked for a C7 - so losing
+    # them on reload would lose real work. pb_symmetry_kind's enum items come
+    # from a static tuple, so its stored value stays meaningful.
+    "pb_symmetry_kind", "pb_symmetry_order", "pb_symmetry_count",
+    "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
     # Visual setup + animation panel.
     "visual_setup_color", "visual_setup_style",
     "pb_keyframe_list", "pb_keyframe_list_index",

@@ -160,16 +160,28 @@ def test_symmetry_is_detected_only_where_it_exists(scene, sm, fixture, ident, ex
     assert _assembly_core().has_buildable_symmetry(molecule) is expected
 
 
-@pytest.mark.parametrize("fixture,ident,expected", [
-    ("4ins.pdb", "4ins", True),
-    ("1ubq.pdb", "1ubq", False),
-])
-def test_panel_polls_itself_away_without_symmetry(scene, sm, fixture, ident, expected):
-    """The meeting's requirement: no symmetry in the file, no panel."""
+def test_the_deposited_half_of_the_panel_is_gated_on_real_symmetry(scene, sm):
+    """The meeting's requirement, applied to the half it belongs to.
+
+    The panel itself is always available once a protein is loaded, because the
+    *builder* half is a construction tool whose whole purpose is giving
+    symmetry to a structure that has none - hiding it when the file has no
+    symmetry would hide it exactly when it is wanted. What is gated is the
+    *deposited assembly* half, which genuinely has nothing to offer.
+    """
     from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
 
-    _import(fixture, ident)
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is expected
+    core = _assembly_core()
+
+    _import("4ins.pdb", "4ins")
+    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True
+    assert core.has_buildable_symmetry(H.sm().molecules["4ins"]) is True
+
+    monomer = _import("1ubq.pdb", "1ubq")
+    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True, (
+        "the builder half applies to a monomer too")
+    assert core.has_buildable_symmetry(monomer) is False, (
+        "a monomer must not be offered a deposited assembly")
 
 
 def test_panel_appears_after_a_plain_import(scene, sm):
