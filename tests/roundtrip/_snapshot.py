@@ -77,6 +77,7 @@ SCENE_PROPS = (
     # from a static tuple, so its stored value stays meaningful.
     "pb_symmetry_kind", "pb_symmetry_order", "pb_symmetry_count",
     "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
+    "pb_symmetry_range", "pb_symmetry_contact",
     # Visual setup + animation panel.
     "visual_setup_color", "visual_setup_style",
     "pb_keyframe_list", "pb_keyframe_list_index",

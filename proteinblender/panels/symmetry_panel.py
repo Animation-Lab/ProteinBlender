@@ -67,6 +67,9 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         box.separator()
         self._draw_builder(box, scene, molecule)
 
+        box.separator()
+        self._draw_trim(box, scene)
+
         if built_id is not None:
             box.separator()
             self._draw_animation(box, scene, molecule, built_id)
@@ -126,6 +129,18 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         row.scale_y = 1.2
         op = row.operator("molecule.build_symmetry", text="Build Symmetry")
         op.molecule_id = molecule.identifier
+
+    # -- trimming ----------------------------------------------------------
+
+    def _draw_trim(self, box, scene):
+        """Range and contact apply to whichever kind is built next."""
+        box.label(text="Trim Copies")
+        col = box.column(align=True)
+        col.prop(scene, "pb_symmetry_range")
+        col.prop(scene, "pb_symmetry_contact")
+        note = box.row()
+        note.enabled = False
+        note.label(text="0 keeps every copy", icon='INFO')
 
     # -- animation ---------------------------------------------------------
 

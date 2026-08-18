@@ -270,6 +270,18 @@ def register():
         description="Direction of the symmetry axis",
         default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
     )
+    bpy.types.Scene.pb_symmetry_range = FloatProperty(
+        name="Range",
+        description=("Drop copies whose centre lands further than this many "
+                     "Angstrom from the original. 0 keeps every copy"),
+        default=0.0, min=0.0, max=10000.0,
+    )
+    bpy.types.Scene.pb_symmetry_contact = FloatProperty(
+        name="Contact",
+        description=("Keep only copies with an atom within this many Angstrom "
+                     "of the original. 0 keeps every copy"),
+        default=0.0, min=0.0, max=100.0,
+    )
     bpy.types.Scene.pb_assembly_stagger = FloatProperty(
         name="Stagger",
         description=("Spread the copies' arrivals across the animation "
@@ -289,7 +301,7 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
-    for name in ("pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+    for name in ("pb_symmetry_contact", "pb_symmetry_range", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

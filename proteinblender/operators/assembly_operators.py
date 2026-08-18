@@ -88,13 +88,21 @@ class MOLECULE_PB_OT_build_assembly(Operator):
             self.report({"ERROR"}, f"No assembly {assembly_id} in this structure")
             return {"CANCELLED"}
 
-        if not assembly_core.build_assembly(molecule, assembly_id):
+        operators = _filtered(context, molecule,
+                              assembly_core._operators_for(molecule, assembly_id))
+        if not operators:
+            self.report({"WARNING"}, "The range or contact limit removed every copy")
+            return {"CANCELLED"}
+
+        if not assembly_core.apply_operators(molecule, operators, str(assembly_id)):
             self.report({"ERROR"}, "Could not build the assembly")
             return {"CANCELLED"}
 
+        trimmed = ("" if len(operators) == info.transform_count
+                   else f" (trimmed from {info.transform_count})")
         self.report(
             {"INFO"},
-            f"Built assembly {assembly_id}: {info.transform_count} copies")
+            f"Built assembly {assembly_id}: {len(operators)} copies{trimmed}")
         _refresh(context)
         return {"FINISHED"}
 
@@ -156,14 +164,20 @@ class MOLECULE_PB_OT_build_symmetry(Operator):
         scene = context.scene
         kind = self.kind or getattr(scene, "pb_symmetry_kind", "C")
 
-        ok = symmetry_builder.apply_symmetry(
-            molecule, kind,
+        operators = _filtered(context, molecule, symmetry_builder.build_operators(
+            kind,
             order=getattr(scene, "pb_symmetry_order", 3),
             count=getattr(scene, "pb_symmetry_count", 10),
             rise=getattr(scene, "pb_symmetry_rise", 0.0),
             twist=getattr(scene, "pb_symmetry_twist", 0.0),
             axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
-        )
+        ))
+        if not operators:
+            self.report({"WARNING"}, "The range or contact limit removed every copy")
+            return {"CANCELLED"}
+
+        ok = assembly_core.apply_operators(
+            molecule, operators, f"generated:{kind.upper()}")
         if not ok:
             self.report({"ERROR"}, "Could not build that symmetry")
             return {"CANCELLED"}
@@ -204,6 +218,17 @@ class MOLECULE_PB_OT_clear_assembly(Operator):
         self.report({"INFO"}, "Assembly cleared")
         _refresh(context)
         return {"FINISHED"}
+
+
+def _filtered(context, molecule, operators):
+    """Apply the panel's range and contact limits. 0 means "no limit"."""
+    scene = context.scene
+    range_limit = getattr(scene, "pb_symmetry_range", 0.0) or None
+    contact = getattr(scene, "pb_symmetry_contact", 0.0) or None
+    if range_limit is None and contact is None:
+        return list(operators)
+    return assembly_core.filter_operators(
+        molecule, operators, range_limit=range_limit, contact_distance=contact)
 
 
 def _refresh(context):
