@@ -239,6 +239,88 @@ class MOLECULE_PB_OT_toggle_symmetry_axes(Operator):
         return {"FINISHED"}
 
 
+class MOLECULE_PB_OT_realize_copies(Operator):
+    """Turn the symmetry copies into real, separately selectable objects"""
+
+    bl_idname = "molecule.realize_copies"
+    bl_label = "Realize Copies"
+    bl_description = (
+        "Convert the instanced copies into real objects so each one can be "
+        "selected, coloured and hidden on its own. Their atoms stay shared")
+    bl_options = {"REGISTER", "UNDO"}
+
+    molecule_id: StringProperty()
+    force: bpy.props.BoolProperty(default=False)
+
+    def execute(self, context):
+        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
+        if molecule is None:
+            self.report({"ERROR"}, "No protein selected")
+            return {"CANCELLED"}
+
+        created = assembly_core.realize_copies(molecule, force=self.force)
+
+        if created is None:
+            self.report(
+                {"WARNING"},
+                f"More than {assembly_core.REALIZE_THRESHOLD} copies - this "
+                "would make a great many objects. Hold the option or re-run "
+                "with force to do it anyway")
+            return {"CANCELLED"}
+
+        if not created:
+            self.report({"INFO"}, "There were no copies to realize")
+            return {"CANCELLED"}
+
+        self.report({"INFO"}, f"Realized {len(created)} copies")
+        _refresh(context)
+        return {"FINISHED"}
+
+
+class MOLECULE_PB_OT_cutaway(Operator):
+    """Take the near side off the assembly to reveal its interior"""
+
+    bl_idname = "molecule.cutaway"
+    bl_label = "Cut Away"
+    bl_description = (
+        "Remove the copies in front of a plane, opening the shell up - the "
+        "canonical virus figure. Whole subunits are removed, not sliced")
+    bl_options = {"REGISTER", "UNDO"}
+
+    molecule_id: StringProperty()
+
+    def execute(self, context):
+        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
+        if molecule is None:
+            self.report({"ERROR"}, "No protein selected")
+            return {"CANCELLED"}
+
+        tag = assembly_core.built_assembly_id(molecule)
+        if tag is None:
+            self.report({"WARNING"}, "Build a symmetry before cutting it away")
+            return {"CANCELLED"}
+
+        scene = context.scene
+        operators = _operators_of_built(context, molecule, tag)
+        kept = assembly_core.cutaway_operators(
+            molecule, operators,
+            normal=tuple(getattr(scene, "pb_cutaway_normal", (0.0, -1.0, 0.0))),
+            offset=getattr(scene, "pb_cutaway_offset", 0.0))
+
+        if not kept:
+            self.report({"WARNING"}, "That cut removes the whole assembly")
+            return {"CANCELLED"}
+
+        if not assembly_core.apply_operators(molecule, kept, str(tag)):
+            self.report({"ERROR"}, "Could not apply the cutaway")
+            return {"CANCELLED"}
+
+        self.report({"INFO"},
+                    f"Cut away {len(operators) - len(kept)} of {len(operators)} copies")
+        _refresh(context)
+        return {"FINISHED"}
+
+
 class MOLECULE_PB_OT_clear_assembly(Operator):
     """Drop the assembly copies, leaving the deposited asymmetric unit"""
 
@@ -310,6 +392,8 @@ CLASSES = (
     MOLECULE_PB_OT_build_assembly,
     MOLECULE_PB_OT_build_symmetry,
     MOLECULE_PB_OT_toggle_symmetry_axes,
+    MOLECULE_PB_OT_realize_copies,
+    MOLECULE_PB_OT_cutaway,
     MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
 )

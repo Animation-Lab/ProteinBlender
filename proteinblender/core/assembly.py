@@ -788,3 +788,183 @@ def filter_operators(molecule, operators, range_limit: Optional[float] = None,
 def _is_identity_operator(rotation, offset) -> bool:
     return (bool(np.allclose(rotation, np.eye(3), atol=1e-6))
             and bool(np.allclose(offset, 0.0, atol=1e-9)))
+
+
+# --------------------------------------------------------------------------
+# Realizing copies into real objects
+# --------------------------------------------------------------------------
+
+#: Above this many copies, realizing is refused unless explicitly forced.
+#: ChimeraX's ``sym`` makes the same call at the same number: below it, copies
+#: are full atomic models; above it they stay graphical clones, because a viral
+#: capsid's worth of real models is rarely what anyone wanted.
+REALIZE_THRESHOLD = 12
+
+
+def realize_copies(molecule, force: bool = False):
+    """Turn the instanced copies into real, separately selectable objects.
+
+    Instances are cheap but anonymous: one set of atoms drawn many times, so
+    there is nothing to click on and nothing to colour differently. Realizing
+    trades that memory saving for per-copy identity, which is what you need to
+    hide one subunit, colour a pentamer, or export a single copy.
+
+    Returns the objects created, or ``None`` when the copy count is over
+    :data:`REALIZE_THRESHOLD` and ``force`` was not set.
+    """
+    from mathutils import Matrix as BlenderMatrix
+
+    tag = built_assembly_id(molecule)
+    if tag is None:
+        logger.warning("nothing is built, so there is nothing to realize")
+        return []
+
+    sources = _target_objects(molecule)
+    operators = _operators_of_built_nodes(molecule)
+    if not operators:
+        logger.warning("could not recover the operators behind the build")
+        return []
+
+    if len(operators) > REALIZE_THRESHOLD and not force:
+        return None
+
+    created = []
+    for obj in sources:
+        group = _node_group_of(obj)
+        if group is None or not _existing_assembly_nodes(group):
+            continue
+
+        for index, (rotation, offset) in enumerate(operators):
+            if index == 0 and _is_identity_operator(rotation, offset):
+                # The first copy is the structure already on screen.
+                continue
+            created.append(_realized_copy(obj, group, rotation, offset, index))
+
+    # The originals go back to showing one copy; the rest are real objects now.
+    clear_assembly(molecule)
+    return created
+
+
+def _realized_copy(obj, group, rotation, offset, index):
+    """One real object placed where its instance was."""
+    from mathutils import Matrix as BlenderMatrix
+
+    copy = obj.copy()
+    copy.name = f"{obj.name}_copy_{index}"
+    copy.data = obj.data                       # atoms stay shared
+
+    # Its own node group, minus the assembly node: the copy is placed by its
+    # object transform, so re-instancing inside it would multiply the copies.
+    own_group = group.copy()
+    own_group.name = f"{group.name}_copy_{index}"
+    for node in [n for n in own_group.nodes
+                 if n.name.startswith(ASSEMBLY_NODE_NAME)]:
+        _unlink_and_remove(own_group, node)
+
+    modifier = next((m for m in copy.modifiers if m.type == "NODES"), None)
+    if modifier is not None:
+        modifier.node_group = own_group
+
+    placement = BlenderMatrix.Identity(4)
+    for r in range(3):
+        for c in range(3):
+            placement[r][c] = float(rotation[r][c])
+        placement[r][3] = float(offset[r])
+
+    copy.matrix_world = obj.matrix_world @ placement
+
+    for collection in obj.users_collection:
+        collection.objects.link(copy)
+        break
+    else:
+        bpy.context.scene.collection.objects.link(copy)
+
+    return copy
+
+
+def _operators_of_built_nodes(molecule):
+    """(rotation, offset-in-Blender-units) for each copy currently placed.
+
+    Read back off the point cloud a build wrote, so it describes what is
+    actually on screen rather than what some panel setting says now.
+    """
+    from mathutils import Quaternion
+
+    prefix = f".pb_assembly_{molecule.identifier}_"
+    points = next((o for o in bpy.data.objects if o.name.startswith(prefix)), None)
+    if points is None or points.data is None:
+        return []
+
+    mesh = points.data
+    count = len(mesh.vertices)
+    if not count:
+        return []
+
+    def read(name, width):
+        attribute = mesh.attributes.get(name)
+        if attribute is None:
+            return None
+        flat = np.empty(count * width, dtype=float)
+        attribute.data.foreach_get("vector" if width == 3 else "value", flat)
+        return flat.reshape(count, width) if width == 3 else flat
+
+    axes, angles = read("axis", 3), read("angle", 1)
+    translations, pivots = read("trans", 3), read("pivot", 3)
+    if axes is None or angles is None or translations is None or pivots is None:
+        return []
+
+    operators = []
+    for i in range(count):
+        rotation = np.array(
+            Quaternion(axes[i].tolist(), float(angles[i])).to_matrix())
+        offset = rotation @ pivots[i] - pivots[i] + translations[i]
+        operators.append((rotation, offset))
+    return operators
+
+
+# --------------------------------------------------------------------------
+# Cutaway
+# --------------------------------------------------------------------------
+
+def cutaway_operators(molecule, operators, normal=(0.0, -1.0, 0.0),
+                      offset: float = 0.0):
+    """Drop the copies in front of a plane, opening the shell up.
+
+    The canonical virus figure: take the near face off a capsid so the
+    interior is visible. Implemented by removing whole copies rather than
+    slicing through atoms, which is both what the published figures do and
+    what leaves intact subunits around the cut edge instead of a wall of
+    severed side chains.
+
+    ``normal`` points at the side to remove, and ``offset`` moves the cut plane
+    along it in Angstrom - 0 cuts through the centre of the assembly, positive
+    values take away less.
+
+    The identity is *not* privileged here. Unlike the range and contact
+    filters, whose job is "show me this subunit's neighbours", a cutaway is
+    about the shell as a whole, and exempting the original would leave one
+    subunit floating in the opening.
+    """
+    atoms = _atom_cloud(molecule)
+    if atoms is None:
+        logger.warning("no atoms to cut against; keeping every copy")
+        return list(operators)
+
+    direction = np.array(normal, dtype=float)
+    length = float(np.linalg.norm(direction))
+    if length < 1e-9:
+        logger.warning("cutaway normal has no direction; keeping every copy")
+        return list(operators)
+    direction = direction / length
+
+    centre = atoms.mean(axis=0)
+    plane = offset * WORLD_SCALE
+
+    kept = []
+    for rotation, translation in operators:
+        placed = rotation @ centre + np.asarray(translation, dtype=float) * WORLD_SCALE
+        if float(np.dot(placed - centre, direction)) > plane:
+            continue          # this copy is on the side being removed
+        kept.append((rotation, translation))
+
+    return kept

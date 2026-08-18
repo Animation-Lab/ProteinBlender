@@ -54,6 +54,8 @@ from .assembly_operators import (
     MOLECULE_PB_OT_build_assembly,
     MOLECULE_PB_OT_build_symmetry,
     MOLECULE_PB_OT_toggle_symmetry_axes,
+    MOLECULE_PB_OT_realize_copies,
+    MOLECULE_PB_OT_cutaway,
     MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
     CLASSES as ASSEMBLY_CLASSES,

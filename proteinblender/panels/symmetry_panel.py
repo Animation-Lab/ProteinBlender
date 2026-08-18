@@ -170,6 +170,22 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         clear = row.operator("molecule.clear_assembly", text="Clear")
         clear.molecule_id = molecule.identifier
 
+        box.separator(factor=0.5)
+        box.label(text="Cutaway")
+        cut = box.column(align=True)
+        cut.prop(scene, "pb_cutaway_normal")
+        cut.prop(scene, "pb_cutaway_offset")
+        cut_row = box.row(align=True)
+        cut_op = cut_row.operator("molecule.cutaway", text="Cut Away",
+                                  icon='MOD_BOOLEAN')
+        cut_op.molecule_id = molecule.identifier
+
+        box.separator(factor=0.5)
+        real = box.row(align=True)
+        real_op = real.operator("molecule.realize_copies",
+                                text="Realize Copies", icon='OUTLINER_OB_MESH')
+        real_op.molecule_id = molecule.identifier
+
         note = box.row()
         note.enabled = False
         note.label(text="Copies are instances - one set of atoms", icon='INFO')
