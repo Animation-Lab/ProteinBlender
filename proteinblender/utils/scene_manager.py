@@ -609,6 +609,18 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
     except Exception:
         pass
 
+    # A built biological assembly owns a point cloud and a node group per
+    # object. Clearing the assembly purges them, but deleting the protein is a
+    # different route, and datablocks stranded here accumulate silently for the
+    # rest of the session.
+    try:
+        from ..core import assembly as assembly_core
+        molecule = scene_manager.molecules.get(molecule_id)
+        if molecule is not None:
+            assembly_core.clear_assembly(molecule)
+    except Exception:
+        logger.exception("could not clear the assembly of %s", molecule_id)
+
     # Removes the wrapper, its objects and datablocks, the UI list item, and
     # the puppets/poses left orphaned by their disappearance.
     deleted = scene_manager.delete_molecule(molecule_id)

@@ -666,3 +666,88 @@ def test_clearing_removes_the_animation_too(scene, sm):
 
     core.clear_assembly(molecule)
     assert not [o for o in bpy.data.objects if o.name.startswith(prefix)]
+
+
+# --------------------------------------------------------------------------
+# Composition with the rest of the add-on
+# --------------------------------------------------------------------------
+
+def test_deleting_the_protein_takes_its_assembly_with_it(scene, sm):
+    """A built assembly must not outlive the protein it belongs to.
+
+    Building creates a point cloud and a node group per object. Clearing the
+    assembly purges them, but deleting the protein outright is a different
+    route, and datablocks stranded there would accumulate silently across a
+    session.
+    """
+    molecule = _import()
+    identifier = molecule.identifier
+    assert _assembly_core().build_assembly(molecule, "3")
+
+    prefix = f".pb_assembly_{identifier}_"
+    assert [o for o in bpy.data.objects if o.name.startswith(prefix)]
+
+    assert bpy.ops.molecule.delete(
+        "EXEC_DEFAULT", molecule_id=identifier) == {"FINISHED"}
+
+    stranded = [o.name for o in bpy.data.objects if o.name.startswith(prefix)]
+    assert not stranded, f"assembly datablocks outlived the protein: {stranded}"
+
+
+def test_brownian_motion_and_an_assembly_coexist(scene, sm):
+    """Jitter is keyed on a puppet controller; the assembly lives in the node
+    tree. They must not disturb one another.
+
+    Worth an explicit test because the pitch for this feature is the two
+    combined - subunits jittering in from solution and locking into the
+    lattice - so a silent interaction between them would undercut the point.
+    """
+    import json
+
+    from proteinblender.utils.animation import ensure_quaternion_mode
+
+    core = _assembly_core()
+    molecule = _import()
+    assert core.build_assembly(molecule, "3")
+    assembled = _observed_spread(molecule)
+
+    # Build a puppet over this protein's chains and jitter it.
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    chain_rows = [it for it in scene.outliner_items
+                  if it.item_type == "CHAIN" and it.parent_id == molecule.identifier]
+    assert len(chain_rows) >= 2, "need chains to build a puppet over"
+    wanted = {chain_rows[0].item_id, chain_rows[1].item_id}
+    for item in scene.outliner_items:
+        item.is_selected = item.item_id in wanted
+
+    assert bpy.ops.proteinblender.create_puppet(
+        "EXEC_DEFAULT", puppet_name="AssemblyPuppet") == {"FINISHED"}
+
+    puppet = next(it for it in scene.outliner_items
+                  if it.item_type == "PUPPET" and it.name == "AssemblyPuppet"
+                  and it.controller_object_name)
+    controller = bpy.data.objects[puppet.controller_object_name]
+
+    ensure_quaternion_mode(controller)
+    controller.keyframe_insert(data_path="location", frame=1)
+    controller.keyframe_insert(data_path="rotation_quaternion", frame=1)
+
+    assert bpy.ops.proteinblender.brownian_settings(
+        "EXEC_DEFAULT",
+        controller_object_name=controller.name,
+        puppet_id=puppet.item_id,
+        puppet_name="AssemblyPuppet",
+        frame_number=12,
+        jitter_interval=3,
+        jitter_max_distance=1.0,
+        jitter_max_rotation=30.0,
+        use_random_seed=False,
+        seed=42,
+    ) == {"FINISHED"}
+
+    assert "pb_brownian_metadata" in controller
+    assert json.loads(controller["pb_brownian_metadata"])
+
+    # The assembly is still built and still placed correctly.
+    assert core.built_assembly_id(molecule) == "3"
+    assert _observed_spread(molecule) == pytest.approx(assembled, rel=0.01)
