@@ -70,6 +70,15 @@ SCENE_PROPS = (
     "split_domain_new_end",
     "temp_domain_start", "temp_domain_end", "temp_domain_id",
     "temp_domain_color",
+    # Symmetry builder settings. Snapshotted rather than excluded: unlike the
+    # assembly factor sliders, these are the user's own input with no other
+    # home - nothing on the nodes records that they asked for a C7 - so losing
+    # them on reload would lose real work. pb_symmetry_kind's enum items come
+    # from a static tuple, so its stored value stays meaningful.
+    "pb_symmetry_kind", "pb_symmetry_order", "pb_symmetry_count",
+    "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
+    "pb_symmetry_range", "pb_symmetry_contact",
+    "pb_cutaway_normal", "pb_cutaway_offset",
     # Visual setup + animation panel.
     "visual_setup_color", "visual_setup_style",
     "pb_keyframe_list", "pb_keyframe_list_index",
@@ -94,6 +103,24 @@ EXCLUSIONS = {
         "Embedded MolecularNodes' own object properties. Upstream-owned; the "
         "ProteinBlender state that matters (domain_*, pb_*) is captured "
         "separately, as are the custom ID properties MN writes."),
+    "Scene.pb_assembly_factor": (
+        "Live handle on the assembly nodes, not the state itself. How far "
+        "assembled a protein is lives on its geometry-nodes assembly node - "
+        "that is what keyframe_assembly keys and what the .blend carries - so "
+        "this resets on load without losing anything. It is also a single "
+        "scene-level slider standing in for whichever protein is active, so a "
+        "stored value would be meaningless against a different selection."),
+    "Scene.pb_assembly_stagger": (
+        "Same as pb_assembly_factor: a live handle on the assembly nodes, "
+        "where the value actually lives and persists."),
+    "Scene.pb_assembly_id": (
+        "Transient UI choice - which deposited assembly the Symmetry panel "
+        "would build next. The assembly actually *built* persists as the "
+        "geometry-nodes assembly node in each object's tree and is read back "
+        "from there by core.assembly.built_assembly_id, so nothing is lost "
+        "when this resets on load. Its enum items are also computed from the "
+        "active molecule, so a stored value would be meaningless against a "
+        "different selection."),
 }
 
 # Per-PropertyGroup fields excluded from the RNA walk, with reasons.

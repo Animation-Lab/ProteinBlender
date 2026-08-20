@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, CollectionProperty
+from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty, FloatProperty, FloatVectorProperty, CollectionProperty
 from bpy.types import PropertyGroup
 
 # REMOVED: on_outliner_selection_change callback
@@ -168,27 +168,138 @@ class ProteinProperties(bpy.types.PropertyGroup):
         name="Remote Format",
         description="File format to download from the PDB",
         items=[
-            ('pdb', 'PDB', 'Download as .pdb'),
             ('cif', 'mmCIF', 'Download as .cif (mmCIF)'),
+            ('pdb', 'PDB', 'Download as .pdb (legacy format)'),
         ],
-        default='pdb',
+        # mmCIF is the wwPDB's own default and the only format that can carry a
+        # large structure at all: legacy PDB runs out of atom serial numbers at
+        # 99,999 and chain identifiers at 62, so a viral capsid or a big
+        # biological assembly is unreachable through it.
+        default='cif',
     )
+
+def _push_assembly_factor(self, context):
+    """Send the sliders straight to the assembly nodes of the active protein.
+
+    The value lives on the nodes, not here: that is what a keyframe keys and
+    what a .blend carries, so this property is only ever a live handle on it.
+    """
+    from ..core import assembly as assembly_core
+    from ..utils.scene_manager import resolve_active_molecule
+
+    molecule = resolve_active_molecule(context)
+    if molecule is None:
+        return
+    assembly_core.set_assembly_factor(
+        molecule, self.pb_assembly_factor, stagger=self.pb_assembly_stagger)
+
+
+def _symmetry_kind_items(self, context):
+    from ..core.symmetry_builder import SYMMETRY_KINDS
+    return list(SYMMETRY_KINDS)
+
+
+def _assembly_enum_items(self, context):
+    """Deposited assemblies worth offering for the active protein.
+
+    Imported lazily: ``core.assembly`` reaches the scene manager, which imports
+    this module back.
+    """
+    from ..operators.assembly_operators import assembly_enum_items
+    return assembly_enum_items(self, context)
+
 
 def register():
     from bpy.utils import register_class
-    
+
     # Safe registration - unregister first if already registered
     try:
         unregister()
     except Exception:
         pass
-    
+
     # Now register
     register_class(ProteinOutlinerItem)
     register_class(ProteinProperties)
-    
+
     # Add properties to scene
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
+    # Which deposited assembly the Symmetry panel will build. Scene-level
+    # rather than per-molecule because it is a transient UI choice, not state
+    # worth persisting - what is *built* is read back off the node itself.
+    bpy.types.Scene.pb_assembly_id = EnumProperty(
+        name="Assembly",
+        description="Which deposited biological assembly to build",
+        items=_assembly_enum_items,
+    )
+    bpy.types.Scene.pb_assembly_factor = FloatProperty(
+        name="Assembled",
+        description=("How far the copies have travelled from the asymmetric "
+                     "unit to the full assembly. Keyframe this to animate the "
+                     "assembly forming"),
+        min=0.0, max=1.0, default=1.0, subtype="FACTOR",
+        update=_push_assembly_factor,
+    )
+    bpy.types.Scene.pb_symmetry_kind = EnumProperty(
+        name="Symmetry",
+        description="What kind of symmetry to generate",
+        items=_symmetry_kind_items,
+    )
+    bpy.types.Scene.pb_symmetry_order = IntProperty(
+        name="Order",
+        description="n, for Cn or Dn - how many copies around the axis",
+        default=3, min=1, max=60,
+    )
+    bpy.types.Scene.pb_symmetry_count = IntProperty(
+        name="Subunits",
+        description="How many subunits to place along the helix",
+        default=10, min=1, max=200,
+    )
+    bpy.types.Scene.pb_symmetry_rise = FloatProperty(
+        name="Rise",
+        description="Angstrom advanced along the axis per subunit",
+        default=27.5, min=-500.0, max=500.0,
+    )
+    bpy.types.Scene.pb_symmetry_twist = FloatProperty(
+        name="Twist",
+        description="Degrees rotated about the axis per subunit",
+        default=-166.7, min=-360.0, max=360.0,
+    )
+    bpy.types.Scene.pb_symmetry_axis = FloatVectorProperty(
+        name="Axis",
+        description="Direction of the symmetry axis",
+        default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
+    )
+    bpy.types.Scene.pb_symmetry_range = FloatProperty(
+        name="Range",
+        description=("Drop copies whose centre lands further than this many "
+                     "Angstrom from the original. 0 keeps every copy"),
+        default=0.0, min=0.0, max=10000.0,
+    )
+    bpy.types.Scene.pb_symmetry_contact = FloatProperty(
+        name="Contact",
+        description=("Keep only copies with an atom within this many Angstrom "
+                     "of the original. 0 keeps every copy"),
+        default=0.0, min=0.0, max=100.0,
+    )
+    bpy.types.Scene.pb_cutaway_normal = FloatVectorProperty(
+        name="Cut Direction",
+        description="The side of the assembly to take away",
+        default=(0.0, -1.0, 0.0), size=3, subtype="XYZ",
+    )
+    bpy.types.Scene.pb_cutaway_offset = FloatProperty(
+        name="Cut Depth",
+        description=("Angstrom to move the cut plane along the cut direction. "
+                     "0 cuts through the centre; larger values take less away"),
+        default=0.0, min=-1000.0, max=1000.0,
+    )
+    bpy.types.Scene.pb_assembly_stagger = FloatProperty(
+        name="Stagger",
+        description=("Spread the copies' arrivals across the animation "
+                     "instead of moving them together"),
+        min=0.0, max=1.0, default=0.0, subtype="FACTOR",
+        update=_push_assembly_factor,
+    )
     bpy.types.Scene.outliner_items = CollectionProperty(type=ProteinOutlinerItem)
     # outliner_index is kept for UIList compatibility but has no update callback
     # We don't use row selection - only checkbox selection
@@ -201,6 +312,12 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
+    for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+                 "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
+                 "pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
+        if hasattr(bpy.types.Scene, name):
+            delattr(bpy.types.Scene, name)
+
     if hasattr(bpy.types.Scene, "outliner_index"):
         del bpy.types.Scene.outliner_index
     

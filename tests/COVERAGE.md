@@ -283,6 +283,12 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
+| `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
+| `test_symmetry_realize_cutaway.py` | realizing copies into real objects (one per extra copy per source, independently selectable, sharing their atom data, landing exactly where their instances were, and the instanced assembly cleared so nothing is drawn twice) with ChimeraX's over-threshold refusal unless forced; and the cutaway (copies in front of the plane removed, the offset moving the plane, the original cut like any other copy, a degenerate normal keeping everything) |
+| `test_symmetry_axes.py` | recovering an assembly's symmetry axes from its operators and drawing them: a Cn having one axis whose fold comes from the *smallest* rotation, a Dn having one n-fold plus n perpendicular two-folds (group theory, computed in the test), a tilted axis recovered as asked for, a deposited assembly's three-fold, axis objects being renderable meshes rather than empties and pointing the right way (checked by transforming their own local Z, not by reading back the quaternion set), rebuilds replacing rather than accumulating, and deletion of the protein taking its axes with it |
+| `test_symmetry_filtering.py` | trimming an assembly to a legible patch (ChimeraX's `range` / `contact`): which copies of a ring survive a cutoff, checked against `2r sin(k pi/n)` computed in the test; the identity always surviving; both limits behaving as Angstrom rather than Blender units; a filament too spread out to touch anywhere; and the panel's limits reaching a real build |
+| `test_symmetry_builder.py` | generative symmetry (Cn, Dn, helical): the operators themselves against trigonometry done in the test, an off-origin centre staying fixed, a tilted axis staying invariant, copies placed on a real ring at `2r sin(pi/n)`, a filament climbing by exactly its rise along whichever axis was asked for, generated copies inheriting the assemble/disassemble factor, either kind of build replacing the other, and the cubic groups being refused rather than guessed |
+| `test_assembly_build.py` | building *and animating* a deposited assembly inside ProteinBlender: which assemblies a structure offers, identity-only ones being withheld, the Symmetry panel polling itself away without symmetry, one instance placed per `REMARK 350` operator *on the domain objects* (measured from the depsgraph and from rendered pixels, not the node graph), clear restoring the asymmetric unit exactly, rebuilds not stacking, the build/clear/keyframe operators, and the assemble/disassemble animation: factor 0 returning every copy exactly onto the asymmetric unit, factor 1 reproducing the deposited placement, intermediate factors matching the file's own operator rotated part-way about its own axis, per-copy monotonic travel, stagger putting copies at different stages mid-animation, the factor surviving as keyframes, coexistence with Brownian jitter on a puppet over the same protein, and deleting the protein taking its assembly datablocks with it |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the isolation preview's isolate/ghost/highlight/restore cycle, and the identity-preservation invariants a layout edit must hold (see below) |
 
@@ -1120,6 +1126,104 @@ on a membrane whose typical gap was 0.28 nm.
   deliberately does not go through this. Guarded by
   `test_delete_last_chain_deletes_protein.py` (verified red pre-fix, green on
   Blender 5.0/5.1/5.2).
+
+- **Biological assemblies could not be built from a `.pdb` file at all.**
+  Two defects in the embedded MolecularNodes, both on the PDB side only.
+  `PDBAssemblyParser.get_transformations` returned `(chain_ids, matrix)`
+  tuples while its only consumer, `utils.array_quaternions_from_dict`, indexes
+  them as dicts by `chain_ids`/`matrix`/`pdb_model_num`, so building raised
+  `TypeError: list indices must be integers or slices, not str`.
+  `CIFAssemblyParser` already returned dicts, so the two implementations of
+  one abstract interface disagreed about what that interface was - and the
+  `AssemblyParser` docstring still documented the tuple neither consumer
+  accepted. Behind it sat a worse one: a chain set was sliced up to the start
+  of the next one, sweeping in the blank separator line `REMARK 350` writes
+  between BIOMOLECULE blocks, and `_parse_transformations` requires exactly
+  three lines per transformation - so every assembly except the file's *last*
+  raised `Invalid number of transformation vectors`. 4hhb hid this by having
+  only one assembly. Both parsers now return the documented dict, the slice
+  keeps only `BIOMT` records, and the download default moved to mmCIF (legacy
+  PDB cannot express a large assembly: 99,999 atom serials, 62 chain ids).
+  Guarded by `test_biological_assembly.py`, whose expected transforms come
+  from the fixture's own `REMARK 350` text rather than from the parser
+  (verified red pre-fix, green on Blender 5.0/5.1/5.2).
+
+- **An assembly built on the molecule object alone would be invisible.**
+  A ProteinBlender import creates one object per domain on top of the molecule
+  object, all sharing one mesh, and the molecule object draws only the atoms
+  *no* domain covers - which after a normal import is none of them. Rendering
+  it in isolation produces zero covered pixels. MolecularNodes' own
+  `assembly_insert` targets the molecule object, so reusing it directly would
+  have produced a perfectly correct assembly that never appeared on screen,
+  and every node-graph assertion about it would still have passed.
+  `core.assembly` therefore wires the assembly node into every domain object
+  as well. Guarded by `test_assembly_build.py`, which counts the instances the
+  depsgraph places per domain object against the operator count in
+  `REMARK 350` and separately asserts that rendered coverage increases;
+  both were confirmed to fail when the node is wired into the molecule object
+  only (green on Blender 5.0/5.1/5.2).
+
+- **A cancelled Realize Copies destroyed the assembly it refused to realize.**
+  Reachable from the UI in two clicks: cut an assembly down until only the
+  original is left, then press Realize Copies. There was nothing to realize,
+  so the operator reported as much and returned CANCELLED - but
+  `realize_copies` had already called `clear_assembly` unconditionally on the
+  way out, so the build still on screen was silently thrown away. A cancelled
+  operator has to leave the scene as it found it. The teardown now happens
+  only when copies were actually created. Guarded by
+  `test_symmetry_realize_cutaway.py::test_realizing_nothing_leaves_the_assembly_alone`,
+  plus an end-to-end test of the cutaway-then-realize sequence that surfaced
+  it. Found by driving the panel in a live Blender session; no headless test
+  covered the combination.
+
+- **mmCIF assembly matrices carried uninitialised memory.**
+  `pdbx._extract_matrices` allocated with `np.empty` and filled only rows 0-2,
+  so the homogeneous bottom row was whatever happened to be in that memory -
+  a downloaded 1ubq came back with `[1.5e-312, 1.1e-312, 1.5e-312,
+  1.1e-312]` instead of `[0, 0, 0, 1]`. Nothing validates that row, and the
+  damage surfaced far away: an identity operator no longer compared equal to
+  the identity, so a *monomer* reported symmetry and put a Symmetry panel on
+  screen whose Build button placed one identity copy and appeared to do
+  nothing. Switching the download default to mmCIF made this the primary
+  path. Both extractors now start from the identity. Guarded by
+  `test_biological_assembly.py::test_mmcif_matrices_do_not_leak_uninitialised_memory`,
+  which poisons `np.empty` with NaN to make the defect deterministic - a
+  plain assertion on the bottom row is *not* reliably red, because a fresh
+  `np.empty` often does come back looking like a valid matrix, which is
+  precisely what let this ship. Found by driving the live GUI, not by the
+  suite.
+
+- **Assembly copies landed on top of each other instead of forming the assembly.**
+  The copies were built with MolecularNodes' assembly node, which splits the
+  structure into per-chain *centred* instances before transforming. Centring
+  discards where each chain sits relative to the crystallographic origin -
+  the exact thing a BIOMT operator is defined against - so the copies rotated
+  about each chain's own centroid and piled up on the original: correct in
+  number, wrong in space. For 4ins assembly 3, consecutive copies sat 0.0095
+  apart where the operators put them 0.303 apart, a factor of 32.
+  Neither the copy-count test nor the render-coverage test can see this: both
+  pass with the copies stacked. ProteinBlender now applies each operator as a
+  placement of the whole structure in the deposited frame, which is what
+  ChimeraX's `sym` does. The translation carries a `R @ pivot - pivot`
+  correction because the node tree has already shifted geometry by `-pivot`
+  before our node sees it. Guarded by
+  `test_assembly_build.py::test_copies_land_where_the_operators_put_them`,
+  which takes chain A's centroid from the fixture's own ATOM records and
+  asserts where the copies' *atoms* land - not where instance origins land,
+  which is governed by the mass-weighted pivot and is right for the wrong
+  reason. Found by driving the live GUI; verified red at 0.0095 pre-fix.
+
+- **The Symmetry panel would never have appeared in a real session.**
+  It resolved the active protein through `scene.selected_molecule_id`, which
+  reads like the obvious accessor but is written by nothing except the rename
+  operator - import does not set it. The panel therefore polled False forever
+  while its tests passed, because those tests assigned the property by hand
+  before polling. Fixed by `scene_manager.resolve_active_molecule_id`, which
+  falls back from that property to the active `molecule_list_items` row and
+  then to the manager's own `active_molecule`. The test helper no longer sets
+  the property at all, so every panel/operator test now exercises the path a
+  plain import leaves behind (verified red pre-fix: the poll, enum and
+  no-argument operator tests all failed).
 
 ## Crash regressions (guard against reintroduction)
 

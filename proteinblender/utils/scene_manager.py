@@ -465,6 +465,58 @@ class ProteinBlenderScene:
         self._refresh_ui()
 
 
+def resolve_active_molecule_id(context=None) -> Optional[str]:
+    """The protein the UI should currently act on.
+
+    There is no single source of truth for this, so consult them in order of
+    how deliberate each one is, and return the first that names a molecule
+    that actually exists:
+
+    1. ``scene.selected_molecule_id`` - an explicit selection. Only the rename
+       operator ever writes it, so in practice it is usually empty; a panel
+       that consulted it alone would be invisible in a real session.
+    2. The active row of ``scene.molecule_list_items`` - what the user sees
+       highlighted, and what import leaves pointing at the protein it just
+       created.
+    3. ``ProteinBlenderScene.active_molecule`` - the manager's own record,
+       maintained across import and delete.
+
+    Returns None when nothing is loaded.
+    """
+    if context is None:
+        context = bpy.context
+
+    scene = getattr(context, "scene", None)
+    manager = ProteinBlenderScene.get_instance()
+    molecules = manager.molecules
+
+    if scene is not None:
+        explicit = getattr(scene, "selected_molecule_id", "") or ""
+        if explicit in molecules:
+            return explicit
+
+        items = getattr(scene, "molecule_list_items", None)
+        index = getattr(scene, "molecule_list_index", -1)
+        if items is not None and 0 <= index < len(items):
+            identifier = getattr(items[index], "identifier", "")
+            if identifier in molecules:
+                return identifier
+
+    active = getattr(manager, "active_molecule", None)
+    if active in molecules:
+        return active
+
+    return None
+
+
+def resolve_active_molecule(context=None):
+    """The wrapper for :func:`resolve_active_molecule_id`, or None."""
+    identifier = resolve_active_molecule_id(context)
+    if identifier is None:
+        return None
+    return ProteinBlenderScene.get_instance().molecules.get(identifier)
+
+
 def molecule_would_be_emptied(molecule, doomed_domain_ids) -> bool:
     """True if deleting exactly these domains leaves the protein with none.
 
@@ -556,6 +608,20 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
         on_molecule_deleted(molecule_id)
     except Exception:
         pass
+
+    # A built biological assembly owns a point cloud and a node group per
+    # object. Clearing the assembly purges them, but deleting the protein is a
+    # different route, and datablocks stranded here accumulate silently for the
+    # rest of the session.
+    try:
+        from ..core import assembly as assembly_core
+        from ..core import symmetry_axes
+        molecule = scene_manager.molecules.get(molecule_id)
+        if molecule is not None:
+            assembly_core.clear_assembly(molecule)
+            symmetry_axes.clear_symmetry_axes(molecule)
+    except Exception:
+        logger.exception("could not clear the assembly of %s", molecule_id)
 
     # Removes the wrapper, its objects and datablocks, the UI list item, and
     # the puppets/poses left orphaned by their disappearance.
