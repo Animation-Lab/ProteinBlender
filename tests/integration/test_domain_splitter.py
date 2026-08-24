@@ -125,6 +125,51 @@ def test_even_split_tiles_the_chain_exactly(count):
 
 
 @pytest.mark.integration
+def test_grid_lines_are_numbered_in_chain_order():
+    """Every line of the dialog's grid carries its position in the chain.
+
+    The leading and trailing stretches used to show "+" instead of a number,
+    flagging them as domains that do not exist yet. They are lines of the same
+    list, so they take the same numbering, and the rows between them shift down
+    when there is a line above them.
+
+    The expected numbers are written out by hand here, not derived.
+    """
+    # head + 3 rows + tail  ->  1. | 2. 3. 4. | 5.
+    assert ds.grid_line_number(ds.EDGE_HEAD, True) == 1
+    assert [ds.grid_line_number(i, True) for i in range(3)] == [2, 3, 4]
+    assert ds.grid_line_number(ds.EDGE_TAIL, True, 3) == 5
+
+    # 3 rows + tail  ->  1. 2. 3. | 4.
+    assert [ds.grid_line_number(i, False) for i in range(3)] == [1, 2, 3]
+    assert ds.grid_line_number(ds.EDGE_TAIL, False, 3) == 4
+
+    # A single row with both edges  ->  1. | 2. | 3.
+    assert ds.grid_line_number(ds.EDGE_HEAD, True) == 1
+    assert ds.grid_line_number(0, True) == 2
+    assert ds.grid_line_number(ds.EDGE_TAIL, True, 1) == 3
+
+
+@pytest.mark.integration
+def test_grid_line_total_counts_the_edges_as_domains():
+    """The header's count is what the grid lists, because every line of it
+    becomes a domain on OK.
+
+    The last line's number and the total are the same thing - a header saying
+    "2" over lines numbered 1 to 4 is the contradiction this pins shut.
+    """
+    assert ds.grid_line_total(2, True, True) == 4
+    assert ds.grid_line_total(3, False, False) == 3
+    assert ds.grid_line_total(3, True, False) == 4
+    assert ds.grid_line_total(0, False, False) == 1
+
+    for rows, head, tail in ((2, True, True), (3, True, False), (4, False, True)):
+        last = (ds.grid_line_number(ds.EDGE_TAIL, head, rows) if tail
+                else ds.grid_line_number(rows - 1, head))
+        assert last == ds.grid_line_total(rows, head, tail)
+
+
+@pytest.mark.integration
 def test_even_split_never_produces_empty_pieces_for_short_chains():
     """Asking for more domains than residues yields one domain per residue."""
     pieces = domain_layout.even_split(10, 12, 9)

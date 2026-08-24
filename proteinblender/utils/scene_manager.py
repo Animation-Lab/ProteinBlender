@@ -1853,6 +1853,11 @@ def build_outliner_hierarchy(context=None):
                         if str(domain_chain_id) in chain_match_tokens(molecule, chain_id):
                             chain_domains.append((domain_id, domain))
 
+                # Read down the chain, not down the creation history: the dict
+                # holds domains in the order they were made, so a chain split
+                # back-to-front listed its last domain first.
+                chain_domains.sort(key=lambda pair: (pair[1].start, pair[1].end))
+
                 # If this chain has no domains, remove the chain item and skip to next chain
                 if len(chain_domains) == 0:
                     # Remove the chain item we just added

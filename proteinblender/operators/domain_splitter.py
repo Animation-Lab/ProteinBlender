@@ -110,6 +110,42 @@ GHOST_ALPHA = 0.1
 _GHOST_SUFFIX = " (PB ghost)"
 
 
+# Sentinels for the two grid lines that are not backed by a row: the stretches
+# of chain before the first row and after the last one.
+EDGE_HEAD = -1
+EDGE_TAIL = -2
+
+
+def grid_line_number(index: int, has_head: bool, row_count: int = 0) -> int:
+    """The number shown in a grid line's index column, 1-based, top to bottom.
+
+    The grid lists the chain in residue order: an optional leading stretch
+    (the "head" edge), then the rows, then an optional trailing stretch (the
+    "tail" edge). Edge lines are domains too - they are created on OK - so
+    they are counted like any other line rather than flagged with a marker.
+
+    ``index`` is a row's index in ``self.rows``; pass ``EDGE_HEAD`` or
+    ``EDGE_TAIL`` for the edge lines (``row_count`` matters only for the
+    tail, which comes after every row).
+    """
+    if index == EDGE_HEAD:
+        return 1
+    offset = 2 if has_head else 1
+    if index == EDGE_TAIL:
+        return row_count + offset
+    return index + offset
+
+
+def grid_line_total(row_count: int, has_head: bool, has_tail: bool) -> int:
+    """How many lines the grid shows: its rows plus whichever edges are there.
+
+    Every line becomes a domain on OK, so this is also how many domains the
+    chain ends up with - which is what the header's count must report, or it
+    contradicts the numbered lines directly beneath it.
+    """
+    return max(1, row_count + int(has_head) + int(has_tail))
+
+
 def _active():
     return PROTEINBLENDER_OT_edit_chain_domains._active_instance
 
@@ -943,6 +979,10 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
     def has_tail(self):
         return bool(len(self.rows)) and self.rows[-1].end < self.chain_max
 
+    def grid_line_count(self):
+        """How many domains the grid describes: its rows plus its edge lines."""
+        return grid_line_total(len(self.rows), self.has_head(), self.has_tail())
+
     def _sync_edges(self):
         """Point the edge adjusters at the boundaries the rows currently have.
 
@@ -960,6 +1000,8 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             if self.has_tail() and is_default_domain_name(self.tail_name):
                 self.tail_name = default_domain_name(
                     self.chain_label, self.tail_start, self.chain_max)
+            # The header counts what the grid lists, edges included.
+            self.domain_count = self.grid_line_count()
 
     # ------------------------------------------------------------------
     # Resolution helpers
@@ -1214,7 +1256,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             new_row.color = self._next_fresh_color()
             self.rows.move(len(self.rows) - 1, index + 1)
             self._refresh_default_names()
-            self.domain_count = len(self.rows)
+            self.domain_count = self.grid_line_count()
 
     def merge_row(self, index):
         """Absorb the following row into this one."""
@@ -1226,7 +1268,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             row.end = max(row.end, following.end)
             self.rows.remove(index + 1)
             self._refresh_default_names()
-            self.domain_count = len(self.rows)
+            self.domain_count = self.grid_line_count()
 
     # ------------------------------------------------------------------
     # Viewport preview
@@ -1379,7 +1421,8 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         """
         cell = line.row()
         cell.ui_units_x = self._COL_INDEX
-        cell.label(text="" if header else f"{index + 1}.")
+        cell.label(text="" if header else
+                   f"{grid_line_number(index, self.has_head())}.")
 
         cell = line.row()
         cell.ui_units_x = self._COL_COLOR
@@ -1428,14 +1471,19 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         (a label sits at its own indent and width, which is what used to
         push these numbers off their columns), and the tools column holds
         the same two buttons, disabled. The editable number *is* the boundary
-        the neighbouring row is dragging, and editing it here moves that row;
-        the '+' marks the row as a domain that will be created on OK.
+        the neighbouring row is dragging, and editing it here moves that row.
+
+        It is numbered like every other line rather than marked as new: it
+        becomes a domain on OK either way, and where it sits in the chain is
+        the useful thing to read off the column.
         """
         # A text label, exactly like the numbered rows' "1." cells: an *icon*
         # label pads differently and shifted every later column off the grid.
+        number = grid_line_number(EDGE_HEAD if head else EDGE_TAIL,
+                                  self.has_head(), len(self.rows))
         cell = line.row()
         cell.ui_units_x = self._COL_INDEX
-        cell.label(text="+")
+        cell.label(text=f"{number}.")
 
         cell = line.row()
         cell.ui_units_x = self._COL_COLOR

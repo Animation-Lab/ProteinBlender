@@ -179,3 +179,46 @@ def test_outliner_chain_range_falls_back_to_auth_chain_id_map(scene, sm, single_
     assert any(r.chain_end >= r.chain_start > 0 for r in chain_rows), (
         "auth_chain_id_map fallback should still resolve a real residue range"
     )
+
+
+# --------------------------------------------------------------------------
+# Row order
+# --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_chain_domain_rows_are_ordered_by_residue(scene, sm, multi_chain):
+    """Domains read down the chain, whatever order they were created in.
+
+    The rows used to come out in creation order (the wrapper's dict order), so
+    a chain split back-to-front listed its last domain first. Ordering is a
+    property of the chain, not of the order the user happened to carve it up
+    in.
+
+    The layout is submitted deliberately out of order and the expectation is
+    the residue numbers written here, not anything the add-on derived.
+    """
+    import json
+
+    from proteinblender.utils.scene_manager import build_outliner_hierarchy
+
+    mid = multi_chain
+    scene.selected_molecule_id = mid
+    build_outliner_hierarchy(bpy.context)
+    chain_row = next(it for it in scene.outliner_items
+                     if it.item_type == "CHAIN" and it.name == "Chain A")
+
+    payload = json.dumps([
+        {"name": "Third", "start": 130, "end": 198, "domain_id": ""},
+        {"name": "First", "start": 1, "end": 60, "domain_id": ""},
+        {"name": "Second", "start": 61, "end": 129, "domain_id": ""},
+    ])
+    assert bpy.ops.proteinblender.edit_chain_domains(
+        'EXEC_DEFAULT', item_id=chain_row.item_id, layout_json=payload,
+        chain_name=chain_row.name) == {'FINISHED'}
+
+    build_outliner_hierarchy(bpy.context)
+    rows = [it for it in scene.outliner_items
+            if it.item_type == "DOMAIN" and it.parent_id == chain_row.item_id]
+
+    assert [it.name for it in rows] == ["First", "Second", "Third"]
+    assert [it.domain_start for it in rows] == [1, 61, 130]
