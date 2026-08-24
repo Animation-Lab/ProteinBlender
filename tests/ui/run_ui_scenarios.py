@@ -330,6 +330,15 @@ def edit_pivot_opens_the_move_gizmo():
     assert objects, "the chain row resolved to no objects"
     state["pivot_origin_before"] = list(objects[0].matrix_world.translation)
 
+    view = next(area for area in active_window().screen.areas
+                if area.type == "VIEW_3D")
+    space = view.spaces.active
+    state["pivot_gizmos_before"] = [
+        space.show_gizmo, space.show_gizmo_tool,
+        space.show_gizmo_object_translate, space.show_gizmo_object_rotate,
+        space.show_gizmo_object_scale,
+    ]
+
     with ui_override("VIEW_3D"):
         assert bpy.ops.wm.tool_set_by_id(name="builtin.rotate") == {"FINISHED"}
         assert bpy.context.workspace.tools.from_space_view3d_mode(
@@ -399,6 +408,29 @@ def edit_pivot_second_click_applies_and_closes():
         assert offset < 1e-4, (
             f"{obj.name}'s origin is {offset:.6f} from where the helper was "
             f"dropped; the pivot was not applied")
+
+    # The mode borrows the active tool and the viewport's object gizmos to put
+    # a translate handle on the helper. Both must be handed back, exactly like
+    # the 3D cursor and the transform orientation are. Left switched, the
+    # user's Rotate tool is silently replaced by Move and every protein they
+    # select afterwards wears a translate gizmo it never had - which reads as
+    # the pivot gizmo following them around.
+    active = bpy.context.workspace.tools.from_space_view3d_mode(
+        "OBJECT", create=False)
+    assert active.idname == "builtin.rotate", (
+        f"Edit Pivot left the active tool at {active.idname}; it was "
+        f"builtin.rotate before the session")
+    view = next(area for area in active_window().screen.areas
+                if area.type == "VIEW_3D")
+    space = view.spaces.active
+    gizmos_after = [
+        space.show_gizmo, space.show_gizmo_tool,
+        space.show_gizmo_object_translate, space.show_gizmo_object_rotate,
+        space.show_gizmo_object_scale,
+    ]
+    assert gizmos_after == state["pivot_gizmos_before"], (
+        f"Edit Pivot left the viewport gizmo flags at {gizmos_after}, not the "
+        f"{state['pivot_gizmos_before']} it found")
     return "Edit Pivot applied the dropped position and closed"
 
 

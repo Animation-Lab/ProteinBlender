@@ -6,13 +6,13 @@ backing Blender object's hide flags).
 
 Headless caveat: several outliner operators tag UI areas for redraw at the tail
 of ``execute`` via ``context.screen.areas`` / ``context.area``, and under
-``--background --factory-startup`` there is no screen/area, so those calls
-raise. Where that redraw tail is *unguarded* (``outliner_select``), the test
-tolerates the RuntimeError — the operator mutates the observable flag BEFORE the
-redraw tail, so the post-condition still holds. ``toggle_visibility`` guards the
-missing-area case internally and needs no tolerance; ``toggle_expand`` is
-exercised through its headless-safe CHAIN path (which rebuilds the hierarchy
-instead of tagging a redraw).
+``--background --factory-startup`` there is no screen/area. Each of them guards
+that case, and has to: the redraw tail is not the last thing ``execute`` does,
+so an unguarded ``context.area.tag_redraw()`` aborted the operator *before* it
+synced the selection to the viewport - a silent no-op for any caller without an
+area (a script, an MCP session, this suite). ``toggle_expand`` is exercised
+through its headless-safe CHAIN path (which rebuilds the hierarchy instead of
+tagging a redraw).
 
 Covered operators:
   * proteinblender.outliner_select
@@ -45,18 +45,39 @@ def test_outliner_select_sets_is_selected(scene, sm, single_chain):
     assert pit.is_selected is False
     pid = pit.item_id
 
-    # The operator toggles is_selected first, then tags UI areas for redraw.
-    # Headless has no area, so tolerate the redraw-tail RuntimeError; the
-    # selection flag is mutated before that point.
-    try:
-        bpy.ops.proteinblender.outliner_select(item_id=pid)
-    except RuntimeError:
-        pass
+    assert bpy.ops.proteinblender.outliner_select(item_id=pid) == {"FINISHED"}
 
     pit = _item_by_id(scene, pid)
     assert pit is not None
     assert pit.is_selected is True, \
         "outliner_select did not set is_selected (unexpected headless rollback)"
+
+
+@pytest.mark.integration
+def test_outliner_select_reaches_the_viewport_without_an_area(scene, sm,
+                                                              single_chain):
+    """Ticking a row selects the object, area or no area.
+
+    The redraw tail sits *before* the viewport sync in ``execute``, so an
+    unguarded ``context.area.tag_redraw()`` did not merely skip a repaint - it
+    threw, and the selection never left the outliner. Every caller without an
+    area (a script, an MCP session, this suite) silently got half an operator.
+
+    Ground truth is Blender's own ``select_get`` on the molecule object, not
+    the row's ``is_selected`` flag: the flag is set before the point that used
+    to throw, so asserting on it alone passes with the bug in place.
+    """
+    if bpy.context.area is not None:
+        pytest.skip("only meaningful where there is no UI area to redraw")
+
+    molecule_object = sm.molecules[single_chain].object
+    molecule_object.select_set(False)
+
+    assert bpy.ops.proteinblender.outliner_select(
+        item_id=single_chain) == {"FINISHED"}
+
+    assert molecule_object.select_get(), (
+        "the row ticked but the molecule was never selected in the viewport")
 
 
 # --------------------------------------------------------------------------

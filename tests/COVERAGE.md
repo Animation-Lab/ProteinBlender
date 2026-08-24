@@ -279,8 +279,8 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves what is rendered (pixel render) and never writes to mesh data, First/Center/Last land on PDB-derived residues (biotite ground truth), the pivot input matches the raw first-residue coordinate, domains rotate about a fixed origin, rendered coverage stays in-band, and the mesh-sharing assertion. Ground truth is kept independent of the pivot code under test |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field (through the protein's edit dialog) |
-| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle, and chain rows listing their domains in residue order rather than creation order |
-| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
+| `test_outliner.py` | `outliner_select` (including that it reaches the viewport when there is no UI area to redraw), `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle, and chain rows listing their domains in residue order rather than creation order |
+| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, a deleted helper ending the session, and the mode owning the viewport while it is open - the helper the only selectable object, a user's own selection lock left alone, and nothing selected in the viewport or ticked in the outliner once it closes; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
 | `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
@@ -382,6 +382,56 @@ on a membrane whose typical gap was 0.28 nm.
   `::test_protein_pivot_moves_only_the_molecule_object` and
   `::test_edit_pivot_on_a_protein_moves_only_the_molecule_object`, both verified
   red by mutating `row_pivot_objects` back to the wide set.
+
+- **Edit Pivot let the viewport steal the gizmo, and left the outliner ticked.**
+  Reported from the UI: while the pivot helper is on screen the Move gizmo
+  keeps switching between the pivot and the protein, and after the session the
+  molecule is still ticked in the Protein Outliner.
+  One omission behind both. The mode deselected everything on the way in but
+  never stopped anything being *re*-selected, and the molecule is exactly what
+  is sitting under the cursor: a click aimed at the helper lands on the
+  protein, Blender moves the selection - and therefore the gizmo - onto it, and
+  the next drag slides the whole molecule instead of placing the pivot. The
+  same stray click ticks that row via the selection-sync poll, and nothing
+  cleared it when the session closed.
+  Fixed by making Edit Pivot own the viewport for as long as it is open:
+  `_lock_scene_selection` makes the helper the only selectable object (only
+  objects it actually locked are unlocked again, so a user's own lock
+  survives), and `end_pivot_edit` leaves nothing selected - clearing the
+  outliner rows directly rather than waiting on the 0.2 s poll, which does not
+  run headless at all.
+  The mode was also keeping what it borrowed: it switched the active tool to
+  Move and forced `show_gizmo_object_translate` on, and restored neither, so a
+  user who entered with the Rotate tool came out with Move and every protein
+  they selected afterwards wore a translate gizmo it never had. `_borrow_viewport`
+  now records the tool and each viewport's gizmo flags, and `end_pivot_edit`
+  hands them back alongside the 3D cursor and transform orientation it already
+  restored.
+  Guarded by `test_visual_edit_dialogs.py::test_edit_pivot_makes_the_helper_the_only_selectable_object`
+  (ground truth is Blender's own `object.select_all(action='SELECT')` - if the
+  molecule comes back selected, a user's click would have selected it too),
+  `::test_edit_pivot_leaves_the_outliner_deselected`, and
+  and `::test_edit_pivot_returns_objects_the_user_had_locked_still_locked`
+  (the one test here that cannot be red pre-fix - there was no lock to unlock
+  selectively; it exists so a future "unlock everything" shortcut fails). The
+  tool and gizmo restore needs a real window, so it is guarded in the
+  foreground UI lane (`tests/ui/run_ui_scenarios.py`,
+  `edit_pivot_second_click_applies_and_closes`). The other three were verified
+  red pre-fix - the outliner one on `['4hhb'] stayed ticked`, the selection one
+  on the molecule and all four chain objects coming back selected, and the UI
+  one on `left the active tool at builtin.move`.
+
+- **`outliner_select` never reached the viewport without a UI area.**
+  Its redraw tail called `context.area.tag_redraw()` unguarded, and that tail
+  sits *before* the `sync_outliner_to_blender_selection` call - so for any
+  caller with no area (a script, an MCP session, the headless suite) the
+  operator threw halfway through and the row ticked without the object ever
+  being selected. The suite had been documenting this as a headless caveat and
+  swallowing the `RuntimeError`. Guarded by
+  `test_outliner.py::test_outliner_select_reaches_the_viewport_without_an_area`,
+  which asserts on `Object.select_get()` rather than the row flag (the flag is
+  set before the throw, so it passes with the bug in place). Verified red
+  pre-fix via `git stash push -- proteinblender/panels/protein_outliner_panel.py`.
 
 - **A renamed chain was wiped by the first undo.**
   `scene_manager._refresh_molecule_ui` rebuilds `scene.molecule_list_items` by
