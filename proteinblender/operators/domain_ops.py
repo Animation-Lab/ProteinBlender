@@ -6,6 +6,7 @@ from bpy.props import StringProperty, IntProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
 from ..utils.chain_utils import (
     chain_match_tokens,
+    copy_group_members,
     get_chain_objects,
     normalize_domain_residue_range,
 )
@@ -1173,9 +1174,45 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
         layout.prop(self, "new_name")
         self.draw_visual_setup(layout, context)
 
+    def _rename_chain_copy(self, item):
+        """Rename a chain copy, if that is what this row is.
+
+        A chain copy is a group of copied domains, not one of the molecule's
+        own chains: its name belongs on the group. Writing it to
+        ``chain_custom_names`` (keyed by chain index) would rename the chain
+        it was copied from instead - and, before the copy carried a name of
+        its own, silently renamed nothing at all.
+
+        Returns True when the row was a chain copy and has been renamed.
+        """
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(item.parent_id)
+        if molecule is None:
+            return False
+        domain = getattr(molecule, 'domains', {}).get(item.item_id)
+        if domain is None or not getattr(domain, 'is_copy', False):
+            return False
+
+        members = copy_group_members(molecule, getattr(domain, 'copy_group_id', ''))
+        name = self.new_name.strip()
+        for _member_id, member in (members or [(item.item_id, domain)]):
+            member.copy_group_name = name
+        if not members:
+            # A copy made before chain copies were grouped has no group to
+            # name; its own name is what the row shows.
+            domain.name = name or domain.name
+        if hasattr(molecule, '_mirror_domains_to_property_group'):
+            try:
+                molecule._mirror_domains_to_property_group()
+            except Exception:
+                pass
+        return True
+
     def _rename_chain(self, scene, item):
         """Persist a chain rename on the molecule's list item as JSON so it
         survives the outliner rebuild and a .blend save."""
+        if self._rename_chain_copy(item):
+            return
         import json
         list_item = next((it for it in scene.molecule_list_items
                           if it.identifier == item.parent_id), None)

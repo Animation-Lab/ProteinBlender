@@ -165,22 +165,25 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 chain_domains = get_chain_domains(molecule, item)
 
                 if chain_domains:
-                    primary_domain_id, primary_domain = chain_domains[0]
+                    _primary_domain_id, primary_domain = chain_domains[0]
                     is_chain_copy = getattr(primary_domain, 'is_copy', False)
 
-                    # Copy — duplicates the chain's primary domain. Same icon
-                    # as the protein row's Duplicate: it is the same action at
-                    # a different level of the hierarchy.
-                    copy_op = row.operator("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
+                    # Copy - duplicates the whole chain, including every
+                    # domain it has been split into. Same icon as the protein
+                    # row's Duplicate: it is the same action at a different
+                    # level of the hierarchy.
+                    copy_op = row.operator("molecule.copy_chain", text="", icon='DUPLICATE', emboss=False)
                     if copy_op:
-                        copy_op.domain_id = primary_domain_id
+                        copy_op.molecule_id = item.parent_id
+                        copy_op.chain_id = chain_token_from_item(item)
 
                     self._draw_custom_pivot_toggle(context, row, item)
 
                     # Edit — the Domain Splitter: renames the chain, restyles
                     # it, and edits how it is divided into domains. A chain
-                    # *copy* is a single domain rather than a splittable chain,
-                    # so it keeps the plain domain dialog.
+                    # *copy* is not re-splittable (its pieces come from the
+                    # chain it was copied from), so it keeps the plain rename
+                    # dialog, which names the copy as a whole.
                     if is_chain_copy:
                         rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
                         if rename_op:
@@ -191,16 +194,13 @@ class PROTEINBLENDER_UL_outliner(UIList):
                         if edit_op:
                             edit_op.item_id = item.item_id
 
-                    # Delete — a copy deletes itself; a real chain deletes the chain
-                    if is_chain_copy:
-                        delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
-                        if delete_op:
-                            delete_op.domain_id = primary_domain_id
-                    else:
-                        delete_op = row.operator("molecule.delete_chain", text="", icon='TRASH', emboss=False)
-                        if delete_op:
-                            delete_op.chain_id = chain_token_from_item(item)
-                            delete_op.molecule_id = item.parent_id
+                    # Delete - one chain-level row, one chain-level delete.
+                    # A copy resolves to every domain of that copy, a real
+                    # chain to every domain of the chain.
+                    delete_op = row.operator("molecule.delete_chain", text="", icon='TRASH', emboss=False)
+                    if delete_op:
+                        delete_op.chain_id = chain_token_from_item(item)
+                        delete_op.molecule_id = item.parent_id
             else:
                 # For domains, use the item_id directly as domain_id
                 domain_id = item.item_id

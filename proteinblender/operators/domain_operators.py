@@ -5,7 +5,7 @@ from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy
                                    delete_molecule_if_empty,
                                    molecule_would_be_emptied,
                                    prune_emptied_puppets)
-from ..utils.chain_utils import chain_match_tokens
+from ..utils.chain_utils import chain_match_tokens, chain_token_from_item
 from ..utils.animation import (
     keyframe_transforms, 
     refresh_timeline, 
@@ -136,6 +136,50 @@ class MOLECULE_PB_OT_copy_domain(Operator):
         else:
             self.report({'ERROR'}, "Failed to copy domain")
             return {'CANCELLED'}
+
+class MOLECULE_PB_OT_copy_chain(Operator):
+    """Copy a whole chain, however many domains it has been split into"""
+    bl_idname = "molecule.copy_chain"
+    bl_label = "Copy Chain"
+    bl_description = "Create a copy of this chain and every domain it is split into"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    molecule_id: StringProperty(description="ID of the molecule owning the chain")
+    chain_id: StringProperty(
+        description="Chain to copy: a chain index, an author chain id, or an "
+                    "existing chain copy's primary domain id")
+
+    def _row_name(self, context):
+        """The chain row's own label, so a renamed chain copies under its
+        chosen name ("Catalytic subunit 1") rather than "Chain A 1"."""
+        for item in context.scene.outliner_items:
+            if item.item_type != 'CHAIN' or item.parent_id != self.molecule_id:
+                continue
+            token = chain_token_from_item(item)
+            if token == self.chain_id:
+                return item.name
+        return ""
+
+    def execute(self, context):
+        scene_manager = ProteinBlenderScene.get_instance()
+        molecule = scene_manager.molecules.get(self.molecule_id)
+
+        if not molecule:
+            self.report({'ERROR'}, "Molecule not found")
+            return {'CANCELLED'}
+
+        new_domain_ids = molecule.copy_chain(self.chain_id,
+                                             group_name=self._row_name(context))
+
+        if not new_domain_ids:
+            self.report({'ERROR'}, f"Failed to copy chain {self.chain_id}")
+            return {'CANCELLED'}
+
+        self.report({'INFO'},
+                    f"Copied chain with {len(new_domain_ids)} domain(s)")
+        build_outliner_hierarchy(context)
+        return {'FINISHED'}
+
 
 class MOLECULE_PB_OT_delete_domain(Operator):
     bl_idname = "molecule.delete_domain"

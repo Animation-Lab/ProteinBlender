@@ -61,6 +61,21 @@ class DomainProperties(PropertyGroup):
     object_name: StringProperty(description="Name of the Blender object for this domain")
     node_group_name: StringProperty(description="Name of the node group for this domain")
 
+    # Copy tracking. These are persisted (not just runtime state) because the
+    # outliner reads them to decide what a domain *is*: without them a reloaded
+    # or undone file turns every chain copy back into an ordinary domain of the
+    # chain it was copied from.
+    is_copy: BoolProperty(default=False,
+                          description="Whether this domain is a copy")
+    copy_number: IntProperty(default=0, min=0,
+                             description="Which copy of the original this is")
+    original_domain_id: StringProperty(
+        description="ID of the domain this one was copied from")
+    copy_group_id: StringProperty(
+        description="ID of the chain copy this domain is one piece of")
+    copy_group_name: StringProperty(
+        description="Display name of the chain copy this domain is one piece of")
+
 class DomainDefinition:
     """Represents the logical definition of a domain with its own geometry nodes network.
 
@@ -99,6 +114,11 @@ class DomainDefinition:
         self.is_copy = False  # Whether this domain is a copy
         self.copy_number = 0  # The copy number (1, 2, 3, etc.)
         self.original_domain_id = None  # ID of the original domain if this is a copy
+        # A chain copy is a *group* of copied domains - a split chain copies
+        # into one piece per domain, and they belong together under a single
+        # outliner row. Empty for a plain domain-level copy.
+        self.copy_group_id = ""
+        self.copy_group_name = ""
 
     # Property accessors that use safe references
     @property
@@ -179,7 +199,9 @@ class DomainDefinition:
             'is_expanded': False,
             'is_copy': self.is_copy,
             'copy_number': self.copy_number,
-            'original_domain_id': self.original_domain_id
+            'original_domain_id': self.original_domain_id,
+            'copy_group_id': self.copy_group_id,
+            'copy_group_name': self.copy_group_name
         }
         return props
         
@@ -219,6 +241,10 @@ class DomainDefinition:
             domain.copy_number = props.copy_number
         if hasattr(props, 'original_domain_id'):
             domain.original_domain_id = props.original_domain_id
+        if hasattr(props, 'copy_group_id'):
+            domain.copy_group_id = props.copy_group_id
+        if hasattr(props, 'copy_group_name'):
+            domain.copy_group_name = props.copy_group_name
         
         # Set setup state based on whether object and node group exist
         domain._setup_complete = bool(domain.object and domain.node_group)
@@ -418,6 +444,16 @@ class Domain(PropertyGroup):
     # Stored object name for healing PointerProperty references after load.
     object_name: StringProperty()
     object: PointerProperty(type=bpy.types.Object)  # Reference to the domain object
+    # Copy identity. The outliner reads these to decide what a domain *is*: a
+    # chain copy is a set of domains sharing a `copy_group_id`, shown as one
+    # chain row. Without them on this collection - the only part of a domain
+    # that reaches the .blend - a reloaded chain copy folds back into the
+    # chain it was copied from.
+    is_copy: BoolProperty(default=False)
+    copy_number: IntProperty(default=0, min=0)
+    original_domain_id: StringProperty()
+    copy_group_id: StringProperty()
+    copy_group_name: StringProperty()
 
 def ensure_domain_properties_registered():
     """Make sure all domain-related properties are registered on Object class"""

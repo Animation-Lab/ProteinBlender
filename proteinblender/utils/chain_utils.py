@@ -346,20 +346,105 @@ def domain_in_chain(molecule: Any, chain_token: Any, domain: Any) -> bool:
 def chain_token_from_item(chain_item: Any) -> str:
     """Extract the chain identifier from a chain outliner row.
 
-    Regular chains use item_ids of the form ``<mol>_chain_<index>``; chain
-    copies use the domain id directly. Falls back to the row's ``chain_id``.
+    Regular chains use item_ids of the form ``<mol>_chain_<index>``, and the
+    index is the token.
+
+    A chain copy's row is identified by its primary *domain* id instead, and
+    that id is the token: the copy's ``chain_id`` names the chain it was
+    copied FROM, so returning that would send every chain-level action - copy,
+    delete, split - to the original instead of the copy.
     """
     item_id = getattr(chain_item, "item_id", "") or ""
     if "_chain_" in item_id:
         return item_id.split("_chain_")[-1]
-    return getattr(chain_item, "chain_id", "") or item_id
+    return item_id or getattr(chain_item, "chain_id", "")
+
+
+def domain_spans_whole_chain(molecule: Any, domain: Any) -> bool:
+    """True if ``domain`` covers its chain's entire residue range."""
+    ranges = getattr(molecule, "chain_residue_ranges", {}) or {}
+    if not ranges:
+        return False
+
+    chain_key = str(getattr(domain, "chain_id", ""))
+    idx_map = getattr(molecule, "idx_to_label_asym_id_map", None) or {}
+    if chain_key.isdigit() and idx_map:
+        chain_key = str(idx_map.get(int(chain_key), chain_key))
+
+    if chain_key not in ranges:
+        return False
+    min_res, max_res = ranges[chain_key]
+    return domain.start == min_res and domain.end == max_res
+
+
+def chain_copy_group_key(molecule: Any, domain_id: str, domain: Any) -> Optional[str]:
+    """The chain copy ``domain`` is part of, or None if it is not one.
+
+    A chain copy is a group: copying a chain that has been split into domains
+    copies every one of them, and they share a ``copy_group_id`` so the
+    outliner can show them under a single chain row.
+
+    Copies made before that grouping existed (and anything loaded from an
+    older .blend) carry no group id, so they are recognised the way the
+    outliner always recognised them - a copy spanning its chain's whole range
+    is a chain copy of its own - and each becomes a group of one. A copy of a
+    *single* domain of a split chain is not a chain copy at all: it stays a
+    domain of the chain it was copied from.
+    """
+    if not getattr(domain, "is_copy", False):
+        return None
+    group_id = getattr(domain, "copy_group_id", "") or ""
+    if group_id:
+        return group_id
+    if domain_spans_whole_chain(molecule, domain):
+        return domain_id
+    return None
+
+
+def chain_copy_groups(molecule: Any) -> List[Tuple[str, List[Tuple[str, Any]]]]:
+    """Every chain copy of a molecule, as ``(group_id, members)``.
+
+    Members are ordered by start residue, and the groups by the chain they
+    copy then by copy number, so the outliner lists a protein's copies in a
+    stable order across rebuilds.
+    """
+    if molecule is None:
+        return []
+
+    groups: Dict[str, List[Tuple[str, Any]]] = {}
+    for domain_id, domain in getattr(molecule, "domains", {}).items():
+        key = chain_copy_group_key(molecule, domain_id, domain)
+        if key is not None:
+            groups.setdefault(key, []).append((domain_id, domain))
+
+    for members in groups.values():
+        members.sort(key=lambda pair: (pair[1].start, pair[1].end))
+
+    def _order(entry):
+        _key, members = entry
+        first = members[0][1]
+        return (str(first.chain_id), int(getattr(first, "copy_number", 0) or 0))
+
+    return sorted(groups.items(), key=_order)
+
+
+def copy_group_members(molecule: Any, group_id: str) -> List[Tuple[str, Any]]:
+    """The ``(domain_id, domain)`` pairs making up one chain copy."""
+    if molecule is None or not group_id:
+        return []
+    members = [(domain_id, domain)
+               for domain_id, domain in molecule.domains.items()
+               if (getattr(domain, "copy_group_id", "") or "") == group_id]
+    members.sort(key=lambda pair: (pair[1].start, pair[1].end))
+    return members
 
 
 def get_chain_domains(molecule: Any, chain_item: Any) -> List[Tuple[str, Any]]:
     """Return the ``(domain_id, domain)`` pairs a chain outliner row maps to.
 
-    * A chain copy's row carries the domain id as its item_id, so that single
-      domain is returned.
+    * A chain copy's row carries its primary domain id as its item_id, so the
+      whole copy is returned - one domain for a copy of an unsplit chain,
+      several for a copy that kept the chain's split.
     * A full or split chain returns every non-copy domain whose chain matches
       the row (one domain for a whole chain, several once it is split).
     """
@@ -369,7 +454,9 @@ def get_chain_domains(molecule: Any, chain_item: Any) -> List[Tuple[str, Any]]:
     item_id = getattr(chain_item, "item_id", "") or ""
     # Chain copy: the row's item_id is the domain id itself.
     if item_id in molecule.domains:
-        return [(item_id, molecule.domains[item_id])]
+        domain = molecule.domains[item_id]
+        members = copy_group_members(molecule, getattr(domain, "copy_group_id", ""))
+        return members or [(item_id, domain)]
 
     token = chain_token_from_item(chain_item)
     pairs = []
@@ -378,6 +465,9 @@ def get_chain_domains(molecule: Any, chain_item: Any) -> List[Tuple[str, Any]]:
             continue
         if domain_in_chain(molecule, token, domain):
             pairs.append((domain_id, domain))
+    # Residue order, so "the row's primary domain" is the chain's first piece
+    # rather than whichever one the dict happens to yield first.
+    pairs.sort(key=lambda pair: (pair[1].start, pair[1].end))
     return pairs
 
 

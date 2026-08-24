@@ -92,17 +92,17 @@ Two checks stop the lane from being decorative:
 
 ### Cases
 
-17 builders: `empty`, `single_protein`, `multi_chain`, `domains`,
-`chain_rename`, `pivots`, `keyframes`, `poses`, `pose_library`, `puppets`,
-`linkers`, `dna`, `membrane`, `force_fields`, `brownian`, `visual_style`,
-`kitchen_sink`. Three of them also run a **second generation**
+18 builders: `empty`, `single_protein`, `multi_chain`, `domains`,
+`chain_rename`, `chain_copy`, `pivots`, `keyframes`, `poses`, `pose_library`,
+`puppets`, `linkers`, `dna`, `membrane`, `force_fields`, `brownian`,
+`visual_style`, `kitchen_sink`. Three of them also run a **second generation**
 (save → reopen → save → reopen, compared against the original expectation),
 which is the only shape that catches the original data-loss bug's real
 mechanism: the reload degraded state and the *next save* persisted it. Two run
 a **Cycles render after reload**, because state assertions cannot see a node
 tree that reloaded subtly rewired.
 
-Whole lane: 32 tests, ~2m20s on Blender 5.2.
+Whole lane: 34 tests, ~2m30s on Blender 5.2.
 
 ### Known gaps
 
@@ -291,9 +291,29 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_assembly_build.py` | building *and animating* a deposited assembly inside ProteinBlender: which assemblies a structure offers, identity-only ones being withheld, the Symmetry panel polling itself away without symmetry, one instance placed per `REMARK 350` operator *on the domain objects* (measured from the depsgraph and from rendered pixels, not the node graph), clear restoring the asymmetric unit exactly, rebuilds not stacking, the build/clear/keyframe operators, and the assemble/disassemble animation: factor 0 returning every copy exactly onto the asymmetric unit, factor 1 reproducing the deposited placement, intermediate factors matching the file's own operator rotated part-way about its own axis, per-copy monotonic travel, stagger putting copies at different stages mid-animation, the factor surviving as keyframes, coexistence with Brownian jitter on a puppet over the same protein, and deleting the protein taking its assembly datablocks with it |
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the ghost-everything preview's ghost/solid/restore cycle, per-domain colours (live preview and commit, via the dialog rows or `layout_json`'s `color` field), and the identity-preservation invariants a layout edit must hold (see below) |
+| `test_copy_chain.py` | `molecule.copy_chain` from the outliner's chain row: a split chain copying every one of its domains (residue coverage against the PDB text, and a Cycles render proving the copy puts as much protein on screen as the chain it copied), the copy appearing as one expandable chain row rather than leaking into its source chain, an unsplit chain still copying as a single domain, copying a copy, and the copy's Delete removing all of it and nothing else |
 | `test_outliner_colors.py` | the PB Outliner's row colour swatches: seeding from what each item renders with (node graph as ground truth), the mixed-grey placeholder for a protein whose chains disagree, and a pick on a protein/chain/domain row recolouring exactly what that row covers |
 
 ## Behaviour regressions (guard against reintroduction)
+
+- **Copying a split chain copied only its first domain.**
+  The outliner's chain row wired Copy to `molecule.copy_domain` with the
+  chain's *primary* domain id, so a chain split into 1-99 / 100-198 copied as
+  1-99 alone - and, no longer spanning the whole chain, the half-copy was
+  auto-parented to the original and listed as an extra domain row *inside* the
+  chain it came from. A chain copy is now a group: `molecule.copy_chain`
+  duplicates every domain of the chain, each keeping its own range, colour and
+  style, tied together by a `copy_group_id` that the outliner reads to show
+  them under one expandable chain row (`chain_utils.chain_copy_groups`). The
+  same grouping carries Delete, the colour swatch, selection sync and rename,
+  and the copy identity is persisted on the `Domain` PropertyGroup - the only
+  part of a domain that reaches the .blend - so a reloaded copy stays a copy
+  instead of folding back into its source chain.
+  Guarded by `test_copy_chain.py` (7 tests) and the `chain_copy` save/load
+  builder. Ground truth for "the entire chain" is parsed from `4hhb.pdb`
+  directly (chain A spans author residues 1-198), never from
+  `chain_residue_ranges`, and the pixel test renders the copy against the
+  chain it copied.
 
 - **Edit dialogs opened showing the wrong colour and style.**
   The Visual Set-up block seeded its fields from `objects[0]`, which for a

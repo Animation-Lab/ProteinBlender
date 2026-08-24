@@ -20,7 +20,8 @@ from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid, ensure_object_mode
-from .chain_utils import (chain_match_tokens, default_domain_name,
+from .chain_utils import (chain_copy_group_key, chain_copy_groups,
+                          chain_match_tokens, default_domain_name,
                           is_default_domain_name)
 
 logger = logging.getLogger(__name__)
@@ -752,6 +753,13 @@ def _snapshot_list_item(item):
                 'start': d.start,
                 'end': d.end,
                 'name': d.name,
+                # Copy identity - a chain copy that loses it stops being a
+                # chain copy and folds back into its source chain.
+                'is_copy': bool(getattr(d, 'is_copy', False)),
+                'copy_number': int(getattr(d, 'copy_number', 0) or 0),
+                'original_domain_id': getattr(d, 'original_domain_id', ''),
+                'copy_group_id': getattr(d, 'copy_group_id', ''),
+                'copy_group_name': getattr(d, 'copy_group_name', ''),
                 # Object PointerProperty is restored by name lookup below.
                 'object_name': (
                     d.object.name if d.object
@@ -841,6 +849,10 @@ def _restore_list_item(item, snap):
         new_d.name = d_data.get('name', '')
         if hasattr(new_d, 'is_expanded'):
             new_d.is_expanded = d_data.get('is_expanded', False)
+        for field in ('is_copy', 'copy_number', 'original_domain_id',
+                      'copy_group_id', 'copy_group_name'):
+            if field in d_data and hasattr(new_d, field):
+                setattr(new_d, field, d_data[field])
         obj_name = d_data.get('object_name')
         if hasattr(new_d, 'object_name'):
             new_d.object_name = obj_name or ''
@@ -1210,6 +1222,15 @@ def _restore_domains_into_wrapper(wrapper, item):
             domain.parent_molecule_id = wrapper.identifier
             domain_id = d_pg.domain_id or domain.domain_id
             domain.domain_id = domain_id
+            # Copy identity, mirrored by
+            # MoleculeWrapper._mirror_domains_to_property_group. Losing it
+            # turns a reloaded chain copy back into an ordinary domain of the
+            # chain it was copied from.
+            domain.is_copy = bool(getattr(d_pg, "is_copy", False))
+            domain.copy_number = int(getattr(d_pg, "copy_number", 0) or 0)
+            domain.original_domain_id = getattr(d_pg, "original_domain_id", "") or None
+            domain.copy_group_id = getattr(d_pg, "copy_group_id", "") or ""
+            domain.copy_group_name = getattr(d_pg, "copy_group_name", "") or ""
             # Heal the object reference: PointerProperty first, then by
             # stored name as a fallback (handles undo/redo or rename
             # scenarios).
@@ -1803,32 +1824,11 @@ def build_outliner_hierarchy(context=None):
                 # Collect domains for this chain
                 chain_domains = []
                 for domain_id, domain in molecule.domains.items():
-                    # Skip chain-level copies - they should be shown as separate chains
-                    if hasattr(domain, 'is_copy') and domain.is_copy:
-                        # Check if this is a full chain copy (covers entire chain range)
-                        if hasattr(molecule, 'chain_residue_ranges'):
-                            # Get the correct chain key for looking up ranges
-                            domain_chain = domain.chain_id
-                            chain_key = None
-                            
-                            # Try to map to the correct key in chain_residue_ranges
-                            if hasattr(molecule, 'idx_to_label_asym_id_map'):
-                                # If domain.chain_id is numeric, map it
-                                if str(domain_chain).isdigit():
-                                    chain_key = molecule.idx_to_label_asym_id_map.get(int(domain_chain))
-                                else:
-                                    # It's already an author chain ID
-                                    chain_key = domain_chain
-                            
-                            if not chain_key:
-                                chain_key = str(domain_chain)
-                            
-                            if chain_key in molecule.chain_residue_ranges:
-                                min_res, max_res = molecule.chain_residue_ranges[chain_key]
-                                if domain.start == min_res and domain.end == max_res:
-                                    # This is a full chain copy, skip it here (will be added as separate chain)
-                                    continue
-                    
+                    # Skip anything that belongs to a chain copy - those get
+                    # their own chain-level rows further down.
+                    if chain_copy_group_key(molecule, domain_id, domain) is not None:
+                        continue
+
                     # Check if domain belongs to this chain
                     domain_chain_id = getattr(domain, 'chain_id', None)
                     
@@ -1963,60 +1963,86 @@ def build_outliner_hierarchy(context=None):
 
                         domain_item.tooltip = "\n".join(tooltip_parts)
             
-            # After processing all regular chains, add chain copies as separate chain items
-            # These are full-chain domain copies that should appear at the chain level
-            for domain_id, domain in molecule.domains.items():
-                if hasattr(domain, 'is_copy') and domain.is_copy:
-                    # Check if this is a full chain copy
-                    if hasattr(molecule, 'chain_residue_ranges'):
-                        # Get the correct chain key for looking up ranges
-                        domain_chain = domain.chain_id
-                        chain_key = None
-                        
-                        # Try to map to the correct key in chain_residue_ranges
-                        if hasattr(molecule, 'idx_to_label_asym_id_map'):
-                            # If domain.chain_id is numeric, map it
-                            if str(domain_chain).isdigit():
-                                chain_key = molecule.idx_to_label_asym_id_map.get(int(domain_chain))
-                            else:
-                                # It's already an author chain ID
-                                chain_key = domain_chain
-                        
-                        if not chain_key:
-                            chain_key = str(domain_chain)
-                        
-                        if chain_key in molecule.chain_residue_ranges:
-                            min_res, max_res = molecule.chain_residue_ranges[chain_key]
-                            if domain.start == min_res and domain.end == max_res:
-                                # This is a full chain copy - add it as a chain-level item
-                                chain_copy_item = scene.outliner_items.add()
-                                chain_copy_item.item_type = 'CHAIN'
-                                chain_copy_item.item_id = domain_id  # Use domain_id as the item_id
-                                chain_copy_item.parent_id = molecule_id
-                                chain_copy_item.name = domain.name  # e.g., "1 Chain A"
-                                chain_copy_item.chain_id = str(domain.chain_id)
-                                chain_copy_item.indent_level = 1
-                                chain_copy_item.icon = 'LINKED'
+            # After processing all regular chains, add chain copies as chain
+            # items of their own. A chain copy is a *group*: copying a chain
+            # that has been split duplicates every one of its domains, and
+            # they belong under one row (expandable, like the chain they were
+            # copied from) rather than scattered through it.
+            for _group_id, members in chain_copy_groups(molecule):
+                primary_id, primary = members[0]
+                chain_copy_item = scene.outliner_items.add()
+                chain_copy_item.item_type = 'CHAIN'
+                chain_copy_item.item_id = primary_id  # Use domain_id as the item_id
+                chain_copy_item.parent_id = molecule_id
+                # The group carries the copy's name ("Chain A 1"); copies made
+                # before groups existed carry it on the domain itself.
+                chain_copy_item.name = (getattr(primary, 'copy_group_name', '')
+                                        or primary.name)
+                chain_copy_item.chain_id = str(primary.chain_id)
+                chain_copy_item.indent_level = 1
+                chain_copy_item.icon = 'LINKED'
+                chain_copy_item.has_domains = len(members) > 1
 
-                                # Safely get object name and visibility
-                                if is_object_valid(domain.object):
-                                    chain_copy_item.object_name = domain.object.name
-                                    try:
-                                        chain_copy_item.is_visible = not domain.object.hide_get(view_layer=context.view_layer)
-                                    except Exception:
-                                        chain_copy_item.is_visible = True
-                                else:
-                                    chain_copy_item.object_name = ""
-                                    chain_copy_item.is_visible = True
+                # A copy that is one domain IS its object; a split copy has no
+                # single object, so it resolves through its members instead
+                # (get_chain_objects).
+                copy_object = primary.object if len(members) == 1 else None
+                if is_object_valid(copy_object):
+                    chain_copy_item.object_name = copy_object.name
+                    try:
+                        chain_copy_item.is_visible = not copy_object.hide_get(view_layer=context.view_layer)
+                    except Exception:
+                        chain_copy_item.is_visible = True
+                else:
+                    chain_copy_item.object_name = ""
+                    chain_copy_item.is_visible = True
 
-                                chain_copy_item.chain_start = domain.start
-                                chain_copy_item.chain_end = domain.end
-                                
-                                # Restore selection and expansion states
-                                if domain_id in item_selection_states:
-                                    chain_copy_item.is_selected = item_selection_states[domain_id]
-                                if domain_id in item_expansion_states:
-                                    chain_copy_item.is_expanded = item_expansion_states[domain_id]
+                chain_copy_item.chain_start = min(m.start for _i, m in members)
+                chain_copy_item.chain_end = max(m.end for _i, m in members)
+
+                # Restore selection and expansion states
+                if primary_id in item_selection_states:
+                    chain_copy_item.is_selected = item_selection_states[primary_id]
+                if primary_id in item_expansion_states:
+                    chain_copy_item.is_expanded = item_expansion_states[primary_id]
+
+                copy_tooltip = [
+                    f"Protein: {getattr(molecule, 'name', molecule.identifier)}",
+                    f"Chain copy: {chain_copy_item.name}",
+                    f"Chain Residues: {chain_copy_item.chain_start}-{chain_copy_item.chain_end}",
+                ]
+                chain_copy_item.tooltip = "\n".join(copy_tooltip)
+
+                # The pieces of a split chain's copy, listed under it.
+                if not (chain_copy_item.has_domains and chain_copy_item.is_expanded):
+                    continue
+                for member_id, member in members:
+                    domain_item = scene.outliner_items.add()
+                    domain_item.item_type = 'DOMAIN'
+                    domain_item.item_id = member_id
+                    domain_item.parent_id = chain_copy_item.item_id
+                    domain_item.name = member.name
+                    domain_item.object_name = (member.object.name
+                                               if is_object_valid(member.object) else "")
+                    domain_item.domain_start = getattr(member, 'start', 0)
+                    domain_item.domain_end = getattr(member, 'end', 0)
+                    domain_item.indent_level = 2
+                    domain_item.icon = 'GROUP_VERTEX'
+                    if is_object_valid(member.object):
+                        try:
+                            domain_item.is_visible = not member.object.hide_get(
+                                view_layer=context.view_layer)
+                        except Exception:
+                            domain_item.is_visible = True
+                    else:
+                        domain_item.is_visible = True
+                    if member_id in item_selection_states:
+                        domain_item.is_selected = item_selection_states[member_id]
+                    domain_item.tooltip = "\n".join([
+                        f"Protein: {getattr(molecule, 'name', molecule.identifier)}",
+                        f"Chain copy: {chain_copy_item.name}",
+                        f"Domain Residues: {domain_item.domain_start}-{domain_item.domain_end}",
+                    ])
     
     # Add membrane items — top-level rows for each ``pb_is_membrane`` root,
     # placed after the molecules so the user gets a single combined list.

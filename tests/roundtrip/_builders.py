@@ -189,6 +189,42 @@ def build_chain_rename():
         f"chain renames were not stored before saving: {stored}")
 
 
+def build_chain_copy():
+    """A copy of a chain that has been split into domains.
+
+    A chain copy is not an object property: it is a set of domains tied
+    together by ``copy_group_id``, and the outliner reads that to decide
+    whether they are a chain of their own or ordinary domains of the chain
+    they were copied from. Lose it on reload and the copy does not merely look
+    wrong - it folds back into its source chain, which then reports twice the
+    domains it has.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    scene = bpy.context.scene
+    scene.selected_molecule_id = mid
+    assert H.split_domain_from_outliner(mid, "A", 1, 60) == {"FINISHED"}
+    _build_outliner()
+
+    from proteinblender.utils.chain_utils import chain_token_from_item
+
+    row = next(r for r in _chain_rows(mid) if r.name == "Chain A")
+    assert bpy.ops.molecule.copy_chain(
+        'EXEC_DEFAULT', molecule_id=mid,
+        chain_id=chain_token_from_item(row)) == {'FINISHED'}
+
+    mol = H.sm().molecules[mid]
+    copies = [d for d in mol.domains.values()
+              if getattr(d, "copy_group_id", "")]
+    assert len(copies) == 2, (
+        f"copying a split chain should copy both domains, copied {len(copies)}")
+    assert len({d.copy_group_id for d in copies}) == 1, \
+        "the copied domains did not end up in one chain copy"
+
+    _build_outliner()
+    copy_rows = [r for r in _chain_rows(mid) if r.has_domains and r.name.endswith(" 1")]
+    assert len(copy_rows) == 1, "the chain copy has no chain row of its own"
+
+
 def build_pivots():
     """Non-default pivots on several domains.
 
@@ -651,6 +687,7 @@ BUILDERS = {
     "biological_assembly": build_biological_assembly,
     "domains": build_domains,
     "chain_rename": build_chain_rename,
+    "chain_copy": build_chain_copy,
     "pivots": build_pivots,
     "keyframes": build_keyframes,
     "poses": build_poses,
@@ -675,6 +712,7 @@ BUILDER_SUBSYSTEMS = {
     "biological_assembly": ("core", "operators", "panels"),
     "domains": ("core", "operators", "panels", "addon"),
     "chain_rename": ("core", "panels"),
+    "chain_copy": ("core", "operators", "utils"),
     "pivots": ("core",),
     "keyframes": ("operators", "utils"),
     "poses": ("properties", "operators"),

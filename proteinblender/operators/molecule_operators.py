@@ -7,7 +7,7 @@ from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy
                                    delete_molecule_if_empty,
                                    molecule_would_be_emptied,
                                    prune_emptied_puppets)
-from ..utils.chain_utils import chain_match_tokens
+from ..utils.chain_utils import chain_match_tokens, copy_group_members
 from ..core import domain_space
 
 class MOLECULE_PB_OT_delete(Operator):
@@ -576,10 +576,35 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         ``self.chain_id`` arrives as the chain *index* ("2") from the outliner
         row while domains store the chain *letter* ("D"); match on any of the
         chain's identity forms.
+
+        A chain *copy*'s row identifies itself by its primary domain id
+        instead. It is still one chain-level thing to delete, so it resolves
+        to every piece of that copy - deleting the copy of a split chain must
+        not leave its other halves behind.
         """
+        domain = molecule.domains.get(self.chain_id)
+        if domain is not None:
+            group_id = getattr(domain, 'copy_group_id', '')
+            if group_id:
+                return [member_id for member_id, _member
+                        in copy_group_members(molecule, group_id)]
+            return [self.chain_id]
+
         chain_tokens = chain_match_tokens(molecule, self.chain_id)
         return [domain_id for domain_id, domain in molecule.domains.items()
                 if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens]
+
+    def _display_name(self, molecule):
+        """What to call this row in a message.
+
+        ``chain_id`` is a chain index ("2") or, for a chain copy, a domain id -
+        neither belongs in a report the user reads.
+        """
+        domain = molecule.domains.get(self.chain_id) if molecule else None
+        if domain is not None:
+            return (getattr(domain, 'copy_group_name', '')
+                    or getattr(domain, 'name', '') or self.chain_id)
+        return f"chain {self.chain_id}"
 
     def invoke(self, context, event):
         # Deleting the protein's last chain deletes the protein itself, so say
@@ -606,10 +631,11 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         # Capture state for undo (reuse existing pattern)
         scene_manager.refresh_domain_refs_before_destructive_op(self.molecule_id)
 
+        label = self._display_name(molecule)
         domains_to_delete = self._domains_in_chain(molecule)
 
         if not domains_to_delete:
-            self.report({'WARNING'}, f"No domains found for chain {self.chain_id}")
+            self.report({'WARNING'}, f"No domains found for {label}")
             return {'CANCELLED'}
 
         # Delete each domain using cleanup (reuse existing cleanup method)
@@ -621,15 +647,16 @@ class MOLECULE_PB_OT_delete_chain(Operator):
             del molecule.domains[domain_id]
 
         # Remove chain from puppet memberships
-        self._remove_chain_from_puppets(context, self.molecule_id, self.chain_id)
+        self._remove_chain_from_puppets(context, self.molecule_id, self.chain_id,
+                                        domains_to_delete)
 
         # A protein with no chains left is not a protein any more: delete it
         # outright so nothing (puppets, poses, keyframes, linkers) is left
         # holding on to an empty one.
         prune_emptied_puppets(context)
         if delete_molecule_if_empty(context, self.molecule_id):
-            self.report({'INFO'}, f"Deleted chain {self.chain_id} - the "
-                                  "protein's last, so it was deleted too")
+            self.report({'INFO'}, f"Deleted {label} - the protein's last, "
+                                  "so it was deleted too")
             return {'FINISHED'}
 
         # Rebuild outliner (reuse existing function)
@@ -642,26 +669,20 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         except Exception:
             pass
 
-        self.report({'INFO'}, f"Deleted chain {self.chain_id} and {len(domains_to_delete)} domain(s)")
+        self.report({'INFO'}, f"Deleted {label} and {len(domains_to_delete)} domain(s)")
         return {'FINISHED'}
 
-    def _remove_chain_from_puppets(self, context, molecule_id, chain_id):
-        """Remove chain from any puppet group memberships"""
+    def _remove_chain_from_puppets(self, context, molecule_id, chain_id,
+                                   domain_ids_in_chain):
+        """Remove chain from any puppet group memberships.
+
+        ``domain_ids_in_chain`` is captured before the deletion - by the time
+        this runs the domains are gone from the molecule, so they can no
+        longer be looked up. A chain copy's row is a domain id rather than a
+        ``<molecule>_chain_<n>`` id, and it reaches puppets through that list.
+        """
         # The chain's outliner ID is in the format "molecule_id_chain_X"
         chain_outliner_id = f"{molecule_id}_chain_{chain_id}"
-
-        # Also check for individual domain IDs that might be in puppets
-        scene_manager = ProteinBlenderScene.get_instance()
-        molecule = scene_manager.molecules.get(molecule_id)
-        if not molecule:
-            return
-
-        # Collect all domain IDs for this chain (index/letter agnostic)
-        chain_tokens = chain_match_tokens(molecule, chain_id)
-        domain_ids_in_chain = []
-        for domain_id, domain in molecule.domains.items():
-            if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens:
-                domain_ids_in_chain.append(domain_id)
 
         # Remove from puppet memberships
         for item in context.scene.outliner_items:

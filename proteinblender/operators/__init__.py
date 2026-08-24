@@ -18,6 +18,7 @@ from .operator_import_local import MOLECULE_OT_import_local
 from .selection_operators import MOLECULE_PB_OT_select_object
 from .domain_operators import (
     MOLECULE_PB_OT_copy_domain,
+    MOLECULE_PB_OT_copy_chain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_select_keyframe,
@@ -100,6 +101,7 @@ CLASSES = (
     MOLECULE_PB_OT_duplicate_protein,
     MOLECULE_PB_OT_create_domain,
     MOLECULE_PB_OT_copy_domain,
+    MOLECULE_PB_OT_copy_chain,
     MOLECULE_PB_OT_delete_domain,
     MOLECULE_PB_OT_keyframe_protein,
     MOLECULE_PB_OT_select_keyframe,
