@@ -421,6 +421,28 @@ on a membrane whose typical gap was 0.28 nm.
   on the molecule and all four chain objects coming back selected, and the UI
   one on `left the active tool at builtin.move`.
 
+- **"Snap Protein Pivot to Center" put the centre outside the protein.**
+  `snap_protein_pivot_center` averaged `obj.matrix_world @ corner` over
+  `obj.bound_box`, with a comment claiming `bound_box` was evaluated geometry
+  and therefore already pivot-applied. It is not: it is the *raw* mesh's
+  bounds, and a molecule object has no evaluated bounds of its own to borrow -
+  it evaluates to an **empty** point cloud, because the atoms are drawn by its
+  chain domains. Raw bounds mapped with `matrix_world` are off by exactly the
+  pivot (CLAUDE.md's first silent-failure rule), which on 1ubq put the "centre"
+  at x = 0.305 for a molecule spanning [-0.150, +0.150] - twice its half-width
+  outside itself. Fixed by mapping the corners with
+  `domain_space.local_to_world`.
+  It survived because the only assertion on it was that the result was
+  *finite*. Now guarded by
+  `test_operator_surface.py::test_snap_parent_pivot_center_lands_inside_the_molecule`
+  and its live twin, both measuring Blender's own evaluated point-cloud atoms
+  (`helpers.evaluated_atom_positions`) rather than anything the add-on derives.
+  Verified red pre-fix with that exact 0.305-vs-0.150 signature in both lanes.
+  The new helper also replaces `eval_positions` for molecular objects, where
+  `to_mesh()` returns zero vertices and reductions over the empty array raised
+  instead of failing an assertion - which is how the live test that should have
+  caught this had been dying before it asserted anything.
+
 - **`outliner_select` never reached the viewport without a UI area.**
   Its redraw tail called `context.area.tag_redraw()` unguarded, and that tail
   sits *before* the `sync_outliner_to_blender_selection` call - so for any

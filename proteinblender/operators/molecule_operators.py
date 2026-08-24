@@ -68,10 +68,16 @@ class MOLECULE_PB_OT_snap_protein_pivot_center(bpy.types.Operator):
             return {'CANCELLED'}
         obj = molecule.object
         try:
-            # bound_box is the evaluated geometry's bounds in local space, so it
-            # already has the pivot applied - map it with matrix_world directly
-            # rather than through domain_space.local_to_world.
-            corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+            # bound_box is the bounds of the object's *raw* mesh, which has not
+            # been through the geometry-nodes pivot - a molecule object has no
+            # evaluated bounds of its own to borrow, because it evaluates to an
+            # empty point cloud and the atoms are drawn by its chain domains.
+            # So map the corners with domain_space.local_to_world, not with
+            # matrix_world: the latter is off by exactly the pivot, which put
+            # this "centre" outside the molecule entirely (CLAUDE.md's first
+            # silent-failure rule).
+            corners = [domain_space.local_to_world(obj, Vector(c))
+                       for c in obj.bound_box]
             center = sum(corners, Vector()) / len(corners)
             if not domain_space.set_pivot_world(obj, center):
                 self.report({'ERROR'}, "Failed to snap pivot.")

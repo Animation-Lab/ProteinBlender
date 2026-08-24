@@ -49,6 +49,40 @@ def test_snap_parent_pivot_center_is_finite(scene, sm, single_chain):
 
 
 @pytest.mark.integration
+def test_snap_parent_pivot_center_lands_inside_the_molecule(scene, sm,
+                                                            single_chain):
+    """A "centre" outside the thing it centres is wrong however it was reached.
+
+    Ground truth is Blender's own evaluated geometry - the point-cloud atoms it
+    drew, mapped by each instance's ``matrix_world`` - so nothing here shares a
+    code path with the operator. That matters: the operator averaged
+    ``obj.matrix_world @ corner`` over ``obj.bound_box``, and ``bound_box`` is
+    the *raw* mesh's bounds, which have not been through the geometry-nodes
+    pivot. The two errors compose into a centre displaced by exactly the pivot,
+    and asserting only that the result is finite never noticed.
+    """
+    import numpy as np
+
+    molecule = sm.molecules[single_chain]
+    objects = [molecule.object] + [d.object for d in molecule.domains.values()
+                                   if d.object]
+
+    assert bpy.ops.molecule.snap_protein_pivot_center(
+        molecule_id=single_chain) == {"FINISHED"}
+    bpy.context.view_layer.update()
+
+    atoms = H.evaluated_atom_positions(objects)
+    assert len(atoms) > 0, "the molecule evaluated to no drawable atoms"
+
+    low, high = atoms.min(axis=0), atoms.max(axis=0)
+    centre = np.array(molecule.object.matrix_world.translation)
+    for axis in range(3):
+        assert low[axis] <= centre[axis] <= high[axis], (
+            f"the 'centre' pivot fell outside the molecule on axis {axis}: "
+            f"{centre[axis]} is not within [{low[axis]}, {high[axis]}]")
+
+
+@pytest.mark.integration
 def test_initialize_domain_temp_name_is_observable(scene, sm, single_chain):
     molecule = sm.molecules[single_chain]
     domain_id, domain = next(iter(molecule.domains.items()))

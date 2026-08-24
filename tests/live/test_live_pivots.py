@@ -356,10 +356,12 @@ def test_snap_pivot_to_residue_moves_the_origin_without_moving_the_atoms(
     of the same two properties - the render must not move, and START and END
     must reach two different places.
 
-    The START/END separation is asserted against the domain's own residue span
-    read off the outliner row (``domain_start``/``domain_end``), which is data
-    rather than a derivation: a domain spanning many residues cannot have its
-    first and last alpha carbons at the same point.
+    The START/END separation is asserted against chain A's residue span read
+    out of ``1atn.pdb`` with biotite, which no add-on code touches: a chain
+    spanning many residues cannot have its first and last alpha carbons at the
+    same point. (It used to be read off a DOMAIN outliner row, but an unsplit
+    chain has no such row - it draws as a CHAIN - so that lookup found nothing
+    and the test died before it asserted anything.)
     """
     setup = blender.call("""
 scene = bpy.context.scene
@@ -370,17 +372,16 @@ scene.selected_molecule_id = "1atn"
 
 domain_id, domain = next(
     (did, d) for did, d in molecule.domains.items() if d.chain_id == "A")
-row = next(i for i in scene.outliner_items
-           if i.item_type == 'DOMAIN' and i.item_id == domain_id)
+residues = sorted(H.pdb_amino_acid_cas("1atn.pdb", "A"))
 return {
     "domain_id": domain_id,
     "object_name": domain.object.name,
-    "span": [int(row.domain_start), int(row.domain_end)],
+    "span": [residues[0], residues[-1]],
 }
 """)
     assert setup["span"][1] > setup["span"][0] + 10, (
-        "fixture changed: the chain-A domain no longer spans enough residues "
-        "for START and END to be meaningfully different")
+        "fixture changed: chain A no longer spans enough residues for START "
+        "and END to be meaningfully different")
 
     blender.call("return R.frame_all()")
     before = _capture(blender, "before")
@@ -424,34 +425,45 @@ def test_snap_protein_pivot_center_is_invisible_and_lands_inside_the_molecule(
         blender, single_chain):
     """``molecule.snap_protein_pivot_center`` moves the whole protein's origin.
 
-    Ground truth is the evaluated bounding box read back from Blender: a
-    "centre" that falls outside the geometry it is meant to be the centre of is
-    wrong regardless of how it was computed. That is an invariant the operator's
-    own arithmetic cannot satisfy vacuously, unlike re-running its bound_box
-    average and comparing it to itself.
+    Ground truth is what Blender itself evaluated and drew: the atoms come back
+    as point-cloud instances off the depsgraph, mapped by each instance's own
+    ``matrix_world``. A "centre" that falls outside the geometry it is meant to
+    be the centre of is wrong regardless of how it was computed, and nothing in
+    that reading goes through the add-on's coordinate helpers.
+
+    It has to be read that way. ``helpers.eval_positions`` (``to_mesh()``)
+    returns *zero* vertices for a molecule or domain object - MolecularNodes
+    emits a point cloud, not a mesh - and the molecule object itself evaluates
+    to an empty one: the atoms are drawn by its chain domains. Measuring the
+    parent alone therefore measured nothing at all.
     """
     blender.call("return R.frame_all()")
     before = _capture(blender, "before")
     assert before["covered"] > 0
 
     result = blender.call("""
-manager = H.sm()
-molecule = manager.molecules["1ubq"]
+molecule = H.sm().molecules["1ubq"]
 obj = molecule.object
 with R.view3d_override():
     outcome = bpy.ops.molecule.snap_protein_pivot_center(molecule_id="1ubq")
 bpy.context.view_layer.update()
 
-# Evaluated positions already have the pivot applied (CLAUDE.md): they must not
-# be re-mapped through matrix_world, and they are read here purely as data.
-positions = H.eval_positions(obj)
+# Every object the protein draws through: the molecule object and its domains.
+drawn = [obj] + [d.object for d in molecule.domains.values() if d.object]
+world = H.evaluated_atom_positions(drawn)
+if not len(world):
+    raise AssertionError(
+        "the protein evaluated to no drawable atoms, so there is nothing to "
+        "measure the pivot against")
 return {
     "result": sorted(outcome),
+    "atoms": int(len(world)),
     "origin": [float(v) for v in obj.matrix_world.translation],
-    "bbox_min": [float(v) for v in positions.min(axis=0)],
-    "bbox_max": [float(v) for v in positions.max(axis=0)],
+    "bbox_min": [float(v) for v in world.min(axis=0)],
+    "bbox_max": [float(v) for v in world.max(axis=0)],
 }
 """)
+    assert result["atoms"] > 0
     assert result["result"] == ["FINISHED"]
 
     after = _capture(blender, "after")

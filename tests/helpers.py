@@ -251,10 +251,53 @@ def split_domain_from_outliner(molecule_id, chain_id, start, end,
 # Geometry snapshot support (for syrupy regression of GN / mesh output)
 # --------------------------------------------------------------------------
 
+def evaluated_atom_positions(objects):
+    """World-space positions of the atoms Blender actually evaluated and drew.
+
+    ``eval_positions`` is useless for anything molecular: MolecularNodes emits a
+    **point cloud**, so ``to_mesh()`` hands back zero vertices for a molecule or
+    a domain, and a molecule *object* evaluates to an empty point cloud of its
+    own - the atoms are drawn by its chain domains, not by the parent. A caller
+    that measured the parent alone measured nothing at all, and reductions over
+    the empty array raise rather than fail an assertion.
+
+    Pass every object the item draws through (a molecule object *and* its
+    domains) and get back an ``(N, 3)`` array. This reads Blender's own
+    evaluated output, mapped by each instance's own ``matrix_world``, so it goes
+    nowhere near the add-on's coordinate helpers - which is what makes it usable
+    as ground truth for pivot placement.
+    """
+    import bpy
+    import numpy as np
+
+    wanted = {getattr(o, "name", o) for o in objects}
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    chunks = []
+    for instance in depsgraph.object_instances:
+        parent = instance.parent
+        if parent is None or parent.original.name not in wanted:
+            continue
+        data = instance.object.data
+        count = len(getattr(data, "points", ()))
+        if not count:
+            continue
+        local = np.zeros(count * 3)
+        data.attributes["position"].data.foreach_get("vector", local)
+        matrix = np.array(instance.matrix_world)
+        chunks.append(local.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3])
+    if not chunks:
+        return np.zeros((0, 3))
+    return np.concatenate(chunks)
+
+
 def eval_positions(obj):
     """Evaluated vertex positions of an object (after modifiers/GN), as a
     numpy (N, 3) float array. The single most useful geometry regression
-    signal — feed it to the ``geo_snapshot`` fixture."""
+    signal — feed it to the ``geo_snapshot`` fixture.
+
+    Molecules and domains are the exception: they evaluate to a point cloud,
+    not a mesh, so this returns an empty array for them. Use
+    :func:`evaluated_atom_positions` there."""
     import bpy
     import numpy as np
     deps = bpy.context.evaluated_depsgraph_get()
