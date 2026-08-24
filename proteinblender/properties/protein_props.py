@@ -6,6 +6,17 @@ from bpy.types import PropertyGroup
 # We no longer use row selection - only checkbox selection is allowed
 # This prevents confusion between row highlighting and actual selection state
 
+def _on_row_color_edited(item, context):
+    """A colour picked on an outliner row's swatch: apply it to the item.
+
+    The logic lives in core.outliner_colors (with a guard that keeps swatch
+    *seeding* from re-applying colours); imported lazily because properties
+    register before the rest of the package is importable.
+    """
+    from ..core.outliner_colors import apply_row_color
+    apply_row_color(item, context)
+
+
 class ProteinOutlinerItem(PropertyGroup):
     """Unified item for protein outliner display"""
     item_type: EnumProperty(
@@ -54,6 +65,18 @@ class ProteinOutlinerItem(PropertyGroup):
         name="Visible",
         description="Whether this item is visible",
         default=True
+    )
+
+    # The colour swatch on protein / chain / domain rows. Seeded from what the
+    # item currently looks like (core.outliner_colors.sync_outliner_colors);
+    # editing it recolours the item live. Shows a neutral grey when the item's
+    # parts disagree.
+    row_color: FloatVectorProperty(
+        name="Color",
+        description="Color of this item. Click to recolor it",
+        subtype='COLOR', size=4, min=0.0, max=1.0,
+        default=(0.5, 0.5, 0.5, 1.0),
+        update=_on_row_color_edited
     )
     
     # Display properties

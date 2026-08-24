@@ -2147,13 +2147,19 @@ class MoleculeWrapper:
             color_emit = None
             set_color = None
             
+            # The colour node is matched by tree-name *prefix*: the first
+            # setup renames its tree to "Color Common_<domain_id>" to make it
+            # unique, so an exact match finds nothing on a later re-range -
+            # which then created a second colour node with a fresh random
+            # colour, silently repainting the domain every time its range was
+            # edited.
             for node in domain.node_group.nodes:
-                if (node.bl_idname == 'GeometryNodeGroup' and 
-                    node.node_tree and 
-                    node.node_tree.name == "Color Common"):
+                if (node.bl_idname == 'GeometryNodeGroup' and
+                    node.node_tree and
+                    node.node_tree.name.startswith("Color Common")):
                     color_emit = node
-                elif (node.bl_idname == 'GeometryNodeGroup' and 
-                      node.node_tree and 
+                elif (node.bl_idname == 'GeometryNodeGroup' and
+                      node.node_tree and
                       node.node_tree.name == "Set Color"):
                     set_color = node
             
@@ -2585,8 +2591,12 @@ class MoleculeWrapper:
             if self._write_color_to_active_driver(domain, color):
                 return True
 
+            # Matched by prefix, not equality: a range update rebuilds the
+            # domain's selection nodes and the re-added colour node comes back
+            # name-collided as "Color Common.001". An exact match then finds
+            # nothing and the colour write silently does nothing.
             for node in domain.node_group.nodes:
-                if node.name == "Color Common":
+                if node.name.startswith("Color Common"):
                     # Check if this Color Common node has a unique node tree for this domain
                     if (node.bl_idname == 'GeometryNodeGroup' and node.node_tree and
                         not node.node_tree.name.endswith(f"_{domain_id}")):

@@ -967,9 +967,21 @@ def _shader_shape(material):
 
 
 def _domain_color(obj):
-    """The domain's colour, read from the node graph rather than the model."""
-    return tuple(_domain_tree(obj).nodes["Color Common"].inputs["Carbon"]
-                 .default_value)
+    """The domain's colour, read from the node graph rather than the model.
+
+    Resolved through the link that actually feeds Set Color's Color input, so
+    it keeps reading truth after a range update renames the colour node
+    ("Color Common.001") or a recolour relinks it to "Custom Combine Color".
+    """
+    tree = _domain_tree(obj)
+    set_color = next(n for n in tree.nodes if n.type == 'GROUP' and n.node_tree
+                     and 'Set Color' in n.node_tree.name)
+    color_input = next(s for s in set_color.inputs if "Color" in s.name)
+    driver = next(l.from_node for l in tree.links if l.to_socket == color_input)
+    if driver.name == "Custom Combine Color":
+        return tuple(driver.inputs[c].default_value
+                     for c in ("Red", "Green", "Blue")) + (1.0,)
+    return tuple(driver.inputs["Carbon"].default_value)
 
 
 def _spec(entry, start, end):
@@ -994,40 +1006,51 @@ def _split_in_two(mid):
 
 
 @pytest.mark.integration
-def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
-    """Sizing a domain isolates its chain, and closing the dialog puts it back.
+def test_preview_ghosts_the_rest_of_the_scene_and_restores_it_afterwards(scene):
+    """Sizing a domain ghosts everything else, and closing the dialog reverts.
 
-    The chain being edited stays whole - the domain under the cursor plus its
-    neighbours for context - while everything else in the scene is hidden. This
-    is the one piece of the dialog that touches the scene *before* the user
-    confirms, so a leak is highly visible: the user would be left looking at a
-    scene missing most of its contents with no idea why. Ground truth is the
-    visibility flags and node ranges captured before isolating, so the
-    assertions cannot move with a bug in the restore code.
+    Everything visible outside the edited chain - the rest of the protein AND
+    other proteins - stays on screen but drops to the ghost material, so the
+    piece being sized is read against everything it lives amongst. Nothing
+    visible is hidden. This is the one piece of the dialog that touches the
+    scene *before* the user confirms, so a leak is highly visible. Ground
+    truth is the visibility flags, material names and node ranges captured
+    before previewing, so the assertions cannot move with a bug in the
+    restore code.
     """
+    H.import_local("1ubq.pdb", "1ubq")  # a second, unrelated protein
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
     mol, token, low, high, layout = _split_in_two(mid)
 
     geometry = [o for o in bpy.data.objects if o.type in ds._ISOLATABLE_TYPES]
-    assert len(geometry) > 3, "need several objects for isolation to mean anything"
+    assert len(geometry) > 4, "need several objects for ghosting to mean anything"
     before_hidden = {o.name: o.hide_viewport for o in geometry}
+    before_material = {o.name: _style_material_name(o) for o in geometry}
+    before_visible = {name for name, hidden in before_hidden.items() if not hidden}
 
     first_obj = mol.domains[layout[0].domain_id].object
     second_obj = mol.domains[layout[1].domain_id].object
     chain_objects = {first_obj.name, second_obj.name}
-    assert chain_objects < set(before_hidden), (
-        "the scene holds nothing outside the edited chain to hide")
+    context_objects = before_visible - chain_objects
+    assert context_objects, (
+        "the scene holds nothing visible outside the edited chain to ghost")
     before_range = {o.name: _shown_range(o) for o in (first_obj, second_obj)}
 
-    # Size the FIRST domain. Its chain stays whole; nothing else survives.
+    # Size the FIRST domain. Everything that was visible stays visible.
     ds.preview_layout(bpy.context, mol, token,
                       [_spec(layout[0], low + 5, low + 25),
                        _spec(layout[1], low + 26, high)], 0)
     visible = {o.name for o in bpy.data.objects
                if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport}
-    assert visible == chain_objects, (
-        f"isolation should leave exactly the edited chain visible, left {visible}")
+    assert visible == before_visible, (
+        f"ghosting must not change what is visible: "
+        f"lost {before_visible - visible}, gained {visible - before_visible}")
+    # ...but everything outside the chain is ghosted, other proteins included.
+    for name in context_objects:
+        assert _style_material_name(bpy.data.objects[name]) == (
+            before_material[name] + ds._GHOST_SUFFIX), (
+            f"{name} is outside the edited chain and should be ghosted")
     assert _shown_range(first_obj) == (low + 5, low + 25)
     assert _shown_range(second_obj) == (low + 26, high), (
         "the rest of the chain is not showing the layout the user is heading to")
@@ -1038,14 +1061,13 @@ def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
                        _spec(layout[1], low + 41, high)], 0)
     assert _shown_range(first_obj) == (low + 5, low + 40)
 
-    # Moving to the SECOND domain sizes that one instead. Both stay visible:
-    # the chain is the context, only which domain is the subject changes.
+    # Moving to the SECOND domain sizes that one instead; visibility holds.
     ds.preview_layout(bpy.context, mol, token,
                       [_spec(layout[0], low, low + 49),
                        _spec(layout[1], low + 50, low + 60)], 1)
     visible = {o.name for o in bpy.data.objects
                if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport}
-    assert visible == chain_objects, (
+    assert visible == before_visible, (
         f"switching domains changed what is visible: {visible}")
     assert bpy.context.scene[ds._PREVIEW_OBJECT] == second_obj.name
 
@@ -1055,22 +1077,30 @@ def test_preview_isolates_the_chain_and_restores_everything_afterwards(scene):
                     if o.type in ds._ISOLATABLE_TYPES}
     assert after_hidden == before_hidden, (
         "the preview did not restore the original visibility")
+    for name in context_objects:
+        assert _style_material_name(bpy.data.objects[name]) == before_material[name], (
+            f"{name} was left wearing the preview's ghost material")
     # Every driven object gets its own range back, not just the last one.
     for obj in (first_obj, second_obj):
         assert _shown_range(obj) == before_range[obj.name], (
             f"the preview left {obj.name} showing a preview range")
     assert ds._PREVIEW_OBJECT not in bpy.context.scene, (
         "preview bookkeeping was left on the scene")
+    assert ds._PREVIEW_GHOSTED not in bpy.context.scene, (
+        "ghosting bookkeeping was left on the scene")
+    assert [m.name for m in bpy.data.materials
+            if m.name.endswith(ds._GHOST_SUFFIX)] == [], (
+        "the preview left its ghost materials in the file")
 
 
 @pytest.mark.integration
-def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
+def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
     """The edited domain is picked out of its chain, and both revert on close.
 
     Context is only useful if the subject still reads as the subject, so the
-    domain under the cursor is drawn solid and in the highlight colour while
-    its neighbours drop to the ghost material. Both are borrowed, not owned:
-    the domain's real colour and material have to come back, or the dialog
+    domain under the cursor stays solid - its own material, its own colour -
+    while its neighbours drop to the ghost material. The ghost is borrowed,
+    not owned: the neighbours' real material has to come back, or the dialog
     silently repaints the user's molecule.
     """
     mid = H.import_local("4hhb.pdb", "4hhb")
@@ -1083,7 +1113,7 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
                        for o in (first_obj, second_obj)}
     before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
     assert before_color[first_obj.name] != before_color[second_obj.name], (
-        "the fixture gave both domains the same colour, so a highlight that "
+        "the fixture gave both domains the same colour, so a colour that "
         "leaked to the neighbour would go unnoticed")
 
     ds.preview_layout(bpy.context, mol, token,
@@ -1095,11 +1125,11 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
     assert _style_material_name(second_obj) == (
         before_material[second_obj.name] + ds._GHOST_SUFFIX), (
         "the rest of the chain should be ghosted for context")
-    assert _domain_color(first_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4), (
-        "the domain being sized was not highlighted")
-    assert _domain_color(second_obj) == pytest.approx(
-        before_color[second_obj.name], abs=1e-4), (
-        "highlighting one domain repainted its neighbour")
+    for obj in (first_obj, second_obj):
+        assert _domain_color(obj) == pytest.approx(before_color[obj.name],
+                                                   abs=1e-4), (
+            f"previewing repainted {obj.name}; with no colour chosen every "
+            "domain keeps its own")
 
     # Sizing the other domain swaps which one is the subject, both ways round.
     ds.preview_layout(bpy.context, mol, token,
@@ -1108,10 +1138,6 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
     assert _style_material_name(first_obj) == (
         before_material[first_obj.name] + ds._GHOST_SUFFIX)
     assert _style_material_name(second_obj) == before_material[second_obj.name]
-    assert _domain_color(second_obj) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4)
-    assert _domain_color(first_obj) == pytest.approx(
-        before_color[first_obj.name], abs=1e-4), (
-        "the domain we stopped sizing kept the highlight colour")
 
     ds.restore_preview(bpy.context)
 
@@ -1124,6 +1150,43 @@ def test_preview_ghosts_the_chain_and_highlights_the_domain_being_sized(scene):
     assert [m.name for m in bpy.data.materials
             if m.name.endswith(ds._GHOST_SUFFIX)] == [], (
         "the preview left its ghost materials in the file")
+
+
+@pytest.mark.integration
+def test_preview_paints_row_colors_and_restores_the_real_ones(scene):
+    """A colour handed to the preview shows on its domain, and reverts on close.
+
+    This is the path the dialog's per-row swatches ride: picking a colour on a
+    row previews it on that row's domain immediately, and the domain's real
+    colour comes back when the dialog closes - committing the pick is a
+    separate, explicit step.
+    """
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    _build_outliner()
+    mol, token, low, high, layout = _split_in_two(mid)
+
+    first_obj = mol.domains[layout[0].domain_id].object
+    second_obj = mol.domains[layout[1].domain_id].object
+    before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
+
+    picked = (0.9, 0.1, 0.2, 1.0)
+    ds.preview_layout(bpy.context, mol, token,
+                      [_spec(layout[0], low, low + 40),
+                       _spec(layout[1], low + 41, high)], 0,
+                      colors=[picked, None])
+
+    assert _domain_color(first_obj) == pytest.approx(picked, abs=1e-4), (
+        "the picked colour did not reach the domain being sized")
+    assert _domain_color(second_obj) == pytest.approx(
+        before_color[second_obj.name], abs=1e-4), (
+        "a colour picked for one row repainted its neighbour")
+
+    ds.restore_preview(bpy.context)
+
+    for obj in (first_obj, second_obj):
+        assert _domain_color(obj) == pytest.approx(before_color[obj.name],
+                                                   abs=1e-4), (
+            f"{obj.name} was left wearing the previewed colour")
 
 
 @pytest.mark.integration
@@ -1152,6 +1215,7 @@ def test_a_chain_that_was_never_split_still_gets_ghosted_context(scene):
     assert len(layout) == 1, "the chain should import as a single domain"
     real = mol.domains[layout[0].domain_id].object
     real_range = _shown_range(real)
+    real_color = _domain_color(real)
 
     # What the dialog holds after the user sets the count to three: the first
     # row inherits the existing domain, the rest are pure intent.
@@ -1161,29 +1225,36 @@ def test_a_chain_that_was_never_split_still_gets_ghosted_context(scene):
                 domain_id=layout[0].domain_id if i == 0 else None)
              for i, (start, end) in enumerate(thirds)]
 
-    # Size the middle row - the one with no object of its own.
-    ds.preview_layout(bpy.context, mol, token, specs, 1)
+    # Size the middle row - the one with no object of its own - previewing a
+    # colour picked on it, the way the dialog's swatch does.
+    picked = (0.15, 0.5, 0.9, 1.0)
+    ds.preview_layout(bpy.context, mol, token, specs, 1,
+                      colors=[None, picked, None])
 
-    visible = [o for o in bpy.data.objects
-               if o.type in ds._ISOLATABLE_TYPES and not o.hide_viewport]
-    assert len(visible) == 3, (
+    drawn = [o for o in bpy.data.objects if not o.hide_viewport
+             and (o.name.startswith(ds._TEMP_PREFIX) or o.name == real.name)]
+    assert len(drawn) == 3, (
         f"every row should be drawn, but only these are: "
-        f"{[o.name for o in visible]}")
-    assert sorted(_shown_range(o) for o in visible) == sorted(
+        f"{[o.name for o in drawn]}")
+    assert sorted(_shown_range(o) for o in drawn) == sorted(
         (s.start, s.end) for s in specs), (
         "what is on screen does not tile the chain the layout describes")
 
-    ghosted = [o for o in visible
+    ghosted = [o for o in drawn
                if _style_material_name(o).endswith(ds._GHOST_SUFFIX)]
-    solid = [o for o in visible if o not in ghosted]
+    solid = [o for o in drawn if not
+             _style_material_name(o).endswith(ds._GHOST_SUFFIX)]
     assert len(solid) == 1, (
         f"exactly one domain should be solid, got {[o.name for o in solid]}")
     assert len(ghosted) == 2, "the rest of the chain should be ghosted"
     assert _shown_range(solid[0]) == (specs[1].start, specs[1].end), (
         "the solid domain is not the one being sized")
-    assert _domain_color(solid[0]) == pytest.approx(ds.HIGHLIGHT_COLOR, abs=1e-4), (
-        "the stand-in for a brand-new domain was not highlighted - its colour "
-        "group is probably still shared with the object it was copied from")
+    assert _domain_color(solid[0]) == pytest.approx(picked, abs=1e-4), (
+        "the picked colour never reached the stand-in for the new domain - "
+        "its colour group is probably still shared with the object it was "
+        "copied from")
+    assert _domain_color(real) == pytest.approx(real_color, abs=1e-4), (
+        "colouring the stand-in repainted the real domain it was copied from")
 
     ds.restore_preview(bpy.context)
 
@@ -1364,3 +1435,67 @@ def test_chain_rename_through_the_splitter_persists(scene):
     assert "Catalytic core" in stored.values()
     _build_outliner()
     assert _row_by_id(row_id).name == "Catalytic core"
+
+
+# --------------------------------------------------------------------------
+# Per-domain colours chosen in the dialog
+# --------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_committing_the_dialog_recolors_domains_with_their_chosen_colors(scene):
+    """A colour carried by the layout lands on its domain when OK is pressed.
+
+    Driven through layout_json's optional "color" field, the scripted
+    counterpart of the dialog rows' swatches - both feed the same apply path.
+    Ground truth is the colour node the renderer actually reads, not the
+    domain model's stored colour.
+    """
+    mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
+    mol = H.sm().molecules[mid]
+    low = max(1, pdb_min)
+    midpoint = (low + pdb_max) // 2
+
+    red = [0.8, 0.05, 0.1, 1.0]
+    green = [0.05, 0.7, 0.15, 1.0]
+    payload = json.dumps([
+        {"name": "Head", "start": low, "end": midpoint, "domain_id": "",
+         "color": red},
+        {"name": "Tail", "start": midpoint + 1, "end": pdb_max,
+         "domain_id": "", "color": green},
+    ])
+    assert bpy.ops.proteinblender.edit_chain_domains(
+        'EXEC_DEFAULT', item_id=chain_row.item_id, layout_json=payload,
+        chain_name=chain_row.name) == {'FINISHED'}
+
+    domains = _domains_on_chain(mol, letter)
+    head = next(d for d in domains.values() if d.name == "Head")
+    tail = next(d for d in domains.values() if d.name == "Tail")
+    assert _domain_color(head.object)[:3] == pytest.approx(red[:3], abs=1e-4), (
+        "the Head domain never received its chosen colour")
+    assert _domain_color(tail.object)[:3] == pytest.approx(green[:3], abs=1e-4), (
+        "the Tail domain never received its chosen colour")
+
+
+@pytest.mark.integration
+def test_a_layout_without_colors_leaves_the_domains_colors_alone(scene):
+    """Re-committing a layout with no colour choices must not repaint anything."""
+    mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
+    mol = H.sm().molecules[mid]
+    low = max(1, pdb_min)
+    midpoint = (low + pdb_max) // 2
+
+    _apply(chain_row, [("Head", low, midpoint, None),
+                       ("Tail", midpoint + 1, pdb_max, None)])
+    domains = _domains_on_chain(mol, letter)
+    before = {did: _domain_color(d.object) for did, d in domains.items()}
+
+    # Nudge the boundary, colour-free, and check every colour survives.
+    chain_row = _row_by_id(chain_row.item_id)
+    by_start = sorted(domains.items(), key=lambda kv: kv[1].start)
+    _apply(chain_row, [("Head", low, midpoint - 5, by_start[0][0]),
+                       ("Tail", midpoint - 4, pdb_max, by_start[1][0])])
+
+    for did, domain in _domains_on_chain(mol, letter).items():
+        assert _domain_color(domain.object) == pytest.approx(before[did],
+                                                             abs=1e-4), (
+            f"a colour-free layout edit repainted {domain.name}")

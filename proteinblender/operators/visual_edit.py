@@ -382,6 +382,11 @@ class VisualEditMixin:
                     domain.style = self.vs_style
 
     def _after_visual_edit(self, context):
+        # Keep the outliner's colour swatches pointing at what the items now
+        # look like - a dialog edit changes them out from under the rows.
+        from ..core.outliner_colors import sync_outliner_colors
+        sync_outliner_colors(context)
+
         for window in getattr(context.window_manager, "windows", []):
             for area in window.screen.areas:
                 if area.type in ('VIEW_3D', 'PROPERTIES'):

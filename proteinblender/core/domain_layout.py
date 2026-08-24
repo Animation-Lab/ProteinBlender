@@ -179,8 +179,8 @@ def retile_after_edit(specs: List[DomainSpec], index: int, chain_min: int,
     Two rules keep the result sane:
 
     * A domain never shrinks below one residue, and a boundary never drags
-      through the neighbour beyond it. Removing a neighbour is what Merge and
-      the row's X button are for; it should not be a side effect of dragging.
+      through the neighbour beyond it. Removing a neighbour is what Merge is
+      for; it should not be a side effect of dragging.
     * Pulling the first domain's start off the beginning of the chain (or the
       last domain's end off the end) leaves residues with no owner, so a new
       domain is created to hold them.

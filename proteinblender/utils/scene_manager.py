@@ -2191,5 +2191,14 @@ def build_outliner_hierarchy(context=None):
     # Re-enable selection sync
     selection_sync._update_in_progress = old_in_progress
 
+    # Seed the rows' colour swatches from what their items currently look
+    # like. Guarded: a colour-sync failure must not take the whole outliner
+    # rebuild down with it.
+    try:
+        from ..core.outliner_colors import sync_outliner_colors
+        sync_outliner_colors(context)
+    except Exception as exc:
+        print(f"build_outliner_hierarchy: colour sync failed: {exc}")
+
     if context.area:
         context.area.tag_redraw()

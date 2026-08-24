@@ -133,7 +133,11 @@ def register() -> None:
         unregister()
     except Exception as e:
         logger.debug(f"Unregister during startup: {e}")
-    
+
+    # Load the custom toolbar icons before any panel draws
+    from .utils import icons
+    icons.register()
+
     # Register classes
     for class_group in ALL_PB_CLASSES:
         for cls in class_group:
@@ -224,6 +228,13 @@ def unregister() -> None:
         bpy.app.timers.unregister(_finalize_workspace_callback)
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(_apply_workspace_context_callback):
         bpy.app.timers.unregister(_apply_workspace_context_callback)
+
+    # Drop the custom toolbar icons
+    try:
+        from .utils import icons
+        icons.unregister()
+    except Exception as e:
+        logger.debug(f"Failed to unregister icons: {e}")
 
     # Unregister persistent workspace handler
     try:

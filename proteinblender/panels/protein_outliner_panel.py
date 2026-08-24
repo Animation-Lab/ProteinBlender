@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import Panel, UIList, Operator
 from bpy.props import StringProperty
+from ..core.outliner_colors import row_has_swatch
 from ..utils.scene_manager import ProteinBlenderScene
 from ..utils.chain_utils import get_chain_objects, get_chain_domains, chain_token_from_item
 
@@ -134,7 +135,15 @@ class PROTEINBLENDER_UL_outliner(UIList):
         
         # Add some space before the controls
         row.separator()
-        
+
+        # Colour swatch — click it to recolour the protein, chain or domain
+        # on the spot, without opening its edit dialog. Seeded from what the
+        # item currently looks like; grey means its parts disagree.
+        if row_has_swatch(item):
+            swatch = row.row(align=True)
+            swatch.ui_units_x = 1.0
+            swatch.prop(item, "row_color", text="")
+
         # Handle different item types
         if item.item_type == 'PUPPET' and item.item_id == "puppets_separator":
             # Groups separator - no controls
@@ -158,11 +167,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 if chain_domains:
                     primary_domain_id, primary_domain = chain_domains[0]
                     is_chain_copy = getattr(primary_domain, 'is_copy', False)
-
-                    # Reset transform — acts on the chain's primary domain
-                    reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
-                    if reset_op:
-                        reset_op.domain_id = primary_domain_id
 
                     # Copy — duplicates the chain's primary domain. Same icon
                     # as the protein row's Duplicate: it is the same action at
@@ -204,11 +208,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 # Find which molecule this domain belongs to
                 for molecule_id, molecule in scene_manager.molecules.items():
                     if domain_id in molecule.domains:
-
-                        # Add reset transform button
-                        reset_op = row.operator("molecule.reset_domain_transform", text="", icon='OBJECT_ORIGIN', emboss=False)
-                        if reset_op:
-                            reset_op.domain_id = domain_id
 
                         # Add copy button (same icon as every other copy)
                         copy_op = row.operator("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
