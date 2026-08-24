@@ -442,6 +442,17 @@ on a membrane whose typical gap was 0.28 nm.
   `to_mesh()` returns zero vertices and reductions over the empty array raised
   instead of failing an assertion - which is how the live test that should have
   caught this had been dying before it asserted anything.
+  The same mistake had three more copies, in `molecule_wrapper`'s
+  bounding-box fallbacks: two in `_calculate_center_of_mass` and one in the
+  outliner row's **Center** button. Those fire only for a structure with no Cα
+  to average - a nucleic acid, or a ligand-only entry - which is why no fixture
+  ever reached them. All three now go through one `_bound_box_center` helper
+  that maps with `local_to_world`, and the branch is reached deterministically
+  by `test_proteins.py::test_center_protein_centres_a_molecule_with_no_alpha_carbons`,
+  which removes the `is_alpha_carbon` attribute (exactly the condition the
+  fallback tests for) and then measures against the evaluated atoms. Verified
+  red pre-fix: the centred origin sat at 0.0 for a molecule spanning
+  [-0.455, -0.154].
 
 - **`outliner_select` never reached the viewport without a UI area.**
   Its redraw tail called `context.area.tag_redraw()` unguarded, and that tail

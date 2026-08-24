@@ -1145,6 +1145,24 @@ class MoleculeWrapper:
             return None
     # --- End Moved Helper ---
 
+    @staticmethod
+    def _bound_box_center(obj) -> Optional[Vector]:
+        """World-space centre of *obj*'s bounding box, or None if it has none.
+
+        ``obj.bound_box`` is the bounds of the object's **raw** mesh, which has
+        not been through the geometry-nodes pivot - and a molecule object has no
+        evaluated bounds of its own to borrow, because it evaluates to an empty
+        point cloud and the atoms are drawn by its chain domains. So the corners
+        are mapped with ``domain_space.local_to_world``: ``matrix_world @ co``
+        is off by exactly the pivot, which is enough to put a "centre" outside
+        the molecule (CLAUDE.md's first silent-failure rule).
+        """
+        corners = list(obj.bound_box)
+        if not corners:
+            return None
+        world = [domain_space.local_to_world(obj, Vector(c)) for c in corners]
+        return sum(world, Vector()) / len(world)
+
     # --- Helper: Calculate Center of Mass ---
     def _calculate_center_of_mass(self, context, obj, chain_id=None, start_res=None, end_res=None):
         """
@@ -1187,11 +1205,12 @@ class MoleculeWrapper:
 
             # Check for required attributes
             if "is_alpha_carbon" not in attrs or "position" not in attrs:
-                # Fallback to bounding box center
-                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                if bbox:
-                    return sum(bbox, Vector()) / len(bbox)
-                return None
+                # Fallback to bounding box center. bound_box is the *raw*
+                # mesh's bounds, so map it with local_to_world like the
+                # alpha-carbon path below - matrix_world @ co is off by
+                # exactly the pivot. Nucleic acids and ligand-only
+                # structures reach this, and only this.
+                return self._bound_box_center(obj)
 
             # Get alpha carbon mask
             is_alpha_attr = attrs["is_alpha_carbon"]
@@ -1252,11 +1271,9 @@ class MoleculeWrapper:
                 alpha_positions = positions[is_alpha]
 
             if len(alpha_positions) == 0:
-                # Fallback to bounding box center
-                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                if bbox:
-                    return sum(bbox, Vector()) / len(bbox)
-                return None
+                # Fallback to bounding box center (see above for why this is
+                # mapped with local_to_world, not matrix_world).
+                return self._bound_box_center(obj)
 
             # Calculate center of mass (simple average of alpha carbons)
             # Using carbon mass (12.01) for all alpha carbons
@@ -1296,14 +1313,12 @@ class MoleculeWrapper:
             center_of_mass = self._calculate_center_of_mass(context, obj)
 
             if not center_of_mass:
-                # Nothing to aim at: fall back to the bounding-box centre of the
-                # evaluated geometry, which is already pivot-corrected.
+                # Nothing to aim at: fall back to the bounding-box centre.
                 print("Warning: Could not calculate center of mass, "
                       "falling back to the bounding-box centre")
-                bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                if not bbox:
+                center_of_mass = self._bound_box_center(obj)
+                if center_of_mass is None:
                     return False
-                center_of_mass = sum(bbox, Vector()) / len(bbox)
 
             # Put the origin on the centre of mass without moving any atoms...
             if not domain_space.set_pivot_world(obj, center_of_mass):

@@ -220,6 +220,46 @@ def test_center_protein_moves_to_origin(scene, sm, single_chain):
     assert max(abs(v) for v in obj.location) < 1.0
 
 
+@pytest.mark.integration
+def test_center_protein_centres_a_molecule_with_no_alpha_carbons(
+        scene, sm, single_chain):
+    """Centre must still land inside a structure that has no Cα to average.
+
+    Nucleic acids and ligand-only structures have none, so ``center_protein``
+    falls back to the object's bounding box - a branch that had the same
+    raw-bounds-times-matrix_world error the Snap-to-Center button did, and that
+    no test reached because every fixture is a protein. Dropping the
+    ``is_alpha_carbon`` attribute is the deterministic way in: it is exactly the
+    condition the fallback tests for.
+
+    Ground truth is Blender's own evaluated point-cloud atoms, which share no
+    code path with the centring arithmetic.
+    """
+    import numpy as np
+
+    molecule = sm.molecules[single_chain]
+    obj = molecule.object
+    objects = [obj] + [d.object for d in molecule.domains.values() if d.object]
+
+    attributes = obj.data.attributes
+    assert "is_alpha_carbon" in attributes, "fixture has no Cα to remove"
+    attributes.remove(attributes["is_alpha_carbon"])
+
+    assert bpy.ops.molecule.center_protein(
+        molecule_id=single_chain) == {'FINISHED'}
+    bpy.context.view_layer.update()
+
+    atoms = H.evaluated_atom_positions(objects)
+    assert len(atoms) > 0, "the molecule evaluated to no drawable atoms"
+
+    low, high = atoms.min(axis=0), atoms.max(axis=0)
+    centre = np.array(obj.matrix_world.translation)
+    for axis in range(3):
+        assert low[axis] <= centre[axis] <= high[axis], (
+            f"the centred origin fell outside the molecule on axis {axis}: "
+            f"{centre[axis]} is not within [{low[axis]}, {high[axis]}]")
+
+
 # --------------------------------------------------------------------------
 # Delete
 # --------------------------------------------------------------------------
