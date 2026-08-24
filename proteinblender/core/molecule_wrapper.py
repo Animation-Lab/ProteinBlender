@@ -551,9 +551,13 @@ class MoleculeWrapper:
         """
         created_domain_ids_list = []
 
-        # Adjust end value based on chain's residue range if needed
-        chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
+        # Adjust end value based on chain's residue range if needed. A domain
+        # stores the *author* chain id, so whatever form the caller used - a
+        # chain index from the outliner, or the author id itself - is resolved
+        # once here and only the resolved id is stored (chain_utils owns the
+        # rule; a molecule with digit chain ids cannot be resolved by guessing).
+        from ..utils.chain_utils import chain_author_id
+        mapped_chain = chain_author_id(self, chain_id)
         if mapped_chain in self.chain_residue_ranges:
             min_res_chain, max_res_chain = self.chain_residue_ranges[mapped_chain]
             start = max(min_res_chain, start)
@@ -985,29 +989,16 @@ class MoleculeWrapper:
             start_res = domain.start
             end_res = domain.end
 
-            # --- Helper function for chain IDs --- (Can remain nested or become internal method)
-            def get_possible_chain_ids(chain_id):
-                 # ... (implementation remains the same) ...
-                 search_ids = [chain_id]
-                 if isinstance(chain_id, str) and chain_id.isalpha():
-                     try:
-                         numeric_chain = ord(chain_id.upper()) - ord('A')
-                         search_ids.append(numeric_chain)
-                     except Exception:
-                         pass
-                 elif isinstance(chain_id, (str, int)) and str(chain_id).isdigit():
-                     try:
-                         int_chain_id = int(chain_id)
-                         alpha_chain = chr(int_chain_id + ord('A'))
-                         search_ids.append(alpha_chain)
-                         search_ids.append(int_chain_id)
-                         search_ids.append(str(int_chain_id))
-                     except Exception:
-                         pass
-                 return list(set(filter(lambda x: x is not None, search_ids)))
-            # --- End helper --- 
-
-            search_chain_ids = get_possible_chain_ids(domain_chain_id)
+            # The one index the mesh uses for this chain. It used to be a set of
+            # "plausible" ids built by alphabet math in both directions, which
+            # on a protein with digit chain ids (1CD3) accepted the neighbouring
+            # chain's atoms and pivoted a domain onto them.
+            from ..utils.chain_utils import object_chain_index
+            target_chain_index = object_chain_index(mol_obj, domain_chain_id)
+            if target_chain_index is None:
+                print(f"Error: could not resolve chain {domain_chain_id!r} on "
+                      f"{mol_obj.name}.")
+                return None
 
             # Determine which chain attribute to use (support 'chain_id' or 'chain_id_int')
             if "chain_id" in attrs:
@@ -1023,33 +1014,11 @@ class MoleculeWrapper:
             res_nums_data = attrs[residue_attr_name].data
             positions_data = attrs["position"].data
 
-            # Get custom chain mapping if available
-            obj_chain_ids_list = None
-            if hasattr(mol_obj, 'keys') and "chain_ids" in mol_obj.keys():
-                obj_chain_ids_list = mol_obj["chain_ids"]
-            
-            # **FIX: Create reverse mapping for better chain matching**
-            # If we have custom mapping, we need to find which numeric indices correspond to our target chain
-            target_chain_indices = []
-            
-            if obj_chain_ids_list is not None:
-                # Search for all indices that map to our target chain
-                for idx, mapped_chain in enumerate(obj_chain_ids_list):
-                    if str(mapped_chain) == str(domain_chain_id):
-                        target_chain_indices.append(idx)
-                
-                # Also add the mathematical conversions
-                for search_id in search_chain_ids:
-                    if isinstance(search_id, int) and 0 <= search_id < len(obj_chain_ids_list):
-                        if search_id not in target_chain_indices:
-                            target_chain_indices.append(search_id)
-            else:
-                # No custom mapping, use the mathematical conversion
-                target_chain_indices = [idx for idx in search_chain_ids if isinstance(idx, int)]
-            
-            # Convert to strings for comparison
-            search_chain_ids_str = [str(s) for s in search_chain_ids]
-            target_chain_indices_str = [str(idx) for idx in target_chain_indices]
+            # The attribute holds the chain *index*, so that is the only value
+            # an atom of this chain can carry. Accepting the author id as well
+            # would re-open the digit ambiguity: on 1CD3, chain "1"'s label
+            # equals chain "2"'s index.
+            target_chain_index_str = str(target_chain_index)
 
             is_alpha_carbon_data = None
             is_alpha_carbon_attr = attrs.get("is_alpha_carbon")
@@ -1076,47 +1045,19 @@ class MoleculeWrapper:
 
             # --- Search for the first CA encountered in the specified range order ---
             for target_res_num in residue_search_range:
-                atoms_in_residue = 0
-                atoms_in_target_chain = 0
-                
                 for atom_idx in range(len(positions_data)):
                     try:
                         atom_res_num = res_nums_data[atom_idx].value
                         if atom_res_num != target_res_num:
-                            continue 
-                        
-                        atoms_in_residue += 1
-                        
+                            continue
+
                         # Get the chain ID value for this atom
                         chain_id_val = chain_ids_data[atom_idx].value
-                        
-                        # **FIX: Use both custom mapping and direct comparison**
-                        atom_matches_target_chain = False
-                        
-                        # Method 1: Check if atom's chain index is in our target indices
-                        if str(chain_id_val) in target_chain_indices_str:
-                            atom_matches_target_chain = True
-                        
-                        # Method 2: If we have custom mapping, check the mapped value
-                        if obj_chain_ids_list is not None and not atom_matches_target_chain:
-                            try:
-                                actual_chain_id = obj_chain_ids_list[chain_id_val]
-                                if str(actual_chain_id) in search_chain_ids_str:
-                                    atom_matches_target_chain = True
-                            except (IndexError, TypeError):
-                                pass
-                        
-                        # Method 3: Direct comparison (fallback)
-                        if not atom_matches_target_chain:
-                            if str(chain_id_val) in search_chain_ids_str:
-                                atom_matches_target_chain = True
-                        
-                        if not atom_matches_target_chain:
+
+                        if str(chain_id_val) != target_chain_index_str:
                             continue
-                        
-                        atoms_in_target_chain += 1
-                        
-                        # --- Check using the preferred method (is_alpha_carbon) --- 
+
+                        # --- Check using the preferred method (is_alpha_carbon) ---
                         is_ca = False
                         if is_alpha_carbon_data: 
                             is_ca = is_alpha_carbon_data[atom_idx].value
@@ -1231,26 +1172,21 @@ class MoleculeWrapper:
                     chain_ids = np.zeros(len(mesh.vertices), dtype=np.int32)
                     attrs["chain_id"].data.foreach_get("value", chain_ids)
 
-                    # Resolve the chain to the INTEGER index the mesh attribute
-                    # uses. MolecularNodes encodes chain_id as a sorted-unique
-                    # integer and keeps the string labels in obj["chain_ids"]
-                    # (list index == the integer). A caller passing a letter
-                    # ("A") must be mapped through that list, or np.isin compares
-                    # a letter against an int array, never matches, and the whole
-                    # thing silently falls back to the bounding-box centre of the
-                    # (shared, full) mesh - the same wrong point for every chain.
-                    search_indices = []
-                    if isinstance(chain_id, int):
-                        search_indices.append(chain_id)
-                    elif isinstance(chain_id, str) and chain_id.isdigit():
-                        search_indices.append(int(chain_id))
-                    chain_labels = list(obj.get("chain_ids") or [])
-                    if chain_id in chain_labels:
-                        search_indices.append(chain_labels.index(chain_id))
+                    # Resolve the chain to the ONE integer index the mesh
+                    # attribute uses (chain_utils owns that rule). A caller
+                    # passing a letter ("A") must be mapped through the object's
+                    # label list, or np.isin compares a letter against an int
+                    # array, never matches, and the whole thing silently falls
+                    # back to the bounding-box centre of the (shared, full) mesh
+                    # - the same wrong point for every chain. Resolving to a
+                    # *set* of plausible indices is just as wrong the other way:
+                    # on a protein with digit chain ids, chain "1" then averaged
+                    # itself with chain "2" and pivoted between them.
+                    from ..utils.chain_utils import object_chain_index
+                    chain_index = object_chain_index(obj, chain_id)
 
-                    if search_indices:
-                        chain_mask = np.isin(chain_ids, search_indices)
-                        filter_mask &= chain_mask
+                    if chain_index is not None:
+                        filter_mask &= (chain_ids == chain_index)
                     else:
                         print(f"Warning: could not resolve chain {chain_id!r} to "
                               f"an index on {obj.name}; using all chains")
@@ -1529,9 +1465,9 @@ class MoleculeWrapper:
     def _find_next_available_section(self, chain_id: str) -> Optional[tuple]:
         """Find the next available non-overlapping section in a chain"""
         # Get chain mapping
-        chain_id_int = int(chain_id) if isinstance(chain_id, str) and chain_id.isdigit() else chain_id
-        mapped_chain = self.chain_mapping.get(chain_id_int, str(chain_id))
-        
+        from ..utils.chain_utils import chain_author_id
+        mapped_chain = chain_author_id(self, chain_id)
+
         # Get chain residue range
         if mapped_chain not in self.chain_residue_ranges:
             print(f"Chain {mapped_chain} not found in residue ranges")
@@ -2803,17 +2739,16 @@ class MoleculeWrapper:
         duplicates that copy, not the chain it came from. Ordered by start
         residue.
         """
-        from ..utils.chain_utils import (chain_match_tokens, copy_group_members)
+        from ..utils.chain_utils import (copy_group_members, domain_in_chain)
 
         domain = self.domains.get(str(chain_token))
         if domain is not None:
             members = copy_group_members(self, getattr(domain, 'copy_group_id', ''))
             return members or [(str(chain_token), domain)]
 
-        tokens = chain_match_tokens(self, chain_token)
         sources = [(domain_id, dom) for domain_id, dom in self.domains.items()
                    if not getattr(dom, 'is_copy', False)
-                   and str(dom.chain_id) in tokens]
+                   and domain_in_chain(self, chain_token, dom)]
         sources.sort(key=lambda pair: (pair[1].start, pair[1].end))
         return sources
 

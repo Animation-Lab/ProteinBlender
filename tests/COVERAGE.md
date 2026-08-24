@@ -292,6 +292,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the grid's line numbering (edge lines counted like any other line, and the header's count agreeing with them), the ghost-everything preview's ghost/solid/restore cycle, per-domain colours (live preview and commit, via the dialog rows or `layout_json`'s `color` field), and the identity-preservation invariants a layout edit must hold (see below) |
 | `test_copy_chain.py` | `molecule.copy_chain` from the outliner's chain row: a split chain copying every one of its domains (residue coverage against the PDB text, and a Cycles render proving the copy puts as much protein on screen as the chain it copied), the copy appearing as one expandable chain row rather than leaking into its source chain, an unsplit chain still copying as a single domain, copying a copy, and the copy's Delete removing all of it and nothing else |
+| `test_numeric_chain_ids.py` | a structure whose author chain ids are digits (1CD3: chains 1, 2, 3, 4, B, F, G), where a chain's index and another chain's id share a namespace: chains importing unsplit, each outliner row resolving to exactly its own chain's single domain and object, and a chain-level delete taking one chain (see below) |
 | `test_outliner_colors.py` | the PB Outliner's row colour swatches: seeding from what each item renders with (node graph as ground truth), the mixed-grey placeholder for a protein whose chains disagree, and a pick on a protein/chain/domain row recolouring exactly what that row covers |
 
 ## Behaviour regressions (guard against reintroduction)
@@ -1366,6 +1367,42 @@ on a membrane whose typical gap was 0.28 nm.
   the property at all, so every panel/operator test now exercises the path a
   plain import leaves behind (verified red pre-fix: the poll, enum and
   no-argument operator tests all failed).
+
+- **A protein whose chains are named with digits imported already split, and
+  every chain-level action hit its neighbour too.**
+  Reported: 1CD3 (the phiX174 procapsid, chains 1, 2, 3, 4, B, F, G) showed
+  four chains split into two domains each straight after import, before the
+  user had split anything.
+  Cause: `chain_utils.chain_match_tokens` reconciled the outliner's chain
+  *index* ("1") with the author chain *id* a domain stores ("B") by returning
+  both forms and matching a domain against either. That only works while the
+  two namespaces are disjoint, and digit chain ids collapse them: index 1 is
+  chain "2", but "1" is also chain "1", so every numeric chain row collected
+  its neighbour's domain as well. The trash can on chain "2" deleted chain "1"
+  with it, and copy/recolour/select reached just as wide.
+  Fixed by resolving instead of guessing: `chain_author_id` (digit = index,
+  the convention every outliner row and `_create_domain_with_params` uses),
+  `chain_index_token` (its inverse, for rows keyed by index) and
+  `domain_chain_author_id` (digit = author id, the convention a *domain*
+  stores), with `domain_in_chain` resolving both sides before comparing.
+  `chain_match_tokens` is gone, and neither resolver invents an identity by
+  alphabet math for an id the molecule's own maps do not know.
+  The same ambiguity had a geometry half: `_calculate_center_of_mass` and
+  `_find_residue_alpha_carbon_pos` each built a *set* of plausible chain
+  indices (digit-as-index plus label lookup plus `chr(65 + idx)` both ways),
+  so chain "1"'s centre of mass was averaged over chains "1" and "2" and every
+  numeric chain's whole-chain domain pivoted between itself and its
+  neighbour - measured at 0.12 world units off, on chains 0.25 apart. Both now
+  resolve to the single index through `chain_utils.object_chain_index`, which
+  reads the object's own `chain_ids` label list first and returns None rather
+  than guessing.
+  Guarded by `test_numeric_chain_ids.py` (rows unsplit on import, each row
+  resolving to exactly its own chain's single domain, each whole-chain pivot
+  on its own chain's alpha-carbon centroid, and deleting chain "2" leaving the
+  other six) with the chain ids parsed out of `1cd3.pdb` as text and the
+  centroid taken from raw mesh attributes, plus `test_chain_utils.py`'s
+  resolver unit tests; all verified red pre-fix (four split rows, "Deleted
+  chain 1 and 2 domain(s)", and the 0.12 pivot offset).
 
 ## Crash regressions (guard against reintroduction)
 

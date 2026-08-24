@@ -583,8 +583,9 @@ def test_chain_range_matches_the_pdb(scene):
     mid, chain_row, (pdb_min, pdb_max) = _single_chain_setup()[:3]
     mol = H.sm().molecules[mid]
 
-    low, high = domain_layout.chain_residue_range(
-        mol, domain_layout.chain_match_tokens(mol, chain_row.chain_id).pop())
+    # The row carries the chain *index*; chain_residue_range resolves it to the
+    # author chain its ranges are keyed by.
+    low, high = domain_layout.chain_residue_range(mol, chain_row.chain_id)
 
     # 1ubq's chain A runs 1-76; the addon normalises the floor to 1.
     assert low == max(1, pdb_min)

@@ -20,9 +20,9 @@ from bpy.app.handlers import persistent
 from typing import Dict, Optional, List, Set
 from ..core.molecule_manager import MoleculeManager, MoleculeWrapper
 from .blender_utils import is_object_valid, ensure_object_mode
-from .chain_utils import (chain_copy_group_key, chain_copy_groups,
-                          chain_match_tokens, default_domain_name,
-                          is_default_domain_name)
+from .chain_utils import (chain_author_id, chain_copy_group_key,
+                          chain_copy_groups, default_domain_name,
+                          domain_chain_author_id, is_default_domain_name)
 
 logger = logging.getLogger(__name__)
 
@@ -1847,10 +1847,12 @@ def build_outliner_hierarchy(context=None):
                     
                     if domain_chain_id is not None:
                         # Single matching rule for the whole codebase: does this
-                        # domain belong to the current chain? chain_match_tokens
-                        # bridges the chain-index ("0") vs. chain-letter ("A")
-                        # gap via the molecule's real maps.
-                        if str(domain_chain_id) in chain_match_tokens(molecule, chain_id):
+                        # domain belong to the current chain? Both sides resolve
+                        # to the author chain id through the molecule's real
+                        # maps, bridging the chain-index ("0") vs. chain-letter
+                        # ("A") gap.
+                        if (domain_chain_author_id(molecule, domain_chain_id)
+                                == chain_author_id(molecule, chain_id)):
                             chain_domains.append((domain_id, domain))
 
                 # Read down the chain, not down the creation history: the dict

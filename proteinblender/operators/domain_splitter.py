@@ -56,7 +56,7 @@ from bpy.props import (CollectionProperty, FloatVectorProperty, IntProperty,
 from bpy.types import Operator, PropertyGroup
 
 from ..core import domain_layout
-from ..utils.chain_utils import (chain_match_tokens, chain_token_from_item,
+from ..utils.chain_utils import (chain_author_id, chain_token_from_item,
                                  default_domain_name, is_default_domain_name)
 from ..utils.scene_manager import ProteinBlenderScene
 from .visual_edit import VisualEditMixin
@@ -162,10 +162,7 @@ def _author_chain_label(molecule, chain_token, specs):
         letter = getattr(domain, "chain_id", None)
         if letter:
             return str(letter)
-    for candidate in chain_match_tokens(molecule, chain_token):
-        if not str(candidate).isdigit():
-            return str(candidate)
-    return str(chain_token)
+    return chain_author_id(molecule, chain_token)
 
 
 # Dialog edit state. Module-level rather than attributes on the operator

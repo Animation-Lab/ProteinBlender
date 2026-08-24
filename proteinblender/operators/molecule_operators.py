@@ -7,7 +7,7 @@ from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy
                                    delete_molecule_if_empty,
                                    molecule_would_be_emptied,
                                    prune_emptied_puppets)
-from ..utils.chain_utils import chain_match_tokens, copy_group_members
+from ..utils.chain_utils import copy_group_members, domain_in_chain
 from ..core import domain_space
 
 class MOLECULE_PB_OT_delete(Operator):
@@ -580,8 +580,8 @@ class MOLECULE_PB_OT_delete_chain(Operator):
         """Domain ids belonging to this chain.
 
         ``self.chain_id`` arrives as the chain *index* ("2") from the outliner
-        row while domains store the chain *letter* ("D"); match on any of the
-        chain's identity forms.
+        row while domains store the chain *letter* ("D"); ``domain_in_chain``
+        resolves both to the same identity.
 
         A chain *copy*'s row identifies itself by its primary domain id
         instead. It is still one chain-level thing to delete, so it resolves
@@ -596,9 +596,8 @@ class MOLECULE_PB_OT_delete_chain(Operator):
                         in copy_group_members(molecule, group_id)]
             return [self.chain_id]
 
-        chain_tokens = chain_match_tokens(molecule, self.chain_id)
         return [domain_id for domain_id, domain in molecule.domains.items()
-                if hasattr(domain, 'chain_id') and str(domain.chain_id) in chain_tokens]
+                if domain_in_chain(molecule, self.chain_id, domain)]
 
     def _display_name(self, molecule):
         """What to call this row in a message.
