@@ -407,6 +407,19 @@ on a membrane whose typical gap was 0.28 nm.
   now records the tool and each viewport's gizmo flags, and `end_pivot_edit`
   hands them back alongside the 3D cursor and transform orientation it already
   restored.
+  That ownership then bought a second thing: **clicking anywhere in the
+  viewport that is not the helper now applies the pivot and ends the mode**,
+  which is how a user finishes without going back to the panel. With every
+  other object unselectable, "the helper is no longer selected" means exactly
+  "the user clicked somewhere that is not the helper" - empty space and the
+  molecule alike - and a gizmo drag never changes the selection, so it cannot
+  be mistaken for letting go. `click_away_watcher` is a `bpy.app.timers` poll
+  registered by `begin_pivot_edit` and only while a session is open, for the
+  same reason the selection sync is one: Blender has no reliable
+  selection-changed event, and a modal running for the life of a mode has to be
+  nursed through file loads, undo and its own cancel paths. It closes through
+  the operator, so the apply is one undo step exactly like the button's second
+  click.
   Guarded by `test_visual_edit_dialogs.py::test_edit_pivot_makes_the_helper_the_only_selectable_object`
   (ground truth is Blender's own `object.select_all(action='SELECT')` - if the
   molecule comes back selected, a user's click would have selected it too),
@@ -420,6 +433,17 @@ on a membrane whose typical gap was 0.28 nm.
   red pre-fix - the outliner one on `['4hhb'] stayed ticked`, the selection one
   on the molecule and all four chain objects coming back selected, and the UI
   one on `left the active tool at builtin.move`.
+  Click-away is guarded at three depths, because a headless test can only
+  reproduce the *state* a click leaves behind:
+  `::test_clicking_away_from_the_helper_applies_the_pivot` and
+  `::test_the_click_away_watcher_stops_when_nothing_is_open` drive the watcher
+  directly; the foreground UI lane pushes a real `LEFTMOUSE` event through the
+  window manager (`edit_pivot_click_away_applies_and_closes`, then settle ticks
+  so the watcher runs on its own schedule); and `test_live_pivots.py::test_clicking_away_from_the_helper_applies_the_pivot`
+  does it against the deployed add-on with the real timer, including a second
+  of *not* clicking first so a session that closed on its own would fail. The
+  UI-lane one was verified red on `clicking away left the Edit Pivot session
+  open` - the reported behaviour, reproduced by a real click.
 
 - **"Snap Protein Pivot to Center" put the centre outside the protein.**
   `snap_protein_pivot_center` averaged `obj.matrix_world @ corner` over

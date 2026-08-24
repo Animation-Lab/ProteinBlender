@@ -43,6 +43,7 @@ pivot applied.
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 
@@ -592,3 +593,102 @@ return {
     assert offset < 1e-4, (
         f"the pivot landed {offset} from where the helper was dropped: "
         f"helper={result['dropped']} origin={result['origin']}")
+
+
+@pytest.mark.live
+def test_clicking_away_from_the_helper_applies_the_pivot(blender, single_chain):
+    """Click anywhere but the helper and the mode ends, applying the placement.
+
+    Two things make this lane the one that can prove it. The click goes through
+    ``view3d.select`` - the operator Blender's own keymap runs on a left click,
+    with its own picking - rather than a scripted deselect standing in for one.
+    And the close is done by the add-on's real ``bpy.app.timers`` watcher on its
+    own schedule, so this measures the wall-clock behaviour a user gets, not a
+    hand-pumped callback.
+
+    The helper is dragged clear first and the click aimed at the far edge, so it
+    cannot land on the helper. Where it lands otherwise does not matter: the
+    mode makes every other object unselectable, so empty space and the molecule
+    are the same answer.
+    """
+    opened = blender.call("""
+scene = bpy.context.scene
+H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+from proteinblender.operators import pivot_operators as P
+
+row = next(r for r in scene.outliner_items if r.item_type == 'PROTEIN')
+with R.view3d_override():
+    bpy.ops.wm.tool_set_by_id(name="builtin.rotate")
+    bpy.ops.proteinblender.set_pivot_custom(item_id=row.item_id)
+
+helper = bpy.data.objects[P.PIVOT_HELPER]
+helper.location.x += 1.5
+bpy.context.view_layer.update()
+return {
+    "row": row.item_id,
+    "session": P.pivot_edit_key(scene),
+    "watching": bpy.app.timers.is_registered(P.click_away_watcher),
+    "dropped": [float(v) for v in helper.matrix_world.translation],
+}
+""")
+    assert opened["session"], "Edit Pivot did not open a session to click away from"
+    assert opened["watching"], (
+        "no click-away watcher is running, so no click could ever end the mode")
+
+    # Still open after a full second of NOT clicking: dragging the gizmo must
+    # not be mistaken for letting go of it.
+    time.sleep(1.0)
+    assert blender.call("""
+from proteinblender.operators import pivot_operators as P
+return P.pivot_edit_key(bpy.context.scene)
+"""), "the session closed on its own without any click"
+
+    clicked = blender.call("""
+from proteinblender.operators import pivot_operators as P
+area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
+region = next(r for r in area.regions if r.type == 'WINDOW')
+with bpy.context.temp_override(area=area, region=region):
+    bpy.ops.view3d.select(deselect_all=True, location=(8, region.height // 2))
+helper = bpy.data.objects.get(P.PIVOT_HELPER)
+return {"helper_selected": helper.select_get() if helper else None,
+        "session": P.pivot_edit_key(bpy.context.scene)}
+""")
+    assert clicked["helper_selected"] is False, (
+        "the click did not reach the helper's selection, so this test is not "
+        "measuring a click away")
+    assert clicked["session"], (
+        "the session closed inside the click itself; this test would then pass "
+        "without the watcher it is meant to exercise")
+
+    time.sleep(1.0)
+    result = blender.call("""
+from proteinblender.operators import pivot_operators as P
+scene = bpy.context.scene
+row = next(r for r in scene.outliner_items if r.item_id == row_id)
+tool = bpy.context.workspace.tools.from_space_view3d_mode("OBJECT", create=False)
+bpy.context.view_layer.update()
+return {
+    "session": P.pivot_edit_key(scene),
+    "helper_gone": bpy.data.objects.get(P.PIVOT_HELPER) is None,
+    "watching": bpy.app.timers.is_registered(P.click_away_watcher),
+    "tool": tool.idname if tool else None,
+    "locked": sorted(o.name for o in bpy.context.view_layer.objects
+                     if o.hide_select),
+    "origins": [[float(v) for v in o.matrix_world.translation]
+                for o in P.row_pivot_objects(bpy.context, row)],
+}
+""", row_id=opened["row"])
+
+    assert result["session"] == "", "clicking away left the session open"
+    assert result["helper_gone"], "clicking away left the helper in the scene"
+    assert not result["watching"], "the watcher kept polling after the mode ended"
+    assert result["locked"] == [], (
+        f"clicking away left {result['locked']} unselectable")
+    assert result["tool"] == "builtin.rotate", (
+        f"clicking away left the active tool at {result['tool']}")
+    assert result["origins"], "the row resolved to no objects"
+    for origin in result["origins"]:
+        offset = max(abs(a - b) for a, b in zip(origin, opened["dropped"]))
+        assert offset < 1e-4, (
+            f"the pivot landed {offset} from where the helper was left: "
+            f"helper={opened['dropped']} origin={origin}")

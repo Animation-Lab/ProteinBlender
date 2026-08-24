@@ -6,13 +6,16 @@ Two ways to move what a protein, chain or domain rotates about.
 carbons and write it straight away.
 
 **Edit Pivot** is a *mode*, not an action. One click drops a helper Empty on
-the item's current pivot and hands the user the move gizmo; the next click on
-the same button takes the helper's position as the new pivot and clears the
-helper away. It is a mode because the pivot is chosen by dragging in the
-viewport, which takes as long as it takes: nothing else may decide the
-placement is over. That is why it lives on the outliner row rather than inside
-an edit dialog, and why there is no "click away to confirm" - clicking away is
-how a user orbits the view.
+the item's current pivot and hands the user the move gizmo; the pivot is then
+chosen by dragging in the viewport, which takes as long as it takes. That is
+why it lives on the outliner row rather than inside an edit dialog: a dialog
+would end the placement at the moment it began.
+
+Two things finish it, and both mean the same thing. Clicking the row's button
+again applies the helper's position. So does **clicking anywhere else in the
+viewport** - which is what a user does when they are done with the pivot and
+want to get on with something else, and it is the only ending they reach
+without going back to the panel.
 
 Being a mode, it *owns* the viewport while it is open: the helper is the only
 selectable object in the scene, and nothing else is selected. Without that the
@@ -24,6 +27,13 @@ the session is over. Everything the mode takes (the selection and each
 object's selectability, the active tool, the viewport gizmo flags, the 3D
 cursor, the transform orientation and pivot point) is recorded on the way in
 and handed back on the way out.
+
+The ownership is also what makes click-away *precise*. With every other object
+unselectable, the helper is the only thing in the scene a click can select, so
+"the helper is no longer selected" means "the user clicked somewhere that is
+not the helper" - empty space and the molecule alike - and never means "they
+picked something else to work on". Dragging the gizmo does not change the
+selection, so a drag cannot be mistaken for a click away.
 
 ``molecule.toggle_pivot_edit`` (domains) and
 ``molecule.toggle_protein_pivot_edit`` (proteins) predate the row button and
@@ -96,6 +106,7 @@ def _forget_pivot_edit(scene):
     restored here: only ``wm.tool_set_by_id`` can set it, and the self-heal
     fires from panel draw code, where calling an operator is not allowed.
     """
+    _stop_click_away_watch()
     _unlock_scene_selection(scene)
     _restore_viewport_gizmos(scene)
     for key in (PIVOT_EDIT_KEY, PIVOT_EDIT_TARGETS, PIVOT_EDIT_CURSOR,
@@ -248,6 +259,72 @@ def _unlock_scene_selection(scene):
         obj = bpy.data.objects.get(name)
         if obj is not None:
             obj.hide_select = False
+
+
+# How often the click-away watcher looks. Short enough that letting go of the
+# pivot feels immediate, long enough to cost nothing while a session is open -
+# and it is only registered while one is.
+_CLICK_AWAY_INTERVAL = 0.15
+
+
+def click_away_watcher():
+    """Apply the pivot when the user clicks away from the helper.
+
+    A timer rather than a modal operator, for the same reason the selection
+    sync is one (see ``handlers/selection_sync``): Blender has no reliable
+    event for "the selection changed", and a modal running for the whole life
+    of a mode has to be nursed through file loads, undo and its own cancel
+    paths. This has no state of its own - it re-reads the session every tick
+    and stops itself the moment there is nothing open.
+
+    The signal is the helper losing its selection, which is unambiguous only
+    because the mode locks everything else: see the module docstring.
+
+    Returns the next interval, or None to stop.
+    """
+    try:
+        scene = getattr(bpy.context, "scene", None)
+        if scene is None:
+            return _CLICK_AWAY_INTERVAL
+        key = pivot_edit_key(scene)
+        if not key:
+            return None
+        helper = bpy.data.objects.get(PIVOT_HELPER)
+        if helper is None:
+            return None
+        try:
+            if helper.select_get():
+                return _CLICK_AWAY_INTERVAL
+        except RuntimeError:
+            # Not in this view layer (yet, or any more) - nothing to read.
+            return _CLICK_AWAY_INTERVAL
+        # Through the operator, not end_pivot_edit directly, so the apply is a
+        # single undo step exactly like the button's second click.
+        bpy.ops.proteinblender.set_pivot_custom(item_id=key)
+    except Exception as exc:      # never let a timer death strand the mode
+        print(f"[ProteinBlender] pivot click-away watcher stopped: {exc}")
+    return None
+
+
+def _start_click_away_watch():
+    if not bpy.app.timers.is_registered(click_away_watcher):
+        bpy.app.timers.register(click_away_watcher,
+                                first_interval=_CLICK_AWAY_INTERVAL)
+
+
+def _stop_click_away_watch():
+    """Stop the watcher, tolerating being called from inside it.
+
+    The watcher closes the session by running the operator, which lands back
+    here - and unregistering a timer from its own callback is not something
+    Blender promises to accept. It does not need to: returning None from the
+    callback already stops it.
+    """
+    try:
+        if bpy.app.timers.is_registered(click_away_watcher):
+            bpy.app.timers.unregister(click_away_watcher)
+    except (ValueError, RuntimeError):
+        pass
 
 
 def _deselect_everything(context):
@@ -762,10 +839,12 @@ def begin_pivot_edit(context, key, objects):
     context.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
     if context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
-    # Headless has no screen and therefore no gizmo to activate; the session
-    # itself works fine without one, which is what makes it testable offline.
+    # Headless has no screen and therefore no gizmo to activate, and no clicks
+    # to watch for; the session itself works fine without either, which is what
+    # makes it testable offline.
     if getattr(context, "screen", None) is not None:
         _borrow_viewport(context)
+        _start_click_away_watch()
 
     for obj in objects:
         obj["is_pivot_editing"] = True

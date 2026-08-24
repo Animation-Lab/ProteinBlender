@@ -820,3 +820,67 @@ def test_edit_pivot_leaves_the_outliner_deselected(scene, sm, multi_chain):
     assert not ticked, (
         f"{ticked} is still ticked in the Protein Outliner after Edit Pivot "
         f"closed")
+
+
+@pytest.mark.integration
+def test_clicking_away_from_the_helper_applies_the_pivot(scene, sm, multi_chain):
+    """Click anywhere but the helper and the placement is done.
+
+    The click itself belongs to the UI lane (a headless Blender has no window
+    to click in); what is driven here is the state a click leaves behind. The
+    mode locks every other object, so a click that is not on the helper selects
+    nothing and simply deselects it - that is the whole signal, and it is
+    reproduced exactly by deselecting the helper.
+
+    Ground truth for where the pivot landed is the helper's own world position,
+    captured before the watcher runs.
+    """
+    from mathutils import Vector
+    from proteinblender.operators import pivot_operators as P
+
+    _build_outliner()
+    row, obj = _first_domain_row(scene)
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    helper.location = helper.location + Vector((2.0, -1.0, 0.5))
+    bpy.context.view_layer.update()
+    dropped_at = helper.matrix_world.translation.copy()
+    assert (dropped_at - _origin(obj)).length > 1e-3, (
+        "the helper was not moved, so applying it would prove nothing")
+
+    # Still on the helper: the session must survive dragging it around.
+    assert P.click_away_watcher() is not None, (
+        "the watcher gave up while the helper was still selected")
+    assert P.pivot_edit_key(scene) == row.item_id
+
+    helper.select_set(False)          # what a click anywhere else leaves behind
+    assert P.click_away_watcher() is None, "the watcher kept running"
+
+    assert P.pivot_edit_key(scene) == "", (
+        "clicking away left the Edit Pivot session open")
+    assert bpy.data.objects.get(P.PIVOT_HELPER) is None, (
+        "clicking away left the helper in the scene")
+    assert (_origin(obj) - dropped_at).length < 1e-4, (
+        "clicking away discarded the placement instead of applying it")
+
+
+@pytest.mark.integration
+def test_the_click_away_watcher_stops_when_nothing_is_open(scene, sm,
+                                                           multi_chain):
+    """It must not keep polling once the mode is over, however it ended."""
+    from proteinblender.operators import pivot_operators as P
+
+    _build_outliner()
+    row, _obj = _first_domain_row(scene)
+
+    assert P.click_away_watcher() is None, (
+        "the watcher kept running with no session open at all")
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    assert P.click_away_watcher() is None, (
+        "the watcher kept running after the button closed the session")
