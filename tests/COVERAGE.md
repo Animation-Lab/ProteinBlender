@@ -1428,6 +1428,28 @@ by passing that state directly (no dialog needed):
 
 ## Known issues surfaced but not fixed here
 
+- **Three live-lane failures that predate the pivot-mode work.** Confirmed
+  pre-existing by installing the branch-point product files into the live
+  Blender and re-running the lane; the pivot/centre fixes took it from 11
+  failures to 3, and these are what is left.
+  - `test_live_visual_color.py::test_the_multiple_style_sentinel_changes_nothing`
+    sets the style picker to `""`, the old "Multiple" sentinel. That value is
+    no longer in the enum (`spheres, cartoon, surface, ribbon, sticks,
+    ball_and_stick`), so the assignment raises before the test asserts
+    anything. The headless dialog tests still cover a "Multiple" seed, so the
+    concept exists somewhere - which property now carries it needs deciding
+    before the live test can be rewritten.
+  - `test_live_domains.py::test_changing_one_domain_style_restyles_only_that_domain`
+    and `::test_deleting_a_domain_removes_its_geometry_from_the_screen` both
+    fail on `xor == 0`: the captured viewport is byte-identical across a change
+    that should be plainly visible. Two unrelated features reporting "the
+    screen did not change" points at the capture rather than at either feature,
+    but that is a hypothesis, not a finding.
+  - Separately, `test_live_linkers.py::test_a_linker_actually_renders` is
+    **order-dependent**: it passes alone and in small groups, on branch-point
+    and current code alike, and fails in some whole-lane orderings. Lane
+    hygiene, not a product regression.
+
 - **STILL UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and
   lattice disappear; you have to undo until it comes back."** Reported against a
   membrane that already existed and was reopened through the PB Outliner's edit
