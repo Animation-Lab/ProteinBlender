@@ -1,43 +1,43 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-08-23T01:57:21+00:00",
+  "generated_at": "2026-08-24T01:55:13+00:00",
   "summary": {
-    "views": 81,
+    "views": 84,
     "visitors": 32,
-    "clones": 228,
-    "cloners": 54
+    "clones": 225,
+    "cloners": 51
   },
   "all_time": {
-    "views": 736,
-    "visitors": 331,
-    "clones": 4005,
-    "cloners": 1732,
-    "days_tracked": 158
+    "views": 740,
+    "visitors": 333,
+    "clones": 4016,
+    "cloners": 1734,
+    "days_tracked": 159
   },
   "current_day": {
+    "date": "2026-08-22",
+    "views": 4,
+    "visitors": 2,
+    "clones": 11,
+    "cloners": 2
+  },
+  "previous_day": {
     "date": "2026-08-21",
     "views": 7,
     "visitors": 4,
     "clones": 17,
     "cloners": 5
   },
-  "previous_day": {
-    "date": "2026-08-20",
-    "views": 3,
-    "visitors": 1,
-    "clones": 16,
-    "cloners": 5
-  },
   "delta_since_previous_day": {
-    "views": 4,
-    "visitors": 3,
-    "clones": 1,
-    "cloners": 0
+    "views": -3,
+    "visitors": -2,
+    "clones": -6,
+    "cloners": -3
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 35,
+      "count": 38,
       "uniques": 23
     },
     {
@@ -55,7 +55,7 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 36,
+      "count": 37,
       "uniques": 25
     },
     {
@@ -83,6 +83,12 @@
       "uniques": 2
     },
     {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
+      "title": "/releases/tag/1.1.0",
+      "count": 3,
+      "uniques": 2
+    },
+    {
       "path": "/Animation-Lab/ProteinBlender/discussions/11",
       "title": "/discussions/11",
       "count": 2,
@@ -103,12 +109,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/compare/1.0.0...main",
       "title": "/compare/1.0.0...main",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/deployments/github-pages",
-      "title": "/deployments/github-pages",
       "count": 1,
       "uniques": 1
     }
