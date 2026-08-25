@@ -1,6 +1,17 @@
 """Bending controls for DNA/RNA molecules.
 
-Implements a Bezier-curve-based bend modifier with discrete *control nodes*:
+The rig itself - a Bezier curve, control-node Empties, and the hooks tying
+them together - lives in :mod:`proteinblender.core.bend_rig`, shared with the
+Symmetry panel's helical filament bend. This module is the DNA-specific half:
+what the curve is *for*.
+
+The difference is the whole reason they are separate modules. DNA hands its
+curve to a Blender **Curve modifier** and deforms the strand, which is right
+for a continuous double helix - it genuinely bends. A filament of rigid
+protein subunits instead *samples* the curve and re-places each subunit, which
+is why ``core/symmetry_bend.py`` exists rather than reusing this.
+
+Operators here:
 
   * `dna_add_bend`         – shifts the molecule's pivot to its bottom (so all
     vertices live in +Z object-space), creates a Bezier curve along the
@@ -14,27 +25,25 @@ Implements a Bezier-curve-based bend modifier with discrete *control nodes*:
     resampling the existing curve shape so the user's bend is preserved.
   * `dna_finish_bend_edit` – deselects nodes and re-activates the parent
     DNA. Empties stay in the scene so the bend persists.
+  * `dna_toggle_bend_curve` – shows / hides the guide curve.
   * `dna_remove_bend`      – removes the modifier, deletes the curve and
     all bend nodes, restores the (vertically) flat helix.
-  * `dna_bend_preset`      – overwrites the curve's spline with one of a
-    few initial shapes (Straight / Arc / S-curve / Loop). Recreates the
-    nodes so they line up with the new spline.
+
+Starting shapes (Straight / Arc / S-curve / Coil) are implemented generically
+in ``core.bend_rig.apply_preset``; the DNA dialog does not surface them yet.
 
 The DNA stores:
   * `pb_bend_curve_name`   – the bend Bezier curve object's name.
   * `pb_bend_node_names`   – JSON list of the control-node Empty names.
 """
 
-import json
-
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import IntProperty
 from bpy.types import Operator
 from mathutils import Vector
-from mathutils.geometry import interpolate_bezier
 
-from ..core import domain_space
+from ..core import bend_rig, domain_space
 
 
 # Custom property keys on the DNA object
@@ -46,17 +55,28 @@ PIVOT_SHIFTED_PROP = "pb_bend_pivot_shifted"
 _CURVE_MOD = "DNA Bend"
 _HOOK_PREFIX = "Hook_BP"
 
-# Default visible bevel on the curve
-_CURVE_BEVEL = 0.005
+# Resolution range for the control-node count. Re-exported from the shared rig
+# so the DNA dialog and the Symmetry panel cannot drift apart on what counts as
+# a usable number of handles.
+RES_MIN = bend_rig.RES_MIN
+RES_MAX = bend_rig.RES_MAX
+RES_DEFAULT = bend_rig.RES_DEFAULT
 
-# Empty (control-node) display
-_NODE_DISPLAY_TYPE = "SPHERE"
-_NODE_DISPLAY_SIZE = 0.04
-
-# Resolution range for the control-node count
-RES_MIN = 2
-RES_MAX = 12
-RES_DEFAULT = 3
+#: How the shared rig identifies DNA's curves and nodes. ``curve_suffix`` and
+#: ``node_label`` must stay distinct from the filament rig's, or one feature's
+#: orphan sweep would delete the other's objects.
+SPEC = bend_rig.BendRigSpec(
+    kind="dna",
+    curve_prop=BEND_CURVE_PROP,
+    nodes_prop=BEND_NODES_PROP,
+    curve_suffix="_BendCurve",
+    node_label="Bend Node",
+    hook_prefix=_HOOK_PREFIX,
+    curve_bevel=0.005,
+    node_display_size=0.04,
+    node_display_type="SPHERE",
+    owner_test=lambda obj: bool(obj.get("pb_is_nucleic_acid", False)),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,23 +138,13 @@ def restore_origin_to_centre(obj) -> None:
 
 
 def get_bend_curve(dna_obj):
-    name = dna_obj.get(BEND_CURVE_PROP)
-    if not name:
-        return None
-    return bpy.data.objects.get(name)
+    return bend_rig.get_curve(SPEC, dna_obj)
 
 
 def get_bend_nodes(dna_obj):
     """Return list of control-node Empty objects (in order). Filters dangling
     references."""
-    raw = dna_obj.get(BEND_NODES_PROP)
-    if not raw:
-        return []
-    try:
-        names = json.loads(raw)
-    except Exception:
-        return []
-    return [bpy.data.objects[n] for n in names if n in bpy.data.objects]
+    return bend_rig.get_nodes(SPEC, dna_obj)
 
 
 def dna_has_keyframes(dna_obj):
@@ -146,55 +156,17 @@ def dna_has_keyframes(dna_obj):
     the rig from scratch, which orphans the F-curves keyed against the old
     nodes/curve/origin and silently corrupts the animation.
     """
-    if dna_obj is None:
-        return False
-    # Imported here to avoid a circular dependency at module import time
-    # (utils.animation can be imported by code that imports bender).
-    from ..utils.animation import get_fcurves_from_action
-
-    objs = [dna_obj]
-    curve = get_bend_curve(dna_obj)
-    if curve is not None:
-        objs.append(curve)
-    objs.extend(get_bend_nodes(dna_obj))
-    for o in objs:
-        ad = o.animation_data
-        if not ad or not ad.action:
-            continue
-        for fc in get_fcurves_from_action(ad.action, ad):
-            if len(fc.keyframe_points) > 0:
-                return True
-    return False
+    return bend_rig.has_keyframes(SPEC, dna_obj)
 
 
 def get_dna_for_curve(curve_obj):
     """Reverse lookup: which DNA molecule owns this bend curve?"""
-    if curve_obj is None:
-        return None
-    for o in bpy.data.objects:
-        if (o.get("pb_is_nucleic_acid", False)
-                and o.get(BEND_CURVE_PROP) == curve_obj.name):
-            return o
-    return None
+    return bend_rig.owner_of_curve(SPEC, curve_obj)
 
 
 def get_dna_for_node(node_obj):
     """Reverse lookup: which DNA molecule owns this bend node?"""
-    if node_obj is None:
-        return None
-    for o in bpy.data.objects:
-        if not o.get("pb_is_nucleic_acid", False):
-            continue
-        raw = o.get(BEND_NODES_PROP)
-        if not raw:
-            continue
-        try:
-            names = json.loads(raw)
-        except Exception:
-            continue
-        if node_obj.name in names:
-            return o
-    return None
+    return bend_rig.owner_of_node(SPEC, node_obj)
 
 
 def _resolve_dna(obj):
@@ -204,9 +176,7 @@ def _resolve_dna(obj):
     Operators that accept either the DNA mesh or one of its bend control
     nodes as the active object use this to find the underlying molecule.
     """
-    if obj is not None and obj.get("pb_is_nucleic_acid", False):
-        return obj
-    return get_dna_for_node(obj)
+    return bend_rig.resolve_owner(SPEC, obj)
 
 
 # ---------------------------------------------------------------------------
@@ -214,66 +184,11 @@ def _resolve_dna(obj):
 # ---------------------------------------------------------------------------
 
 
-def _set_bezier_points(spline, points, handle_type="ALIGNED"):
-    spline.bezier_points.add(len(points) - 1)
-    for i, (co, hl, hr) in enumerate(points):
-        bp = spline.bezier_points[i]
-        bp.co = Vector(co)
-        bp.handle_left = Vector(hl)
-        bp.handle_right = Vector(hr)
-        bp.handle_left_type = handle_type
-        bp.handle_right_type = handle_type
-
-
-def _straight_points(height, n=3):
-    pts = []
-    handle = height / max(n - 1, 1) * 0.4
-    for i in range(n):
-        t = i / max(n - 1, 1)
-        z = t * height
-        pts.append(((0.0, 0.0, z),
-                    (0.0, 0.0, z - handle),
-                    (0.0, 0.0, z + handle)))
-    return pts
-
-
 def _create_bend_curve(name, dna_obj, height, n_points=RES_DEFAULT):
-    curve_data = bpy.data.curves.new(name, type="CURVE")
-    curve_data.dimensions = "3D"
-    curve_data.bevel_depth = _CURVE_BEVEL
-    curve_data.resolution_u = 12
-
-    spline = curve_data.splines.new("BEZIER")
-    _set_bezier_points(spline, _straight_points(height, n=n_points))
-
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    curve_obj.location = dna_obj.location.copy()
-    curve_obj.rotation_mode = dna_obj.rotation_mode
-    curve_obj.rotation_euler = dna_obj.rotation_euler.copy()
-
-    # Curve is purely a visual guide: the user shouldn't be able to grab it
-    # in the viewport and pull it away from the DNA. Hide it from selection
-    # but leave it visible so the bend path stays apparent. It's also
-    # excluded from final renders — the panel surfaces this via the
-    # "Show Bend Curve" toggle so the user knows they can hide it without
-    # affecting the saved image.
-    curve_obj.hide_select = True
-    curve_obj.hide_render = True
-
-    coll = (dna_obj.users_collection[0]
-            if dna_obj.users_collection else bpy.context.collection)
-    coll.objects.link(curve_obj)
-
-    # Parent the curve to the DNA so moving the DNA moves the whole rig.
-    # Nodes are parented to the curve (set up in _create_bend_nodes), giving
-    # the hierarchy: DNA → Curve → Nodes.
-    # Flush the depsgraph first — shift_origin_to_bottom may have changed
-    # dna_obj.location without matrix_world being recalculated yet.
-    bpy.context.view_layer.update()
-    curve_obj.parent = dna_obj
-    curve_obj.matrix_parent_inverse = dna_obj.matrix_world.inverted()
-
-    return curve_obj
+    """The guide curve, straight up the strand's own +Z."""
+    return bend_rig.create_curve(
+        SPEC, dna_obj, name,
+        bend_rig.straight_points(height, n=n_points, direction=(0.0, 0.0, 1.0)))
 
 
 def _add_curve_modifier(dna_obj, curve_obj):
@@ -287,109 +202,11 @@ def _add_curve_modifier(dna_obj, curve_obj):
 
 
 def _set_aligned_handles_along_path(spline, factor=0.3):
-    """Set each bezier point's left/right handles so they're tangent to the
-    smooth path through neighboring control points (Catmull-Rom-style).
-    Uses ALIGNED handle types so a hook moving all 3 sub-vertices keeps the
-    point's tangent consistent.
-    """
-    bps = spline.bezier_points
-    n = len(bps)
-    if n < 2:
-        return
-
-    for i in range(n):
-        if i == 0:
-            tangent = bps[1].co - bps[0].co
-            seg_len = tangent.length
-        elif i == n - 1:
-            tangent = bps[n - 1].co - bps[n - 2].co
-            seg_len = tangent.length
-        else:
-            tangent = bps[i + 1].co - bps[i - 1].co
-            seg_len = (
-                (bps[i].co - bps[i - 1].co).length
-                + (bps[i + 1].co - bps[i].co).length
-            ) * 0.5
-
-        if tangent.length < 1e-9:
-            tangent = Vector((0.0, 0.0, 1.0))
-
-        offset = tangent.normalized() * (seg_len * factor)
-        bps[i].handle_left = bps[i].co - offset
-        bps[i].handle_right = bps[i].co + offset
-        bps[i].handle_left_type = "ALIGNED"
-        bps[i].handle_right_type = "ALIGNED"
+    bend_rig.set_aligned_handles_along_path(spline, factor)
 
 
 def _resample_curve_arc_length(curve_obj, n_points):
-    """Resample the first spline to n_points evenly distributed by arc
-    length. Tries to preserve the existing shape. Replaces the spline
-    in place."""
-    n_points = max(RES_MIN, min(RES_MAX, n_points))
-    curve_data = curve_obj.data
-    if not curve_data.splines:
-        return
-
-    old_spline = curve_data.splines[0]
-    if old_spline.type != "BEZIER" or len(old_spline.bezier_points) < 2:
-        return
-
-    # No-op if the count already matches — preserves the curve exactly.
-    if len(old_spline.bezier_points) == n_points:
-        return
-
-    SAMPLES_PER_SEG = 32
-    polyline = []
-    bps = old_spline.bezier_points
-    for i in range(len(bps) - 1):
-        a = bps[i]
-        b = bps[i + 1]
-        pts = interpolate_bezier(
-            a.co, a.handle_right, b.handle_left, b.co, SAMPLES_PER_SEG,
-        )
-        if i < len(bps) - 2:
-            polyline.extend(pts[:-1])
-        else:
-            polyline.extend(pts)
-
-    if len(polyline) < 2:
-        return
-
-    lens = [0.0]
-    for i in range(1, len(polyline)):
-        lens.append(lens[-1] + (polyline[i] - polyline[i - 1]).length)
-    total = lens[-1]
-    if total <= 0:
-        return
-
-    # Sample n_points evenly by arc length
-    new_positions = []
-    for j in range(n_points):
-        target = (j / (n_points - 1)) * total
-        idx = 0
-        while idx < len(lens) - 1 and lens[idx + 1] < target:
-            idx += 1
-        if idx >= len(lens) - 1:
-            new_positions.append(polyline[-1].copy())
-        else:
-            seg = lens[idx + 1] - lens[idx]
-            t = (target - lens[idx]) / seg if seg > 0 else 0.0
-            new_positions.append(polyline[idx].lerp(polyline[idx + 1], t))
-
-    # Replace spline with a new one and explicitly set CO + smooth handles.
-    # (Just changing handle_type to AUTO/ALIGNED on a freshly-added point
-    # leaves the handle COORDINATES at their default (0,0,0) — that makes
-    # every handle vector point toward the curve-local origin, sagging the
-    # curve and shifting any mesh deformed along it.)
-    curve_data.splines.remove(old_spline)
-    new_spline = curve_data.splines.new("BEZIER")
-    new_spline.bezier_points.add(n_points - 1)
-    for i, pos in enumerate(new_positions):
-        new_spline.bezier_points[i].co = Vector(pos)
-
-    _set_aligned_handles_along_path(new_spline)
-
-    curve_data.update_tag()
+    bend_rig.resample_curve_arc_length(curve_obj, n_points)
 
 
 # ---------------------------------------------------------------------------
@@ -398,292 +215,44 @@ def _resample_curve_arc_length(curve_obj, n_points):
 
 
 def _remove_hook_modifiers(curve_obj):
-    if curve_obj is None:
-        return
-    for mod in list(curve_obj.modifiers):
-        if mod.type == "HOOK" and mod.name.startswith(_HOOK_PREFIX):
-            curve_obj.modifiers.remove(mod)
+    bend_rig.remove_hook_modifiers(SPEC, curve_obj)
 
 
 def _remove_bend_nodes(dna_obj):
     """Delete all control-node empties referenced by the DNA, plus their
     hook modifiers on the bend curve."""
-    nodes = get_bend_nodes(dna_obj)
-    for n in nodes:
-        try:
-            bpy.data.objects.remove(n, do_unlink=True)
-        except Exception:
-            pass
-    curve = get_bend_curve(dna_obj)
-    _remove_hook_modifiers(curve)
-    dna_obj.pop(BEND_NODES_PROP, None)
+    bend_rig.remove_nodes(SPEC, dna_obj)
 
 
 def _create_bend_nodes(dna_obj, curve_obj, n_points):
     """Create n_points control-node empties along the curve, hook each one
     to the corresponding bezier point. Assumes the curve already has
     n_points bezier points (call _resample_curve_arc_length first)."""
-    import mathutils
-
-    coll = (dna_obj.users_collection[0]
-            if dna_obj.users_collection else bpy.context.collection)
-
-    spline = curve_obj.data.splines[0]
-    if len(spline.bezier_points) != n_points:
-        # Caller didn't resample first
-        _resample_curve_arc_length(curve_obj, n_points)
-        spline = curve_obj.data.splines[0]
-
-    # Make sure the curve's own matrix_world is current before we read it
-    # (it may have been modified by add_bend / shift_origin_to_bottom and
-    # not yet picked up by the depsgraph).
-    bpy.context.view_layer.update()
-    curve_world = curve_obj.matrix_world.copy()
-
-    # First pass: create + link all empties at their target world positions.
-    # Each empty is parented to the curve so that when Move Strand
-    # translates the curve, the nodes follow automatically. This avoids
-    # double-translation issues and keeps hook deformation consistent.
-    created = []  # list of (i, empty, bp)
-    names = []
-    for i in range(n_points):
-        bp = spline.bezier_points[i]
-        bp_world = curve_world @ bp.co
-
-        # User-facing name: "{dna} Bend Node N" (1-based, spaced).
-        # The previous "_BendNode00" scheme made it impossible to tell
-        # which node was which in the Keyframe Create dialog and the
-        # outliner. Tester report (Janet): "Maybe naming something like
-        # 'bend node 1' or something would be helpful."
-        empty = bpy.data.objects.new(
-            f"{dna_obj.name} Bend Node {i + 1}", None,
-        )
-        empty.empty_display_type = _NODE_DISPLAY_TYPE
-        empty.empty_display_size = _NODE_DISPLAY_SIZE
-        empty.location = bp_world
-        empty.show_in_front = True
-        coll.objects.link(empty)
-
-        # Parent the empty to the curve so it follows the curve when the
-        # whole rig is translated (Move Strand selects DNA + curve).
-        empty.parent = curve_obj
-        empty.matrix_parent_inverse = curve_world.inverted()
-
-        created.append((i, empty, bp))
-        names.append(empty.name)
-
-    # Force a view-layer update so each new empty's matrix_world reflects
-    # the location we just set. Without this, matrix_world is still the
-    # identity from when the data-block was created, so hook_reset below
-    # sees stale matrices.
-    bpy.context.view_layer.update()
-
-    # Second pass: build the hook modifiers.
-    hook_names = []
-    for i, empty, bp in created:
-        mod = curve_obj.modifiers.new(f"{_HOOK_PREFIX}{i:02d}", "HOOK")
-        mod.object = empty
-        mod.vertex_indices_set([3 * i + 0, 3 * i + 1, 3 * i + 2])
-        mod.center = bp.co.copy()
-        # Pin strength + disable falloff so vertex_indices is the only
-        # selector (full effect at any distance).
-        mod.strength = 1.0
-        mod.falloff_radius = 0.0
-        mod.falloff_type = "NONE"
-        # Pre-set matrix_inverse to a pure translation as a safety net;
-        # the canonical hook_reset() below will overwrite it correctly.
-        mod.matrix_inverse = mathutils.Matrix.Translation(-empty.location)
-        hook_names.append(mod.name)
-
-    # Use Blender's canonical hook_reset operator to recompute
-    # matrix_inverse for each hook from the current empty/curve transforms.
-    # This is the only fully-reliable way to get zero initial deformation —
-    # the operator runs the same C-side code that bpy.ops.object.hook_assign
-    # uses, sidestepping any depsgraph-timing issues with reading
-    # empty.matrix_world from Python.
-    prev_active = bpy.context.view_layer.objects.active
-    prev_selected = list(bpy.context.selected_objects)
-    prev_mode = bpy.context.mode
-
-    # Edit mode + hook_reset cannot run on a hidden object — Blender's
-    # mode_set poll raises "Cannot edit hidden object". The bend curve may be
-    # hidden (the user hid the guide, or a legacy file saved it with the old
-    # hide_viewport toggle), so temporarily reveal it and restore its hide
-    # state afterward. Without this, changing the node count on a hidden curve
-    # errored and left the bend rig half-rebuilt (tester report, Janet:
-    # "I got an error and the bend curve option no longer appears").
-    prev_curve_hide_vp = curve_obj.hide_viewport
-    prev_curve_hide_eye = curve_obj.hide_get()
-    curve_obj.hide_viewport = False
-    curve_obj.hide_set(False)
-
-    try:
-        if prev_mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.select_all(action="DESELECT")
-        curve_obj.select_set(True)
-        bpy.context.view_layer.objects.active = curve_obj
-        try:
-            bpy.ops.object.mode_set(mode="EDIT")
-            for hname in hook_names:
-                try:
-                    bpy.ops.object.hook_reset(modifier=hname)
-                except Exception:
-                    pass
-            bpy.ops.object.mode_set(mode="OBJECT")
-        except RuntimeError:
-            # Couldn't enter edit mode for hook_reset — fall back to the
-            # pre-set translation matrix_inverse (assigned above), which
-            # still gives a usable (near-zero) initial deformation.
-            if bpy.context.mode != "OBJECT":
-                try:
-                    bpy.ops.object.mode_set(mode="OBJECT")
-                except Exception:
-                    pass
-    finally:
-        # Restore the curve's hide state.
-        curve_obj.hide_viewport = prev_curve_hide_vp
-        try:
-            curve_obj.hide_set(prev_curve_hide_eye)
-        except Exception:
-            pass
-        # Restore the previous selection state.
-        try:
-            bpy.ops.object.select_all(action="DESELECT")
-        except Exception:
-            pass
-        for o in prev_selected:
-            try:
-                if o.name in bpy.data.objects:
-                    o.select_set(True)
-            except Exception:
-                pass
-        try:
-            if prev_active is not None and prev_active.name in bpy.data.objects:
-                bpy.context.view_layer.objects.active = prev_active
-        except Exception:
-            pass
-
-    bpy.context.view_layer.update()
-
-    dna_obj[BEND_NODES_PROP] = json.dumps(names)
+    bend_rig.create_nodes(SPEC, dna_obj, curve_obj, n_points)
 
 
 def bake_evaluated_curve_shape(curve_obj):
     """Write the user's hook-deformed bend back into the curve's static
-    ``bezier_points`` so subsequent operations (arc-length resampling,
-    rebuild-then-recreate flows) see the deformed shape instead of the
-    original straight line.
+    ``bezier_points``. See ``core.bend_rig.bake_evaluated_curve_shape`` for why
+    the obvious evaluated-curve read is a silent no-op.
 
-    **Why not just read ``evaluated_get(deps).data.splines[0].bezier_points``?**
-    Hook modifiers on a *curve* deform the final rendered geometry only —
-    they never write back to ``bp.co``. The evaluated curve datablock
-    exposes the SAME bezier points as the source; the hook delta lives in
-    the modifier stack, not in the data. So the obvious "copy eval bp.co
-    back to orig bp.co" approach is a silent no-op.
-
-    Instead we read each hook empty's current ``matrix_world.translation``,
-    transform into the curve's local space, and snap the corresponding
-    bezier point there. Handles are shifted by the same delta so the
-    curve's local tangent is preserved (otherwise the handles would point
-    at where the point USED to be, kinking the curve).
-
-    Bug fixed (tester report, Janet, Windows): adding a 4th bend node
+    Bug this exists for (tester report, Janet, Windows): adding a 4th bend node
     after one of the original 3 had been moved made the DNA snap back to
-    origin. Root cause: this function silently no-op'd, so the rebuild
-    saw a straight curve, resampled it to a straight 4-point curve, and
-    the DNA followed the straight curve back to its original axis.
+    origin, because the rebuild resampled a curve that still described a
+    straight line.
     """
-    if curve_obj is None or curve_obj.data is None:
-        return
-    splines = curve_obj.data.splines
-    if not splines:
-        return
-    spline = splines[0]
-    if spline.type != "BEZIER" or not spline.bezier_points:
-        return
-
-    # Map hook modifiers → bezier-point index. The hook setup in
-    # _create_bend_nodes uses vertex_indices_set([3*i, 3*i+1, 3*i+2]) per
-    # bezier point i, so the first index // 3 recovers the point index.
-    bp_to_empty = {}
-    for m in curve_obj.modifiers:
-        if m.type != "HOOK" or m.object is None:
-            continue
-        vi = list(m.vertex_indices)
-        if not vi:
-            continue
-        bp_index = vi[0] // 3
-        if 0 <= bp_index < len(spline.bezier_points):
-            bp_to_empty[bp_index] = m.object
-
-    if not bp_to_empty:
-        return
-
-    # Make sure each empty's matrix_world is current — the user might
-    # have moved a node moments before this call without a viewport tick.
-    bpy.context.view_layer.update()
-
-    inv_curve_world = curve_obj.matrix_world.inverted()
-    for bp_index, empty in bp_to_empty.items():
-        bp = spline.bezier_points[bp_index]
-        target_local = inv_curve_world @ empty.matrix_world.translation
-        delta = target_local - bp.co
-        if delta.length_squared < 1e-12:
-            continue
-        bp.co = target_local
-        # Shift handles by the same delta so local tangents are preserved.
-        # (Resetting handles to AUTO is left to the caller — the rebuild
-        # path calls _set_aligned_handles_along_path after resampling.)
-        bp.handle_left = bp.handle_left + delta
-        bp.handle_right = bp.handle_right + delta
-
-    curve_obj.data.update_tag()
+    bend_rig.bake_evaluated_curve_shape(curve_obj)
 
 
 def _rebuild_bend_nodes(dna_obj, n_points):
     """Tear down & recreate the bend node system at a new resolution while
     preserving the curve's current shape via arc-length resampling."""
-    curve_obj = get_bend_curve(dna_obj)
-    if curve_obj is None:
-        return
-
-    # Bake the user's hook-deformed shape into the underlying curve so the
-    # subsequent resample sees their bend, not the straight starting line.
-    bake_evaluated_curve_shape(curve_obj)
-
-    # Remove old nodes & hooks
-    _remove_bend_nodes(dna_obj)
-
-    # Resample curve to new N points, then attach new nodes
-    _resample_curve_arc_length(curve_obj, n_points)
-    _create_bend_nodes(dna_obj, curve_obj, n_points)
+    bend_rig.rebuild_nodes(SPEC, dna_obj, n_points)
 
 
 # ---------------------------------------------------------------------------
 # Public API used by other modules (e.g. update_dna)
 # ---------------------------------------------------------------------------
-
-
-def _bind_action(id_data, action):
-    """Assign *action* to *id_data*, binding a slot when the file uses slotted
-    actions (Blender 4.4+). Blender auto-binds the slot whose name matches the
-    ID's, which is why the rebuild keeps the strand's and nodes' names - but
-    fall back to the action's first slot if that lookup came up empty, or the
-    channels would sit in the action driving nothing."""
-    if id_data is None or action is None:
-        return
-    if id_data.animation_data is None:
-        id_data.animation_data_create()
-    id_data.animation_data.action = action
-    ad = id_data.animation_data
-    if hasattr(ad, "action_slot") and ad.action_slot is None:
-        slots = getattr(action, "slots", None)
-        if slots:
-            try:
-                ad.action_slot = slots[0]
-            except Exception:
-                pass
 
 
 def capture_bend_animation(dna_obj):
@@ -697,48 +266,20 @@ def capture_bend_animation(dna_obj):
     pressed OK. The bend CURVE survives the rebuild as the same object, so its
     keys need no handling here - which is exactly why the Animate panel kept
     listing the frames while nothing moved.
-
-    Each captured action is given a fake user so deleting its owner doesn't
-    free it while we're holding on.
     """
-    stash = {"dna": None, "nodes": []}
-    if dna_obj is None:
-        return stash
-
-    def _take(obj):
-        ad = getattr(obj, "animation_data", None)
-        action = ad.action if ad else None
-        if action is not None:
-            action.use_fake_user = True
-        return action
-
-    stash["dna"] = _take(dna_obj)
-    stash["nodes"] = [_take(n) for n in get_bend_nodes(dna_obj)]
-    return stash
+    stash = bend_rig.capture_animation(SPEC, dna_obj)
+    # Keyed by "dna" historically; kept so a stash captured by an older build
+    # still restores.
+    return {"dna": stash.get("owner"), "nodes": stash.get("nodes", [])}
 
 
 def restore_bend_animation(new_dna_obj, stash):
-    """Re-bind the actions captured by :func:`capture_bend_animation`.
-
-    Control nodes are matched by position in the list: ``_create_bend_nodes``
-    rebuilds them in bezier-point order, so node *i* after the rebuild is the
-    same handle the user keyed as node *i* before it. A node's local
-    ``location`` is its world position (its parent inverse cancels the curve's
-    matrix), so the old F-curve values still mean the same place.
-    """
-    if not stash or new_dna_obj is None:
+    """Re-bind the actions captured by :func:`capture_bend_animation`."""
+    if not stash:
         return
-    _bind_action(new_dna_obj, stash.get("dna"))
-    nodes = get_bend_nodes(new_dna_obj)
-    for node, action in zip(nodes, stash.get("nodes") or []):
-        _bind_action(node, action)
-
-    # Drop the fake users we added in capture - the actions have real owners
-    # again. Anything we could NOT re-bind (the node count changed) keeps its
-    # fake user so the user can still recover it from the Dope Sheet.
-    for action in [stash.get("dna")] + list(stash.get("nodes") or []):
-        if action is not None and action.users > 1:
-            action.use_fake_user = False
+    bend_rig.restore_animation(
+        SPEC, new_dna_obj,
+        {"owner": stash.get("dna"), "nodes": stash.get("nodes") or []})
 
 
 def reattach_after_rebuild(new_dna_obj, curve_obj):
@@ -822,26 +363,14 @@ def reattach_after_rebuild(new_dna_obj, curve_obj):
 
 def cleanup_bend_curve(dna_obj):
     """Full teardown: remove modifier, delete nodes, delete curve."""
-    _remove_bend_nodes(dna_obj)
+    # The Curve modifier is the DNA-specific half of the rig, so it comes off
+    # here rather than in the shared teardown. Taking it off first means the
+    # strand is never left deforming along a curve that has just been deleted.
+    modifier = dna_obj.modifiers.get(_CURVE_MOD)
+    if modifier is not None:
+        dna_obj.modifiers.remove(modifier)
 
-    name = dna_obj.get(BEND_CURVE_PROP)
-    if name:
-        mod = dna_obj.modifiers.get(_CURVE_MOD)
-        if mod is not None:
-            dna_obj.modifiers.remove(mod)
-        curve_obj = bpy.data.objects.get(name)
-        if curve_obj is not None:
-            curve_data = curve_obj.data
-            try:
-                bpy.data.objects.remove(curve_obj, do_unlink=True)
-            except Exception:
-                pass
-            if curve_data is not None and curve_data.users == 0:
-                try:
-                    bpy.data.curves.remove(curve_data)
-                except Exception:
-                    pass
-        dna_obj.pop(BEND_CURVE_PROP, None)
+    bend_rig.remove_rig(SPEC, dna_obj)
 
 
 # ---------------------------------------------------------------------------
@@ -1190,44 +719,12 @@ CLASSES = (
 
 def cleanup_orphaned_bend_objects():
     """Delete bend curves and bend nodes whose owning DNA molecule has been
-    removed from `bpy.data.objects`. Safe to call from operators."""
-    live_curves = set()
-    live_nodes = set()
-    for obj in bpy.data.objects:
-        if not obj.get("pb_is_nucleic_acid", False):
-            continue
-        cn = obj.get(BEND_CURVE_PROP)
-        if cn:
-            live_curves.add(cn)
-        raw = obj.get(BEND_NODES_PROP)
-        if raw:
-            try:
-                for n in json.loads(raw):
-                    live_nodes.add(n)
-            except Exception:
-                pass
+    removed from `bpy.data.objects`. Safe to call from operators.
 
-    to_remove = []
-    for o in bpy.data.objects:
-        if o.type == "CURVE" and o.name.endswith("_BendCurve"):
-            if o.name not in live_curves:
-                to_remove.append(o)
-        elif o.type == "EMPTY" and ("_BendNode" in o.name or "Bend Node " in o.name):
-            if o.name not in live_nodes:
-                to_remove.append(o)
-
-    for o in to_remove:
-        data = o.data
-        try:
-            bpy.data.objects.remove(o, do_unlink=True)
-        except Exception:
-            continue
-        if data is not None and getattr(data, "users", 1) == 0:
-            try:
-                if isinstance(data, bpy.types.Curve):
-                    bpy.data.curves.remove(data)
-            except Exception:
-                pass
+    ``_BendNode`` is the pre-rename node naming; legacy .blend files still
+    contain Empties called that, and they need sweeping up too.
+    """
+    bend_rig.cleanup_orphans(SPEC, extra_node_patterns=("_BendNode",))
 
 
 # Tracks the set of DNA-molecule names seen on the previous depsgraph

@@ -261,6 +261,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_dna_sequence.py` | `get_complement` (DNA/RNA), `validate_sequence`, `calculate_helix_info`, `make_wound_mask`, `_cumulative_twist`, `build_nucleic_acid` |
 | `test_canonical_geometry.py` | `build_canonical_template`, `get_canonical_templates`, purine/pyrimidine ring builders (atom counts, finite coords) |
 | `test_linker_geometry.py` | `compute_catenary_points`, `compute_zero_g_points`, `_arc_length`, `compute_random_coil_points`, `_solve_catenary_parameter`, `apply_rigid_binding_zones` |
+| `test_bend_rig.py` | the shared bend rig's geometry (`core/bend_rig.py`, behind both the DNA strand bender and the helical filament bend): sampling a path by *arc length* rather than by chord (checked on a right angle whose legs are summed in the test), carrying straight on past the end of a curve, a frame whose normal stays square to the tangent and - the load-bearing one - does not flip at an inflection the way a Frenet normal does; the starting presets by their geometry (an arc leaving the axis and returning, an S departing to opposite sides, a coil closing on itself, an unknown name falling back to straight); and arc-length resampling keeping the ends, the length and even handle spacing, no-opping at the same count, and clamping to a usable number |
 
 ## Integration lane (subsystem → operators covered)
 
