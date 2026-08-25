@@ -309,6 +309,35 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if delete_op:
                 delete_op.membrane_name = item.object_name
+        elif item.item_type == 'SYMMETRY':
+            # Edit pencil — reopens the Symmetry dialog on the settings this
+            # build was actually made with (recorded on the assembly node).
+            edit_op = row.operator(
+                "molecule.symmetry_dialog",
+                text="", icon='GREASEPENCIL', emboss=False,
+            )
+            if edit_op:
+                edit_op.molecule_id_to_update = item.parent_id
+            # Delete — takes the copies away and leaves the asymmetric unit.
+            # The row goes with them: it is derived from what is built.
+            delete_op = row.operator(
+                "molecule.clear_assembly", text="", icon='TRASH', emboss=False,
+            )
+            if delete_op:
+                delete_op.molecule_id = item.parent_id
+            # No selection or visibility control: the copies are geometry-node
+            # instances of the protein's own objects, so there is nothing here
+            # to select or hide that the protein's own row does not already
+            # own. Returning early leaves both off rather than drawing two
+            # controls that would silently do nothing.
+            #
+            # Their two columns still get spacers. Rows are laid out from the
+            # right, so without them this row's pencil and trash slide into
+            # the checkbox and eye columns and read as misaligned against
+            # every other row's pencil and trash.
+            row.label(text="", icon='BLANK1')
+            row.label(text="", icon='BLANK1')
+            return
         elif item.item_type == 'PUPPET':
             # Delete button (trash can) — route through the dedicated delete
             # operator, NOT edit_puppet's DELETE branch. The latter is a fallback

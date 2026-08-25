@@ -4,12 +4,104 @@ The domain logic lives in ``core.assembly``; these are the thin Blender-facing
 wrappers the panel drives.
 """
 
+import logging
+
 import bpy
 from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
 from ..utils.scene_manager import ProteinBlenderScene, resolve_active_molecule_id
+
+logger = logging.getLogger(__name__)
+
+#: The scene controls a generated symmetry is built from: (settings key, scene
+#: property, default). Named in one place so the dialog that edits them, the
+#: build that consumes them and the record the build leaves behind cannot
+#: drift apart about what a setting is.
+SYMMETRY_SETTINGS = (
+    ("kind", "pb_symmetry_kind", "C"),
+    ("order", "pb_symmetry_order", 3),
+    ("count", "pb_symmetry_count", 10),
+    ("rise", "pb_symmetry_rise", 0.0),
+    ("twist", "pb_symmetry_twist", 0.0),
+    ("axis", "pb_symmetry_axis", (0.0, 0.0, 1.0)),
+    ("range_limit", "pb_symmetry_range", 0.0),
+    ("contact", "pb_symmetry_contact", 0.0),
+)
+
+
+def symmetry_settings(scene) -> dict:
+    """Read the builder's controls off the scene into a plain dict."""
+    values = {}
+    for key, prop, default in SYMMETRY_SETTINGS:
+        value = getattr(scene, prop, default)
+        # The axis is a FloatVectorProperty, whose bpy_prop_array does not
+        # survive being stored or JSON-encoded.
+        values[key] = tuple(float(v) for v in value) if key == "axis" else value
+    return values
+
+
+def apply_symmetry_settings(scene, values: dict) -> None:
+    """Push a settings dict back onto the scene's controls.
+
+    Field by field on purpose: a stored value that no longer fits its property
+    - an enum identifier since renamed, a count past a new maximum - should
+    leave the rest of the dialog correctly seeded rather than abort the seed.
+    """
+    for key, prop, _default in SYMMETRY_SETTINGS:
+        if key not in values:
+            continue
+        try:
+            setattr(scene, prop, values[key])
+        except (TypeError, ValueError, AttributeError):
+            logger.warning("could not seed %s from stored value %r",
+                           prop, values[key])
+
+
+def build_generated_symmetry(molecule, settings: dict):
+    """Build a generated symmetry from a settings dict. Returns (ok, message).
+
+    The one path both the Symmetry dialog's Apply and its OK go through, so
+    what the viewport previews and what the dialog commits cannot be built by
+    two different pieces of code.
+    """
+    from ..core import symmetry_bend, symmetry_builder
+
+    kind = settings.get("kind", "C") or "C"
+    shape = {
+        "order": settings.get("order", 3),
+        "count": settings.get("count", 10),
+        "rise": settings.get("rise", 0.0),
+        "twist": settings.get("twist", 0.0),
+    }
+
+    # Through symmetry_bend, not symmetry_builder: a helical filament with a
+    # bend curve is laid along it, and everything else falls straight through
+    # to the generator.
+    operators = symmetry_bend.build_operators(
+        molecule, kind,
+        axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
+        **shape)
+
+    range_limit = settings.get("range_limit", 0.0) or None
+    contact = settings.get("contact", 0.0) or None
+    if range_limit is not None or contact is not None:
+        operators = assembly_core.filter_operators(
+            molecule, operators,
+            range_limit=range_limit, contact_distance=contact)
+
+    if not operators:
+        return False, "The range or contact limit removed every copy"
+
+    if not assembly_core.apply_operators(
+            molecule, operators, f"generated:{kind.upper()}"):
+        return False, "Could not build that symmetry"
+
+    # Leave the settings with the build, so the dialog can reopen on what was
+    # actually built rather than on whatever the scene sliders now say.
+    assembly_core.record_build_params(molecule, dict(settings))
+    return True, symmetry_builder.describe(kind, **shape)
 
 #: Blender does not keep a reference to the strings an EnumProperty items
 #: callback returns, so anything built on the fly there must be held alive on
@@ -200,40 +292,21 @@ class MOLECULE_PB_OT_build_symmetry(Operator):
     kind: StringProperty(default="")
 
     def execute(self, context):
-        from ..core import symmetry_builder
-
         molecule = _molecule(self.molecule_id or _active_molecule_id(context))
         if molecule is None:
             self.report({"ERROR"}, "No protein selected")
             return {"CANCELLED"}
 
-        scene = context.scene
-        kind = self.kind or getattr(scene, "pb_symmetry_kind", "C")
+        settings = symmetry_settings(context.scene)
+        if self.kind:
+            settings["kind"] = self.kind
 
-        operators = _filtered(context, molecule, symmetry_builder.build_operators(
-            kind,
-            order=getattr(scene, "pb_symmetry_order", 3),
-            count=getattr(scene, "pb_symmetry_count", 10),
-            rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0),
-            axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
-        ))
-        if not operators:
-            self.report({"WARNING"}, "The range or contact limit removed every copy")
-            return {"CANCELLED"}
-
-        ok = assembly_core.apply_operators(
-            molecule, operators, f"generated:{kind.upper()}")
+        ok, message = build_generated_symmetry(molecule, settings)
         if not ok:
-            self.report({"ERROR"}, "Could not build that symmetry")
+            self.report({"WARNING"}, message)
             return {"CANCELLED"}
 
-        self.report({"INFO"}, symmetry_builder.describe(
-            kind,
-            order=getattr(scene, "pb_symmetry_order", 3),
-            count=getattr(scene, "pb_symmetry_count", 10),
-            rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0)))
+        self.report({"INFO"}, message)
         _refresh(context)
         return {"FINISHED"}
 
@@ -402,13 +475,18 @@ def _operators_of_built(context, molecule, tag):
     The tag on the node says which: a deposited assembly id, or
     ``generated:<kind>``. The panel's current builder settings stand in for a
     generated one, which is right as long as they have not been changed since.
+
+    Goes through ``symmetry_bend`` for the same reason the build does: a bent
+    filament that was *built* one way and *measured* another would cut away
+    and draw axes for a straight filament nobody can see.
     """
-    from ..core import symmetry_builder
+    from ..core import symmetry_bend
 
     tag = str(tag)
     if tag.startswith("generated:"):
         scene = context.scene
-        return symmetry_builder.build_operators(
+        return symmetry_bend.build_operators(
+            molecule,
             tag.split(":", 1)[1],
             order=getattr(scene, "pb_symmetry_order", 3),
             count=getattr(scene, "pb_symmetry_count", 10),

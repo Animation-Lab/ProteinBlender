@@ -49,6 +49,15 @@ ASSEMBLY_NODE_NAME = "PB_Assembly"
 #: survives a save/load without needing a parallel property to keep in sync.
 _ASSEMBLY_ID_KEY = "pb_assembly_id"
 
+#: The settings a *generated* symmetry was built from, as a JSON blob on the
+#: same node, for the same reason: the Symmetry dialog has to reopen showing
+#: what the user actually built, and the scene-level pb_symmetry_* sliders
+#: cannot answer that - they are a single set of controls standing in for
+#: whichever protein is active, so by the time a second protein is built they
+#: describe that one instead. Living on the node means the record is created,
+#: saved and destroyed with the build it describes.
+_ASSEMBLY_PARAMS_KEY = "pb_assembly_params"
+
 #: MolecularNodes stores structures at 1/100 scale, so an Angstrom of operator
 #: translation is 0.01 Blender units.
 WORLD_SCALE = 0.01
@@ -239,6 +248,54 @@ def is_assembly_built(molecule) -> bool:
     return False
 
 
+def record_build_params(molecule, params: dict) -> bool:
+    """Stash the settings a build came from, on the node that build made.
+
+    Called after :func:`apply_operators` rather than through it, because the
+    operators are the same shape whether they came from a file or from the
+    generator - only a generated build has settings worth reopening a dialog
+    on. Returns True if at least one node took the record.
+    """
+    try:
+        payload = json.dumps(params, sort_keys=True)
+    except (TypeError, ValueError):
+        logger.exception("could not serialise build params %r", params)
+        return False
+
+    written = 0
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            node[_ASSEMBLY_PARAMS_KEY] = payload
+            written += 1
+    return written > 0
+
+
+def built_build_params(molecule) -> Optional[dict]:
+    """The settings the current build came from, or None if it carries none.
+
+    None covers both "nothing is built" and "what is built is a deposited
+    assembly", neither of which the generator has settings for.
+    """
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            stored = node.get(_ASSEMBLY_PARAMS_KEY)
+            if stored is None:
+                continue
+            try:
+                decoded = json.loads(str(stored))
+            except (TypeError, ValueError):
+                logger.warning("unreadable build params on %s", node.name)
+                return None
+            return decoded if isinstance(decoded, dict) else None
+    return None
+
+
 def built_assembly_id(molecule) -> Optional[str]:
     """Which assembly is currently built, read back off the node itself."""
     for obj in _target_objects(molecule):
@@ -308,6 +365,64 @@ def apply_operators(molecule, operators, tag: str) -> bool:
             logger.exception("could not wire the assembly into %s", obj.name)
 
     return wired > 0
+
+
+def update_operator_points(molecule, operators) -> bool:
+    """Re-place an existing build's copies without rebuilding anything.
+
+    :func:`apply_operators` tears the assembly down and constructs a fresh
+    point cloud, a fresh node group and a fresh node in every target tree. That
+    is right for a build, and wrong for something that has to keep up with a
+    mouse drag: removing and re-adding objects on every depsgraph tick is the
+    churn that invalidates node pointers, fights the undo stack, and is
+    explicitly unsafe from inside a depsgraph handler.
+
+    This writes the new rotations and translations straight into the attributes
+    the existing point cloud already carries. No datablock is created or
+    destroyed, so it is safe to call as often as the viewport asks.
+
+    Refuses - returning False, for the caller to fall back to a full rebuild -
+    when the operator count has changed, since that needs different geometry
+    rather than different attribute values.
+    """
+    from mathutils import Matrix as BlenderMatrix
+
+    if not operators:
+        return False
+
+    prefix = f".pb_assembly_{molecule.identifier}_"
+    targets = [o for o in bpy.data.objects if o.name.startswith(prefix)]
+    if not targets:
+        return False
+
+    axes, angles, translations = [], [], []
+    for rotation, translation in operators:
+        quaternion = BlenderMatrix(np.asarray(rotation).tolist()).to_quaternion()
+        angle = float(quaternion.angle)
+        axes.append(tuple(quaternion.axis) if abs(angle) > 1e-9 else (0.0, 0.0, 1.0))
+        angles.append(angle)
+        translations.append(
+            (np.asarray(translation, dtype=float) * WORLD_SCALE).tolist())
+
+    touched = 0
+    for points in targets:
+        mesh = points.data
+        if mesh is None or len(mesh.vertices) != len(operators):
+            continue
+        for name, values in (("axis", axes), ("trans", translations)):
+            attribute = mesh.attributes.get(name)
+            if attribute is None:
+                continue
+            for i, value in enumerate(values):
+                attribute.data[i].vector = value
+        attribute = mesh.attributes.get("angle")
+        if attribute is not None:
+            for i, value in enumerate(angles):
+                attribute.data[i].value = value
+        mesh.update_tag()
+        touched += 1
+
+    return touched > 0
 
 
 def _operators_for(molecule, assembly_id: str):

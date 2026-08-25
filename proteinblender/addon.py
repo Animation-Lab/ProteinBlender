@@ -206,6 +206,11 @@ def register() -> None:
     from .handlers import frame_change_handler
     frame_change_handler.register()
 
+    # Register the handler that keeps a built helical filament following its
+    # bend control nodes as they are dragged.
+    from .operators import symmetry_bend_operators
+    symmetry_bend_operators.register_handlers()
+
     # Register flexible linkers module
     register_linkers()
 
@@ -279,6 +284,13 @@ def unregister() -> None:
         frame_change_handler.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister frame change handler: {e}")
+
+    # Unregister the filament bend follow handler
+    try:
+        from .operators import symmetry_bend_operators
+        symmetry_bend_operators.unregister_handlers()
+    except Exception as e:
+        logger.debug(f"Failed to unregister filament bend handler: {e}")
 
     # Unregister Membrane builder module
     try:

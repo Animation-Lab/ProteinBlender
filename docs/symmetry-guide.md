@@ -95,19 +95,77 @@ The dropdown follows what is built rather than only what will be built next: bui
 Always available, including on a monomer.
 This is a construction tool, not a reader, so it is not gated on the file.
 
+The panel holds a single **Build Symmetry** button, which opens the builder's dialog.
+Everything that shapes a build lives in there:
+
+- **Protein** - which structure to build the symmetry for.
+  One at a time.
+  The generator works in a molecule's own coordinate frame, so applying one operator set to two proteins would ring each about its own origin rather than building a single assembly out of both.
 - **Cyclic (Cn)** - Order sets n.
 - **Dihedral (Dn)** - Order sets n, giving 2n copies.
 - **Helical** - Subunits, Rise (Angstrom along the axis), Twist (degrees about it).
 - **Axis** - the direction the symmetry turns about. Z by default.
-- **Build Symmetry** - applies it.
+- **Trim Copies** - Range and Contact, described below.
+
+Three ways out, and they mean different things:
+
+- **Apply** builds it and leaves the dialog open, so the settings can be judged against the viewport rather than against the numbers.
+  Press it as often as you like while dialling the shape in.
+- **OK** builds it and closes, and the result takes its place in the PB Outliner as a row of its own.
+- **Cancel** puts back whatever was on screen when the dialog opened.
+  That is nothing, a deposited assembly, or an earlier generated symmetry, whichever it was.
+  A preview you rejected is not what you are left with.
+
+Once something is built, the panel's button reads **Edit Symmetry** and reopens the dialog on the settings that build was actually made with.
+So does the pencil on the outliner row.
+Those settings travel with the build rather than with the panel, which is what lets two proteins carry different symmetries at once: the sliders are one set of controls standing in for whichever protein is active, so building a second protein moves them off the first.
 
 Tetrahedral, octahedral and icosahedral are deliberately absent.
 Each needs an explicit orientation convention, and picking one silently would put every subunit in the wrong place.
 Use the deposited assembly for those.
 
+### In the PB Outliner
+
+A generated symmetry appears as a **Symmetry C7** row under the protein it repeats, above the chains.
+The pencil reopens the builder's dialog on it; the trash takes the copies away and leaves the asymmetric unit.
+
+The row is read back from what is actually built rather than written when the dialog closes.
+That is what keeps it honest through undo, through a save and reload, and through a symmetry built from anywhere else.
+A deposited assembly gets no row: it has no generator settings, so the dialog's pencil would open on nothing.
+
+## Bend
+
+Appears in the panel once a **helical** symmetry is built, because it is the only kind with a path to run along - a ring has nowhere to bend to.
+It stays in the panel rather than moving into the builder's dialog because dragging the control nodes is a mode: a dialog that closed over it would end the drag at the moment it began.
+
+Real filaments are not straight.
+Actin curves, microtubules flex, amyloid twists across a field of view.
+**Add Bend** puts a Bezier curve along the filament with draggable control nodes, the same rig the DNA builder uses, and lays the subunits along it.
+
+- **Nodes** - how many handles shape the path, applied with the tick beside it.
+  Changing the count resamples the path you already made rather than resetting it.
+- **Straight / Arc / S-curve / Coil** - starting shapes. A starting point, not a constraint; the nodes still move afterwards.
+- **Edit Bend** - selects the control nodes so you can grab them with the usual transform gizmo. The copies follow as you drag.
+- **Remove** - deletes the rig; the filament runs straight along its axis again.
+
+The line underneath reports whether the bend is actually doing anything - "drag one to bend" until it is, then how far the far end has moved off straight.
+
+### The subunits stay rigid
+
+The copies are re-placed along the curve; they are never deformed.
+That is the physically right model - a filament bends by changing the relative orientation of rigid subunits, not by shearing each one - and it is also the only one available: the copies are geometry-nodes instances, which a deform modifier cannot reach at all.
+
+DNA is the opposite case, which is why its bend works differently: a double helix genuinely bends along its length, so the DNA builder hands its curve to a Curve modifier and deforms the strand.
+Same rig, opposite use.
+
+Two consequences worth knowing:
+
+- **The first subunit never moves.** The filament is anchored on the structure you imported and bends away from it, so bending the middle can swing the far end. That is what holding one end of a rope does.
+- **A filament longer than its curve carries straight on** past the end rather than piling up on the last point, so raising Subunits after shaping a bend extends the filament rather than crowding it.
+
 ## Trim Copies
 
-Applies to the next build.
+Part of the builder's dialog, so it is part of what a build is made of and travels with it.
 Both values are in Angstrom; **0 means no limit**.
 
 - **Range** - drop copies whose centre lands further than this from the original.
@@ -238,6 +296,9 @@ Worth knowing it exists before someone picks it in front of an audience, and a f
 Actin, bundled, and the natural subject for the helical builder.
 Try Subunits 13, Rise **27.5**, Twist **-166.7**, which are actin's real parameters.
 
+Then press **Add Bend** and drag the middle node: a curving actin filament, with every subunit still rigid.
+The **Arc** preset gets there in one click if you would rather not drag on stage.
+
 ### 2gls - gating, at scale
 Forty-eight chains and a deposited assembly consisting of one identity operator, because the file already contains the complete molecule.
 Makes the point that "no Deposited Assembly section" is not a failure to detect anything.
@@ -261,7 +322,7 @@ Add:
 6. **1cd3** - pentamer (assembly 3), then hexamer (4), then the whole capsid (1).
 7. **Trim Copies** with a Contact limit, reducing the capsid to one subunit's neighbours.
 8. **Show Symmetry Axes** on the capsid.
-9. **1atn** with the helical builder at actin's real rise and twist.
+9. **1atn** with the helical builder at actin's real rise and twist, then **Add Bend** and drag a node to curve the filament.
 10. **Realize Copies** on something small, then click a single subunit to show per-copy identity.
 
 ---
@@ -281,3 +342,7 @@ Worth stating before a demo rather than during one.
   Expected, given the copies share one set of atoms, but worth knowing before editing on stage.
 - **The panel is one long strip** of always-expanded sections.
   Collapsible sub-panels are the fix and are not built yet.
+- **Only helical symmetry can be bent.** Cyclic and dihedral have no path to run along, so the Bend section does not appear for them.
+- **A keyframed bend cannot change its node count.**
+  Rebuilding the handles orphans the F-curves keyed against the old ones, so the operator refuses rather than silently losing an animation you cannot see has gone.
+  Remove the keys, change the count, key it again.

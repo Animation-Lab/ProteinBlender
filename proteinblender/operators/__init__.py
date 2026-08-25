@@ -61,6 +61,19 @@ from .assembly_operators import (
     MOLECULE_PB_OT_clear_assembly,
     CLASSES as ASSEMBLY_CLASSES,
 )
+from .symmetry_bend_operators import (
+    MOLECULE_PB_OT_add_filament_bend,
+    MOLECULE_PB_OT_edit_filament_bend,
+    MOLECULE_PB_OT_set_filament_bend_nodes,
+    MOLECULE_PB_OT_filament_bend_preset,
+    MOLECULE_PB_OT_remove_filament_bend,
+    CLASSES as SYMMETRY_BEND_CLASSES,
+)
+from .symmetry_dialog import (
+    MOLECULE_PB_OT_symmetry_dialog,
+    MOLECULE_PB_OT_symmetry_preview,
+    CLASSES as SYMMETRY_DIALOG_CLASSES,
+)
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
 from .visual_edit import (
     PROTEINBLENDER_OT_edit_protein_visuals,
@@ -144,6 +157,9 @@ CLASSES = (
     PROTEINBLENDER_OT_brownian_clear_all,
     # Deposited biological assemblies
     *ASSEMBLY_CLASSES,
+    *SYMMETRY_BEND_CLASSES,
+    # The Symmetry Builder dialog and its in-dialog Apply
+    *SYMMETRY_DIALOG_CLASSES,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)

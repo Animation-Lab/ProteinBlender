@@ -614,13 +614,17 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
     # object. Clearing the assembly purges them, but deleting the protein is a
     # different route, and datablocks stranded here accumulate silently for the
     # rest of the session.
+    # A filament's bend rig is the same story: a curve object and a handful of
+    # control-node Empties, parented to the protein but not owned by it, which
+    # would otherwise be left floating in the scene with nothing to bend.
     try:
         from ..core import assembly as assembly_core
-        from ..core import symmetry_axes
+        from ..core import symmetry_axes, symmetry_bend
         molecule = scene_manager.molecules.get(molecule_id)
         if molecule is not None:
             assembly_core.clear_assembly(molecule)
             symmetry_axes.clear_symmetry_axes(molecule)
+            symmetry_bend.remove_bend(molecule)
     except Exception:
         logger.exception("could not clear the assembly of %s", molecule_id)
 
@@ -1535,6 +1539,60 @@ def sync_molecule_list_after_undo(*args):
         traceback.print_exc() 
 
 
+def _add_symmetry_item(context, scene, molecule, molecule_id,
+                       selection_states, expansion_states):
+    """Give a generated symmetry a row of its own under its protein.
+
+    Derived from what is *built* - read back off the assembly node - rather
+    than written when the builder's dialog closes. That is what keeps the row
+    honest through undo, through a save/load, and through a symmetry built
+    from anywhere other than the dialog; there is no second copy of the fact
+    to fall out of step.
+
+    Deposited assemblies get no row: the picker in the Symmetry panel is what
+    drives those, and the dialog this row's pencil opens has no settings that
+    would describe one.
+    """
+    from ..core import assembly as assembly_core
+    from ..core import symmetry_builder
+
+    try:
+        kind = symmetry_builder.built_symmetry_kind(molecule)
+    except (ReferenceError, AttributeError):
+        return
+    if not kind:
+        return
+
+    params = assembly_core.built_build_params(molecule) or {}
+    shape = {
+        "order": params.get("order", 3),
+        "count": params.get("count", 10),
+        "rise": params.get("rise", 0.0),
+        "twist": params.get("twist", 0.0),
+    }
+    try:
+        label = symmetry_builder.short_label(kind, **shape)
+        tooltip = symmetry_builder.describe(kind, **shape)
+    except Exception:
+        logger.exception("could not describe the built symmetry")
+        label, tooltip = kind, f"Generated symmetry: {kind}"
+
+    item = scene.outliner_items.add()
+    item.item_type = 'SYMMETRY'
+    item.item_id = f"symmetry_{molecule_id}"
+    item.parent_id = molecule_id
+    item.name = f"Symmetry {label}"
+    item.object_name = ""
+    item.indent_level = 1
+    item.icon = 'MOD_ARRAY'
+    item.tooltip = tooltip
+
+    if item.item_id in selection_states:
+        item.is_selected = selection_states[item.item_id]
+    if item.item_id in expansion_states:
+        item.is_expanded = expansion_states[item.item_id]
+
+
 def build_outliner_hierarchy(context=None):
     """Build or rebuild the outliner hierarchy from current molecule data"""
     if context is None:
@@ -1703,6 +1761,11 @@ def build_outliner_hierarchy(context=None):
             if hasattr(molecule, 'identifier'):
                 tooltip_parts.append(f"ID: {molecule.identifier}")
         protein_item.tooltip = "\n".join(tooltip_parts)
+
+        # Before the chains: a symmetry describes the whole protein, and a
+        # structure with many chains would otherwise bury it.
+        _add_symmetry_item(context, scene, molecule, molecule_id,
+                           item_selection_states, item_expansion_states)
 
         # Get chains from the molecule
         if mol_object and "chain_id" in mol_object.data.attributes:

@@ -325,9 +325,16 @@ def resample_curve_arc_length(curve_obj, n_points: int) -> None:
     if total <= 0:
         return
 
-    positions = [_at_arc_length(polyline, lengths,
-                                (j / (n_points - 1)) * total)
-                 for j in range(n_points)]
+    targets = [(j / (n_points - 1)) * total for j in range(n_points)]
+    positions = [_at_arc_length(polyline, lengths, t) for t in targets]
+    # Each new handle points along the *old path's* direction at that arc
+    # length, not at the next control point. Aiming at the neighbour looks
+    # equivalent and is not: on the very first point it swings the path's
+    # opening tangent by however much the path turns before the next handle,
+    # which for a filament laid out relative to its own start rotates the whole
+    # thing. Resampling is supposed to change how a path is controlled, never
+    # where it goes.
+    tangents = [_tangent_at_arc_length(polyline, lengths, t) for t in targets]
 
     # Replace the spline outright and set the coordinates explicitly. Adding a
     # Bezier point and only setting its handle *type* leaves the handle
@@ -339,8 +346,43 @@ def resample_curve_arc_length(curve_obj, n_points: int) -> None:
     for i, position in enumerate(positions):
         new_spline.bezier_points[i].co = Vector(position)
 
-    set_aligned_handles_along_path(new_spline)
+    _set_handles_along(new_spline, tangents)
     curve_data.update_tag()
+
+
+def _set_handles_along(spline, tangents, factor: float = 0.3) -> None:
+    """Handles pointing along given directions, scaled to the local spacing."""
+    points = spline.bezier_points
+    for i, point in enumerate(points):
+        if i == 0:
+            spacing = (points[1].co - points[0].co).length
+        elif i == len(points) - 1:
+            spacing = (points[-1].co - points[-2].co).length
+        else:
+            spacing = ((points[i].co - points[i - 1].co).length
+                       + (points[i + 1].co - points[i].co).length) * 0.5
+
+        direction = tangents[i]
+        if direction.length < 1e-9:
+            direction = Vector((0.0, 0.0, 1.0))
+        offset = direction.normalized() * (spacing * factor)
+
+        point.handle_left = point.co - offset
+        point.handle_right = point.co + offset
+        point.handle_left_type = "ALIGNED"
+        point.handle_right_type = "ALIGNED"
+
+
+def _tangent_at_arc_length(polyline, lengths, target: float) -> Vector:
+    """The polyline's direction of travel at *target*, from its own segments."""
+    index = 0
+    while index < len(lengths) - 1 and lengths[index + 1] < target:
+        index += 1
+    index = min(index, len(polyline) - 2)
+    direction = polyline[index + 1] - polyline[index]
+    if direction.length < 1e-12:
+        return Vector((0.0, 0.0, 1.0))
+    return direction.normalized()
 
 
 def _flatten(spline) -> List[Vector]:
@@ -366,30 +408,13 @@ def _at_arc_length(polyline, lengths, target: float) -> Vector:
     return polyline[index].lerp(polyline[index + 1], t)
 
 
-def bake_evaluated_curve_shape(curve_obj) -> None:
-    """Write the hook deformation back into the curve's own control points.
+def _hooks_by_point(curve_obj, point_count):
+    """Which Empty drives each Bezier point, from the hooks on the curve.
 
-    Hooks on a *curve* deform the evaluated geometry only - they never write
-    back to ``bp.co``, and the evaluated datablock exposes the same Bezier
-    points as the source. So reading ``evaluated_get(...).data.splines`` and
-    copying it back is a silent no-op, and anything that resamples afterwards
-    sees the original straight line instead of the user's bend.
-
-    Reading each hook's Empty and snapping the point there is what actually
-    works. Handles move by the same delta, or they would point at where the
-    point used to be and kink the curve.
+    ``create_nodes`` hooks the three sub-vertices of Bezier point *i* with
+    ``vertex_indices_set([3i, 3i+1, 3i+2])``, so the first index recovers the
+    point.
     """
-    if curve_obj is None or curve_obj.data is None:
-        return
-    splines = curve_obj.data.splines
-    if not splines:
-        return
-    spline = splines[0]
-    if spline.type != "BEZIER" or not spline.bezier_points:
-        return
-
-    # vertex_indices_set([3i, 3i+1, 3i+2]) per Bezier point, so the first
-    # index recovers which point a hook drives.
     by_point = {}
     for modifier in curve_obj.modifiers:
         if modifier.type != "HOOK" or modifier.object is None:
@@ -398,25 +423,87 @@ def bake_evaluated_curve_shape(curve_obj) -> None:
         if not indices:
             continue
         point_index = indices[0] // 3
-        if 0 <= point_index < len(spline.bezier_points):
+        if 0 <= point_index < point_count:
             by_point[point_index] = modifier.object
+    return by_point
 
-    if not by_point:
+
+def effective_bezier_points(curve_obj):
+    """The curve's control points *as the user has dragged them*, curve-local.
+
+    **Never read this off the evaluated curve.** Hooks on a curve deform the
+    rendered geometry only; they never write back to ``bp.co``, and
+    ``evaluated_get(...).data.splines`` hands back the very same Bezier points
+    as the source. Anything that trusts it sees the original straight line no
+    matter how far the control nodes have been dragged - which is a silent
+    wrong answer, not an error.
+
+    What does work is reading each hook's Empty. Its parent inverse cancels the
+    curve's matrix, so its world position *is* where that control point has
+    been moved to. Handles shift by the same delta; leaving them behind would
+    have them pointing at where the point used to be, kinking the path.
+
+    Returns ``(co, handle_left, handle_right)`` triples, or an empty list if
+    there is no Bezier spline to read.
+    """
+    if curve_obj is None or curve_obj.data is None:
+        return []
+    splines = curve_obj.data.splines
+    if not splines:
+        return []
+    spline = splines[0]
+    if spline.type != "BEZIER" or not spline.bezier_points:
+        return []
+
+    points = spline.bezier_points
+    by_point = _hooks_by_point(curve_obj, len(points))
+    to_local = curve_obj.matrix_world.inverted()
+
+    out = []
+    for index, point in enumerate(points):
+        co = point.co.copy()
+        handle_left = point.handle_left.copy()
+        handle_right = point.handle_right.copy()
+
+        empty = by_point.get(index)
+        if empty is not None:
+            target = to_local @ empty.matrix_world.translation
+            delta = target - co
+            if delta.length_squared >= 1e-12:
+                co = target
+                handle_left = handle_left + delta
+                handle_right = handle_right + delta
+
+        out.append((co, handle_left, handle_right))
+    return out
+
+
+def bake_evaluated_curve_shape(curve_obj) -> None:
+    """Write the hook deformation back into the curve's own control points.
+
+    So that anything reading ``bp.co`` afterwards - arc-length resampling, a
+    rebuild-then-recreate flow - sees the user's bend rather than the straight
+    line it started from. See :func:`effective_bezier_points` for why the
+    obvious evaluated-curve read is a silent no-op.
+    """
+    if curve_obj is None or curve_obj.data is None:
         return
 
     # The user may have moved a node moments ago without a viewport tick.
     bpy.context.view_layer.update()
 
-    to_local = curve_obj.matrix_world.inverted()
-    for point_index, empty in by_point.items():
-        point = spline.bezier_points[point_index]
-        target = to_local @ empty.matrix_world.translation
-        delta = target - point.co
-        if delta.length_squared < 1e-12:
+    effective = effective_bezier_points(curve_obj)
+    if not effective:
+        return
+
+    spline = curve_obj.data.splines[0]
+    for point, (co, handle_left, handle_right) in zip(spline.bezier_points,
+                                                      effective):
+        if (co - point.co).length_squared < 1e-12:
             continue
-        point.co = target
-        point.handle_left = point.handle_left + delta
-        point.handle_right = point.handle_right + delta
+        point.co = co
+        point.handle_left = handle_left
+        point.handle_right = handle_right
 
     curve_obj.data.update_tag()
 
@@ -891,23 +978,25 @@ def curve_length(curve_obj, samples_per_segment: int = _SAMPLES_PER_SEGMENT) -> 
 
 
 def _world_polyline(curve_obj, samples_per_segment):
-    """The evaluated curve as world-space points, with cumulative lengths."""
-    if curve_obj is None:
+    """The curve the user is actually looking at, as world-space points.
+
+    Built from :func:`effective_bezier_points` rather than from the evaluated
+    datablock, because the evaluated one does not carry the hook deformation -
+    see that function.
+    """
+    if curve_obj is None or curve_obj.data is None:
         return [], []
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    evaluated = curve_obj.evaluated_get(depsgraph)
-    data = evaluated.data
-    if data is None or not getattr(data, "splines", None):
-        return [], []
+    to_world = curve_obj.matrix_world
 
-    spline = data.splines[0]
-    to_world = evaluated.matrix_world
-
-    if spline.type == "BEZIER" and len(spline.bezier_points) >= 2:
-        local = _flatten_dense(spline, samples_per_segment)
+    effective = effective_bezier_points(curve_obj)
+    if len(effective) >= 2:
+        local = _flatten_triples(effective, samples_per_segment)
     else:
-        local = [p.co.to_3d() for p in getattr(spline, "points", [])]
+        splines = getattr(curve_obj.data, "splines", None)
+        if not splines:
+            return [], []
+        local = [p.co.to_3d() for p in getattr(splines[0], "points", [])]
 
     polyline = [to_world @ p for p in local]
     if len(polyline) < 2:
@@ -919,14 +1008,14 @@ def _world_polyline(curve_obj, samples_per_segment):
     return polyline, lengths
 
 
-def _flatten_dense(spline, samples_per_segment):
-    points = spline.bezier_points
+def _flatten_triples(triples, samples_per_segment):
+    """A dense polyline through ``(co, handle_left, handle_right)`` triples."""
     out = []
-    for i in range(len(points) - 1):
-        a, b = points[i], points[i + 1]
-        segment = interpolate_bezier(
-            a.co, a.handle_right, b.handle_left, b.co, samples_per_segment)
-        out.extend(segment[:-1] if i < len(points) - 2 else segment)
+    for i in range(len(triples) - 1):
+        (co_a, _hl_a, hr_a) = triples[i]
+        (co_b, hl_b, _hr_b) = triples[i + 1]
+        segment = interpolate_bezier(co_a, hr_a, hl_b, co_b, samples_per_segment)
+        out.extend(segment[:-1] if i < len(triples) - 2 else segment)
     return out
 
 

@@ -79,6 +79,13 @@ SCENE_PROPS = (
     "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
     "pb_symmetry_range", "pb_symmetry_contact",
     "pb_cutaway_normal", "pb_cutaway_offset",
+    # Bend node count. Snapshotted for the same reason as the symmetry
+    # settings, plus one of its own: the panel puts this field beside an apply
+    # button that rebuilds the rig at whatever it reads. If it reset on load
+    # while the rig kept the 7 nodes the user had applied, the field would
+    # disagree with the rig it labels and one click would silently rebuild the
+    # rig down to the default, discarding every node position.
+    "pb_bend_nodes",
     # Visual setup + animation panel.
     "visual_setup_color", "visual_setup_style",
     "pb_keyframe_list", "pb_keyframe_list_index",

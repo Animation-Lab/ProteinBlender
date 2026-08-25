@@ -61,6 +61,38 @@ def _bezier_curve(points, name="TestBezier"):
     return obj
 
 
+def _dragged_curve(name="DraggedPath"):
+    """A curve shaped the way production shapes one: built straight, then pulled.
+
+    This matters for the resampling tests. Building the "before" curve with
+    :func:`set_aligned_handles_along_path` would give it handles that already
+    aim at their neighbours - which is the very rule being tested, so
+    resampling under that rule would trivially reproduce it and prove nothing.
+
+    A real bend curve is created from ``straight_points`` and then deformed by
+    a hook, which moves a control point *and its handles* together and leaves
+    every other handle exactly as it was. That is what this builds.
+    """
+    rig = _rig()
+    triples = rig.straight_points(2.0, n=3, direction=(0, 0, 1))
+
+    dragged = []
+    for i, (co, handle_left, handle_right) in enumerate(triples):
+        offset = Vector((0.4, 0.0, 0.0)) if i == 1 else Vector((0.0, 0.0, 0.0))
+        dragged.append((Vector(co) + offset,
+                        Vector(handle_left) + offset,
+                        Vector(handle_right) + offset))
+
+    data = bpy.data.curves.new(name, "CURVE")
+    data.dimensions = "3D"
+    spline = data.splines.new("BEZIER")
+    rig.set_bezier_points(spline, dragged)
+    obj = bpy.data.objects.new(name, data)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.update()
+    return obj
+
+
 # --------------------------------------------------------------------------
 # Reading a path: position
 # --------------------------------------------------------------------------
@@ -274,6 +306,50 @@ def test_resampling_keeps_the_ends_and_the_length(scene):
     assert (points[0].co - before_first).length == pytest.approx(0, abs=1e-5)
     assert (points[-1].co - before_last).length == pytest.approx(0, abs=1e-5)
     assert rig.curve_length(curve) == pytest.approx(before_length, rel=0.02)
+
+
+def test_resampling_preserves_the_path_itself(scene):
+    """Resampling changes how a path is *controlled*, never where it goes.
+
+    Handles pointed at the next control point rather than along the old path
+    look equivalent and are not: on the first point that swings the opening
+    tangent by however much the path turns before the next handle. Sampling
+    the same fractions of arc length before and after is the invariant that
+    catches it, and it does not care how the handles were arrived at.
+    """
+    rig = _rig()
+    curve = _dragged_curve()
+
+    fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
+    before_length = rig.curve_length(curve)
+    before = rig.sample_along(curve, [f * before_length for f in fractions])
+
+    rig.resample_curve_arc_length(curve, 5)
+    bpy.context.view_layer.update()
+
+    after_length = rig.curve_length(curve)
+    after = rig.sample_along(curve, [f * after_length for f in fractions])
+
+    for i, ((p1, t1, _n1), (p2, t2, _n2)) in enumerate(zip(before, after)):
+        assert (p1 - p2).length < 0.05 * before_length, (
+            f"sample {i} moved from {p1} to {p2}")
+        assert t1.dot(t2) > 0.98, (
+            f"the path turns differently at sample {i}: "
+            f"{t1} became {t2} (dot {t1.dot(t2):.3f})")
+
+
+def test_resampling_keeps_the_opening_tangent(scene):
+    """The first handle in particular, because everything downstream leans on it."""
+    rig = _rig()
+    curve = _dragged_curve()
+
+    (_p, before, _n), = rig.sample_along(curve, [0.0])
+    rig.resample_curve_arc_length(curve, 6)
+    bpy.context.view_layer.update()
+    (_p, after, _n), = rig.sample_along(curve, [0.0])
+
+    assert before.dot(after) > 0.995, (
+        f"the path now sets off in a different direction: {before} -> {after}")
 
 
 def test_resampling_spaces_the_handles_evenly_along_the_path(scene):

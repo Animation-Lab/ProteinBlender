@@ -168,6 +168,23 @@ def describe(kind: str, order: int = 3, count: int = 10,
     return kind
 
 
+def short_label(kind: str, order: int = 3, count: int = 10,
+                rise: float = 0.0, twist: float = 0.0) -> str:
+    """A compact name for a built symmetry.
+
+    :func:`describe` is written for a panel's summary line, where there is
+    room to explain what the setting will do. An outliner row has none: it
+    sits in a column of names beside chains and domains, so it wants the
+    name alone and leaves the explanation to the tooltip.
+    """
+    kind = (kind or "C").upper()
+    if kind in {"C", "D"}:
+        return f"{kind}{int(order)}"
+    if kind == "H":
+        return f"Helix ({int(count)})"
+    return kind
+
+
 def apply_symmetry(molecule, kind: str, **settings) -> bool:
     """Generate a symmetry and place the copies.
 

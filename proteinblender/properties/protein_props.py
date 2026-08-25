@@ -28,6 +28,7 @@ class ProteinOutlinerItem(PropertyGroup):
             ('PUPPET', 'Puppet', 'Protein Puppet'),
             ('DNA_RNA', 'DNA/RNA', 'DNA or RNA molecule'),
             ('MEMBRANE', 'Membrane', 'Lipid bilayer membrane'),
+            ('SYMMETRY', 'Symmetry', 'Generated symmetric assembly'),
         ],
         default='PROTEIN'
     )
@@ -222,6 +223,12 @@ def _symmetry_kind_items(self, context):
     return list(SYMMETRY_KINDS)
 
 
+def _bend_rig():
+    """Imported lazily: ``core`` reaches back into this module at import time."""
+    from ..core import bend_rig
+    return bend_rig
+
+
 def _assembly_enum_items(self, context):
     """Deposited assemblies worth offering for the active protein.
 
@@ -295,6 +302,13 @@ def register():
         description="Direction of the symmetry axis",
         default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
     )
+    bpy.types.Scene.pb_bend_nodes = IntProperty(
+        name="Nodes",
+        description=("How many control handles shape the filament's bend "
+                     "path"),
+        default=_bend_rig().RES_DEFAULT,
+        min=_bend_rig().RES_MIN, max=_bend_rig().RES_MAX,
+    )
     bpy.types.Scene.pb_symmetry_range = FloatProperty(
         name="Range",
         description=("Drop copies whose centre lands further than this many "
@@ -337,7 +351,7 @@ def unregister():
     from bpy.utils import unregister_class
     
     # Safe unregistration with try/except blocks
-    for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+    for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

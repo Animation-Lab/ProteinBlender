@@ -67,8 +67,14 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         box.separator()
         self._draw_builder(box, scene, molecule)
 
-        box.separator()
-        self._draw_trim(box, scene)
+        # Bend follows what is *built*, not what the dialog's picker says: a
+        # path to bend exists once there is a filament on screen. It stays on
+        # the panel rather than moving into the dialog because dragging the
+        # control nodes is a mode, and a dialog that closes over it would end
+        # the drag at the moment it began.
+        if symmetry_builder.built_symmetry_kind(molecule) == "H":
+            box.separator()
+            self._draw_bend(box, scene, molecule)
 
         if built_id is not None:
             box.separator()
@@ -103,47 +109,94 @@ class PROTEINBLENDER_PT_symmetry(Panel):
     # -- generated ---------------------------------------------------------
 
     def _draw_builder(self, box, scene, molecule):
+        """One button. Everything that shapes a build lives in its dialog.
+
+        The settings used to sit here, inline. They moved because they are
+        *build* settings - read once, when the copies are made - and a panel
+        full of live sliders says otherwise: it invites the reading that
+        dragging one re-shapes what is already on screen. A dialog makes the
+        moment of building explicit, and gives the preview an Apply to hang
+        off and a Cancel to undo it with.
+        """
         box.label(text="Symmetry Builder")
 
-        col = box.column(align=True)
-        col.prop(scene, "pb_symmetry_kind", text="")
-
-        kind = getattr(scene, "pb_symmetry_kind", "C")
-        if kind in {"C", "D"}:
-            col.prop(scene, "pb_symmetry_order")
-        else:
-            col.prop(scene, "pb_symmetry_count")
-            col.prop(scene, "pb_symmetry_rise")
-            col.prop(scene, "pb_symmetry_twist")
-        axis_row = col.row(align=True)
-        axis_row.label(text="Axis")
-        axis_row.prop(scene, "pb_symmetry_axis", text="")
-
-        summary = box.row()
-        summary.enabled = False
-        summary.label(text=symmetry_builder.describe(
-            kind,
-            order=getattr(scene, "pb_symmetry_order", 3),
-            count=getattr(scene, "pb_symmetry_count", 10),
-            rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0)))
+        built_kind = symmetry_builder.built_symmetry_kind(molecule)
 
         row = box.row(align=True)
         row.scale_y = 1.2
-        op = row.operator("molecule.build_symmetry", text="Build Symmetry")
-        op.molecule_id = molecule.identifier
+        op = row.operator(
+            "molecule.symmetry_dialog",
+            text="Edit Symmetry" if built_kind else "Build Symmetry",
+            icon='GREASEPENCIL' if built_kind else 'MOD_ARRAY')
+        op.molecule_id_to_update = molecule.identifier if built_kind else ""
 
-    # -- trimming ----------------------------------------------------------
+    # -- bending a filament -------------------------------------------------
 
-    def _draw_trim(self, box, scene):
-        """Range and contact apply to whichever kind is built next."""
-        box.label(text="Trim Copies")
-        col = box.column(align=True)
-        col.prop(scene, "pb_symmetry_range")
-        col.prop(scene, "pb_symmetry_contact")
-        note = box.row()
-        note.enabled = False
-        note.label(text="0 keeps every copy", icon='INFO')
+    def _draw_bend(self, box, scene, molecule):
+        """Only for helical: a ring or a double ring has no path to follow."""
+        from ..core import bend_rig, symmetry_bend
+
+        box.separator(factor=0.5)
+        box.label(text="Bend")
+
+        if not symmetry_bend.has_bend(molecule):
+            note = box.row()
+            note.enabled = False
+            note.label(text="Subunits stay rigid - the path bends, not them",
+                       icon='INFO')
+            add = box.row(align=True)
+            add_op = add.operator("molecule.add_filament_bend",
+                                  text="Add Bend", icon='CURVE_BEZCURVE')
+            add_op.molecule_id = molecule.identifier
+            return
+
+        nodes = symmetry_bend.get_bend_nodes(molecule)
+
+        count = box.row(align=True)
+        count.prop(scene, "pb_bend_nodes")
+        apply_count = count.operator("molecule.set_filament_bend_nodes",
+                                     text="", icon='CHECKMARK')
+        apply_count.molecule_id = molecule.identifier
+        apply_count.n_points = getattr(scene, "pb_bend_nodes",
+                                       bend_rig.RES_DEFAULT)
+
+        presets = box.row(align=True)
+        for identifier, label, _description in bend_rig.PRESETS:
+            preset_op = presets.operator("molecule.filament_bend_preset",
+                                         text=label)
+            preset_op.molecule_id = molecule.identifier
+            preset_op.preset = identifier
+
+        actions = box.row(align=True)
+        edit_op = actions.operator("molecule.edit_filament_bend",
+                                   text="Edit Bend", icon='EMPTY_DATA')
+        edit_op.molecule_id = molecule.identifier
+        remove_op = actions.operator("molecule.remove_filament_bend",
+                                     text="Remove", icon='X')
+        remove_op.molecule_id = molecule.identifier
+
+        # Say whether the rig is doing anything, not merely that it exists -
+        # a freshly added bend is straight until a node is dragged. Measured
+        # against the settings the filament was *built* from, which the
+        # scene sliders no longer have to agree with now that they are the
+        # dialog's working copy.
+        built = assembly_core.built_build_params(molecule) or {}
+        departure = symmetry_bend.bend_departure(
+            molecule,
+            count=built.get("count", getattr(scene, "pb_symmetry_count", 10)),
+            rise=built.get("rise", getattr(scene, "pb_symmetry_rise", 0.0)),
+            twist=built.get("twist", getattr(scene, "pb_symmetry_twist", 0.0)),
+            axis=tuple(built.get(
+                "axis", getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0)))))
+
+        status = box.row()
+        status.enabled = False
+        if departure < 1.0:
+            status.label(text=f"{len(nodes)} nodes - drag one to bend",
+                         icon='INFO')
+        else:
+            status.label(text=f"Tip is {departure:.0f} A off straight",
+                         icon='CHECKMARK')
 
     # -- animation ---------------------------------------------------------
 

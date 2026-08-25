@@ -164,6 +164,57 @@ def build_biological_assembly():
     _build_outliner()
 
 
+def build_bent_filament():
+    """A generated helical filament bent along a curve, expected to reload bent.
+
+    Three separate things have to survive together: the bend rig (an ordinary
+    curve object, control-node Empties and the hooks between them), the custom
+    properties on the molecule naming them, and the *bent* operators - which
+    live baked into the assembly point cloud rather than being recomputed on
+    load. If any of the three did not persist the filament would come back
+    straight, which looks like a working file rather than a broken one.
+    """
+    from proteinblender.core import assembly as assembly_core
+    from proteinblender.core import bend_rig, symmetry_bend
+
+    mid = H.import_local("1ubq.pdb", "filament")
+    bpy.context.scene.selected_molecule_id = mid
+    molecule = H.sm().molecules[mid]
+
+    scene = bpy.context.scene
+    scene.pb_symmetry_kind = "H"
+    scene.pb_symmetry_count = 6
+    scene.pb_symmetry_rise = 40.0
+    scene.pb_symmetry_twist = 30.0
+    scene.pb_symmetry_axis = (0.0, 0.0, 1.0)
+    # Deliberately not bend_rig.RES_DEFAULT: a builder that sets a property to
+    # its default proves nothing on reload, because a value that was dropped
+    # entirely comes back looking identical to one that persisted.
+    scene.pb_bend_nodes = 5
+    assert scene.pb_bend_nodes != bend_rig.RES_DEFAULT, \
+        "pb_bend_nodes must round-trip a non-default value to be observable"
+
+    assert bpy.ops.molecule.build_symmetry(
+        'EXEC_DEFAULT', molecule_id=mid) == {'FINISHED'}
+    assert str(assembly_core.built_assembly_id(molecule)).startswith("generated:H")
+
+    assert bpy.ops.molecule.add_filament_bend(
+        'EXEC_DEFAULT', molecule_id=mid) == {'FINISHED'}
+    nodes = symmetry_bend.get_bend_nodes(molecule)
+    assert len(nodes) == 5, f"bend rig made {len(nodes)} nodes, expected 5"
+
+    from mathutils import Vector
+    middle = nodes[len(nodes) // 2]
+    middle.location = middle.location + Vector((0.4, 0.0, 0.0))
+    bpy.context.view_layer.update()
+
+    departure = symmetry_bend.bend_departure(molecule, 6, 40.0, 30.0)
+    assert departure > 10.0, (
+        f"the filament is only {departure:.1f} A off straight - nothing to "
+        "round-trip")
+    _build_outliner()
+
+
 def build_chain_rename():
     """A user-renamed chain.
 
@@ -685,6 +736,7 @@ BUILDERS = {
     "single_protein": build_single_protein,
     "multi_chain": build_multi_chain,
     "biological_assembly": build_biological_assembly,
+    "bent_filament": build_bent_filament,
     "domains": build_domains,
     "chain_rename": build_chain_rename,
     "chain_copy": build_chain_copy,
@@ -710,6 +762,7 @@ BUILDER_SUBSYSTEMS = {
     "single_protein": ("core",),
     "multi_chain": ("core",),
     "biological_assembly": ("core", "operators", "panels"),
+    "bent_filament": ("core", "operators", "panels"),
     "domains": ("core", "operators", "panels", "addon"),
     "chain_rename": ("core", "panels"),
     "chain_copy": ("core", "operators", "utils"),
