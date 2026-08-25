@@ -452,6 +452,69 @@ def test_the_trim_limits_travel_with_the_build():
 
 
 # --------------------------------------------------------------------------
+# Which protein the dialog opens on
+# --------------------------------------------------------------------------
+
+def _forget_the_active_molecule():
+    """The state a user is in after deleting a protein, or an undo.
+
+    Clears all three sources ``resolve_active_molecule_id`` consults, so
+    nothing is active while proteins are still loaded.
+    """
+    bpy.context.scene.selected_molecule_id = ""
+    bpy.context.scene.molecule_list_index = -1
+    H.sm().active_molecule = None
+
+
+def test_the_dialog_opens_on_a_loaded_protein_when_nothing_is_active():
+    """Create New Symmetry is always enabled, so it gets clicked cold.
+
+    Refusing a scene that has a protein in it merely because none is selected
+    is the bug this covers: the dialog has a picker, and there is something
+    to pick.
+    """
+    molecule = _import()
+    _forget_the_active_molecule()
+
+    assert _dialog().resolve_target(bpy.context) == molecule.identifier, (
+        "the dialog would have refused a scene with a protein in it")
+
+
+def test_an_explicit_request_wins_over_whatever_is_active():
+    first = _import("target_first")
+    second = _import("target_second")
+    bpy.context.scene.selected_molecule_id = second.identifier
+
+    assert _dialog().resolve_target(
+        bpy.context, first.identifier) == first.identifier
+
+
+def test_a_stale_request_falls_back_rather_than_refusing():
+    """The outliner's pencil can carry an id whose protein has since gone."""
+    molecule = _import()
+    assert _dialog().resolve_target(
+        bpy.context, "a_protein_that_was_deleted") == molecule.identifier
+
+
+def test_only_an_empty_scene_leaves_the_dialog_with_nothing():
+    """The one case it genuinely cannot proceed from."""
+    assert not H.sm().molecules, "the scrub should have left an empty scene"
+    assert _dialog().resolve_target(bpy.context) == ""
+
+
+def test_an_empty_scene_is_told_what_to_do_not_what_is_missing():
+    """The message a user meets on a fresh file.
+
+    It used to read "No protein selected", which sent people looking for a
+    selection that would not have helped. Nothing was selectable: a symmetry
+    repeats a protein, so there has to be one first.
+    """
+    assert not H.sm().molecules
+    with pytest.raises(RuntimeError, match="Import a protein first"):
+        bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT')
+
+
+# --------------------------------------------------------------------------
 # Seeding the dialog
 # --------------------------------------------------------------------------
 

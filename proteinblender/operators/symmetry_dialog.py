@@ -120,6 +120,30 @@ def target_enum_items(self, context):
     return _TARGET_ENUM_CACHE
 
 
+def resolve_target(context, requested: str = "") -> str:
+    """Which protein the dialog should open on, or "" if there is none.
+
+    Create New Symmetry is always enabled, like the other two builders, so it
+    gets clicked when nothing in particular is selected - the state a user is
+    in after deleting a protein, after an undo, or simply on a scene they have
+    not clicked into yet. Refusing then is wrong twice over: the dialog has a
+    picker, and there is something to pick.
+
+    So an explicit request wins, then whatever the UI considers active, and
+    failing both, the first molecule loaded - which is exactly what the picker
+    would have opened on anyway. "" is reserved for the one case the dialog
+    genuinely cannot proceed from: no proteins at all.
+    """
+    if requested and _molecule(requested) is not None:
+        return requested
+
+    active = resolve_active_molecule_id(context) or ""
+    if _molecule(active) is not None:
+        return active
+
+    return next(iter(_molecules()), "")
+
+
 def snapshot_state(molecule) -> dict:
     """What is on screen now, in enough detail to put it back.
 
@@ -182,11 +206,14 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     # -- opening -----------------------------------------------------------
 
     def invoke(self, context, event):
-        molecule_id = (self.molecule_id_to_update
-                       or resolve_active_molecule_id(context) or "")
+        molecule_id = resolve_target(context, self.molecule_id_to_update)
         molecule = _molecule(molecule_id)
         if molecule is None:
-            self.report({"ERROR"}, "No protein selected")
+            # Say what to do, not what is missing. "No protein selected"
+            # sent people hunting for a selection that would not have helped:
+            # a symmetry repeats a protein, so there has to be one first.
+            self.report({"ERROR"},
+                        "Import a protein first - a symmetry repeats one")
             return {"CANCELLED"}
 
         try:
@@ -271,9 +298,12 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     # -- leaving -----------------------------------------------------------
 
     def execute(self, context):
-        molecule = _molecule(self.target_id)
+        # The picker's choice wins; resolve_target only fills in when it is
+        # empty, which is the no-protein case.
+        molecule = _molecule(resolve_target(context, self.target_id))
         if molecule is None:
-            self.report({"ERROR"}, "No protein selected")
+            self.report({"ERROR"},
+                        "Import a protein first - a symmetry repeats one")
             return {"CANCELLED"}
 
         ok, message = build_generated_symmetry(
@@ -322,10 +352,10 @@ class MOLECULE_PB_OT_symmetry_preview(Operator):
     molecule_id: StringProperty(options={'SKIP_SAVE'})
 
     def execute(self, context):
-        molecule = _molecule(self.molecule_id
-                             or resolve_active_molecule_id(context) or "")
+        molecule = _molecule(resolve_target(context, self.molecule_id))
         if molecule is None:
-            self.report({"ERROR"}, "No protein selected")
+            self.report({"ERROR"},
+                        "Import a protein first - a symmetry repeats one")
             return {"CANCELLED"}
 
         # Before building, not after: the point of the record is what was

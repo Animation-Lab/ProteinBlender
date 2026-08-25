@@ -374,6 +374,41 @@ def assert_symmetry_preview_was_reverted():
     return "cancelling the dialog took the previewed symmetry back down"
 
 
+def symmetry_dialog_opens_with_no_active_protein():
+    """The Builders button is always there, so it must not refuse a loaded scene.
+
+    Create New Symmetry sits beside Create New DNA / RNA and Create New
+    Membrane and is never greyed out, so it gets clicked when nothing in
+    particular is selected. Refusing then is wrong: the dialog has a protein
+    picker, and there is a protein to pick.
+
+    Only reachable here. Background Blender routes INVOKE_DEFAULT straight to
+    execute(), so the refusal this guards lives on a code path the headless
+    lane cannot reach at all.
+    """
+    scene = bpy.context.scene
+    manager = H.sm()
+
+    # Clear every source resolve_active_molecule_id consults, which is the
+    # state a user lands in after deleting a protein or undoing an import.
+    saved = (scene.selected_molecule_id, scene.molecule_list_index,
+             getattr(manager, "active_molecule", None))
+    scene.selected_molecule_id = ""
+    scene.molecule_list_index = -1
+    manager.active_molecule = None
+    try:
+        with ui_override("PROPERTIES"):
+            result = bpy.ops.molecule.symmetry_dialog("INVOKE_DEFAULT")
+        assert result == {"RUNNING_MODAL"}, (
+            f"the dialog refused a scene that has a protein in it: {result}")
+        active_window().event_simulate(type="ESC", value="PRESS")
+        active_window().event_simulate(type="ESC", value="RELEASE")
+    finally:
+        scene.selected_molecule_id, scene.molecule_list_index = saved[0], saved[1]
+        manager.active_molecule = saved[2]
+    return "symmetry dialog opened with nothing active, and was cancelled"
+
+
 def edit_pivot_opens_the_move_gizmo():
     """First click on a chain row's Edit Pivot: the mode opens.
 
@@ -1078,6 +1113,8 @@ steps = [
     ("symmetry dialog apply preview", symmetry_dialog_apply_preview),
     ("settle symmetry modal", lambda: "modal cancellation processed"),
     ("assert symmetry preview reverted", assert_symmetry_preview_was_reverted),
+    ("symmetry dialog with nothing active", symmetry_dialog_opens_with_no_active_protein),
+    ("settle symmetry no-active modal", lambda: "modal cancellation processed"),
     ("edit pivot opens the move gizmo", edit_pivot_opens_the_move_gizmo),
     ("settle edit pivot open", lambda: "gizmo activation processed"),
     ("edit pivot second click applies",

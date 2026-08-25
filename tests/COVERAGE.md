@@ -300,6 +300,25 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Create New Symmetry refused a scene that had a protein in it.**
+  The dialog resolved its target through `resolve_active_molecule_id` alone and
+  cancelled with "No protein selected" when that returned nothing. But the
+  Builders button is always enabled, like the other two, so it gets clicked
+  when nothing in particular is selected - after deleting a protein, after an
+  undo, or on a scene the user has not clicked into yet - and refusing then was
+  wrong twice over: the dialog has a picker, and there was something to pick.
+  `resolve_target` now falls back to the first loaded molecule, which is what
+  the picker would have opened on anyway, and reserves failure for the one case
+  it cannot proceed from. That case now says what to do ("Import a protein
+  first - a symmetry repeats one") rather than naming a selection that would
+  not have helped.
+  Guarded headlessly by `test_symmetry_dialog.py`'s resolution tests (nothing
+  active, an explicit request winning, a stale request falling back, and the
+  empty-scene message), and end to end by
+  `run_ui_scenarios.py::symmetry_dialog_opens_with_no_active_protein`, which
+  reproduced the original `RuntimeError: Error: No protein selected` red -
+  `invoke` is unreachable headless, so only that lane exercises the refusal.
+
 - **The PB Outliner listed a chain's domains in creation order.**
   `build_outliner_hierarchy` walked `molecule.domains` (a dict, so insertion
   ordered) and emitted the rows as it found them, so a chain carved up
