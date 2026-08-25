@@ -300,6 +300,19 @@ on a membrane whose typical gap was 0.28 nm.
 
 ## Behaviour regressions (guard against reintroduction)
 
+- **Create New Symmetry refused to open on an empty scene.**
+  The dialog cancelled with "Import a protein first" when no protein was
+  loaded, which is backwards: the form carries its own Download / Import Local
+  File controls, so an empty scene is what it *fixes*, and refusing shut the
+  one screen that could have helped. `invoke` now never cancels. Failure is
+  left to OK, which genuinely cannot build a symmetry out of nothing.
+  Guarded by `run_ui_scenarios.py::symmetry_dialog_opens_with_no_protein_at_all`,
+  which empties the molecule registry (what the dialog reads) rather than the
+  scene, so the steps after it keep their fixture. It reproduced the reported
+  refusal red before the fix. Verified end to end in a windowed Blender too:
+  a real click on Download inside the dialog imported 1ubq, left the dialog
+  open, and the Build from picker gained the protein.
+
 - **Create New Symmetry refused a scene that had a protein in it.**
   The dialog resolved its target through `resolve_active_molecule_id` alone and
   cancelled with "No protein selected" when that returned nothing. But the

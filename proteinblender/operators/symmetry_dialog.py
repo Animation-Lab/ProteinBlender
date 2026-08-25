@@ -206,30 +206,32 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     # -- opening -----------------------------------------------------------
 
     def invoke(self, context, event):
+        """Always opens. There is no scene too empty for this dialog.
+
+        It carries its own Download / Import Local File controls, so an empty
+        scene is something it *fixes* rather than something it refuses: the
+        form is where you get hold of a protein as well as where you shape the
+        symmetry built from it. Refusing here shut the one screen that could
+        have helped.
+        """
         molecule_id = resolve_target(context, self.molecule_id_to_update)
         molecule = _molecule(molecule_id)
-        if molecule is None:
-            # Say what to do, not what is missing. "No protein selected"
-            # sent people hunting for a selection that would not have helped:
-            # a symmetry repeats a protein, so there has to be one first.
-            self.report({"ERROR"},
-                        "Import a protein first - a symmetry repeats one")
-            return {"CANCELLED"}
 
-        try:
-            self.target_id = molecule_id
-        except TypeError:
-            # The picker refuses an identifier its items callback is not
-            # currently offering; it then opens on its first entry, which is
-            # a live molecule either way.
-            logger.warning("could not point the picker at %s", molecule_id)
+        if molecule_id:
+            try:
+                self.target_id = molecule_id
+            except TypeError:
+                # The picker refuses an identifier its items callback is not
+                # currently offering; it then opens on its first entry.
+                logger.warning("could not point the picker at %s", molecule_id)
 
         # Reopening on a build shows what that build was made with, not what
         # the scene sliders happen to say - they are one set of controls
         # standing in for whichever protein was last active.
-        stored = assembly_core.built_build_params(molecule)
-        if stored:
-            apply_symmetry_settings(context.scene, stored)
+        if molecule is not None:
+            stored = assembly_core.built_build_params(molecule)
+            if stored:
+                apply_symmetry_settings(context.scene, stored)
 
         # Anything left over from a dialog that was torn down without its
         # cancel() running would otherwise be restored on top of this one.
@@ -242,11 +244,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         layout = self.layout
         scene = context.scene
 
-        # Labelled, unlike the kind dropdown below it: "Cyclic (Cn)" says what
-        # it is on its own, where a bare "ubq" does not.
-        picker = layout.row(align=True)
-        picker.label(text="Protein")
-        picker.prop(self, "target_id", text="")
+        self._draw_protein_block(layout, scene)
         layout.separator(factor=0.5)
 
         kind = getattr(scene, "pb_symmetry_kind", "C")
@@ -294,6 +292,52 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         hint = layout.row()
         hint.enabled = False
         hint.label(text="Apply previews it - OK keeps it", icon='INFO')
+
+    def _draw_protein_block(self, layout, scene):
+        """Getting hold of a protein, and choosing which one to repeat.
+
+        The same Method / id / Download / Import Local File controls the
+        Protein Import panel offers, because the dialog has to stand on its
+        own: it opens on an empty scene, and this is what makes that useful
+        rather than a dead end. Operator buttons inside a props dialog do not
+        dismiss it, so a download lands and the picker below simply gains an
+        entry.
+        """
+        box = layout.box()
+        box.label(text="Protein", icon='FILE_FOLDER')
+
+        props = getattr(scene, "protein_props", None)
+        if props is not None:
+            source = box.row(align=True)
+            source.prop(props, "import_method", text="Method")
+            method = getattr(props, "import_method", "PDB")
+            if method in {'PDB', 'MMCIF'}:
+                source.prop(props, "pdb_id", text="PDB ID")
+            elif method == 'ALPHAFOLD':
+                source.prop(props, "uniprot_id", text="UniProt ID")
+
+            buttons = box.row(align=True)
+            buttons.operator("molecule.import_protein", text="Download")
+            # Opens Blender's file browser, which cannot be nested inside a
+            # popup: this one closes the dialog behind it. The import still
+            # lands, and reopening finds the protein waiting in the picker.
+            buttons.operator("molecule.import_local", text="Import Local File")
+
+        box.separator(factor=0.5)
+        if _molecules():
+            picker = box.row(align=True)
+            # Labelled, unlike the kind dropdown below it: "Cyclic (Cn)" says
+            # what it is on its own, where a bare "ubq" does not.
+            picker.label(text="Build from")
+            picker.prop(self, "target_id", text="")
+        else:
+            # No picker at all rather than one holding the placeholder item.
+            # An enum whose only entry has an empty identifier draws as a
+            # blank dropdown, which reads as broken rather than as empty.
+            note = box.row()
+            note.enabled = False
+            note.label(text="Import one above to build a symmetry from it",
+                       icon='INFO')
 
     # -- leaving -----------------------------------------------------------
 

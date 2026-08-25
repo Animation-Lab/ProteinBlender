@@ -374,6 +374,34 @@ def assert_symmetry_preview_was_reverted():
     return "cancelling the dialog took the previewed symmetry back down"
 
 
+def symmetry_dialog_opens_with_no_protein_at_all():
+    """Create New Symmetry must open its form on an empty scene.
+
+    The dialog is where you set a symmetry up, and that includes getting hold
+    of the protein to build it from: it carries the same Download / Import
+    Local File controls the Protein Import panel has. So there is no such
+    thing as "too empty to open" - refusing on an empty scene refuses the one
+    screen that could have fixed the emptiness.
+
+    The molecule registry is emptied rather than the scene, because that is
+    what the dialog reads; the Blender objects are left alone so the steps
+    after this one still have their fixture.
+    """
+    manager = H.sm()
+    saved = dict(manager.molecules)
+    manager.molecules.clear()
+    try:
+        with ui_override("PROPERTIES"):
+            result = bpy.ops.molecule.symmetry_dialog("INVOKE_DEFAULT")
+        assert result == {"RUNNING_MODAL"}, (
+            f"the dialog refused to open on an empty scene: {result}")
+        active_window().event_simulate(type="ESC", value="PRESS")
+        active_window().event_simulate(type="ESC", value="RELEASE")
+    finally:
+        manager.molecules.update(saved)
+    return "symmetry dialog opened on an empty scene, and was cancelled"
+
+
 def symmetry_dialog_opens_with_no_active_protein():
     """The Builders button is always there, so it must not refuse a loaded scene.
 
@@ -1115,6 +1143,8 @@ steps = [
     ("assert symmetry preview reverted", assert_symmetry_preview_was_reverted),
     ("symmetry dialog with nothing active", symmetry_dialog_opens_with_no_active_protein),
     ("settle symmetry no-active modal", lambda: "modal cancellation processed"),
+    ("symmetry dialog on an empty scene", symmetry_dialog_opens_with_no_protein_at_all),
+    ("settle symmetry empty-scene modal", lambda: "modal cancellation processed"),
     ("edit pivot opens the move gizmo", edit_pivot_opens_the_move_gizmo),
     ("settle edit pivot open", lambda: "gizmo activation processed"),
     ("edit pivot second click applies",

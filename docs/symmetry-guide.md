@@ -99,9 +99,14 @@ A built symmetry is an **object**, not a setting on the protein it repeats.
 It is created from the **Builders** panel, alongside Create New DNA / RNA and Create New Membrane, with **Create New Symmetry**.
 That button is always there, like the other two.
 
-Everything that shapes a build lives in its dialog:
+The dialog always opens, including on an empty file.
+It carries the same **Method / PDB ID / Download / Import Local File** controls the Protein Import panel has, so getting hold of a protein is part of the form rather than something to go and do first.
+Download lands without closing the dialog, and the **Build from** picker gains the protein you just imported.
+(Import Local File opens Blender's file browser, which cannot be nested inside a popup, so that one closes the dialog behind it; the import still lands and reopening finds the protein waiting.)
 
-- **Protein** - which structure to build the symmetry for.
+Everything that shapes a build lives in the same dialog:
+
+- **Build from** - which structure to build the symmetry for.
   One at a time.
   The generator works in a molecule's own coordinate frame, so applying one operator set to two proteins would ring each about its own origin rather than building a single assembly out of both.
 - **Cyclic (Cn)** - Order sets n.
