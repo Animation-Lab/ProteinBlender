@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Panel, UIList, Operator
 from bpy.props import StringProperty
 from ..core.outliner_colors import row_has_swatch
-from ..utils.scene_manager import ProteinBlenderScene
+from ..utils.scene_manager import ProteinBlenderScene, symmetry_molecule_id
 from ..utils.chain_utils import get_chain_objects, get_chain_domains, chain_token_from_item
 
 
@@ -101,7 +101,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
 
-        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA'] and not is_reference:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA', 'SYMMETRY'] and not is_reference:
             show_expand = True
         elif item.item_type == 'CHAIN':
             # Show expand arrow for chains with domains (both original and reference items)
@@ -310,6 +310,20 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.membrane_name = item.object_name
         elif item.item_type == 'SYMMETRY':
+            molecule_id = symmetry_molecule_id(item)
+
+            # Placeholders for the Center and Duplicate columns a protein row
+            # has, so this row's pencil and trash land in the same columns as
+            # every other object's. Rows are laid out from the right, so
+            # without them these buttons slide left and read as misaligned.
+            row.label(text="", icon='BLANK1')
+            row.label(text="", icon='BLANK1')
+            # Third placeholder holds the Pivot column. Edit Pivot on a
+            # symmetry means placing the axis it turns about, which needs the
+            # generator's unused `centre` wired through first; until then the
+            # column stays empty rather than carrying a button that lies.
+            row.label(text="", icon='BLANK1')
+
             # Edit pencil — reopens the Symmetry dialog on the settings this
             # build was actually made with (recorded on the assembly node).
             edit_op = row.operator(
@@ -317,27 +331,15 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 text="", icon='GREASEPENCIL', emboss=False,
             )
             if edit_op:
-                edit_op.molecule_id_to_update = item.parent_id
-            # Delete — takes the copies away and leaves the asymmetric unit.
-            # The row goes with them: it is derived from what is built.
+                edit_op.molecule_id_to_update = molecule_id
+            # Delete — takes the copies away and leaves the asymmetric unit,
+            # which is also what dissolves this row: it is derived from what
+            # is built, so the protein returns to being top-level.
             delete_op = row.operator(
                 "molecule.clear_assembly", text="", icon='TRASH', emboss=False,
             )
             if delete_op:
-                delete_op.molecule_id = item.parent_id
-            # No selection or visibility control: the copies are geometry-node
-            # instances of the protein's own objects, so there is nothing here
-            # to select or hide that the protein's own row does not already
-            # own. Returning early leaves both off rather than drawing two
-            # controls that would silently do nothing.
-            #
-            # Their two columns still get spacers. Rows are laid out from the
-            # right, so without them this row's pencil and trash slide into
-            # the checkbox and eye columns and read as misaligned against
-            # every other row's pencil and trash.
-            row.label(text="", icon='BLANK1')
-            row.label(text="", icon='BLANK1')
-            return
+                delete_op.molecule_id = molecule_id
         elif item.item_type == 'PUPPET':
             # Delete button (trash can) — route through the dedicated delete
             # operator, NOT edit_puppet's DELETE branch. The latter is a fallback
@@ -741,8 +743,13 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         view_layer = context.view_layer
         scene_manager = ProteinBlenderScene.get_instance()
         
-        if item.item_type in ('PROTEIN', 'DNA_RNA'):
-            molecule = scene_manager.molecules.get(item.item_id)
+        if item.item_type in ('PROTEIN', 'DNA_RNA', 'SYMMETRY'):
+            # A Symmetry hides through the protein it wraps: its copies are
+            # geometry-node instances of that protein's objects, so hiding
+            # them takes the whole assembly with it.
+            lookup = (symmetry_molecule_id(item) if item.item_type == 'SYMMETRY'
+                      else item.item_id)
+            molecule = scene_manager.molecules.get(lookup)
             if molecule and molecule.object:
                 self._set_object_visibility(molecule.object, visible, view_layer)
                 # Also set all domain objects

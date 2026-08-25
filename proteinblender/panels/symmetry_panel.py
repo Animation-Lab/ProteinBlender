@@ -1,17 +1,18 @@
-"""The Symmetry panel.
+"""The Symmetry panel - what belongs to the *protein*, not to a Symmetry.
 
-Two halves, gated differently on purpose.
+Generating a symmetry is not done here. A built symmetry is an object in its
+own right, so it is created from the Builders panel alongside a membrane or a
+DNA strand, and edited from its own row in the PB Outliner. What is left here
+is everything that is a property of the protein rather than of that object:
 
-The **deposited assembly** half only appears when the active protein's file
-describes symmetry that would put something new on screen - the meeting's
-"only show if symmetry is present in the PDB". See
-``core.assembly.has_buildable_symmetry`` for why "the file mentions an
-assembly" is not that test.
-
-The **symmetry builder** half is always available. It is a construction tool,
-not a reader: its whole purpose is giving symmetry to a structure whose file
-has none, so gating it on the file having symmetry would hide it precisely
-when it is wanted.
+* the **deposited assembly** its file describes, shown only when the file
+  describes symmetry that would put something new on screen - the meeting's
+  "only show if symmetry is present in the PDB". See
+  ``core.assembly.has_buildable_symmetry`` for why "the file mentions an
+  assembly" is not that test;
+* the **bend** rig for a built filament, and the **animation** controls for
+  whatever is built, both of which are live and continuous and so want a panel
+  that stays on screen rather than a dialog that closes over them.
 """
 
 from bpy.types import Panel
@@ -64,8 +65,11 @@ class PROTEINBLENDER_PT_symmetry(Panel):
             note.label(text="No assembly deposited with this structure",
                        icon='INFO')
 
-        box.separator()
-        self._draw_builder(box, scene, molecule)
+        # No builder section here: a symmetry is an object, so it is created
+        # from the Builders panel like a membrane or a strand, and edited from
+        # its own row in the PB Outliner. This panel is left with what belongs
+        # to the *protein* - the assembly its file describes - and with the
+        # controls that act on a build already on screen.
 
         # Bend follows what is *built*, not what the dialog's picker says: a
         # path to bend exists once there is a filament on screen. It stays on
@@ -105,30 +109,6 @@ class PROTEINBLENDER_PT_symmetry(Panel):
             icon='LOOP_BACK' if showing_unit else 'MOD_ARRAY')
         op.molecule_id = molecule.identifier
         op.assembly_id = chosen
-
-    # -- generated ---------------------------------------------------------
-
-    def _draw_builder(self, box, scene, molecule):
-        """One button. Everything that shapes a build lives in its dialog.
-
-        The settings used to sit here, inline. They moved because they are
-        *build* settings - read once, when the copies are made - and a panel
-        full of live sliders says otherwise: it invites the reading that
-        dragging one re-shapes what is already on screen. A dialog makes the
-        moment of building explicit, and gives the preview an Apply to hang
-        off and a Cancel to undo it with.
-        """
-        box.label(text="Symmetry Builder")
-
-        built_kind = symmetry_builder.built_symmetry_kind(molecule)
-
-        row = box.row(align=True)
-        row.scale_y = 1.2
-        op = row.operator(
-            "molecule.symmetry_dialog",
-            text="Edit Symmetry" if built_kind else "Build Symmetry",
-            icon='GREASEPENCIL' if built_kind else 'MOD_ARRAY')
-        op.molecule_id_to_update = molecule.identifier if built_kind else ""
 
     # -- bending a filament -------------------------------------------------
 

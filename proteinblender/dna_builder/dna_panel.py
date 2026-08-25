@@ -52,6 +52,18 @@ class PROTEINBLENDER_PT_builders(Panel):
             icon="MOD_FLUIDSIM",
         )
 
+        # A built symmetry is an object like the other two, not a setting on
+        # the protein it repeats, so its entry point belongs here rather than
+        # in the Symmetry panel. Always shown, for the same reason the others
+        # are: the button is how you find out the feature exists.
+        sym_row = main_box.row()
+        sym_row.scale_y = 1.4
+        sym_row.operator(
+            "molecule.symmetry_dialog",
+            text="Create New Symmetry",
+            icon="MOD_ARRAY",
+        )
+
 
 CLASSES = (PROTEINBLENDER_PT_builders,)
 

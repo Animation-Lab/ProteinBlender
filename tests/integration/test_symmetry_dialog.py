@@ -81,6 +81,23 @@ def _symmetry_rows():
             if item.item_type == 'SYMMETRY']
 
 
+def _rebuild_outliner():
+    from proteinblender.utils.scene_manager import build_outliner_hierarchy
+    build_outliner_hierarchy(bpy.context)
+
+
+def _row(item_id):
+    """The outliner row for an id, rebuilt from the live scene first."""
+    _rebuild_outliner()
+    return next(r for r in bpy.context.scene.outliner_items
+                if r.item_id == item_id)
+
+
+def _first_chain(molecule_id):
+    return next(r for r in bpy.context.scene.outliner_items
+                if r.item_type == 'CHAIN' and r.parent_id == molecule_id)
+
+
 def _cancel():
     """What the dialog's cancel() does, minus the redraw.
 
@@ -116,18 +133,75 @@ def test_ok_builds_what_the_dialog_was_showing():
     assert _copies(molecule) == 7
 
 
-def test_ok_puts_a_row_in_the_outliner_under_its_protein():
+def test_ok_puts_a_symmetry_object_in_the_outliner():
+    """A built symmetry is an object, not a note on the protein.
+
+    It takes the top-level row; the protein it repeats moves *inside* it.
+    """
     molecule = _import()
     _set(kind="C", order=5)
     assert bpy.ops.molecule.symmetry_dialog(
         'EXEC_DEFAULT', target_id=molecule.identifier) == {'FINISHED'}
 
     rows = _symmetry_rows()
-    assert len(rows) == 1, "one build, one row"
+    assert len(rows) == 1, "one build, one Symmetry object"
     row = rows[0]
-    assert row.parent_id == molecule.identifier, "the row belongs to its protein"
-    assert row.indent_level == 1, "it is a child of the protein, not a sibling"
+    assert row.indent_level == 0, "a Symmetry is top-level, like a membrane"
+    assert row.parent_id == "", "it belongs to the scene, not to a protein"
     assert "C5" in row.name, f"the row should name what was built, got {row.name!r}"
+
+
+def test_the_protein_moves_inside_the_symmetry_that_repeats_it():
+    """The containment, and the indents that draw it.
+
+    The protein stops being top-level and its chains follow it down a level,
+    so the tree reads Symmetry > protein > chain rather than leaving the
+    protein sitting beside the object that contains it.
+    """
+    molecule = _import()
+    identifier = molecule.identifier
+
+    before = _row(identifier)
+    assert before.indent_level == 0, "an unsymmetrised protein is top-level"
+    assert before.parent_id == ""
+    chain_before = _first_chain(identifier)
+    assert chain_before.indent_level == 1
+
+    _set(kind="C", order=5)
+    assert bpy.ops.molecule.symmetry_dialog(
+        'EXEC_DEFAULT', target_id=identifier) == {'FINISHED'}
+
+    symmetry = _symmetry_rows()[0]
+    protein = _row(identifier)
+    assert protein.parent_id == symmetry.item_id, (
+        "the protein is not inside the Symmetry that repeats it")
+    assert protein.indent_level == 1, "the protein did not move down a level"
+    assert _first_chain(identifier).indent_level == 2, (
+        "the chains did not follow the protein down")
+
+    top_level = [r.item_id for r in bpy.context.scene.outliner_items
+                 if r.indent_level == 0]
+    assert identifier not in top_level, (
+        "the protein is still top-level as well as inside the Symmetry")
+
+
+def test_clearing_the_symmetry_returns_the_protein_to_the_top_level():
+    """Deleting the object gives back exactly what was there before it."""
+    molecule = _import()
+    identifier = molecule.identifier
+
+    _set(kind="C", order=5)
+    bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', target_id=identifier)
+    assert _row(identifier).indent_level == 1
+
+    bpy.ops.molecule.clear_assembly('EXEC_DEFAULT', molecule_id=identifier)
+    from proteinblender.utils.scene_manager import build_outliner_hierarchy
+    build_outliner_hierarchy(bpy.context)
+
+    protein = _row(identifier)
+    assert protein.indent_level == 0, "the protein stayed indented with no parent"
+    assert protein.parent_id == "", "the protein still points at a row that is gone"
+    assert _first_chain(identifier).indent_level == 1
 
 
 def test_the_outliner_row_goes_when_the_assembly_is_cleared():

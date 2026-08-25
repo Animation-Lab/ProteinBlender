@@ -95,8 +95,11 @@ The dropdown follows what is built rather than only what will be built next: bui
 Always available, including on a monomer.
 This is a construction tool, not a reader, so it is not gated on the file.
 
-The panel holds a single **Build Symmetry** button, which opens the builder's dialog.
-Everything that shapes a build lives in there:
+A built symmetry is an **object**, not a setting on the protein it repeats.
+It is created from the **Builders** panel, alongside Create New DNA / RNA and Create New Membrane, with **Create New Symmetry**.
+That button is always there, like the other two.
+
+Everything that shapes a build lives in its dialog:
 
 - **Protein** - which structure to build the symmetry for.
   One at a time.
@@ -116,8 +119,7 @@ Three ways out, and they mean different things:
   That is nothing, a deposited assembly, or an earlier generated symmetry, whichever it was.
   A preview you rejected is not what you are left with.
 
-Once something is built, the panel's button reads **Edit Symmetry** and reopens the dialog on the settings that build was actually made with.
-So does the pencil on the outliner row.
+The pencil on the Symmetry object's outliner row reopens the dialog on the settings that build was actually made with.
 Those settings travel with the build rather than with the panel, which is what lets two proteins carry different symmetries at once: the sliders are one set of controls standing in for whichever protein is active, so building a second protein moves them off the first.
 
 Tetrahedral, octahedral and icosahedral are deliberately absent.
@@ -126,8 +128,21 @@ Use the deposited assembly for those.
 
 ### In the PB Outliner
 
-A generated symmetry appears as a **Symmetry C7** row under the protein it repeats, above the chains.
-The pencil reopens the builder's dialog on it; the trash takes the copies away and leaves the asymmetric unit.
+A built symmetry takes a **top-level row of its own**, a sibling of a membrane or a DNA strand rather than a note attached to a protein:
+
+```
+> Symmetry C5
+    > 4hhb
+        Chain A
+        Chain B
+```
+
+Expand it and the protein it repeats is inside, drawn with the ordinary protein UI and editable exactly as it is anywhere else: recolour it, split its chains into domains, edit its visuals.
+The protein moves *into* the Symmetry rather than being referenced from it the way a Puppet references its members.
+It can afford to, because a protein can only ever be in one symmetry: the assembly is built into that protein's own geometry-nodes tree, so there is no sharing to represent and nothing would be gained by listing the protein twice.
+
+The Symmetry row carries the same controls as any other object.
+The pencil opens its dialog; the trash takes the copies away, which also dissolves the row and returns the protein to the top level.
 
 The row is read back from what is actually built rather than written when the dialog closes.
 That is what keeps it honest through undo, through a save and reload, and through a symmetry built from anywhere else.

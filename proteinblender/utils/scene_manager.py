@@ -1539,19 +1539,50 @@ def sync_molecule_list_after_undo(*args):
         traceback.print_exc() 
 
 
-def _add_symmetry_item(context, scene, molecule, molecule_id,
+#: Prefix that turns a molecule id into its Symmetry object's outliner id.
+SYMMETRY_ID_PREFIX = "symmetry_"
+
+
+def symmetry_item_id(molecule_id) -> str:
+    """The outliner id of the Symmetry object wrapping this molecule."""
+    return f"{SYMMETRY_ID_PREFIX}{molecule_id}"
+
+
+def symmetry_molecule_id(item) -> str:
+    """The molecule a Symmetry row wraps, recovered from its id.
+
+    The row's own children carry it as ``parent_id``, but the row itself has
+    none - it is top-level - so the id is the only place it lives.
+    """
+    item_id = getattr(item, "item_id", "") or ""
+    if item_id.startswith(SYMMETRY_ID_PREFIX):
+        return item_id[len(SYMMETRY_ID_PREFIX):]
+    return ""
+
+
+def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
                        selection_states, expansion_states):
-    """Give a generated symmetry a row of its own under its protein.
+    """Emit the Symmetry object that *contains* this molecule, if it has one.
 
-    Derived from what is *built* - read back off the assembly node - rather
-    than written when the builder's dialog closes. That is what keeps the row
+    A built symmetry is an object in its own right here, a sibling of a
+    membrane or a DNA strand rather than a note attached to a protein: it owns
+    a top-level row, it expands to show the protein it repeats, and that
+    protein is drawn with the ordinary protein UI inside it.
+
+    The protein moves *into* it rather than being referenced from it the way a
+    puppet references its members. It can afford to, because a protein can
+    only ever be in one symmetry - the assembly is built into that protein's
+    own geometry-nodes tree - so there is no sharing to represent and nothing
+    would be gained by listing the protein twice.
+
+    Derived from what is *built*, read back off the assembly node, rather than
+    written when the builder's dialog closes. That is what keeps the row
     honest through undo, through a save/load, and through a symmetry built
-    from anywhere other than the dialog; there is no second copy of the fact
-    to fall out of step.
+    from anywhere other than the dialog.
 
-    Deposited assemblies get no row: the picker in the Symmetry panel is what
-    drives those, and the dialog this row's pencil opens has no settings that
-    would describe one.
+    Returns the row, or None when this molecule carries no generated symmetry
+    (a deposited assembly is not one: it has no generator settings, so the
+    dialog behind this row's pencil would open on nothing).
     """
     from ..core import assembly as assembly_core
     from ..core import symmetry_builder
@@ -1559,9 +1590,9 @@ def _add_symmetry_item(context, scene, molecule, molecule_id,
     try:
         kind = symmetry_builder.built_symmetry_kind(molecule)
     except (ReferenceError, AttributeError):
-        return
+        return None
     if not kind:
-        return
+        return None
 
     params = assembly_core.built_build_params(molecule) or {}
     shape = {
@@ -1579,13 +1610,25 @@ def _add_symmetry_item(context, scene, molecule, molecule_id,
 
     item = scene.outliner_items.add()
     item.item_type = 'SYMMETRY'
-    item.item_id = f"symmetry_{molecule_id}"
-    item.parent_id = molecule_id
+    item.item_id = symmetry_item_id(molecule_id)
+    item.parent_id = ""
     item.name = f"Symmetry {label}"
-    item.object_name = ""
-    item.indent_level = 1
+    # The protein's object, so selection sync and the visibility toggle reach
+    # the geometry: the copies are instances of it, so hiding it hides them.
+    try:
+        item.object_name = mol_object.name if mol_object else ""
+    except (ReferenceError, AttributeError):
+        item.object_name = ""
+    item.indent_level = 0
     item.icon = 'MOD_ARRAY'
     item.tooltip = tooltip
+
+    if item.item_id in selection_states:
+        item.is_selected = selection_states[item.item_id]
+    # Expanded by default: a container whose contents are hidden on creation
+    # looks like it did not work.
+    item.is_expanded = expansion_states.get(item.item_id, True)
+    return item
 
     if item.item_id in selection_states:
         item.is_selected = selection_states[item.item_id]
@@ -1723,11 +1766,18 @@ def build_outliner_hierarchy(context=None):
         except (ReferenceError, AttributeError):
             pass
 
-        # Add top-level item
+        # A built symmetry wraps the protein: it takes the top-level row and
+        # the protein becomes its child, one level deeper, with its chains and
+        # domains following it down.
+        symmetry_row = _add_symmetry_item(
+            context, scene, molecule, molecule_id, mol_object,
+            item_selection_states, item_expansion_states)
+        depth = 1 if symmetry_row is not None else 0
+
         protein_item = scene.outliner_items.add()
         protein_item.item_type = 'DNA_RNA' if is_nucleic else 'PROTEIN'
         protein_item.item_id = molecule_id
-        protein_item.parent_id = ""
+        protein_item.parent_id = symmetry_row.item_id if symmetry_row else ""
         protein_item.name = getattr(molecule, 'name', molecule.identifier)
 
         # Safely get object name and visibility
@@ -1736,7 +1786,7 @@ def build_outliner_hierarchy(context=None):
         except (ReferenceError, AttributeError):
             protein_item.object_name = ""
 
-        protein_item.indent_level = 0
+        protein_item.indent_level = depth
         protein_item.icon = 'RNA' if is_nucleic else 'MESH_DATA'
 
         try:
@@ -1761,11 +1811,6 @@ def build_outliner_hierarchy(context=None):
             if hasattr(molecule, 'identifier'):
                 tooltip_parts.append(f"ID: {molecule.identifier}")
         protein_item.tooltip = "\n".join(tooltip_parts)
-
-        # Before the chains: a symmetry describes the whole protein, and a
-        # structure with many chains would otherwise bury it.
-        _add_symmetry_item(context, scene, molecule, molecule_id,
-                           item_selection_states, item_expansion_states)
 
         # Get chains from the molecule
         if mol_object and "chain_id" in mol_object.data.attributes:
@@ -1825,7 +1870,7 @@ def build_outliner_hierarchy(context=None):
                 if _override:
                     chain_item.name = _override
                 chain_item.chain_id = str(chain_id)
-                chain_item.indent_level = 1
+                chain_item.indent_level = 1 + depth
                 chain_item.icon = 'LINKED'
                 
                 # Restore selection and expansion states
@@ -2003,7 +2048,7 @@ def build_outliner_hierarchy(context=None):
 
                         domain_item.domain_start = getattr(domain, 'start', 0)
                         domain_item.domain_end = getattr(domain, 'end', 0)
-                        domain_item.indent_level = 2
+                        domain_item.indent_level = 2 + depth
                         domain_item.icon = 'GROUP_VERTEX'
 
                         # Safely get visibility - handle case where object is freed/invalid
@@ -2049,7 +2094,7 @@ def build_outliner_hierarchy(context=None):
                 chain_copy_item.name = (getattr(primary, 'copy_group_name', '')
                                         or primary.name)
                 chain_copy_item.chain_id = str(primary.chain_id)
-                chain_copy_item.indent_level = 1
+                chain_copy_item.indent_level = 1 + depth
                 chain_copy_item.icon = 'LINKED'
                 chain_copy_item.has_domains = len(members) > 1
 
@@ -2096,7 +2141,7 @@ def build_outliner_hierarchy(context=None):
                                                if is_object_valid(member.object) else "")
                     domain_item.domain_start = getattr(member, 'start', 0)
                     domain_item.domain_end = getattr(member, 'end', 0)
-                    domain_item.indent_level = 2
+                    domain_item.indent_level = 2 + depth
                     domain_item.icon = 'GROUP_VERTEX'
                     if is_object_valid(member.object):
                         try:
