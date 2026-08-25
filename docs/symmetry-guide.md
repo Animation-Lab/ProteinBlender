@@ -80,9 +80,15 @@ Structures failing that test get no Deposited Assembly controls, because buildin
 
 Appears only when the file describes symmetry worth building.
 
-- **Dropdown** - which assembly to build.
+- **Dropdown** - what to show the structure as.
+  It names states, not just builds, so the first entry is **Asymmetric Unit - as deposited**: the structure exactly as the file contains it, which is what is on screen before anything is built.
+  That entry is also the default, because it is the honest description of an untouched import.
+  After it come the assemblies the file describes.
   Many entries carry several: a whole capsid, a pentamer, a hexamer, sometimes a crystal lattice.
-- **Build Assembly** - applies it.
+- **Build Assembly** - applies the chosen assembly.
+  With the asymmetric unit chosen the same button reads **Show Asymmetric Unit** and takes the copies away instead, which is the one-step way back from any build - a deposited assembly or a generated symmetry alike.
+
+The dropdown follows what is built rather than only what will be built next: build assembly 3 and it reads "Assembly 3", clear and it returns to the asymmetric unit.
 
 ## Symmetry Builder
 
@@ -120,6 +126,7 @@ Appears once something is built.
 - **Keyframe** - keys the current state at the playhead.
   Key 0 on one frame and 1 on another to animate the assembly forming.
 - **Clear** - removes the copies.
+  The same result as choosing Asymmetric Unit in the dropdown above; this button is simply nearer to hand once something is built.
 
 ## Show Symmetry Axes
 
@@ -187,6 +194,10 @@ Three operators, so the result is easy to read and impossible to misinterpret.
 Look from the top: it should be a clean three-fold disc.
 Good for demonstrating the Assembled slider, because you can follow individual copies with your eye.
 
+Also the clearest asymmetric-unit round trip.
+Its picker opens on **Asymmetric Unit**, which is the deposited unit already on screen.
+Choose assembly 3, build, and the picker follows to "Assembly 3"; choose Asymmetric Unit again and the button relabels itself to **Show Asymmetric Unit**, putting the structure back where the import left it.
+
 ### 1hho - the minimum case
 One non-identity operator turns the deposited alpha-beta dimer into the haemoglobin tetramer.
 Useful for making the asymmetric-unit-vs-biological-assembly point in one sentence.
@@ -238,7 +249,7 @@ Makes the point that "no Deposited Assembly section" is not a failure to detect 
 ## Five minutes
 
 1. **1ubq** - no deposited section. Explain the gate.
-2. **4ins** - build assembly 3. A three-fold you can read at a glance.
+2. **4ins** - the picker opens on Asymmetric Unit. Build assembly 3: a three-fold you can read at a glance. Pick Asymmetric Unit again to go straight back.
 3. Drag **Assembled** to 0 and back. Keyframe 0 and 1, scrub.
 4. **1fha** - build the 24-copy ferritin shell.
 5. **Cut Away** on the ferritin. Interior revealed, subunits intact.

@@ -84,11 +84,21 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         col = box.column(align=True)
         col.prop(scene, "pb_assembly_id", text="")
 
+        chosen = (getattr(scene, "pb_assembly_id", "")
+                  or assembly_core.ASYMMETRIC_UNIT_ID)
+        showing_unit = chosen == assembly_core.ASYMMETRIC_UNIT_ID
+
         build = box.row(align=True)
         build.scale_y = 1.2
-        op = build.operator("molecule.build_assembly", text="Build Assembly")
+        # One button, named for whichever of the picker's states it applies -
+        # so "Build Assembly" never sits above a picker set to the asymmetric
+        # unit, where pressing it would take copies away rather than add them.
+        op = build.operator(
+            "molecule.build_assembly",
+            text="Show Asymmetric Unit" if showing_unit else "Build Assembly",
+            icon='LOOP_BACK' if showing_unit else 'MOD_ARRAY')
         op.molecule_id = molecule.identifier
-        op.assembly_id = getattr(scene, "pb_assembly_id", "") or ""
+        op.assembly_id = chosen
 
     # -- generated ---------------------------------------------------------
 

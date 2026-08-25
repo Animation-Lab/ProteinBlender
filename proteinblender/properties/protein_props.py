@@ -252,7 +252,9 @@ def register():
     # worth persisting - what is *built* is read back off the node itself.
     bpy.types.Scene.pb_assembly_id = EnumProperty(
         name="Assembly",
-        description="Which deposited biological assembly to build",
+        description=("What to show this structure as - the asymmetric unit "
+                     "the file deposited, or one of its biological "
+                     "assemblies"),
         items=_assembly_enum_items,
     )
     bpy.types.Scene.pb_assembly_factor = FloatProperty(

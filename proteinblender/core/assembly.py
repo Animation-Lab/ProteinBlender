@@ -53,6 +53,20 @@ _ASSEMBLY_ID_KEY = "pb_assembly_id"
 #: translation is 0.01 Blender units.
 WORLD_SCALE = 0.01
 
+#: The assembly picker's entry for "no assembly at all - the structure as the
+#: file deposited it". Not an assembly id: no depositor numbers an assembly
+#: this, and :func:`available_assemblies` never yields it. It is the state the
+#: picker starts in, because it is what is on screen before anything is built,
+#: and choosing it again is the one-step way back from any build.
+ASYMMETRIC_UNIT_ID = "ASU"
+
+#: Label and tooltip for that entry, kept here so the picker and the button
+#: that applies it cannot drift apart.
+ASYMMETRIC_UNIT_LABEL = "Asymmetric Unit - as deposited"
+ASYMMETRIC_UNIT_DESCRIPTION = (
+    "Show the structure exactly as the file deposited it, removing any "
+    "assembly or generated symmetry built on top of it")
+
 #: Node group inputs driving the assembly animation. Factor 0 puts every copy
 #: back on the asymmetric unit, 1 builds the deposited assembly; Stagger
 #: spreads the copies' arrivals across that span instead of moving them

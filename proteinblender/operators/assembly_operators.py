@@ -26,18 +26,26 @@ def _active_molecule_id(context):
 
 
 def assembly_enum_items(self, context):
-    """Assemblies worth offering for the active molecule.
+    """What the active molecule can be shown as.
 
-    Only those with a non-identity transform: an assembly that is purely the
-    identity is the asymmetric unit already on screen, so offering it would be
-    a button that visibly does nothing.
+    The list names *states*, not just builds, so it leads with the asymmetric
+    unit - the structure as deposited, which is what is on screen before
+    anything is built and the one-step way back afterwards. Being first makes
+    it the enum's default, which is the honest opening value.
+
+    After it come only the assemblies with a non-identity transform: one that
+    is purely the identity *is* the asymmetric unit under another name, so
+    listing it would offer the same state twice.
     """
     global _ASSEMBLY_ENUM_CACHE
 
     molecule_id = getattr(self, "molecule_id", "") or _active_molecule_id(context)
     molecule = _molecule(molecule_id)
 
-    items = []
+    items = [(assembly_core.ASYMMETRIC_UNIT_ID,
+              assembly_core.ASYMMETRIC_UNIT_LABEL,
+              assembly_core.ASYMMETRIC_UNIT_DESCRIPTION)]
+
     if molecule is not None:
         for info in assembly_core.buildable_assemblies(molecule):
             items.append((
@@ -46,11 +54,21 @@ def assembly_enum_items(self, context):
                 f"Build biological assembly {info.assembly_id}",
             ))
 
-    if not items:
-        items = [("NONE", "No symmetry in this file", "")]
-
     _ASSEMBLY_ENUM_CACHE = items
     return _ASSEMBLY_ENUM_CACHE
+
+
+def _set_picker(context, assembly_id: str) -> None:
+    """Point the panel's picker at the state now on screen.
+
+    Best-effort: a dynamic EnumProperty refuses any identifier its items
+    callback is not currently offering, and the picker is only ever a
+    convenience - what is *built* is read back off the node itself.
+    """
+    try:
+        context.scene.pb_assembly_id = str(assembly_id)
+    except (TypeError, ValueError):
+        pass
 
 
 class MOLECULE_PB_OT_build_assembly(Operator):
@@ -66,6 +84,18 @@ class MOLECULE_PB_OT_build_assembly(Operator):
     molecule_id: StringProperty()
     assembly_id: StringProperty()
 
+    @classmethod
+    def description(cls, context, properties):
+        """The tooltip has to follow the picker, because the button does.
+
+        One operator serves both of the picker's states, so a fixed
+        ``bl_description`` would promise to build an assembly while hovering a
+        button that is about to take one away.
+        """
+        if getattr(properties, "assembly_id", "") == assembly_core.ASYMMETRIC_UNIT_ID:
+            return assembly_core.ASYMMETRIC_UNIT_DESCRIPTION
+        return cls.bl_description
+
     def execute(self, context):
         molecule_id = self.molecule_id or _active_molecule_id(context)
         molecule = _molecule(molecule_id)
@@ -74,14 +104,13 @@ class MOLECULE_PB_OT_build_assembly(Operator):
             return {"CANCELLED"}
 
         assembly_id = self.assembly_id
-        if not assembly_id or assembly_id == "NONE":
+        if not assembly_id:
             assembly_id = getattr(context.scene, "pb_assembly_id", "") or ""
-        if not assembly_id or assembly_id == "NONE":
-            buildable = assembly_core.buildable_assemblies(molecule)
-            if not buildable:
-                self.report({"WARNING"}, "This structure has no deposited symmetry")
-                return {"CANCELLED"}
-            assembly_id = buildable[0].assembly_id
+        if not assembly_id:
+            assembly_id = assembly_core.ASYMMETRIC_UNIT_ID
+
+        if assembly_id == assembly_core.ASYMMETRIC_UNIT_ID:
+            return self._show_asymmetric_unit(context, molecule)
 
         info = assembly_core.get_assembly_info(molecule, assembly_id)
         if info is None:
@@ -103,6 +132,23 @@ class MOLECULE_PB_OT_build_assembly(Operator):
         self.report(
             {"INFO"},
             f"Built assembly {assembly_id}: {len(operators)} copies{trimmed}")
+        _set_picker(context, assembly_id)
+        _refresh(context)
+        return {"FINISHED"}
+
+    def _show_asymmetric_unit(self, context, molecule):
+        """Take everything off, leaving the structure the file deposited.
+
+        Succeeds either way. Asking for the state you are already in is not an
+        error, and reporting one for a picker that opens on this entry would
+        make the panel's default choice look broken.
+        """
+        removed = assembly_core.clear_assembly(molecule)
+        self.report(
+            {"INFO"},
+            "Showing the asymmetric unit as deposited" if removed
+            else "Already showing the asymmetric unit")
+        _set_picker(context, assembly_core.ASYMMETRIC_UNIT_ID)
         _refresh(context)
         return {"FINISHED"}
 
@@ -345,6 +391,7 @@ class MOLECULE_PB_OT_clear_assembly(Operator):
             return {"CANCELLED"}
 
         self.report({"INFO"}, "Assembly cleared")
+        _set_picker(context, assembly_core.ASYMMETRIC_UNIT_ID)
         _refresh(context)
         return {"FINISHED"}
 

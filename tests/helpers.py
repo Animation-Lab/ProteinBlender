@@ -71,6 +71,16 @@ def reset_scene():
                 pass
 
     scene = bpy.context.scene
+    # Transient pickers whose enum items are computed from the active molecule.
+    # A value left behind by the previous test is meaningless against the next
+    # one's structure, and now that pb_assembly_id names the *state* on screen
+    # rather than only the next build, a stale one is order-dependent noise.
+    for prop_name in ("pb_assembly_id",):
+        try:
+            scene.property_unset(prop_name)
+        except Exception:
+            pass
+
     for coll_name in ("molecule_list_items", "outliner_items", "pb2_linkers",
                       "pose_library", "chain_selections"):
         coll = getattr(scene, coll_name, None)

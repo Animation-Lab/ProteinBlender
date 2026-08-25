@@ -427,12 +427,124 @@ def test_clear_operator_on_nothing_is_cancelled(scene, sm):
 
 def test_assembly_enum_offers_only_symmetric_assemblies(scene, sm):
     """The picker must not list the identity-only assemblies either."""
+    from proteinblender.core import assembly as assembly_core
     from proteinblender.operators.assembly_operators import assembly_enum_items
 
     _import()
     identifiers = {item[0] for item in assembly_enum_items(None, bpy.context)}
 
-    assert identifiers == WITH_SYMMETRY
+    assert identifiers - {assembly_core.ASYMMETRIC_UNIT_ID} == WITH_SYMMETRY
+
+
+# --------------------------------------------------------------------------
+# The asymmetric unit as a first-class choice
+#
+# The picker names what is on screen. Before anything is built that is the
+# structure as deposited - the asymmetric unit - so it leads the list, it is
+# what the picker opens on, and choosing it again is the way back.
+# --------------------------------------------------------------------------
+
+def test_the_asymmetric_unit_leads_the_picker(scene, sm):
+    from proteinblender.core import assembly as assembly_core
+    from proteinblender.operators.assembly_operators import assembly_enum_items
+
+    _import()
+    items = assembly_enum_items(None, bpy.context)
+    identifiers = [item[0] for item in items]
+
+    assert identifiers[0] == assembly_core.ASYMMETRIC_UNIT_ID
+    assert identifiers.count(assembly_core.ASYMMETRIC_UNIT_ID) == 1
+    assert set(identifiers[1:]) == WITH_SYMMETRY, (
+        "the asymmetric unit must be added to the real assemblies, not "
+        "displace any of them")
+
+
+def test_the_picker_opens_on_the_asymmetric_unit(scene, sm):
+    """Untouched, the picker names the structure already on screen."""
+    from proteinblender.core import assembly as assembly_core
+
+    _import()
+    bpy.context.scene.property_unset("pb_assembly_id")
+
+    assert bpy.context.scene.pb_assembly_id == assembly_core.ASYMMETRIC_UNIT_ID
+
+
+def test_choosing_the_asymmetric_unit_removes_the_assembly(scene, sm):
+    """The one-step way back, measured on the depsgraph rather than the tag."""
+    from proteinblender.core import assembly as assembly_core
+
+    molecule = _import()
+    baseline = _instances_by_object()
+
+    assert bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier,
+        assembly_id="3") == {"FINISHED"}
+    assert _instances_by_object() != baseline
+
+    assert bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier,
+        assembly_id=assembly_core.ASYMMETRIC_UNIT_ID) == {"FINISHED"}
+
+    assert _instances_by_object() == baseline
+    assert assembly_core.built_assembly_id(molecule) is None
+
+
+def test_the_picker_follows_what_is_built(scene, sm):
+    """Build, and the picker names the assembly; clear, and it names the unit."""
+    from proteinblender.core import assembly as assembly_core
+
+    molecule = _import()
+
+    bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="3")
+    assert bpy.context.scene.pb_assembly_id == "3"
+
+    bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier,
+        assembly_id=assembly_core.ASYMMETRIC_UNIT_ID)
+    assert bpy.context.scene.pb_assembly_id == assembly_core.ASYMMETRIC_UNIT_ID
+
+    bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="4")
+    assert bpy.context.scene.pb_assembly_id == "4"
+
+    assert bpy.ops.molecule.clear_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
+    assert bpy.context.scene.pb_assembly_id == assembly_core.ASYMMETRIC_UNIT_ID
+
+
+def test_asking_for_the_asymmetric_unit_twice_is_harmless(scene, sm):
+    """Asking for the state you are already in succeeds and changes nothing."""
+    from proteinblender.core import assembly as assembly_core
+
+    molecule = _import()
+    baseline = _instances_by_object()
+
+    assert bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier,
+        assembly_id=assembly_core.ASYMMETRIC_UNIT_ID) == {"FINISHED"}
+
+    assert _instances_by_object() == baseline
+    assert assembly_core.built_assembly_id(molecule) is None
+
+
+def test_the_asymmetric_unit_also_clears_a_generated_symmetry(scene, sm):
+    """The picker's way back is not limited to what the file described."""
+    from proteinblender.core import assembly as assembly_core
+    from proteinblender.core import symmetry_builder
+
+    molecule = _import()
+    baseline = _instances_by_object()
+
+    assert symmetry_builder.apply_symmetry(molecule, "C", order=5)
+    assert _instances_by_object() != baseline
+
+    assert bpy.ops.molecule.build_assembly(
+        "EXEC_DEFAULT", molecule_id=molecule.identifier,
+        assembly_id=assembly_core.ASYMMETRIC_UNIT_ID) == {"FINISHED"}
+
+    assert _instances_by_object() == baseline
+    assert assembly_core.built_assembly_id(molecule) is None
 
 
 # --------------------------------------------------------------------------
