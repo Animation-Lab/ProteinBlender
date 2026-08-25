@@ -330,6 +330,15 @@ def edit_pivot_opens_the_move_gizmo():
     assert objects, "the chain row resolved to no objects"
     state["pivot_origin_before"] = list(objects[0].matrix_world.translation)
 
+    view = next(area for area in active_window().screen.areas
+                if area.type == "VIEW_3D")
+    space = view.spaces.active
+    state["pivot_gizmos_before"] = [
+        space.show_gizmo, space.show_gizmo_tool,
+        space.show_gizmo_object_translate, space.show_gizmo_object_rotate,
+        space.show_gizmo_object_scale,
+    ]
+
     with ui_override("VIEW_3D"):
         assert bpy.ops.wm.tool_set_by_id(name="builtin.rotate") == {"FINISHED"}
         assert bpy.context.workspace.tools.from_space_view3d_mode(
@@ -399,7 +408,104 @@ def edit_pivot_second_click_applies_and_closes():
         assert offset < 1e-4, (
             f"{obj.name}'s origin is {offset:.6f} from where the helper was "
             f"dropped; the pivot was not applied")
+
+    # The mode borrows the active tool and the viewport's object gizmos to put
+    # a translate handle on the helper. Both must be handed back, exactly like
+    # the 3D cursor and the transform orientation are. Left switched, the
+    # user's Rotate tool is silently replaced by Move and every protein they
+    # select afterwards wears a translate gizmo it never had - which reads as
+    # the pivot gizmo following them around.
+    active = bpy.context.workspace.tools.from_space_view3d_mode(
+        "OBJECT", create=False)
+    assert active.idname == "builtin.rotate", (
+        f"Edit Pivot left the active tool at {active.idname}; it was "
+        f"builtin.rotate before the session")
+    view = next(area for area in active_window().screen.areas
+                if area.type == "VIEW_3D")
+    space = view.spaces.active
+    gizmos_after = [
+        space.show_gizmo, space.show_gizmo_tool,
+        space.show_gizmo_object_translate, space.show_gizmo_object_rotate,
+        space.show_gizmo_object_scale,
+    ]
+    assert gizmos_after == state["pivot_gizmos_before"], (
+        f"Edit Pivot left the viewport gizmo flags at {gizmos_after}, not the "
+        f"{state['pivot_gizmos_before']} it found")
     return "Edit Pivot applied the dropped position and closed"
+
+
+def edit_pivot_click_away_applies_and_closes():
+    """A real click anywhere but the helper ends the mode and applies it.
+
+    This is the only lane that can prove it. The click is a genuine
+    ``LEFTMOUSE`` event pushed through the window manager
+    (``--enable-event-simulate``), so it runs Blender's own keymap and its own
+    picking - not a scripted deselect standing in for one. What follows is the
+    watcher noticing on its next tick, which is why the next steps are settle
+    ticks rather than assertions.
+
+    The helper is dragged to the right first and the click goes to the far left
+    edge of the viewport, so it cannot land on the helper. Where it lands
+    otherwise does not matter: the mode makes every other object unselectable,
+    so empty space and the molecule are the same answer.
+    """
+    from proteinblender.operators import pivot_operators as P
+
+    scene = bpy.context.scene
+    chain = next(row for row in scene.outliner_items if row.item_type == "CHAIN")
+    state["click_away_row"] = chain.item_id
+
+    with ui_override("VIEW_3D"):
+        result = bpy.ops.proteinblender.set_pivot_custom(
+            "EXEC_DEFAULT", item_id=chain.item_id)
+    assert result == {"FINISHED"}, result
+
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    assert helper is not None, "Edit Pivot created no helper to click away from"
+    helper.location = helper.location + Vector((1.25, 0.0, 0.0))
+    bpy.context.view_layer.update()
+    state["click_away_at"] = list(helper.matrix_world.translation)
+    assert helper.select_get(), "the helper is not selected, so nothing can be lost"
+
+    window = active_window()
+    view = next(area for area in window.screen.areas if area.type == "VIEW_3D")
+    region = next(r for r in view.regions if r.type == "WINDOW")
+    x, y = region.x + 8, region.y + region.height // 2
+    window.event_simulate(type="MOUSEMOVE", value="NOTHING", x=x, y=y)
+    window.event_simulate(type="LEFTMOUSE", value="PRESS", x=x, y=y)
+    window.event_simulate(type="LEFTMOUSE", value="RELEASE", x=x, y=y)
+    return f"clicked away from the helper at ({x}, {y})"
+
+
+def assert_click_away_applied_the_pivot():
+    """After the click and a couple of ticks: mode over, pivot where it sat."""
+    from proteinblender.operators import pivot_operators as P
+
+    scene = bpy.context.scene
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    assert helper is None or not helper.select_get(), (
+        "the simulated click never reached Blender's picking - the helper is "
+        "still selected, so this test is not measuring a click away")
+    assert P.pivot_edit_key(scene) == "", (
+        "clicking away left the Edit Pivot session open")
+    assert helper is None, "clicking away left the helper in the scene"
+
+    chain = next(row for row in scene.outliner_items
+                 if row.item_id == state["click_away_row"])
+    dropped_at = Vector(state["click_away_at"])
+    bpy.context.view_layer.update()
+    for obj in P.row_pivot_objects(bpy.context, chain):
+        offset = (obj.matrix_world.translation - dropped_at).length
+        assert offset < 1e-4, (
+            f"{obj.name}'s origin is {offset:.6f} from where the helper was "
+            f"left; clicking away discarded the placement instead of applying it")
+
+    active = bpy.context.workspace.tools.from_space_view3d_mode(
+        "OBJECT", create=False)
+    assert active.idname == "builtin.rotate", (
+        f"clicking away left the active tool at {active.idname}; ending the "
+        f"mode has to hand the tool back however it ended")
+    return "clicking away applied the pivot and closed the mode"
 
 
 def parent_and_domain_pivot_edit_roundtrip():
@@ -910,6 +1016,10 @@ steps = [
     ("settle edit pivot open", lambda: "gizmo activation processed"),
     ("edit pivot second click applies",
      edit_pivot_second_click_applies_and_closes),
+    ("edit pivot click away", edit_pivot_click_away_applies_and_closes),
+    ("settle click away 1", lambda: "click event processed"),
+    ("settle click away 2", lambda: "click-away watcher tick"),
+    ("assert click away applied", assert_click_away_applied_the_pivot),
     ("parent and domain pivot edit", parent_and_domain_pivot_edit_roundtrip),
     ("split domain invoke dialog", invoke_and_cancel_split_dialog),
     ("settle split modal", lambda: "modal cancellation processed"),

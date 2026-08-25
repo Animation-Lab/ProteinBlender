@@ -458,7 +458,12 @@ def object_summary(name: str) -> dict:
         raise KeyError(f"no object named {name!r}")
     import helpers as H
 
+    # eval_positions returns nothing for a molecule or a domain (they evaluate
+    # to a point cloud, not a mesh), so fall through to the point-cloud reader
+    # rather than reporting a molecular object as empty.
     positions = H.eval_positions(obj)
+    if not len(positions):
+        positions = H.evaluated_atom_positions([obj])
     summary = {
         "name": obj.name,
         "type": obj.type,

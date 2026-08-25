@@ -5,7 +5,7 @@ from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy
                                    delete_molecule_if_empty,
                                    molecule_would_be_emptied,
                                    prune_emptied_puppets)
-from ..utils.chain_utils import chain_match_tokens, chain_token_from_item
+from ..utils.chain_utils import chain_index_token, chain_token_from_item
 from ..utils.animation import (
     keyframe_transforms, 
     refresh_timeline, 
@@ -282,7 +282,7 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         outliner silently drops the now-memberless puppet on its next rebuild,
         stranding the poses that referenced it.
 
-        The chain row is resolved through ``chain_match_tokens`` rather than
+        The chain row is resolved through ``chain_index_token`` rather than
         formatted from ``chain_id``: domains carry the author letter ("A")
         while outliner rows are keyed by the chain *index*
         ("<molecule>_chain_0"), so the formatted-name shortcut matched nothing.
@@ -291,11 +291,11 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         """
         doomed = {self.domain_id}
         if chain_deleted:
-            tokens = chain_match_tokens(molecule, chain_id)
+            index = chain_index_token(molecule, chain_id)
             doomed.update(item.item_id for item in context.scene.outliner_items
                           if item.item_type == 'CHAIN'
                           and item.parent_id == molecule_id
-                          and str(item.chain_id) in tokens)
+                          and str(item.chain_id) == index)
 
         for item in context.scene.outliner_items:
             if item.item_type != 'PUPPET' or not item.puppet_memberships:

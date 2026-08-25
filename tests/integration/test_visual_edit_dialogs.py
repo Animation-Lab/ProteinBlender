@@ -700,3 +700,187 @@ def test_each_chain_seeds_its_own_color_not_a_siblings(scene, sm, multi_chain):
         assert mixed is False, f"{item_id} reported as mixed"
         assert color == expected, (
             f"{item_id} would open showing {color}, not its own {expected}")
+
+
+# --------------------------------------------------------------------------
+# Edit Pivot is a mode: it owns the selection while it is open
+# --------------------------------------------------------------------------
+#
+# Reported: while the helper is on screen a click in the viewport lands on the
+# protein instead, so the Move gizmo jumps off the pivot and onto the molecule
+# - drag it now and the protein slides across the scene rather than the pivot
+# moving. The same stray click ticks the molecule's row in the Protein
+# Outliner, and that tick survives the end of the session.
+#
+# Both come from one omission: the mode deselects everything on the way in but
+# never stops anything else being *re-selected*, and never clears the outliner
+# on the way out.
+
+
+@pytest.mark.integration
+def test_edit_pivot_makes_the_helper_the_only_selectable_object(scene, sm,
+                                                                multi_chain):
+    """A viewport click during the session must not steal the gizmo.
+
+    Ground truth is Blender's own selection behaviour, not anything the pivot
+    code reports: ``object.select_all(action='SELECT')`` selects every
+    selectable object there is, so if the molecule comes back selected then a
+    user's click would have selected it too - and the Move gizmo would be
+    sitting on the protein rather than on the pivot helper.
+    """
+    from proteinblender.operators import pivot_operators as P
+
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    row = next(r for r in scene.outliner_items if r.item_type == 'PROTEIN')
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    assert helper is not None
+
+    bpy.ops.object.select_all(action='SELECT')
+    stolen = [obj.name for obj in _protein_objects(molecule) if obj.select_get()]
+    assert not stolen, (
+        f"{stolen} became selected while Edit Pivot was open; a viewport "
+        f"click would move the protein instead of the pivot")
+    assert helper.select_get(), "the helper stopped being the selected object"
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+
+    bpy.ops.object.select_all(action='SELECT')
+    assert all(obj.select_get() for obj in _protein_objects(molecule)), (
+        "the molecule is still unselectable after Edit Pivot closed")
+
+
+@pytest.mark.integration
+def test_edit_pivot_returns_objects_the_user_had_locked_still_locked(scene, sm,
+                                                                     multi_chain):
+    """Unlocking on the way out must only undo what the mode locked."""
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    row = next(r for r in scene.outliner_items if r.item_type == 'PROTEIN')
+
+    already_locked = _protein_objects(molecule)[-1]
+    already_locked.hide_select = True
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+
+    assert already_locked.hide_select, (
+        f"{already_locked.name} was unlocked by Edit Pivot, but the user had "
+        f"locked it themselves")
+    already_locked.hide_select = False
+
+
+@pytest.mark.integration
+def test_edit_pivot_leaves_the_outliner_deselected(scene, sm, multi_chain):
+    """Opening and closing the mode both leave the Protein Outliner clear.
+
+    The rows are read straight off ``scene.outliner_items``, which is what the
+    panel draws its checkboxes from. Nothing here waits on the selection-sync
+    poll timer: headless has no timer, and a user should not have to wait a
+    fifth of a second to see the checkbox they are looking at.
+    """
+    from proteinblender.handlers import selection_sync as S
+
+    _build_outliner()
+    row = next(r for r in scene.outliner_items if r.item_type == 'PROTEIN')
+
+    row.is_selected = True
+    S.sync_outliner_to_blender_selection(bpy.context, row.item_id)
+    assert row.is_selected, "the row did not tick to begin with"
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    ticked = [r.item_id for r in scene.outliner_items if r.is_selected]
+    assert not ticked, (
+        f"{ticked} stayed ticked in the Protein Outliner when Edit Pivot "
+        f"opened, though the mode had deselected everything in the viewport")
+
+    # A stray click on the molecule mid-session, the way a user reaches past
+    # the helper. Even if something does get selected, closing the mode must
+    # leave the outliner clear.
+    molecule_obj = sm.molecules[multi_chain].object
+    molecule_obj.hide_select = False
+    molecule_obj.select_set(True)
+    bpy.context.view_layer.objects.active = molecule_obj
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+
+    still_selected = [obj.name for obj in bpy.context.view_layer.objects
+                      if obj.select_get()]
+    assert not still_selected, (
+        f"{still_selected} was left selected after Edit Pivot closed")
+    ticked = [r.item_id for r in scene.outliner_items if r.is_selected]
+    assert not ticked, (
+        f"{ticked} is still ticked in the Protein Outliner after Edit Pivot "
+        f"closed")
+
+
+@pytest.mark.integration
+def test_clicking_away_from_the_helper_applies_the_pivot(scene, sm, multi_chain):
+    """Click anywhere but the helper and the placement is done.
+
+    The click itself belongs to the UI lane (a headless Blender has no window
+    to click in); what is driven here is the state a click leaves behind. The
+    mode locks every other object, so a click that is not on the helper selects
+    nothing and simply deselects it - that is the whole signal, and it is
+    reproduced exactly by deselecting the helper.
+
+    Ground truth for where the pivot landed is the helper's own world position,
+    captured before the watcher runs.
+    """
+    from mathutils import Vector
+    from proteinblender.operators import pivot_operators as P
+
+    _build_outliner()
+    row, obj = _first_domain_row(scene)
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    helper = bpy.data.objects.get(P.PIVOT_HELPER)
+    helper.location = helper.location + Vector((2.0, -1.0, 0.5))
+    bpy.context.view_layer.update()
+    dropped_at = helper.matrix_world.translation.copy()
+    assert (dropped_at - _origin(obj)).length > 1e-3, (
+        "the helper was not moved, so applying it would prove nothing")
+
+    # Still on the helper: the session must survive dragging it around.
+    assert P.click_away_watcher() is not None, (
+        "the watcher gave up while the helper was still selected")
+    assert P.pivot_edit_key(scene) == row.item_id
+
+    helper.select_set(False)          # what a click anywhere else leaves behind
+    assert P.click_away_watcher() is None, "the watcher kept running"
+
+    assert P.pivot_edit_key(scene) == "", (
+        "clicking away left the Edit Pivot session open")
+    assert bpy.data.objects.get(P.PIVOT_HELPER) is None, (
+        "clicking away left the helper in the scene")
+    assert (_origin(obj) - dropped_at).length < 1e-4, (
+        "clicking away discarded the placement instead of applying it")
+
+
+@pytest.mark.integration
+def test_the_click_away_watcher_stops_when_nothing_is_open(scene, sm,
+                                                           multi_chain):
+    """It must not keep polling once the mode is over, however it ended."""
+    from proteinblender.operators import pivot_operators as P
+
+    _build_outliner()
+    row, _obj = _first_domain_row(scene)
+
+    assert P.click_away_watcher() is None, (
+        "the watcher kept running with no session open at all")
+
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    assert bpy.ops.proteinblender.set_pivot_custom(
+        item_id=row.item_id) == {"FINISHED"}
+    assert P.click_away_watcher() is None, (
+        "the watcher kept running after the button closed the session")

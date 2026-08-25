@@ -318,7 +318,9 @@ def test_moving_the_controller_moves_the_rendered_geometry(blender, shot):
         ctrl = bpy.data.objects[controller_name]
         children = [o for o in bpy.data.objects
                     if o.parent is not None and o.parent == ctrl]
-        pts = np.concatenate([H.eval_positions(o) for o in children])
+        # eval_positions returns nothing for a molecular object: they evaluate
+        # to point clouds, not meshes.
+        pts = H.evaluated_atom_positions(children)
         span = float((pts.max(axis=0) - pts.min(axis=0)).max())
         delta = span * 0.25
         home = [float(v) for v in ctrl.location]
@@ -455,7 +457,9 @@ def test_applying_a_pose_restores_the_rendered_arrangement(blender, shot):
         bpy.ops.molecule.create_pose('EXEC_DEFAULT', pose_name="Live_Visual")
         # Displace by a fraction of the molecule's own size: big enough to be
         # unmistakable on screen, small enough to stay inside the framed view.
-        pts = H.eval_positions(obj)
+        # eval_positions returns nothing for a domain: it evaluates to a
+        # point cloud, not a mesh.
+        pts = H.evaluated_atom_positions([obj])
         span = float((pts.max(axis=0) - pts.min(axis=0)).max())
         return {"object": obj.name, "span": span,
                 "home": [float(v) for v in obj.location]}
@@ -615,7 +619,9 @@ def test_pose_library_capture_and_apply_restores_the_rendered_puppet(
         ctrl = bpy.data.objects[controller_name]
         children = [o for o in bpy.data.objects
                     if o.parent is not None and o.parent == ctrl]
-        pts = np.concatenate([H.eval_positions(o) for o in children])
+        # eval_positions returns nothing for a molecular object: they evaluate
+        # to point clouds, not meshes.
+        pts = H.evaluated_atom_positions(children)
         span = float((pts.max(axis=0) - pts.min(axis=0)).max())
         return {"n_transforms": len(pose.transforms), "span": span,
                 "member": children[0].name,

@@ -306,41 +306,164 @@ def deserialize_residue_ranges(json_str: str) -> Dict[str, Tuple[int, int]]:
         return {}
 
 
-def chain_match_tokens(molecule: Any, chain_token: Any) -> set:
-    """Return every string form a chain may be identified by.
+# ---------------------------------------------------------------------------
+# Chain identity: index vs. author id
+#
+# A chain is named two ways. The protein outliner keys a chain row by its
+# numeric *index* ("2") - the value MolecularNodes stores in the mesh's
+# chain_id attribute - while a domain stores the *author* chain id ("D").
+#
+# These used to be reconciled by matching against both forms at once. That is
+# only safe while the two namespaces are disjoint, and they are not: 1CD3's
+# chains are 1, 2, 3, 4, B, F and G, so "1" is chain index 1 (which is chain
+# "2") AND chain "1". Matching both readings put every chain's domain under
+# its neighbour's row as well, and the neighbour's trash can deleted both.
+#
+# So resolve, don't guess: convert whatever a caller holds into the one
+# namespace the comparison needs, and compare there.
+# ---------------------------------------------------------------------------
 
-    The protein outliner identifies a chain by its numeric *index* ("2")
-    while a domain stores the author chain *letter* ("D"). ``chain_token``
-    may be either; this returns both forms (e.g. ``{"2", "D"}``) so callers
-    can match a domain's ``chain_id`` regardless of which convention it uses.
+_CHAIN_ID_MAPS = ("auth_chain_id_map", "chain_mapping", "idx_to_label_asym_id_map")
 
-    The index<->letter step goes through the molecule's own chain maps rather
-    than alphabet math (``chr(65 + idx)``), which is wrong for gapped chain
-    sets such as A, B, D — there index 2 is "D", not "C".
+
+def _mapped_author_chain_id(molecule: Any, chain_idx: int) -> Optional[str]:
+    """The author chain id a molecule's own maps give for a chain index.
+
+    Strict: no alphabet math. :func:`get_author_chain_id` invents a letter for
+    an unmapped index because its callers need something to display; identity
+    resolution must not invent one, or an unmapped "1" becomes chain "B".
     """
-    tokens = {str(chain_token)}
-    s = str(chain_token)
-    if s.isdigit():
-        letter = get_author_chain_id(molecule, int(s))
-        if letter:
-            tokens.add(str(letter))
-    else:
-        idx = get_chain_idx_from_author_id(molecule, s)
-        if idx is not None:
-            tokens.add(str(idx))
-    return tokens
+    for attr in _CHAIN_ID_MAPS:
+        mapping = getattr(molecule, attr, None)
+        if mapping and chain_idx in mapping:
+            return str(mapping[chain_idx])
+    return None
+
+
+def _mapped_chain_index(molecule: Any, author_id: str) -> Optional[int]:
+    """The chain index a molecule's own maps give for an author chain id.
+
+    Strict, for the same reason as :func:`_mapped_author_chain_id`:
+    ``get_chain_idx_from_author_id`` falls back to ``ord(letter) - 65``, which
+    would resolve an unknown "Z" to index 25 and match whatever chain happens
+    to sit there.
+    """
+    for attr in _CHAIN_ID_MAPS:
+        mapping = getattr(molecule, attr, None)
+        if not mapping:
+            continue
+        for idx, value in mapping.items():
+            if str(value) == author_id:
+                return idx
+    return None
+
+
+def _author_chain_ids(molecule: Any) -> set:
+    """Every author chain id this molecule knows about."""
+    ids = set()
+    for attr in _CHAIN_ID_MAPS:
+        mapping = getattr(molecule, attr, None)
+        if mapping:
+            ids.update(str(value) for value in mapping.values())
+    ids.update(str(key) for key in (getattr(molecule, "chain_residue_ranges", None) or {}))
+    return ids
+
+
+def chain_author_id(molecule: Any, chain_token: Any) -> str:
+    """The author chain id ("D") that a chain token names.
+
+    A digit is read as a chain *index* first: that is what an outliner row's
+    ``chain_id``, a ``<molecule>_chain_<n>`` item id and every operator fed
+    from them mean by a digit, and it is what ``_create_domain_with_params``
+    maps before storing a domain's chain id. Anything else is already an
+    author id and is returned unchanged - as is a digit this molecule has no
+    chain at, which is how a mapless molecule (its domains keyed by index)
+    still resolves consistently.
+
+    The index->author step goes through the molecule's own maps rather than
+    alphabet math (``chr(65 + idx)``), which is wrong for gapped chain sets
+    such as A, B, D - there index 2 is "D", not "C".
+    """
+    token = str(chain_token)
+    if token.isdigit():
+        mapped = _mapped_author_chain_id(molecule, int(token))
+        if mapped is not None:
+            return mapped
+    return token
+
+
+def chain_index_token(molecule: Any, chain_token: Any) -> Optional[str]:
+    """The chain *index* ("2"), as a string, that a chain token names.
+
+    The counterpart of :func:`chain_author_id`, for matching things keyed by
+    index: outliner chain rows and their ``<molecule>_chain_<n>`` item ids.
+    Returns None when an author id has no index in this molecule's maps.
+    """
+    token = str(chain_token)
+    if token.isdigit():
+        return token
+    idx = _mapped_chain_index(molecule, token)
+    return None if idx is None else str(idx)
+
+
+def domain_chain_author_id(molecule: Any, domain_chain_id: Any) -> str:
+    """The author chain id for the chain value stored *on a domain*.
+
+    Domains store the author id - ``_create_domain_with_params`` maps whatever
+    index it is handed before saving it - so a digit is read as an author id
+    first here, the opposite way round from :func:`chain_author_id`. That is
+    the whole point: the two sides of a match carry different conventions, and
+    each has to be resolved by its own. A digit that is *not* one of this
+    molecule's chains is then read as an index, which is what older data and
+    the outliner's name-derived fallback can hold.
+    """
+    value = str(domain_chain_id)
+    if value in _author_chain_ids(molecule):
+        return value
+    if value.isdigit():
+        mapped = _mapped_author_chain_id(molecule, int(value))
+        if mapped is not None:
+            return mapped
+    return value
+
+
+def object_chain_index(obj: bpy.types.Object, chain_token: Any) -> Optional[int]:
+    """The integer a molecule mesh's ``chain_id`` attribute uses for a chain.
+
+    MolecularNodes encodes chain ids as sorted-unique integers and keeps the
+    string labels on the object as ``obj["chain_ids"]``, where the list index
+    *is* the integer. That list is an exact answer, so it is consulted first:
+    a digit label ("1" on 1CD3) names that chain, not the index the digit
+    spells. Only a digit the label list does not contain is read as an index
+    itself, which is what an object with no label list leaves callers holding.
+
+    Returns None when the chain cannot be resolved - callers must not fall
+    back to "search several plausible indices", which is how a chain's centre
+    of mass ended up averaged over it and its neighbour.
+    """
+    labels = [str(label) for label in (obj.get("chain_ids") or [])]
+    token = str(chain_token)
+    if token in labels:
+        return labels.index(token)
+    if token.isdigit():
+        index = int(token)
+        if not labels or 0 <= index < len(labels):
+            return index
+    return None
 
 
 def domain_in_chain(molecule: Any, chain_token: Any, domain: Any) -> bool:
     """True if ``domain`` belongs to the chain identified by ``chain_token``.
 
-    Bridges the chain-index vs. chain-letter mismatch via
-    :func:`chain_match_tokens`.
+    The single matching rule for the whole codebase. Both sides are resolved
+    to the author chain id first - see the note above on why matching a raw
+    token against both namespaces cannot work.
     """
     domain_chain_id = getattr(domain, "chain_id", None)
     if domain_chain_id is None:
         return False
-    return str(domain_chain_id) in chain_match_tokens(molecule, chain_token)
+    return (domain_chain_author_id(molecule, domain_chain_id)
+            == chain_author_id(molecule, chain_token))
 
 
 def chain_token_from_item(chain_item: Any) -> str:
@@ -366,10 +489,7 @@ def domain_spans_whole_chain(molecule: Any, domain: Any) -> bool:
     if not ranges:
         return False
 
-    chain_key = str(getattr(domain, "chain_id", ""))
-    idx_map = getattr(molecule, "idx_to_label_asym_id_map", None) or {}
-    if chain_key.isdigit() and idx_map:
-        chain_key = str(idx_map.get(int(chain_key), chain_key))
+    chain_key = domain_chain_author_id(molecule, getattr(domain, "chain_id", ""))
 
     if chain_key not in ranges:
         return False

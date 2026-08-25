@@ -279,8 +279,8 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_domain_geometry_invariants.py` | invariants spanning the domain mesh-sharing refactor: setting a pivot never moves what is rendered (pixel render) and never writes to mesh data, First/Center/Last land on PDB-derived residues (biotite ground truth), the pivot input matches the raw first-residue coordinate, domains rotate about a fixed origin, rendered coverage stays in-band, and the mesh-sharing assertion. Ground truth is kept independent of the pivot code under test |
 | `test_brownian.py` | `brownian_settings/rebuild/disable/clear_all` (metadata + jitter F-curve keys) |
 | `test_membrane.py` | `build_membrane` (all shapes), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field (through the protein's edit dialog) |
-| `test_outliner.py` | `outliner_select`, `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle, and chain rows listing their domains in residue order rather than creation order |
-| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, and a deleted helper ending the session; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
+| `test_outliner.py` | `outliner_select` (including that it reaches the viewport when there is no UI area to redraw), `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle, and chain rows listing their domains in residue order rather than creation order |
+| `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: colour and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolour in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, a deleted helper ending the session, and the mode owning the viewport while it is open - the helper the only selectable object, a user's own selection lock left alone, and nothing selected in the viewport or ticked in the outliner once it closes; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on colour, "Multiple" when they disagree on style, and the real value once they agree |
 | `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
 | `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
@@ -292,6 +292,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_split_domain_regression.py` | crash regression: split a domain after duplicate+delete (see below) |
 | `test_domain_splitter.py` | the Domain Splitter dialog and the `core.domain_layout` reconcile engine: even-split arithmetic, layout validation/coverage gaps, boundary re-tiling, the grid's line numbering (edge lines counted like any other line, and the header's count agreeing with them), the ghost-everything preview's ghost/solid/restore cycle, per-domain colours (live preview and commit, via the dialog rows or `layout_json`'s `color` field), and the identity-preservation invariants a layout edit must hold (see below) |
 | `test_copy_chain.py` | `molecule.copy_chain` from the outliner's chain row: a split chain copying every one of its domains (residue coverage against the PDB text, and a Cycles render proving the copy puts as much protein on screen as the chain it copied), the copy appearing as one expandable chain row rather than leaking into its source chain, an unsplit chain still copying as a single domain, copying a copy, and the copy's Delete removing all of it and nothing else |
+| `test_numeric_chain_ids.py` | a structure whose author chain ids are digits (1CD3: chains 1, 2, 3, 4, B, F, G), where a chain's index and another chain's id share a namespace: chains importing unsplit, each outliner row resolving to exactly its own chain's single domain and object, and a chain-level delete taking one chain (see below) |
 | `test_outliner_colors.py` | the PB Outliner's row colour swatches: seeding from what each item renders with (node graph as ground truth), the mixed-grey placeholder for a protein whose chains disagree, and a pick on a protein/chain/domain row recolouring exactly what that row covers |
 
 ## Behaviour regressions (guard against reintroduction)
@@ -382,6 +383,113 @@ on a membrane whose typical gap was 0.28 nm.
   `::test_protein_pivot_moves_only_the_molecule_object` and
   `::test_edit_pivot_on_a_protein_moves_only_the_molecule_object`, both verified
   red by mutating `row_pivot_objects` back to the wide set.
+
+- **Edit Pivot let the viewport steal the gizmo, and left the outliner ticked.**
+  Reported from the UI: while the pivot helper is on screen the Move gizmo
+  keeps switching between the pivot and the protein, and after the session the
+  molecule is still ticked in the Protein Outliner.
+  One omission behind both. The mode deselected everything on the way in but
+  never stopped anything being *re*-selected, and the molecule is exactly what
+  is sitting under the cursor: a click aimed at the helper lands on the
+  protein, Blender moves the selection - and therefore the gizmo - onto it, and
+  the next drag slides the whole molecule instead of placing the pivot. The
+  same stray click ticks that row via the selection-sync poll, and nothing
+  cleared it when the session closed.
+  Fixed by making Edit Pivot own the viewport for as long as it is open:
+  `_lock_scene_selection` makes the helper the only selectable object (only
+  objects it actually locked are unlocked again, so a user's own lock
+  survives), and `end_pivot_edit` leaves nothing selected - clearing the
+  outliner rows directly rather than waiting on the 0.2 s poll, which does not
+  run headless at all.
+  The mode was also keeping what it borrowed: it switched the active tool to
+  Move and forced `show_gizmo_object_translate` on, and restored neither, so a
+  user who entered with the Rotate tool came out with Move and every protein
+  they selected afterwards wore a translate gizmo it never had. `_borrow_viewport`
+  now records the tool and each viewport's gizmo flags, and `end_pivot_edit`
+  hands them back alongside the 3D cursor and transform orientation it already
+  restored.
+  That ownership then bought a second thing: **clicking anywhere in the
+  viewport that is not the helper now applies the pivot and ends the mode**,
+  which is how a user finishes without going back to the panel. With every
+  other object unselectable, "the helper is no longer selected" means exactly
+  "the user clicked somewhere that is not the helper" - empty space and the
+  molecule alike - and a gizmo drag never changes the selection, so it cannot
+  be mistaken for letting go. `click_away_watcher` is a `bpy.app.timers` poll
+  registered by `begin_pivot_edit` and only while a session is open, for the
+  same reason the selection sync is one: Blender has no reliable
+  selection-changed event, and a modal running for the life of a mode has to be
+  nursed through file loads, undo and its own cancel paths. It closes through
+  the operator, so the apply is one undo step exactly like the button's second
+  click.
+  Guarded by `test_visual_edit_dialogs.py::test_edit_pivot_makes_the_helper_the_only_selectable_object`
+  (ground truth is Blender's own `object.select_all(action='SELECT')` - if the
+  molecule comes back selected, a user's click would have selected it too),
+  `::test_edit_pivot_leaves_the_outliner_deselected`, and
+  and `::test_edit_pivot_returns_objects_the_user_had_locked_still_locked`
+  (the one test here that cannot be red pre-fix - there was no lock to unlock
+  selectively; it exists so a future "unlock everything" shortcut fails). The
+  tool and gizmo restore needs a real window, so it is guarded in the
+  foreground UI lane (`tests/ui/run_ui_scenarios.py`,
+  `edit_pivot_second_click_applies_and_closes`). The other three were verified
+  red pre-fix - the outliner one on `['4hhb'] stayed ticked`, the selection one
+  on the molecule and all four chain objects coming back selected, and the UI
+  one on `left the active tool at builtin.move`.
+  Click-away is guarded at three depths, because a headless test can only
+  reproduce the *state* a click leaves behind:
+  `::test_clicking_away_from_the_helper_applies_the_pivot` and
+  `::test_the_click_away_watcher_stops_when_nothing_is_open` drive the watcher
+  directly; the foreground UI lane pushes a real `LEFTMOUSE` event through the
+  window manager (`edit_pivot_click_away_applies_and_closes`, then settle ticks
+  so the watcher runs on its own schedule); and `test_live_pivots.py::test_clicking_away_from_the_helper_applies_the_pivot`
+  does it against the deployed add-on with the real timer, including a second
+  of *not* clicking first so a session that closed on its own would fail. The
+  UI-lane one was verified red on `clicking away left the Edit Pivot session
+  open` - the reported behaviour, reproduced by a real click.
+
+- **"Snap Protein Pivot to Center" put the centre outside the protein.**
+  `snap_protein_pivot_center` averaged `obj.matrix_world @ corner` over
+  `obj.bound_box`, with a comment claiming `bound_box` was evaluated geometry
+  and therefore already pivot-applied. It is not: it is the *raw* mesh's
+  bounds, and a molecule object has no evaluated bounds of its own to borrow -
+  it evaluates to an **empty** point cloud, because the atoms are drawn by its
+  chain domains. Raw bounds mapped with `matrix_world` are off by exactly the
+  pivot (CLAUDE.md's first silent-failure rule), which on 1ubq put the "centre"
+  at x = 0.305 for a molecule spanning [-0.150, +0.150] - twice its half-width
+  outside itself. Fixed by mapping the corners with
+  `domain_space.local_to_world`.
+  It survived because the only assertion on it was that the result was
+  *finite*. Now guarded by
+  `test_operator_surface.py::test_snap_parent_pivot_center_lands_inside_the_molecule`
+  and its live twin, both measuring Blender's own evaluated point-cloud atoms
+  (`helpers.evaluated_atom_positions`) rather than anything the add-on derives.
+  Verified red pre-fix with that exact 0.305-vs-0.150 signature in both lanes.
+  The new helper also replaces `eval_positions` for molecular objects, where
+  `to_mesh()` returns zero vertices and reductions over the empty array raised
+  instead of failing an assertion - which is how the live test that should have
+  caught this had been dying before it asserted anything.
+  The same mistake had three more copies, in `molecule_wrapper`'s
+  bounding-box fallbacks: two in `_calculate_center_of_mass` and one in the
+  outliner row's **Center** button. Those fire only for a structure with no Cα
+  to average - a nucleic acid, or a ligand-only entry - which is why no fixture
+  ever reached them. All three now go through one `_bound_box_center` helper
+  that maps with `local_to_world`, and the branch is reached deterministically
+  by `test_proteins.py::test_center_protein_centres_a_molecule_with_no_alpha_carbons`,
+  which removes the `is_alpha_carbon` attribute (exactly the condition the
+  fallback tests for) and then measures against the evaluated atoms. Verified
+  red pre-fix: the centred origin sat at 0.0 for a molecule spanning
+  [-0.455, -0.154].
+
+- **`outliner_select` never reached the viewport without a UI area.**
+  Its redraw tail called `context.area.tag_redraw()` unguarded, and that tail
+  sits *before* the `sync_outliner_to_blender_selection` call - so for any
+  caller with no area (a script, an MCP session, the headless suite) the
+  operator threw halfway through and the row ticked without the object ever
+  being selected. The suite had been documenting this as a headless caveat and
+  swallowing the `RuntimeError`. Guarded by
+  `test_outliner.py::test_outliner_select_reaches_the_viewport_without_an_area`,
+  which asserts on `Object.select_get()` rather than the row flag (the flag is
+  set before the throw, so it passes with the bug in place). Verified red
+  pre-fix via `git stash push -- proteinblender/panels/protein_outliner_panel.py`.
 
 - **A renamed chain was wiped by the first undo.**
   `scene_manager._refresh_molecule_ui` rebuilds `scene.molecule_list_items` by
@@ -1260,6 +1368,42 @@ on a membrane whose typical gap was 0.28 nm.
   plain import leaves behind (verified red pre-fix: the poll, enum and
   no-argument operator tests all failed).
 
+- **A protein whose chains are named with digits imported already split, and
+  every chain-level action hit its neighbour too.**
+  Reported: 1CD3 (the phiX174 procapsid, chains 1, 2, 3, 4, B, F, G) showed
+  four chains split into two domains each straight after import, before the
+  user had split anything.
+  Cause: `chain_utils.chain_match_tokens` reconciled the outliner's chain
+  *index* ("1") with the author chain *id* a domain stores ("B") by returning
+  both forms and matching a domain against either. That only works while the
+  two namespaces are disjoint, and digit chain ids collapse them: index 1 is
+  chain "2", but "1" is also chain "1", so every numeric chain row collected
+  its neighbour's domain as well. The trash can on chain "2" deleted chain "1"
+  with it, and copy/recolour/select reached just as wide.
+  Fixed by resolving instead of guessing: `chain_author_id` (digit = index,
+  the convention every outliner row and `_create_domain_with_params` uses),
+  `chain_index_token` (its inverse, for rows keyed by index) and
+  `domain_chain_author_id` (digit = author id, the convention a *domain*
+  stores), with `domain_in_chain` resolving both sides before comparing.
+  `chain_match_tokens` is gone, and neither resolver invents an identity by
+  alphabet math for an id the molecule's own maps do not know.
+  The same ambiguity had a geometry half: `_calculate_center_of_mass` and
+  `_find_residue_alpha_carbon_pos` each built a *set* of plausible chain
+  indices (digit-as-index plus label lookup plus `chr(65 + idx)` both ways),
+  so chain "1"'s centre of mass was averaged over chains "1" and "2" and every
+  numeric chain's whole-chain domain pivoted between itself and its
+  neighbour - measured at 0.12 world units off, on chains 0.25 apart. Both now
+  resolve to the single index through `chain_utils.object_chain_index`, which
+  reads the object's own `chain_ids` label list first and returns None rather
+  than guessing.
+  Guarded by `test_numeric_chain_ids.py` (rows unsplit on import, each row
+  resolving to exactly its own chain's single domain, each whole-chain pivot
+  on its own chain's alpha-carbon centroid, and deleting chain "2" leaving the
+  other six) with the chain ids parsed out of `1cd3.pdb` as text and the
+  centroid taken from raw mesh attributes, plus `test_chain_utils.py`'s
+  resolver unit tests; all verified red pre-fix (four split rows, "Deleted
+  chain 1 and 2 domain(s)", and the 0.12 pivot offset).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
@@ -1344,6 +1488,28 @@ by passing that state directly (no dialog needed):
   are checked via registration + `poll`, not rendering.
 
 ## Known issues surfaced but not fixed here
+
+- **Three live-lane failures that predate the pivot-mode work.** Confirmed
+  pre-existing by installing the branch-point product files into the live
+  Blender and re-running the lane; the pivot/centre fixes took it from 11
+  failures to 3, and these are what is left.
+  - `test_live_visual_color.py::test_the_multiple_style_sentinel_changes_nothing`
+    sets the style picker to `""`, the old "Multiple" sentinel. That value is
+    no longer in the enum (`spheres, cartoon, surface, ribbon, sticks,
+    ball_and_stick`), so the assignment raises before the test asserts
+    anything. The headless dialog tests still cover a "Multiple" seed, so the
+    concept exists somewhere - which property now carries it needs deciding
+    before the live test can be rewritten.
+  - `test_live_domains.py::test_changing_one_domain_style_restyles_only_that_domain`
+    and `::test_deleting_a_domain_removes_its_geometry_from_the_screen` both
+    fail on `xor == 0`: the captured viewport is byte-identical across a change
+    that should be plainly visible. Two unrelated features reporting "the
+    screen did not change" points at the capture rather than at either feature,
+    but that is a hypothesis, not a finding.
+  - Separately, `test_live_linkers.py::test_a_linker_actually_renders` is
+    **order-dependent**: it passes alone and in small groups, on branch-point
+    and current code alike, and fails in some whole-lane orderings. Lane
+    hygiene, not a product regression.
 
 - **STILL UNCONFIRMED: "Reset Deformation makes the whole membrane, hole and
   lattice disappear; you have to undo until it comes back."** Reported against a

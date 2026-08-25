@@ -34,7 +34,9 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import bpy
 
 from ..utils.chain_utils import (
-    chain_match_tokens,
+    chain_author_id,
+    chain_index_token,
+    domain_in_chain,
     normalize_domain_residue_range,
 )
 
@@ -71,11 +73,10 @@ def chain_residue_range(molecule: Any, chain_token: Any) -> Tuple[int, int]:
     caller holds a chain index ("2") or an author letter ("D"), and applies the
     same one-based normalisation the rest of the domain UI uses.
     """
-    tokens = chain_match_tokens(molecule, chain_token)
     ranges = getattr(molecule, "chain_residue_ranges", {}) or {}
-    for token in tokens:
-        if token in ranges:
-            return normalize_domain_residue_range(ranges[token])
+    author_id = chain_author_id(molecule, chain_token)
+    if author_id in ranges:
+        return normalize_domain_residue_range(ranges[author_id])
 
     # Fall back to the span the chain's existing domains cover rather than
     # inventing a number: a wrong hard-coded ceiling silently truncates every
@@ -90,12 +91,11 @@ def current_layout(molecule: Any, chain_token: Any) -> List[DomainSpec]:
     """Return the chain's existing domains as a layout, ordered by start residue."""
     if molecule is None:
         return []
-    tokens = chain_match_tokens(molecule, chain_token)
     specs = []
     for domain_id, domain in molecule.domains.items():
         if getattr(domain, "is_copy", False):
             continue
-        if str(getattr(domain, "chain_id", "")) not in tokens:
+        if not domain_in_chain(molecule, chain_token, domain):
             continue
         specs.append(DomainSpec(name=domain.name, start=int(domain.start),
                                 end=int(domain.end), domain_id=domain_id))
@@ -385,9 +385,10 @@ def apply_layout(context, molecule: Any, chain_token: Any,
     # Puppets that own this chain (by chain row or by one of its domains) need
     # the new pieces parented to their controller, or moving the puppet would
     # leave them behind.
+    chain_index = chain_index_token(molecule, chain_token)
     chain_row_ids = {item.item_id for item in scene.outliner_items
                      if item.item_type == 'CHAIN'
-                     and str(getattr(item, 'chain_id', '')) in chain_match_tokens(molecule, chain_token)}
+                     and str(getattr(item, 'chain_id', '')) == chain_index}
     owning_puppets = _puppets_containing(scene, chain_row_ids | set(existing))
 
     deleted: List[str] = []

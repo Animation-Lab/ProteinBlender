@@ -338,7 +338,10 @@ def test_scrubbing_between_keyframes_changes_the_viewport(blender, shot):
         scene = bpy.context.scene
         scene.selected_molecule_id = mid
         mol = H.sm().molecules[mid]
-        pts = H.eval_positions(mol.object)
+        # The molecule object evaluates to an EMPTY point cloud - its chains
+        # draw the atoms - so the domains have to be measured with it.
+        drawn = [mol.object] + [d.object for d in mol.domains.values() if d.object]
+        pts = H.evaluated_atom_positions(drawn)
         span = float((pts.max(axis=0) - pts.min(axis=0)).max())
         home = [float(v) for v in mol.object.location]
 
@@ -598,7 +601,9 @@ def test_brownian_jitter_visibly_moves_the_protein(blender, shot):
         controller = bpy.data.objects[controller_name]
         children = [o for o in bpy.data.objects
                     if o.parent is not None and o.parent == controller]
-        pts = np.concatenate([H.eval_positions(o) for o in children])
+        # eval_positions returns nothing for a molecular object: they evaluate
+        # to point clouds, not meshes.
+        pts = H.evaluated_atom_positions(children)
         span = float((pts.max(axis=0) - pts.min(axis=0)).max())
         bpy.ops.proteinblender.brownian_settings(
             'EXEC_DEFAULT',

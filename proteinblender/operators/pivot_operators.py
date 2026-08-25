@@ -6,13 +6,34 @@ Two ways to move what a protein, chain or domain rotates about.
 carbons and write it straight away.
 
 **Edit Pivot** is a *mode*, not an action. One click drops a helper Empty on
-the item's current pivot and hands the user the move gizmo; the next click on
-the same button takes the helper's position as the new pivot and clears the
-helper away. It is a mode because the pivot is chosen by dragging in the
-viewport, which takes as long as it takes: nothing else may decide the
-placement is over. That is why it lives on the outliner row rather than inside
-an edit dialog, and why there is no "click away to confirm" - clicking away is
-how a user orbits the view.
+the item's current pivot and hands the user the move gizmo; the pivot is then
+chosen by dragging in the viewport, which takes as long as it takes. That is
+why it lives on the outliner row rather than inside an edit dialog: a dialog
+would end the placement at the moment it began.
+
+Two things finish it, and both mean the same thing. Clicking the row's button
+again applies the helper's position. So does **clicking anywhere else in the
+viewport** - which is what a user does when they are done with the pivot and
+want to get on with something else, and it is the only ending they reach
+without going back to the panel.
+
+Being a mode, it *owns* the viewport while it is open: the helper is the only
+selectable object in the scene, and nothing else is selected. Without that the
+molecule is still sitting under the cursor, so a click aimed at the helper
+lands on the protein instead - the Move gizmo jumps onto the molecule and the
+next drag slides the whole thing across the scene rather than placing the
+pivot, and the molecule's row is left ticked in the Protein Outliner long after
+the session is over. Everything the mode takes (the selection and each
+object's selectability, the active tool, the viewport gizmo flags, the 3D
+cursor, the transform orientation and pivot point) is recorded on the way in
+and handed back on the way out.
+
+The ownership is also what makes click-away *precise*. With every other object
+unselectable, the helper is the only thing in the scene a click can select, so
+"the helper is no longer selected" means "the user clicked somewhere that is
+not the helper" - empty space and the molecule alike - and never means "they
+picked something else to work on". Dragging the gizmo does not change the
+selection, so a drag cannot be mistaken for a click away.
 
 ``molecule.toggle_pivot_edit`` (domains) and
 ``molecule.toggle_protein_pivot_edit`` (proteins) predate the row button and
@@ -20,6 +41,8 @@ still exist as the scripted entry points. All three now share the one session
 below, so there is a single implementation of enter-and-leave and chains work
 the same way the other two always did.
 """
+
+import json
 
 import bpy
 from bpy.types import Operator
@@ -45,6 +68,15 @@ PIVOT_EDIT_TARGETS = "pb_pivot_edit_objects"  # object names, comma-joined
 PIVOT_EDIT_CURSOR = "pb_pivot_edit_cursor"
 PIVOT_EDIT_ORIENTATION = "pb_pivot_edit_orientation"
 PIVOT_EDIT_PIVOT_POINT = "pb_pivot_edit_pivot_point"
+# The objects the mode made unselectable, JSON-encoded. Only the ones it
+# actually changed, so an object the user had locked themselves stays locked.
+PIVOT_EDIT_LOCKED = "pb_pivot_edit_locked"
+# The active tool and each 3D viewport's gizmo flags, JSON-encoded.
+PIVOT_EDIT_VIEW = "pb_pivot_edit_view"
+
+# The gizmo flags the mode overwrites, in the order they are stored.
+_GIZMO_FLAGS = ("show_gizmo", "show_gizmo_tool", "show_gizmo_object_translate",
+                "show_gizmo_object_rotate", "show_gizmo_object_scale")
 
 
 def pivot_edit_key(scene):
@@ -64,10 +96,72 @@ def pivot_edit_key(scene):
 
 
 def _forget_pivot_edit(scene):
+    """Drop the session, releasing everything that can be released from here.
+
+    The selection lock and the gizmo flags are plain RNA writes, so they are
+    given back here rather than only in :func:`end_pivot_edit` - this also runs
+    from ``pivot_edit_key``'s self-heal, and a scene left permanently
+    unselectable because a helper was deleted by hand would be far worse than
+    the leak it is healing. The active *tool* is the one thing that cannot be
+    restored here: only ``wm.tool_set_by_id`` can set it, and the self-heal
+    fires from panel draw code, where calling an operator is not allowed.
+    """
+    _stop_click_away_watch()
+    _unlock_scene_selection(scene)
+    _restore_viewport_gizmos(scene)
     for key in (PIVOT_EDIT_KEY, PIVOT_EDIT_TARGETS, PIVOT_EDIT_CURSOR,
-                PIVOT_EDIT_ORIENTATION, PIVOT_EDIT_PIVOT_POINT):
+                PIVOT_EDIT_ORIENTATION, PIVOT_EDIT_PIVOT_POINT,
+                PIVOT_EDIT_LOCKED, PIVOT_EDIT_VIEW):
         if key in scene:
             del scene[key]
+
+
+def _view3d_areas(context=None):
+    """Every 3D viewport on the current screen, in a stable order."""
+    screen = getattr(context or bpy.context, "screen", None)
+    if screen is None:
+        return []
+    return [area for area in screen.areas if area.type == 'VIEW_3D']
+
+
+def _stash(scene, key, value):
+    scene[key] = json.dumps(value)
+
+
+def _unstash(scene, key, default):
+    try:
+        return json.loads(scene.get(key, "")) if key in scene else default
+    except (TypeError, ValueError):
+        return default
+
+
+# --------------------------------------------------------------------------
+# Borrowing the viewport: the tool, the gizmos, and the selection itself
+# --------------------------------------------------------------------------
+
+def _borrow_viewport(context):
+    """Record the active tool and gizmo flags, then switch to Move.
+
+    Recorded *before* anything is changed so :func:`end_pivot_edit` can hand
+    the viewport back exactly as it was found. Leaving the tool on Move means
+    the Rotate tool a user was working with is silently replaced - and the
+    forced object-translate gizmo then draws a move handle on every protein
+    they select afterwards, which reads as the pivot gizmo following them
+    around.
+    """
+    scene = context.scene
+    areas = _view3d_areas(context)
+    if not areas:
+        return False
+
+    tool = context.workspace.tools.from_space_view3d_mode('OBJECT',
+                                                          create=False)
+    _stash(scene, PIVOT_EDIT_VIEW, {
+        "tool": tool.idname if tool is not None else None,
+        "gizmos": [[getattr(area.spaces.active, flag) for flag in _GIZMO_FLAGS]
+                   for area in areas],
+    })
+    return _activate_translation_gizmo(context)
 
 
 def _activate_translation_gizmo(context):
@@ -101,6 +195,154 @@ def _activate_translation_gizmo(context):
         space.show_gizmo_object_scale = False
         area.tag_redraw()
     return activated
+
+
+def _restore_viewport_gizmos(scene):
+    """Put each 3D viewport's gizmo flags back as they were found."""
+    stored = _unstash(scene, PIVOT_EDIT_VIEW, None) or {}
+    for area, flags in zip(_view3d_areas(), stored.get("gizmos") or []):
+        space = area.spaces.active
+        for name, value in zip(_GIZMO_FLAGS, flags):
+            setattr(space, name, bool(value))
+        area.tag_redraw()
+
+
+def _restore_active_tool(context):
+    """Put the workspace tool back to whatever was active before the mode.
+
+    Only callable from an operator - ``wm.tool_set_by_id`` is an operator, so
+    this cannot run from ``pivot_edit_key``'s draw-time self-heal.
+    """
+    stored = _unstash(context.scene, PIVOT_EDIT_VIEW, None) or {}
+    tool = stored.get("tool")
+    if not tool:
+        return
+    window = context.window
+    screen = context.screen
+    for area in _view3d_areas(context):
+        region = next((candidate for candidate in area.regions
+                       if candidate.type == 'WINDOW'), None)
+        if region is None:
+            continue
+        override = {'area': area, 'region': region}
+        if window is not None:
+            override['window'] = window
+            override['screen'] = screen
+        with context.temp_override(**override):
+            bpy.ops.wm.tool_set_by_id(name=tool)
+        area.tag_redraw()
+
+
+def _lock_scene_selection(context, helper):
+    """Make the helper the only thing in the scene a click can select.
+
+    Edit Pivot is a mode, and this is what makes it one. Without it the
+    molecule is still sitting under the cursor: a click meant for the helper
+    lands on the protein, Blender moves the selection (and therefore the Move
+    gizmo) onto it, and the next drag slides the whole molecule across the
+    scene instead of placing the pivot.
+
+    Objects the user had already locked are left out of the record, so
+    unlocking on the way out gives back only what this took.
+    """
+    locked = []
+    for obj in context.view_layer.objects:
+        if obj.name == helper.name or obj.hide_select:
+            continue
+        obj.hide_select = True
+        locked.append(obj.name)
+    _stash(context.scene, PIVOT_EDIT_LOCKED, locked)
+
+
+def _unlock_scene_selection(scene):
+    for name in _unstash(scene, PIVOT_EDIT_LOCKED, []):
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            obj.hide_select = False
+
+
+# How often the click-away watcher looks. Short enough that letting go of the
+# pivot feels immediate, long enough to cost nothing while a session is open -
+# and it is only registered while one is.
+_CLICK_AWAY_INTERVAL = 0.15
+
+
+def click_away_watcher():
+    """Apply the pivot when the user clicks away from the helper.
+
+    A timer rather than a modal operator, for the same reason the selection
+    sync is one (see ``handlers/selection_sync``): Blender has no reliable
+    event for "the selection changed", and a modal running for the whole life
+    of a mode has to be nursed through file loads, undo and its own cancel
+    paths. This has no state of its own - it re-reads the session every tick
+    and stops itself the moment there is nothing open.
+
+    The signal is the helper losing its selection, which is unambiguous only
+    because the mode locks everything else: see the module docstring.
+
+    Returns the next interval, or None to stop.
+    """
+    try:
+        scene = getattr(bpy.context, "scene", None)
+        if scene is None:
+            return _CLICK_AWAY_INTERVAL
+        key = pivot_edit_key(scene)
+        if not key:
+            return None
+        helper = bpy.data.objects.get(PIVOT_HELPER)
+        if helper is None:
+            return None
+        try:
+            if helper.select_get():
+                return _CLICK_AWAY_INTERVAL
+        except RuntimeError:
+            # Not in this view layer (yet, or any more) - nothing to read.
+            return _CLICK_AWAY_INTERVAL
+        # Through the operator, not end_pivot_edit directly, so the apply is a
+        # single undo step exactly like the button's second click.
+        bpy.ops.proteinblender.set_pivot_custom(item_id=key)
+    except Exception as exc:      # never let a timer death strand the mode
+        print(f"[ProteinBlender] pivot click-away watcher stopped: {exc}")
+    return None
+
+
+def _start_click_away_watch():
+    if not bpy.app.timers.is_registered(click_away_watcher):
+        bpy.app.timers.register(click_away_watcher,
+                                first_interval=_CLICK_AWAY_INTERVAL)
+
+
+def _stop_click_away_watch():
+    """Stop the watcher, tolerating being called from inside it.
+
+    The watcher closes the session by running the operator, which lands back
+    here - and unregistering a timer from its own callback is not something
+    Blender promises to accept. It does not need to: returning None from the
+    callback already stops it.
+    """
+    try:
+        if bpy.app.timers.is_registered(click_away_watcher):
+            bpy.app.timers.unregister(click_away_watcher)
+    except (ValueError, RuntimeError):
+        pass
+
+
+def _deselect_everything(context):
+    """Clear the viewport selection and the Protein Outliner together.
+
+    Done by hand rather than through ``object.select_all``: this runs from a
+    Properties-editor button and from headless tests, and a plain RNA write
+    needs no context to poll against. Clearing the outliner rows here too
+    means the checkboxes are right the instant the panel redraws, instead of
+    up to a poll interval later - and at all in headless, where the
+    selection-sync timer never runs.
+    """
+    view_layer = context.view_layer
+    for obj in view_layer.objects:
+        obj.select_set(False)
+    view_layer.objects.active = None
+    for item in context.scene.outliner_items:
+        item.is_selected = False
 
 
 def _apply_origin_to_cursor(obj, world_pos):
@@ -431,6 +673,10 @@ def run_pivot_mode(operator, context, mode):
     scene = context.scene
     label, empty_message = _MODE_LABELS[mode]
 
+    # Read before the session is closed: closing it clears the outliner, which
+    # is where the no-item_id route reads its targets from.
+    selected_items = [it for it in scene.outliner_items if it.is_selected]
+
     # A preset supersedes a hand placement in progress, so the helper goes
     # away *without* committing - otherwise it would still be sitting there
     # ready to overwrite the preset on the next click of Edit Pivot.
@@ -449,7 +695,6 @@ def run_pivot_mode(operator, context, mode):
             return {'CANCELLED'}
         jobs = [(source, objects)]
     else:
-        selected_items = [it for it in scene.outliner_items if it.is_selected]
         if not selected_items:
             operator.report({'WARNING'}, "No items selected")
             return {'CANCELLED'}
@@ -550,10 +795,11 @@ def begin_pivot_edit(context, key, objects):
     dragging changes nothing.
 
     Everything the mode borrows from the user (the 3D cursor, the transform
-    orientation, the transform pivot point) is recorded first and handed back
-    by :func:`end_pivot_edit`. Leaving a scene in Global/Median when the user
-    had it in Local/3D-Cursor is the sort of change nobody connects to the
-    button they pressed three actions ago.
+    orientation, the transform pivot point, the active tool, the viewport
+    gizmo flags and the rest of the scene's selectability) is recorded first
+    and handed back by :func:`end_pivot_edit`. Leaving a scene in Global/Median
+    when the user had it in Local/3D-Cursor is the sort of change nobody
+    connects to the button they pressed three actions ago.
     """
     scene = context.scene
     if not objects:
@@ -584,7 +830,8 @@ def begin_pivot_edit(context, key, objects):
     scene[PIVOT_EDIT_KEY] = key
     scene[PIVOT_EDIT_TARGETS] = ','.join(obj.name for obj in objects)
 
-    bpy.ops.object.select_all(action='DESELECT')
+    _deselect_everything(context)
+    _lock_scene_selection(context, helper)
     helper.select_set(True)
     context.view_layer.objects.active = helper
 
@@ -592,10 +839,12 @@ def begin_pivot_edit(context, key, objects):
     context.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
     if context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
-    # Headless has no screen and therefore no gizmo to activate; the session
-    # itself works fine without one, which is what makes it testable offline.
+    # Headless has no screen and therefore no gizmo to activate, and no clicks
+    # to watch for; the session itself works fine without either, which is what
+    # makes it testable offline.
     if getattr(context, "screen", None) is not None:
-        _activate_translation_gizmo(context)
+        _borrow_viewport(context)
+        _start_click_away_watch()
 
     for obj in objects:
         obj["is_pivot_editing"] = True
@@ -609,6 +858,12 @@ def end_pivot_edit(context, commit=True):
     sitting on becomes the pivot of every object in the session. Every object,
     one position - so a protein, or a chain that has been split into domains,
     ends up swinging about the single point the user placed.
+
+    The mode leaves nothing selected. It began by clearing the selection, so
+    ending with it clear is the symmetric answer, and it is the only one that
+    holds whatever happened in between: a session that ended with the molecule
+    ticked in the Protein Outliner left the user with a selection they never
+    made.
     """
     scene = context.scene
     helper = bpy.data.objects.get(PIVOT_HELPER)
@@ -638,7 +893,13 @@ def end_pivot_edit(context, commit=True):
     if PIVOT_EDIT_PIVOT_POINT in scene:
         context.tool_settings.transform_pivot_point = scene[PIVOT_EDIT_PIVOT_POINT]
 
+    # Before _forget_pivot_edit, which drops the record this reads.
+    _restore_active_tool(context)
     _forget_pivot_edit(scene)
+    # After the unlock inside _forget_pivot_edit: a locked object is not
+    # selected, but it is also not the outliner's business to still show it as
+    # though it were.
+    _deselect_everything(context)
     return applied
 
 

@@ -231,13 +231,18 @@ class BlenderMCP:
         Blender rather than an opaque protocol error.
         """
         self._bootstrap()
+        # The arguments are decoded OUTSIDE __pb_body and only indexed inside
+        # it. Decoding them in the body with json.loads used to be enough to
+        # break any snippet that carried its own ``import json``: the import
+        # makes ``json`` a local for the whole function, so the binding lines
+        # above it raised UnboundLocalError before a line of the test ran.
         binding = "\n".join(
-            f"{name} = json.loads({json.dumps(json.dumps(value))})"
-            for name, value in params.items()
+            f"{name} = __pb_params[{json.dumps(name)}]" for name in params
         )
         body = textwrap.indent(textwrap.dedent(code).strip("\n"), "    ")
         program = (
             _PRELUDE.replace("__PB_REPO__", repr(remote_repo_path()))
+            + f"\n__pb_params = json.loads({json.dumps(json.dumps(params))})\n"
             + "\ndef __pb_body():\n"
             + (textwrap.indent(binding, "    ") + "\n" if binding else "")
             + body

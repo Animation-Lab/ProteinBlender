@@ -43,6 +43,7 @@ pivot applied.
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 
@@ -356,10 +357,12 @@ def test_snap_pivot_to_residue_moves_the_origin_without_moving_the_atoms(
     of the same two properties - the render must not move, and START and END
     must reach two different places.
 
-    The START/END separation is asserted against the domain's own residue span
-    read off the outliner row (``domain_start``/``domain_end``), which is data
-    rather than a derivation: a domain spanning many residues cannot have its
-    first and last alpha carbons at the same point.
+    The START/END separation is asserted against chain A's residue span read
+    out of ``1atn.pdb`` with biotite, which no add-on code touches: a chain
+    spanning many residues cannot have its first and last alpha carbons at the
+    same point. (It used to be read off a DOMAIN outliner row, but an unsplit
+    chain has no such row - it draws as a CHAIN - so that lookup found nothing
+    and the test died before it asserted anything.)
     """
     setup = blender.call("""
 scene = bpy.context.scene
@@ -370,17 +373,16 @@ scene.selected_molecule_id = "1atn"
 
 domain_id, domain = next(
     (did, d) for did, d in molecule.domains.items() if d.chain_id == "A")
-row = next(i for i in scene.outliner_items
-           if i.item_type == 'DOMAIN' and i.item_id == domain_id)
+residues = sorted(H.pdb_amino_acid_cas("1atn.pdb", "A"))
 return {
     "domain_id": domain_id,
     "object_name": domain.object.name,
-    "span": [int(row.domain_start), int(row.domain_end)],
+    "span": [residues[0], residues[-1]],
 }
 """)
     assert setup["span"][1] > setup["span"][0] + 10, (
-        "fixture changed: the chain-A domain no longer spans enough residues "
-        "for START and END to be meaningfully different")
+        "fixture changed: chain A no longer spans enough residues for START "
+        "and END to be meaningfully different")
 
     blender.call("return R.frame_all()")
     before = _capture(blender, "before")
@@ -424,34 +426,45 @@ def test_snap_protein_pivot_center_is_invisible_and_lands_inside_the_molecule(
         blender, single_chain):
     """``molecule.snap_protein_pivot_center`` moves the whole protein's origin.
 
-    Ground truth is the evaluated bounding box read back from Blender: a
-    "centre" that falls outside the geometry it is meant to be the centre of is
-    wrong regardless of how it was computed. That is an invariant the operator's
-    own arithmetic cannot satisfy vacuously, unlike re-running its bound_box
-    average and comparing it to itself.
+    Ground truth is what Blender itself evaluated and drew: the atoms come back
+    as point-cloud instances off the depsgraph, mapped by each instance's own
+    ``matrix_world``. A "centre" that falls outside the geometry it is meant to
+    be the centre of is wrong regardless of how it was computed, and nothing in
+    that reading goes through the add-on's coordinate helpers.
+
+    It has to be read that way. ``helpers.eval_positions`` (``to_mesh()``)
+    returns *zero* vertices for a molecule or domain object - MolecularNodes
+    emits a point cloud, not a mesh - and the molecule object itself evaluates
+    to an empty one: the atoms are drawn by its chain domains. Measuring the
+    parent alone therefore measured nothing at all.
     """
     blender.call("return R.frame_all()")
     before = _capture(blender, "before")
     assert before["covered"] > 0
 
     result = blender.call("""
-manager = H.sm()
-molecule = manager.molecules["1ubq"]
+molecule = H.sm().molecules["1ubq"]
 obj = molecule.object
 with R.view3d_override():
     outcome = bpy.ops.molecule.snap_protein_pivot_center(molecule_id="1ubq")
 bpy.context.view_layer.update()
 
-# Evaluated positions already have the pivot applied (CLAUDE.md): they must not
-# be re-mapped through matrix_world, and they are read here purely as data.
-positions = H.eval_positions(obj)
+# Every object the protein draws through: the molecule object and its domains.
+drawn = [obj] + [d.object for d in molecule.domains.values() if d.object]
+world = H.evaluated_atom_positions(drawn)
+if not len(world):
+    raise AssertionError(
+        "the protein evaluated to no drawable atoms, so there is nothing to "
+        "measure the pivot against")
 return {
     "result": sorted(outcome),
+    "atoms": int(len(world)),
     "origin": [float(v) for v in obj.matrix_world.translation],
-    "bbox_min": [float(v) for v in positions.min(axis=0)],
-    "bbox_max": [float(v) for v in positions.max(axis=0)],
+    "bbox_min": [float(v) for v in world.min(axis=0)],
+    "bbox_max": [float(v) for v in world.max(axis=0)],
 }
 """)
+    assert result["atoms"] > 0
     assert result["result"] == ["FINISHED"]
 
     after = _capture(blender, "after")
@@ -580,3 +593,102 @@ return {
     assert offset < 1e-4, (
         f"the pivot landed {offset} from where the helper was dropped: "
         f"helper={result['dropped']} origin={result['origin']}")
+
+
+@pytest.mark.live
+def test_clicking_away_from_the_helper_applies_the_pivot(blender, single_chain):
+    """Click anywhere but the helper and the mode ends, applying the placement.
+
+    Two things make this lane the one that can prove it. The click goes through
+    ``view3d.select`` - the operator Blender's own keymap runs on a left click,
+    with its own picking - rather than a scripted deselect standing in for one.
+    And the close is done by the add-on's real ``bpy.app.timers`` watcher on its
+    own schedule, so this measures the wall-clock behaviour a user gets, not a
+    hand-pumped callback.
+
+    The helper is dragged clear first and the click aimed at the far edge, so it
+    cannot land on the helper. Where it lands otherwise does not matter: the
+    mode makes every other object unselectable, so empty space and the molecule
+    are the same answer.
+    """
+    opened = blender.call("""
+scene = bpy.context.scene
+H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+from proteinblender.operators import pivot_operators as P
+
+row = next(r for r in scene.outliner_items if r.item_type == 'PROTEIN')
+with R.view3d_override():
+    bpy.ops.wm.tool_set_by_id(name="builtin.rotate")
+    bpy.ops.proteinblender.set_pivot_custom(item_id=row.item_id)
+
+helper = bpy.data.objects[P.PIVOT_HELPER]
+helper.location.x += 1.5
+bpy.context.view_layer.update()
+return {
+    "row": row.item_id,
+    "session": P.pivot_edit_key(scene),
+    "watching": bpy.app.timers.is_registered(P.click_away_watcher),
+    "dropped": [float(v) for v in helper.matrix_world.translation],
+}
+""")
+    assert opened["session"], "Edit Pivot did not open a session to click away from"
+    assert opened["watching"], (
+        "no click-away watcher is running, so no click could ever end the mode")
+
+    # Still open after a full second of NOT clicking: dragging the gizmo must
+    # not be mistaken for letting go of it.
+    time.sleep(1.0)
+    assert blender.call("""
+from proteinblender.operators import pivot_operators as P
+return P.pivot_edit_key(bpy.context.scene)
+"""), "the session closed on its own without any click"
+
+    clicked = blender.call("""
+from proteinblender.operators import pivot_operators as P
+area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
+region = next(r for r in area.regions if r.type == 'WINDOW')
+with bpy.context.temp_override(area=area, region=region):
+    bpy.ops.view3d.select(deselect_all=True, location=(8, region.height // 2))
+helper = bpy.data.objects.get(P.PIVOT_HELPER)
+return {"helper_selected": helper.select_get() if helper else None,
+        "session": P.pivot_edit_key(bpy.context.scene)}
+""")
+    assert clicked["helper_selected"] is False, (
+        "the click did not reach the helper's selection, so this test is not "
+        "measuring a click away")
+    assert clicked["session"], (
+        "the session closed inside the click itself; this test would then pass "
+        "without the watcher it is meant to exercise")
+
+    time.sleep(1.0)
+    result = blender.call("""
+from proteinblender.operators import pivot_operators as P
+scene = bpy.context.scene
+row = next(r for r in scene.outliner_items if r.item_id == row_id)
+tool = bpy.context.workspace.tools.from_space_view3d_mode("OBJECT", create=False)
+bpy.context.view_layer.update()
+return {
+    "session": P.pivot_edit_key(scene),
+    "helper_gone": bpy.data.objects.get(P.PIVOT_HELPER) is None,
+    "watching": bpy.app.timers.is_registered(P.click_away_watcher),
+    "tool": tool.idname if tool else None,
+    "locked": sorted(o.name for o in bpy.context.view_layer.objects
+                     if o.hide_select),
+    "origins": [[float(v) for v in o.matrix_world.translation]
+                for o in P.row_pivot_objects(bpy.context, row)],
+}
+""", row_id=opened["row"])
+
+    assert result["session"] == "", "clicking away left the session open"
+    assert result["helper_gone"], "clicking away left the helper in the scene"
+    assert not result["watching"], "the watcher kept polling after the mode ended"
+    assert result["locked"] == [], (
+        f"clicking away left {result['locked']} unselectable")
+    assert result["tool"] == "builtin.rotate", (
+        f"clicking away left the active tool at {result['tool']}")
+    assert result["origins"], "the row resolved to no objects"
+    for origin in result["origins"]:
+        offset = max(abs(a - b) for a, b in zip(origin, opened["dropped"]))
+        assert offset < 1e-4, (
+            f"the pivot landed {offset} from where the helper was left: "
+            f"helper={opened['dropped']} origin={origin}")

@@ -322,10 +322,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # For all items including puppets, use their own selection state
         # Puppet checkbox now only reflects the controller's selection state
         selection_icon = 'CHECKBOX_HLT' if item.is_selected else 'CHECKBOX_DEHLT'
-        
-        op = row.operator("proteinblender.outliner_select", text="", icon=selection_icon, emboss=False)
+
+        # An open Edit Pivot session owns the selection: its helper is the only
+        # selectable object in the scene, so ticking a row would do nothing at
+        # all. Grey the checkbox rather than let it silently refuse.
+        checkbox = row.row(align=True)
+        checkbox.enabled = not self._pivot_session_open(context)
+        op = checkbox.operator("proteinblender.outliner_select", text="",
+                               icon=selection_icon, emboss=False)
         op.item_id = item.item_id
-        
+
         # Third: Visibility toggle for all items
         # Read visibility directly from the Blender object (single source of truth)
         is_visible = self._get_item_visibility(context, item)
@@ -333,6 +339,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
         op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
         op.item_id = item.item_id
     
+    @staticmethod
+    def _pivot_session_open(context):
+        """True while any row has an Edit Pivot session open."""
+        from ..operators.pivot_operators import pivot_edit_key
+
+        try:
+            return bool(pivot_edit_key(context.scene))
+        except (ReferenceError, RuntimeError, AttributeError):
+            return False
+
     def _draw_custom_pivot_toggle(self, context, row, item):
         """The Edit Pivot button for a protein, chain or domain row.
 
@@ -537,9 +553,12 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
             if area.type == 'PROPERTIES':
                 area.tag_redraw()
         
-        # Also update the current area
-        context.area.tag_redraw()
-        
+        # Also update the current area. There is none when the operator is
+        # driven from a script or a headless test, and dereferencing it there
+        # aborts the whole selection - including the viewport sync below.
+        if context.area is not None:
+            context.area.tag_redraw()
+
         # Sync to Blender selection (do this after UI update for better responsiveness)
         from ..handlers.selection_sync import sync_outliner_to_blender_selection
         sync_outliner_to_blender_selection(context, actual_item_id)

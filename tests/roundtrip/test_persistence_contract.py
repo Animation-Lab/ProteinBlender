@@ -247,6 +247,13 @@ def test_every_deferred_load_pass_is_pumped_by_the_verifier():
         "_apply_workspace_context_callback":
             "re-applies Scene context to the workspace's Properties editor "
             "after activation; UI layout only, covered by the foreground-ui lane",
+        "click_away_watcher":
+            "watches for a click away from the Edit Pivot helper; registered "
+            "by begin_pivot_edit and only while a session is open, never from "
+            "a load handler, and it reads nothing a reopened file restores. "
+            "Its effect on the pivot IS persisted, but by the operator it "
+            "runs - covered by test_visual_edit_dialogs.py, the foreground-ui "
+            "lane's simulated click, and tests/live",
     }
 
     scheduled: dict[str, list[str]] = {}
