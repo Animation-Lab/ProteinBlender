@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-09-06T04:32:19+00:00",
+  "generated_at": "2026-09-07T04:32:04+00:00",
   "summary": {
-    "views": 36,
-    "visitors": 17,
-    "clones": 223,
-    "cloners": 51
+    "views": 32,
+    "visitors": 15,
+    "clones": 229,
+    "cloners": 56
   },
   "all_time": {
     "views": 772,
     "visitors": 354,
-    "clones": 4228,
-    "cloners": 1798,
-    "days_tracked": 172
+    "clones": 4245,
+    "cloners": 1805,
+    "days_tracked": 173
   },
   "current_day": {
+    "date": "2026-09-05",
+    "views": 0,
+    "visitors": 0,
+    "clones": 17,
+    "cloners": 7
+  },
+  "previous_day": {
     "date": "2026-09-04",
     "views": 2,
     "visitors": 2,
     "clones": 14,
     "cloners": 4
   },
-  "previous_day": {
-    "date": "2026-09-03",
-    "views": 0,
-    "visitors": 0,
-    "clones": 21,
-    "cloners": 8
-  },
   "delta_since_previous_day": {
-    "views": 2,
-    "visitors": 2,
-    "clones": -7,
-    "cloners": -4
+    "views": -2,
+    "visitors": -2,
+    "clones": 3,
+    "cloners": 3
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 28,
-      "uniques": 12
+      "count": 24,
+      "uniques": 10
     },
     {
       "referrer": "Bing",
@@ -55,8 +55,8 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 27,
-      "uniques": 16
+      "count": 25,
+      "uniques": 14
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
@@ -65,14 +65,14 @@
       "uniques": 2
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
-      "title": "/releases/tag/1.1.0",
-      "count": 3,
-      "uniques": 2
-    },
-    {
       "path": "/Animation-Lab/ProteinBlender/blob/main/README.md",
       "title": "/blob/main/README.md",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
+      "title": "/releases/tag/1.1.0",
       "count": 1,
       "uniques": 1
     },
