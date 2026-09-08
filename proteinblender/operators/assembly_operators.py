@@ -94,8 +94,15 @@ def build_generated_symmetry(molecule, settings: dict):
     if not operators:
         return False, "The range or contact limit removed every copy"
 
+    targets = None
+    source_id = settings.get("source_item_id", molecule.identifier)
+    if source_id != molecule.identifier:
+        from ..core.outliner_targets import resolve_target
+        source_molecule, targets = resolve_target(source_id)
+        if source_molecule != molecule or not targets:
+            return False, "The symmetry source no longer exists"
     if not assembly_core.apply_operators(
-            molecule, operators, f"generated:{kind.upper()}"):
+            molecule, operators, f"generated:{kind.upper()}", targets=targets):
         return False, "Could not build that symmetry"
 
     # Leave the settings with the build, so the dialog can reopen on what was
@@ -509,6 +516,8 @@ def _filtered(context, molecule, operators):
 
 
 def _refresh(context):
+    from ..utils.scene_manager import build_outliner_hierarchy
+    build_outliner_hierarchy(context)
     for area in getattr(context.screen, "areas", []):
         area.tag_redraw()
 

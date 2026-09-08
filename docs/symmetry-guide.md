@@ -1,6 +1,6 @@
 # Symmetry: concepts, controls, and structures to demo with
 
-A reference for the Symmetry panel.
+A reference for Create New Assembly and its PB Outliner child controls.
 Part one defines the ideas, part two defines every control, part three lists structures to demo with and what each one shows off.
 
 Every structure in part three was checked against the real files rather than picked from memory, so the operator counts quoted are what you will actually get.
@@ -68,36 +68,31 @@ ChimeraX makes exactly this tradeoff, and switches its default at twelve copies;
 Nearly every deposited structure carries an assembly record.
 For a monomer that record is a single **identity** operator, which is the asymmetric unit under another name.
 
-So the panel does not ask "does this file mention an assembly".
+So the deposited-assembly picker does not ask "does this file mention an assembly".
 It asks "does this file describe an operator that would put something new on screen".
-Structures failing that test get no Deposited Assembly controls, because building one would visibly do nothing.
+Structures failing that test show an explanatory message in the Assembly dialog, because building an identity-only assembly would visibly do nothing.
 
 ---
 
 # Part II - The controls
 
-## Deposited Assembly
+## Create New Assembly
 
-Appears only when the file describes symmetry worth building.
+Open **Builders → Create New Assembly** for either source:
 
-- **Dropdown** - what to show the structure as.
-  It names states, not just builds, so the first entry is **Asymmetric Unit - as deposited**: the structure exactly as the file contains it, which is what is on screen before anything is built.
-  That entry is also the default, because it is the honest description of an untouched import.
-  After it come the assemblies the file describes.
-  Many entries carry several: a whole capsid, a pentamer, a hexamer, sometimes a crystal lattice.
-- **Build Assembly** - applies the chosen assembly.
-  With the asymmetric unit chosen the same button reads **Show Asymmetric Unit** and takes the copies away instead, which is the one-step way back from any build - a deposited assembly or a generated symmetry alike.
+- **Generated Symmetry** repeats the protein, chain, or domain chosen in
+  **Build from**. Other chains and domains remain as they were.
+- **Deposited Assembly (BMT)** uses a whole protein's biological transformation
+  matrices. The **Assembly** picker offers the file's assemblies that add
+  symmetry, including subassemblies when available. If the protein already
+  contains its complete assembly, the dialog explains that there is nothing
+  additional to build.
 
-The dropdown follows what is built rather than only what will be built next: build assembly 3 and it reads "Assembly 3", clear and it returns to the asymmetric unit.
-
-## Symmetry Builder
-
-Always available, including on a monomer.
-This is a construction tool, not a reader, so it is not gated on the file.
-
-A built symmetry is an **object**, not a setting on the protein it repeats.
-It is created from the **Builders** panel, alongside Create New DNA / RNA and Create New Membrane, with **Create New Symmetry**.
-That button is always there, like the other two.
+For example, import **5IM3**, choose its protein row, select **Deposited
+Assembly (BMT)**, then assembly **1**. Its two deposited protein chains become
+the four-chain biological assembly. Both PDB BIOMT records and mmCIF biological
+assembly matrices are supported; offline tests compare the copies with the
+source coordinates in both formats.
 
 The dialog always opens, including on an empty file.
 It carries the same **Method / PDB ID / Download / Import Local File** controls the Protein Import panel has, so getting hold of a protein is part of the form rather than something to go and do first.
@@ -124,7 +119,7 @@ Three ways out, and they mean different things:
   That is nothing, a deposited assembly, or an earlier generated symmetry, whichever it was.
   A preview you rejected is not what you are left with.
 
-The pencil on the Symmetry object's outliner row reopens the dialog on the settings that build was actually made with.
+The pencil on either kind of assembly's outliner row reopens the dialog on the settings that build was actually made with.
 Those settings travel with the build rather than with the panel, which is what lets two proteins carry different symmetries at once: the sliders are one set of controls standing in for whichever protein is active, so building a second protein moves them off the first.
 
 Tetrahedral, octahedral and icosahedral are deliberately absent.
@@ -133,29 +128,36 @@ Use the deposited assembly for those.
 
 ### In the PB Outliner
 
-A built symmetry takes a **top-level row of its own**, a sibling of a membrane or a DNA strand rather than a note attached to a protein:
+A symmetry is a child of its source in the PB Outliner:
 
 ```
-> Symmetry C5
-    > 4hhb
-        Chain A
-        Chain B
+> 4hhb
+    > Chain A
+        Symmetry C5
+    Chain B
 ```
 
-Expand it and the protein it repeats is inside, drawn with the ordinary protein UI and editable exactly as it is anywhere else: recolour it, split its chains into domains, edit its visuals.
-The protein moves *into* the Symmetry rather than being referenced from it the way a Puppet references its members.
-It can afford to, because a protein can only ever be in one symmetry: the assembly is built into that protein's own geometry-nodes tree, so there is no sharing to represent and nothing would be gained by listing the protein twice.
+A protein or domain source places the symmetry beneath that row instead.
+Collapsing the source hides its symmetry row. The pencil reopens the build's
+settings; the trash removes its copies and leaves the source hierarchy intact.
+Biological assemblies appear beneath their protein as **Biological Assembly 1**
+(or the chosen assembly number), with the same edit and delete controls.
 
-The Symmetry row carries the same controls as any other object.
-The pencil opens its dialog; the trash takes the copies away, which also dissolves the row and returns the protein to the top level.
+Click the assembly child's name or checkbox to access **Assembly Controls**
+for animation, axes, cutaway, and realization. A helical child also offers
+bend controls. These live controls use the clicked child's protein, even when
+another protein was imported more recently. Selecting the parent protein does
+not open a separate assembly panel. Delete the assembly child to return to the
+asymmetric unit (the imported protein without its generated copies).
 
-The row is read back from what is actually built rather than written when the dialog closes.
-That is what keeps it honest through undo, through a save and reload, and through a symmetry built from anywhere else.
-A deposited assembly gets no row: it has no generator settings, so the dialog's pencil would open on nothing.
+The row is reconstructed from the built geometry nodes after undo and file
+loading. Each protein currently carries one assembly; a new build replaces its
+previous assembly, including when its source changes from a protein to a chain
+or domain.
 
 ## Bend
 
-Appears in the panel once a **helical** symmetry is built, because it is the only kind with a path to run along - a ring has nowhere to bend to.
+Appears in Assembly Controls when a built **helical** child is clicked, because it is the only kind with a path to run along - a ring has nowhere to bend to.
 It stays in the panel rather than moving into the builder's dialog because dragging the control nodes is a mode: a dialog that closed over it would end the drag at the moment it began.
 
 Real filaments are not straight.
@@ -204,7 +206,7 @@ Appears once something is built.
 - **Keyframe** - keys the current state at the playhead.
   Key 0 on one frame and 1 on another to animate the assembly forming.
 - **Clear** - removes the copies.
-  The same result as choosing Asymmetric Unit in the dropdown above; this button is simply nearer to hand once something is built.
+  This has the same effect as deleting the assembly child in the PB Outliner.
 
 ## Show Symmetry Axes
 
@@ -235,7 +237,7 @@ The counts are what the panel will show you, and the timings are from a normal d
 
 | PDB | What it is | Operators | Shows off |
 |---|---|---|---|
-| **1ubq** | Ubiquitin, monomer | none | Gating: no Deposited Assembly section at all |
+| **1ubq** | Ubiquitin, monomer | none | No additional deposited assembly offered |
 | **4ins** | Insulin | assembly 3: **3** | The clean first build; a visible 3-fold from the top |
 | **1hho** | Haemoglobin | **2** | The smallest possible assembly: one operator makes the tetramer |
 | **1fha** | Ferritin | **24** | Octahedral. One chain becomes a 24-copy shell, and it loads in under a second |
@@ -264,7 +266,7 @@ Building itself is effectively instant in every case; the wait is the download a
 ## What each one is good for
 
 ### 1ubq - the gate
-Import it and the Deposited Assembly section is simply absent, replaced by "No assembly deposited with this structure".
+Choose Deposited Assembly in the dialog and it explains that no additional assembly is deposited for this protein.
 The Symmetry Builder is still there, which is the point: a monomer is exactly when you want to *generate* symmetry.
 
 ### 4ins - the first build
@@ -273,8 +275,7 @@ Look from the top: it should be a clean three-fold disc.
 Good for demonstrating the Assembled slider, because you can follow individual copies with your eye.
 
 Also the clearest asymmetric-unit round trip.
-Its picker opens on **Asymmetric Unit**, which is the deposited unit already on screen.
-Choose assembly 3, build, and the picker follows to "Assembly 3"; choose Asymmetric Unit again and the button relabels itself to **Show Asymmetric Unit**, putting the structure back where the import left it.
+Choose Deposited Assembly, select assembly 3, and confirm. Its child pencil reopens on assembly 3; deleting the child returns the protein to the asymmetric unit.
 
 ### 1hho - the minimum case
 One non-identity operator turns the deposited alpha-beta dimer into the haemoglobin tetramer.
@@ -321,7 +322,7 @@ The **Arc** preset gets there in one click if you would rather not drag on stage
 
 ### 2gls - gating, at scale
 Forty-eight chains and a deposited assembly consisting of one identity operator, because the file already contains the complete molecule.
-Makes the point that "no Deposited Assembly section" is not a failure to detect anything.
+Shows why an identity-only assembly is not offered as an additional build.
 
 ---
 
@@ -330,7 +331,7 @@ Makes the point that "no Deposited Assembly section" is not a failure to detect 
 ## Five minutes
 
 1. **1ubq** - no deposited section. Explain the gate.
-2. **4ins** - the picker opens on Asymmetric Unit. Build assembly 3: a three-fold you can read at a glance. Pick Asymmetric Unit again to go straight back.
+2. **4ins** - build deposited assembly 3: a three-fold you can read at a glance. Delete its child row to return to the asymmetric unit.
 3. Drag **Assembled** to 0 and back. Keyframe 0 and 1, scrub.
 4. **1fha** - build the 24-copy ferritin shell.
 5. **Cut Away** on the ferritin. Interior revealed, subunits intact.

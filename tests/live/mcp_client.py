@@ -97,6 +97,12 @@ if __pb_live not in sys.path:
 import bpy
 import helpers as H
 import remote as R
+# Resolve the package that actually registered the public operator. Normal
+# profiles may enable the extension as bl_ext.<repository>.proteinblender.
+if hasattr(bpy.context.scene, 'outliner_items'):
+    __pb_operator = bpy.types.Operator.bl_rna_get_subclass_py(
+        bpy.ops.molecule.import_local.get_rna_type().identifier)
+    H.PKG = __pb_operator.__module__.split('.operators.', 1)[0]
 '''
 
 

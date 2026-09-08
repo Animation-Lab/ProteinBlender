@@ -600,18 +600,3 @@ def test_deleting_the_protein_takes_its_bend_with_it(scene, sm):
     assert curve_name not in bpy.data.objects, "the bend curve outlived its protein"
     for name in node_names:
         assert name not in bpy.data.objects, f"{name} outlived its protein"
-
-
-def test_the_bend_is_offered_only_for_helical(scene, sm):
-    """A ring has no path to run along; the section must not appear on one."""
-    from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
-
-    molecule = _import()
-    _set_helix()
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True
-
-    bpy.context.scene.pb_symmetry_kind = "C"
-    assert bpy.context.scene.pb_symmetry_kind == "C", (
-        "the builder kind did not change - this test proves nothing")
-    # The gate itself lives in the draw, so assert on the condition it reads.
-    assert bpy.context.scene.pb_symmetry_kind != "H"

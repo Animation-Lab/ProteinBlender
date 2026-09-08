@@ -226,6 +226,11 @@ def unregister() -> None:
     This function unregisters all classes, properties, and handlers,
     cleaning up the addon state.
     """
+    from .operators.conformation_operators import stop_playback, _tick
+    stop_playback()
+    if bpy.app.timers.is_registered(_tick):
+        bpy.app.timers.unregister(_tick)
+
     # Clear any pending timers
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(create_workspace_callback):
         bpy.app.timers.unregister(create_workspace_callback)

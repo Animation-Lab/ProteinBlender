@@ -396,7 +396,7 @@ class VisualEditMixin:
     # Drawing
     # ------------------------------------------------------------------
 
-    def draw_visual_setup(self, layout, context):
+    def draw_visual_setup(self, layout, context, *, show_color=True, show_pivot=True):
         """The Visual Set-up block: colour, representation, pivot, force field."""
         _ACTIVE["dialog"] = self
 
@@ -411,9 +411,10 @@ class VisualEditMixin:
             return
 
         grid = box.row(align=True)
-        left = grid.column(align=True)
-        left.label(text="Color", icon='COLOR')
-        left.prop(self, "vs_color", text="")
+        if show_color:
+            left = grid.column(align=True)
+            left.label(text="Color", icon='COLOR')
+            left.prop(self, "vs_color", text="")
         right = grid.column(align=True)
         right.label(text="Representation", icon='MESH_UVSPHERE')
         right.prop(self, "vs_style", text="")
@@ -421,37 +422,27 @@ class VisualEditMixin:
         # The style dropdown says "Multiple" for itself; the swatch cannot, so
         # the grey placeholder is spelled out rather than passing for a colour
         # the item actually has.
-        if self.vs_color_is_mixed:
+        if show_color and self.vs_color_is_mixed:
             box.label(text="Multiple colors: pick one to apply it to all.",
                       icon='INFO')
 
-        box.separator()
-        pivot = box.column(align=True)
-        pivot.label(text="Pivot Point", icon='PIVOT_CURSOR')
-        # First / Center / Last only. "Custom" is not a fourth choice here: it
-        # is a placement *mode* that needs the viewport and the move gizmo, and
-        # launching it from a dialog would tear it straight back down when the
-        # dialog closed. It lives on the outliner row instead, where the button
-        # stays on screen for the whole placement.
-        buttons = pivot.row(align=True)
-        buttons.scale_y = 1.2
-        for operator_id, label in (("proteinblender.set_pivot_first", "Start"),
-                                   ("proteinblender.set_pivot_center", "Center"),
-                                   ("proteinblender.set_pivot_last", "End")):
-            operator = buttons.operator(operator_id, text=label)
-            operator.item_id = row.item_id if row is not None else ""
-
-        owners = self.force_field_objects(context)
-        if owners:
+        if show_pivot:
             box.separator()
-            force_field = box.box()
-            force_field.prop(self, "vs_force_field", icon='FORCE_FORCE')
-            if self.vs_force_field:
-                force_field.prop(self, "vs_force_field_spacing")
-                force_field.label(
-                    text=f"Lipids part around {len(owners)} object(s) "
-                         f"in any membrane.",
-                    icon='INFO')
+            pivot = box.column(align=True)
+            pivot.label(text="Pivot Point", icon='PIVOT_CURSOR')
+            # First / Center / Last only. "Custom" is not a fourth choice here: it
+            # is a placement *mode* that needs the viewport and the move gizmo, and
+            # launching it from a dialog would tear it straight back down when the
+            # dialog closed. It lives on the outliner row instead, where the button
+            # stays on screen for the whole placement.
+            buttons = pivot.row(align=True)
+            buttons.scale_y = 1.2
+            for operator_id, label in (("proteinblender.set_pivot_first", "Start"),
+                                       ("proteinblender.set_pivot_center", "Center"),
+                                       ("proteinblender.set_pivot_last", "End")):
+                operator = buttons.operator(operator_id, text=label)
+                operator.item_id = row.item_id if row is not None else ""
+
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -515,7 +506,7 @@ class VisualEditMixin:
 
 
 class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
-    """Edit this protein's colour, representation, force field and pivot"""
+    """Edit this protein's colour and representation"""
     bl_idname = "proteinblender.edit_protein_visuals"
     bl_label = "Edit Protein"
     bl_options = {'REGISTER', 'UNDO'}
@@ -547,7 +538,9 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         row = self.visual_row(context)
         if row is not None:
             layout.label(text=row.name, icon=row.icon or 'MESH_DATA')
-        self.draw_visual_setup(layout, context)
+        self.draw_visual_setup(layout, context, show_pivot=False)
+        layout.separator()
+        layout.operator('proteinblender.create_conformation', icon='IPO_EASE_IN_OUT').source_id = self.item_id
 
     def execute(self, context):
         row = self.visual_row(context)

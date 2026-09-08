@@ -47,6 +47,7 @@ this is a defensive nudge.
 from __future__ import annotations
 
 import bpy
+import json
 from bpy.app.handlers import persistent
 from mathutils import Vector
 from typing import Iterable, List, Optional, Tuple
@@ -127,11 +128,52 @@ def iter_ff_emitter_objects() -> Iterable[bpy.types.Object]:
     """Yield every Blender object whose ``pb_force_field_enabled`` is on
     and is itself not an FF anchor. Order matches ``bpy.data.objects``
     iteration so slot assignment is deterministic across sessions."""
+    seen = set()
     for obj in bpy.data.objects:
-        if obj.get(_FF_ANCHOR_MARKER, False):
-            continue
-        if getattr(obj, "pb_force_field_enabled", False):
+        if not obj.get(_FF_ANCHOR_MARKER, False) and getattr(obj, "pb_force_field_enabled", False):
+            seen.add(obj.name)
             yield obj
+    for root in bpy.data.objects:
+        if root.get("pb_is_membrane", False):
+            for obj in membrane_target_objects(root):
+                if obj.name not in seen:
+                    seen.add(obj.name)
+                    yield obj
+
+
+# Stable row ids are saved on each membrane. Missing data means an older file,
+# whose per-object flags continue to work until its membrane picker is used.
+TARGETS_KEY = "pb_membrane_force_field_targets"
+SPACING_KEY = "pb_membrane_force_field_spacing"
+
+
+def membrane_target_ids(root):
+    try:
+        value = json.loads(root.get(TARGETS_KEY, "[]"))
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def membrane_target_objects(root):
+    from ..core.outliner_targets import resolve_target
+    found = {}
+    for item_id in membrane_target_ids(root):
+        if not isinstance(item_id, str):
+            continue
+        _molecule, objects = resolve_target(item_id)
+        for obj in objects:
+            if obj is not None and obj.type == 'MESH':
+                found[obj.name] = obj
+    return list(found.values())
+
+
+def membrane_emitters(root, scene=None):
+    if TARGETS_KEY in root:
+        return membrane_target_objects(root)
+    objects = scene.objects if scene is not None else bpy.data.objects
+    return [o for o in objects if not o.get(_FF_ANCHOR_MARKER, False)
+            and getattr(o, "pb_force_field_enabled", False)]
 
 
 def _evaluated_coords_local(obj: bpy.types.Object):
@@ -324,11 +366,18 @@ def iter_active_force_fields(scene: Optional[bpy.types.Scene]
         yield owner, radius_bu
 
 
-def collect_force_field_slots(scene: Optional[bpy.types.Scene]
+def collect_force_field_slots(scene: Optional[bpy.types.Scene], root=None
                                ) -> List[Tuple[bpy.types.Object, float]]:
     """Return up to MAX_PROTEIN_FFS active (owner, radius) entries."""
     out: List[Tuple[bpy.types.Object, float]] = []
-    for entry in iter_active_force_fields(scene):
+    if root is None:
+        entries = iter_active_force_fields(scene)
+    else:
+        entries = ((owner, compute_force_field_radius_bu(owner,
+                    float(root.get(SPACING_KEY, 1.5)) if TARGETS_KEY in root
+                    else float(owner.pb_force_field_spacing)))
+                   for owner in membrane_emitters(root, scene))
+    for entry in entries:
         out.append(entry)
         if len(out) >= MAX_PROTEIN_FFS:
             break
@@ -396,7 +445,7 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
     if mod.node_group != tree:
         mod.node_group = tree
 
-    slots = collect_force_field_slots(scene) if scene is not None else []
+    slots = collect_force_field_slots(scene, root_obj) if scene is not None else []
     tree_ffs = int(tree.get("pb_active_ffs", MAX_PROTEIN_FFS))
 
     for i in range(1, tree_ffs + 1):
@@ -508,7 +557,7 @@ def _on_depsgraph_check(scene, depsgraph):
         count = len(bpy.data.objects)
         prev = _object_count_cache[0]
         _object_count_cache[0] = count
-        if 0 <= prev and count < prev:
+        if 0 <= prev and count != prev:
             if not bpy.app.timers.is_registered(_deferred_ff_reapply):
                 bpy.app.timers.register(_deferred_ff_reapply,
                                         first_interval=0.0)
@@ -522,7 +571,7 @@ def _on_depsgraph_check(scene, depsgraph):
             return
         moved = any(
             isinstance(upd.id, bpy.types.Object)
-            and upd.is_updated_transform
+            and (upd.is_updated_transform or upd.is_updated_geometry)
             and upd.id.name in watched
             for upd in depsgraph.updates
         )

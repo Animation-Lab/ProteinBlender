@@ -9,6 +9,9 @@ title: Keyframe Animation
 
 Create animations by keyframing puppet positions, poses, and colors.
 
+Use **Set Up Lighting** below the keyframe controls to light your current scene.
+See [Scene Lighting](lighting.html) for presets and options.
+
 Watch the full tutorial:
 
 [![ProteinBlender Tutorial](https://img.youtube.com/vi/XLPvo1Ax3G4/0.jpg)](https://www.youtube.com/watch?v=XLPvo1Ax3G4 "ProteinBlender Tutorial")
@@ -262,3 +265,6 @@ For more advanced topics:
 
 [Back to Home](index.html) | [Previous: Manage Poses](poses.html)
 
+For transitions between two imported structures, use
+[Align & Animate](conformations.html). Its playback popup sets the timing
+without requiring a puppet or the native Blender timeline.

@@ -102,15 +102,8 @@ def test_chain_swatches_seed_from_what_each_chain_renders_with(scene):
 
 
 @pytest.mark.integration
-def test_protein_swatch_shows_neutral_grey_when_its_chains_disagree(scene):
-    """A protein whose chains wear different colours cannot honestly show one.
-
-    The swatch falls back to the same neutral grey the Visual Set-up dialogs
-    use for "mixed" - showing one chain's colour as if it spoke for the rest
-    is a lie the user would then commit by re-picking it.
-    """
-    from proteinblender.operators.visual_edit import MIXED_COLOR
-
+def test_protein_swatch_shows_its_actual_chain_colors(scene):
+    """Mixed is a palette of the colors reaching geometry, distinct from grey."""
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
     mol = H.sm().molecules[mid]
@@ -121,9 +114,12 @@ def test_protein_swatch_shows_neutral_grey_when_its_chains_disagree(scene):
 
     protein_row = next(it for it in bpy.context.scene.outliner_items
                        if it.item_type == "PROTEIN" and it.item_id == mid)
-    assert tuple(protein_row.row_color)[:3] == pytest.approx(
-        MIXED_COLOR[:3], abs=1e-4), (
-        "a mixed-colour protein row should show the neutral 'mixed' grey")
+    palette = json.loads(protein_row.row_palette_json)
+    assert len(palette) == len(colors)
+    for expected in colors:
+        assert any(tuple(color[:3]) == pytest.approx(expected, abs=1e-4)
+                   for color in palette)
+    assert protein_row.row_domain_count == len(mol.domains)
 
 
 # --------------------------------------------------------------------------
@@ -157,8 +153,7 @@ def test_editing_a_chain_swatch_recolors_every_object_of_the_chain(scene):
 
 @pytest.mark.integration
 def test_editing_the_protein_swatch_recolors_the_whole_protein(scene):
-    """A pick on a mixed protein row resolves the mix - and un-greys itself."""
-    from proteinblender.operators.visual_edit import MIXED_COLOR
+    """A pick on a mixed protein row resolves the mix to a solid swatch."""
 
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
@@ -166,8 +161,7 @@ def test_editing_the_protein_swatch_recolors_the_whole_protein(scene):
 
     protein_row = next(it for it in bpy.context.scene.outliner_items
                        if it.item_type == "PROTEIN" and it.item_id == mid)
-    assert tuple(protein_row.row_color)[:3] == pytest.approx(
-        MIXED_COLOR[:3], abs=1e-4), "expected a mixed protein to start grey"
+    assert len(json.loads(protein_row.row_palette_json)) > 1
 
     picked = (0.1, 0.3, 0.85, 1.0)
     protein_row.row_color = picked
@@ -184,6 +178,68 @@ def test_editing_the_protein_swatch_recolors_the_whole_protein(scene):
         picked[:3], abs=1e-3), (
         "after resolving the mix the swatch should show the picked colour, "
         "not the grey placeholder")
+    assert len(json.loads(protein_row.row_palette_json)) == 1
+
+
+@pytest.mark.integration
+def test_split_chain_palette_tracks_recolor_rebuild_and_solid_grey(scene):
+    from proteinblender.core.outliner_colors import palette_description, palette_icon_key
+    from proteinblender.utils import icons
+
+    mid = H.import_local("1ubq.pdb", "palette")
+    _build_outliner()
+    chain_id = _split_first_chain(mid, pieces=6)
+    colors = [(1, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1),
+              (1, 1, 0, 1), (1, 0, 1, 1), (0, 1, 1, 1)]
+    for row, color in zip(_rows("DOMAIN", parent_id=chain_id), colors):
+        row.row_color = color
+    _build_outliner()
+    for row in (*_rows("PROTEIN"), *_rows("CHAIN", parent_id=mid)):
+        assert json.loads(row.row_palette_json) == [list(c) for c in colors]
+        assert row.row_domain_count == 6
+        assert "6 domains" in palette_description(row)
+        assert "Showing 4 of 6 colors" in palette_description(row)
+        # Background Blender does not allocate GPU icon IDs. The live lane
+        # observes the actual displayed icon; here inspect the pixel buffer.
+        # Read Blender's actual icon buffer; the visible four bands must use
+        # the chosen RGBY colors, never an average or a grey placeholder.
+        for band, color in enumerate(colors[:4]):
+            preview = icons._collection[f"{palette_icon_key(row)}:{band // 2}"]
+            pixels = list(preview.icon_pixels_float)
+            x = 8 if band % 2 == 0 else 24
+            offset = (16 * 32 + x) * 4
+            assert pixels[offset:offset + 4] == pytest.approx(color)
+
+    # A true grey shared color must remain a single swatch, never "mixed".
+    chain = next(row for row in _rows("CHAIN") if row.item_id == chain_id)
+    chain.row_color = (0.5, 0.5, 0.5, 1)
+    for row in (*_rows("PROTEIN"), *_rows("CHAIN", parent_id=mid)):
+        assert json.loads(row.row_palette_json) == [[0.5, 0.5, 0.5, 1]]
+        assert all(f"{palette_icon_key(row)}:{half}" not in icons._collection
+                   for half in range(2))
+    for domain in H.sm().molecules[mid].domains.values():
+        assert _rendered_rgb(domain.object) == pytest.approx((0.5, 0.5, 0.5))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('item_type', ['PROTEIN', 'CHAIN'])
+def test_shared_color_picker_applies_only_to_its_row(scene, item_type):
+    mid = H.import_local('4hhb.pdb', 'shared_color')
+    _build_outliner()
+    mol = H.sm().molecules[mid]
+    row = _rows(item_type)[0]
+    item_id = row.item_id
+    objects = ([d.object for d in mol.domains.values()] if item_type == 'PROTEIN'
+               else _chain_objects(mol, row))
+    targets = {obj.name for obj in objects}
+    before = {d.object.name: _rendered_rgb(d.object) for d in mol.domains.values()}
+    picked = (0.2, 0.7, 0.1, 1)
+    assert bpy.ops.proteinblender.outliner_color_picker(
+        item_id=item_id, item_type=item_type, color=picked) == {'FINISHED'}
+    for domain in mol.domains.values():
+        obj = domain.object
+        expected = picked[:3] if obj.name in targets else before[obj.name]
+        assert _rendered_rgb(obj) == pytest.approx(expected, abs=1e-4)
 
 
 @pytest.mark.integration

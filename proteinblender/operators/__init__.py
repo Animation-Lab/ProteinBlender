@@ -75,6 +75,8 @@ from .symmetry_dialog import (
     CLASSES as SYMMETRY_DIALOG_CLASSES,
 )
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
+from .outliner_color_picker import CLASSES as OUTLINER_COLOR_CLASSES
+from .lighting_operators import CLASSES as LIGHTING_CLASSES
 from .visual_edit import (
     PROTEINBLENDER_OT_edit_protein_visuals,
     CLASSES as VISUAL_EDIT_CLASSES,
@@ -97,6 +99,8 @@ from .brownian_operators import (
     PROTEINBLENDER_OT_brownian_rebuild,
     PROTEINBLENDER_OT_brownian_clear_all,
 )
+
+from .conformation_operators import CLASSES as CONFORMATION_CLASSES
 
 CLASSES = (
     # PropertyGroups must be registered before operators that use them
@@ -164,4 +168,7 @@ CLASSES = (
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)
     *VISUAL_EDIT_CLASSES,
+    *OUTLINER_COLOR_CLASSES,
+    *LIGHTING_CLASSES,
+    *CONFORMATION_CLASSES,
 )

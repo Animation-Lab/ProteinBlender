@@ -2035,16 +2035,9 @@ def _required_slot_counts(scene: Optional[bpy.types.Scene] = None
             if count > num_holes:
                 num_holes = count
 
-    # FF count is now per-object (chains, domains, or proteins each carry
-    # their own pb_force_field_enabled). Walk every object, count those
-    # with the flag on — skip our own anchor Empties so they don't
-    # double-count.
-    num_ffs = 0
-    for obj in bpy.data.objects:
-        if obj.get("pb_is_ff_anchor", False):
-            continue
-        if getattr(obj, "pb_force_field_enabled", False):
-            num_ffs += 1
+    from .force_fields import membrane_emitters
+    num_ffs = max((len(membrane_emitters(root, scene)) for root in bpy.data.objects
+                   if root.get("pb_is_membrane", False)), default=0)
 
     return (min(num_holes, MAX_HOLES), min(num_ffs, MAX_PROTEIN_FFS))
 

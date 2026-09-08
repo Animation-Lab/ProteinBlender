@@ -208,6 +208,8 @@ class ProteinBlenderScene:
 
     def _finalize_imported_molecule(self, molecule):
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
+        from ..core.structural_alignment import store_identity
+        store_identity(molecule)
         # Set protein pivot to center of mass and move to world origin
         print("Setting protein pivot to center of mass...")
         molecule.set_protein_pivot_to_center_of_mass(bpy.context)
@@ -518,6 +520,23 @@ def resolve_active_molecule(context=None):
     return ProteinBlenderScene.get_instance().molecules.get(identifier)
 
 
+def resolve_active_assembly_molecule(context=None):
+    """Resolve the explicitly clicked assembly child, independent of protein selection."""
+    from ..core import assembly
+
+    context = context or bpy.context
+    scene = context.scene
+    index = getattr(scene, 'outliner_index', -1)
+    if not 0 <= index < len(scene.outliner_items):
+        return None
+    row = scene.outliner_items[index]
+    if row.item_type != 'SYMMETRY':
+        return None
+    molecule = ProteinBlenderScene.get_instance().molecules.get(symmetry_molecule_id(row))
+    return molecule if molecule and assembly.built_assembly_id(molecule) else None
+
+
+
 def molecule_would_be_emptied(molecule, doomed_domain_ids) -> bool:
     """True if deleting exactly these domains leaves the protein with none.
 
@@ -596,6 +615,11 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
         context = bpy.context
 
     scene_manager = ProteinBlenderScene.get_instance()
+
+    from ..core.conformation import clear_for_source
+    source = scene_manager.molecules.get(molecule_id)
+    if source is not None:
+        clear_for_source(context, source.object)
 
     try:
         scene_manager.refresh_domain_refs_before_destructive_op(molecule_id)
@@ -1462,6 +1486,11 @@ def _deferred_reconstruct_on_load():
             restored = _reconstruct_wrappers_from_properties(scene_manager, scene)
             if restored:
                 build_outliner_hierarchy(bpy.context)
+            # Membrane targets are stable protein/chain/domain IDs. Their
+            # earlier load timer cannot resolve them until this registry has
+            # been reconstructed, so refresh the dependent fields now.
+            from ..membrane_builder.force_fields import apply_to_all_membranes
+            apply_to_all_membranes(scene)
     except Exception as e:
         print(f"[ProteinBlender] reconstruct on load failed: {e}")
     # Re-baseline the deletion detector now the registry matches the file.
@@ -1544,16 +1573,12 @@ SYMMETRY_ID_PREFIX = "symmetry_"
 
 
 def symmetry_item_id(molecule_id) -> str:
-    """The outliner id of the Symmetry object wrapping this molecule."""
+    """The outliner id of the symmetry built on this molecule."""
     return f"{SYMMETRY_ID_PREFIX}{molecule_id}"
 
 
 def symmetry_molecule_id(item) -> str:
-    """The molecule a Symmetry row wraps, recovered from its id.
-
-    The row's own children carry it as ``parent_id``, but the row itself has
-    none - it is top-level - so the id is the only place it lives.
-    """
+    """Recover the molecule ID independently of the symmetry's source row."""
     item_id = getattr(item, "item_id", "") or ""
     if item_id.startswith(SYMMETRY_ID_PREFIX):
         return item_id[len(SYMMETRY_ID_PREFIX):]
@@ -1562,27 +1587,9 @@ def symmetry_molecule_id(item) -> str:
 
 def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
                        selection_states, expansion_states):
-    """Emit the Symmetry object that *contains* this molecule, if it has one.
+    """Append a symmetry row beneath the protein, chain or domain it repeats.
 
-    A built symmetry is an object in its own right here, a sibling of a
-    membrane or a DNA strand rather than a note attached to a protein: it owns
-    a top-level row, it expands to show the protein it repeats, and that
-    protein is drawn with the ordinary protein UI inside it.
-
-    The protein moves *into* it rather than being referenced from it the way a
-    puppet references its members. It can afford to, because a protein can
-    only ever be in one symmetry - the assembly is built into that protein's
-    own geometry-nodes tree - so there is no sharing to represent and nothing
-    would be gained by listing the protein twice.
-
-    Derived from what is *built*, read back off the assembly node, rather than
-    written when the builder's dialog closes. That is what keeps the row
-    honest through undo, through a save/load, and through a symmetry built
-    from anywhere other than the dialog.
-
-    Returns the row, or None when this molecule carries no generated symmetry
-    (a deposited assembly is not one: it has no generator settings, so the
-    dialog behind this row's pencil would open on nothing).
+    Derived from the built nodes so hierarchy follows undo and file loading.
     """
     from ..core import assembly as assembly_core
     from ..core import symmetry_builder
@@ -1591,7 +1598,8 @@ def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
         kind = symmetry_builder.built_symmetry_kind(molecule)
     except (ReferenceError, AttributeError):
         return None
-    if not kind:
+    built_id = assembly_core.built_assembly_id(molecule)
+    if not built_id:
         return None
 
     params = assembly_core.built_build_params(molecule) or {}
@@ -1602,8 +1610,8 @@ def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
         "twist": params.get("twist", 0.0),
     }
     try:
-        label = symmetry_builder.short_label(kind, **shape)
-        tooltip = symmetry_builder.describe(kind, **shape)
+        label = symmetry_builder.short_label(kind, **shape) if kind else ""
+        tooltip = symmetry_builder.describe(kind, **shape) if kind else ""
     except Exception:
         logger.exception("could not describe the built symmetry")
         label, tooltip = kind, f"Generated symmetry: {kind}"
@@ -1611,29 +1619,27 @@ def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
     item = scene.outliner_items.add()
     item.item_type = 'SYMMETRY'
     item.item_id = symmetry_item_id(molecule_id)
-    item.parent_id = ""
-    item.name = f"Symmetry {label}"
-    # The protein's object, so selection sync and the visibility toggle reach
-    # the geometry: the copies are instances of it, so hiding it hides them.
+    parent_id = params.get("source_item_id", molecule_id)
+    parent = next((r for r in scene.outliner_items if r.item_id == parent_id), None)
+    if parent is None:
+        parent_id = molecule_id
+        parent = next(r for r in scene.outliner_items if r.item_id == parent_id)
+    item.parent_id = parent_id
+    item.name = f"Symmetry {label}" if kind else f"Biological Assembly {built_id}"
+    # A split chain has no single object; selection and visibility resolve
+    # the source row to all of its domain objects.
     try:
-        item.object_name = mol_object.name if mol_object else ""
+        item.object_name = parent.object_name
     except (ReferenceError, AttributeError):
         item.object_name = ""
-    item.indent_level = 0
+    item.indent_level = parent.indent_level + 1
     item.icon = 'MOD_ARRAY'
-    item.tooltip = tooltip
+    item.tooltip = tooltip if kind else "Biological transformation matrices from the structure file"
 
     if item.item_id in selection_states:
         item.is_selected = selection_states[item.item_id]
-    # Expanded by default: a container whose contents are hidden on creation
-    # looks like it did not work.
     item.is_expanded = expansion_states.get(item.item_id, True)
     return item
-
-    if item.item_id in selection_states:
-        item.is_selected = selection_states[item.item_id]
-    if item.item_id in expansion_states:
-        item.is_expanded = expansion_states[item.item_id]
 
 
 def build_outliner_hierarchy(context=None):
@@ -1644,6 +1650,10 @@ def build_outliner_hierarchy(context=None):
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
     
+    index = getattr(scene, 'outliner_index', -1)
+    active_row_id = (scene.outliner_items[index].item_id
+                     if 0 <= index < len(scene.outliner_items) else "")
+
     # Store existing groups and their memberships before clearing
     existing_groups = {}
     item_memberships = {}  # Store which groups each item belongs to
@@ -1766,18 +1776,12 @@ def build_outliner_hierarchy(context=None):
         except (ReferenceError, AttributeError):
             pass
 
-        # A built symmetry wraps the protein: it takes the top-level row and
-        # the protein becomes its child, one level deeper, with its chains and
-        # domains following it down.
-        symmetry_row = _add_symmetry_item(
-            context, scene, molecule, molecule_id, mol_object,
-            item_selection_states, item_expansion_states)
-        depth = 1 if symmetry_row is not None else 0
+        depth = 0
 
         protein_item = scene.outliner_items.add()
         protein_item.item_type = 'DNA_RNA' if is_nucleic else 'PROTEIN'
         protein_item.item_id = molecule_id
-        protein_item.parent_id = symmetry_row.item_id if symmetry_row else ""
+        protein_item.parent_id = ""
         protein_item.name = getattr(molecule, 'name', molecule.identifier)
 
         # Safely get object name and visibility
@@ -2012,7 +2016,7 @@ def build_outliner_hierarchy(context=None):
                             chain_item.object_name = ""
 
                 # Add domain items if they should be shown and chain is expanded
-                if should_show_domains and chain_item.is_expanded:
+                if should_show_domains:
                     for domain_id, domain in chain_domains:
                         domain_item = scene.outliner_items.add()
                         domain_item.item_type = 'DOMAIN'
@@ -2129,7 +2133,7 @@ def build_outliner_hierarchy(context=None):
                 chain_copy_item.tooltip = "\n".join(copy_tooltip)
 
                 # The pieces of a split chain's copy, listed under it.
-                if not (chain_copy_item.has_domains and chain_copy_item.is_expanded):
+                if not chain_copy_item.has_domains:
                     continue
                 for member_id, member in members:
                     domain_item = scene.outliner_items.add()
@@ -2159,6 +2163,21 @@ def build_outliner_hierarchy(context=None):
                         f"Domain Residues: {domain_item.domain_start}-{domain_item.domain_end}",
                     ])
     
+    # Insert each symmetry directly after its source. Its siblings keep their
+    # existing hierarchy; collapsing any ancestor hides the symmetry as well.
+    for molecule_id, molecule in scene_manager.molecules.items():
+        item = _add_symmetry_item(
+            context, scene, molecule, molecule_id, molecule.object,
+            item_selection_states, item_expansion_states)
+        if item is not None:
+            parent_id = item.parent_id
+            parent_index = next(i for i, r in enumerate(scene.outliner_items)
+                                if r.item_id == parent_id)
+            scene.outliner_items.move(len(scene.outliner_items) - 1, parent_index + 1)
+
+    from ..core.conformation import add_outliner_rows
+    add_outliner_rows(context, item_selection_states)
+
     # Add membrane items — top-level rows for each ``pb_is_membrane`` root,
     # placed after the molecules so the user gets a single combined list.
     # Children of the root (lattice, hole controllers, force-field proxies)
@@ -2328,6 +2347,11 @@ def build_outliner_hierarchy(context=None):
                     # Add non-domain, non-protein items (chains) directly
                     add_reference_with_children(member_id, group_id)
     
+    # Rows may move when an assembly child is inserted or removed. Preserve
+    # the user's explicit row, rather than activating its new neighbour.
+    scene.outliner_index = next((i for i, row in enumerate(scene.outliner_items)
+                                if row.item_id == active_row_id), -1)
+
     # Update outliner display
     # Re-enable selection sync
     selection_sync._update_in_progress = old_in_progress

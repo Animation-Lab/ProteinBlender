@@ -228,6 +228,13 @@ def test_every_deferred_load_pass_is_pumped_by_the_verifier():
     pumped or be listed here as irrelevant to persisted state.
     """
     not_load_related = {
+        "open_playback":
+            "opens the transition dialog after an interactive create operator; "
+            "never scheduled by a load handler and has no persisted state",
+        "_tick":
+            "temporary conformational preview playback, scheduled only by the "
+            "Play button; saved animation is evaluated by Blender shape keys "
+            "without this timer, and foreground tests exercise the timer itself",
         "_deferred_molecule_purge":
             "deletion detector, scheduled from depsgraph updates rather than "
             "from a load handler",

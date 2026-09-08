@@ -15,7 +15,7 @@ from typing import Optional
 
 from ..utils import gn_compat
 from . import lipid_assets
-from . import force_fields
+from . import force_fields, force_field_picker
 from .membrane_geometry import (
     NM_PER_BU,
     MAX_HOLES,
@@ -722,6 +722,15 @@ def _draw_membrane_form(layout, props, *, root=None):
     # dismissing the dialog instead. Entering and leaving now live on the PB
     # Outliner row's lattice toggle, and Reset Deformation lives in the banner
     # that is on screen while deforming - both places that persist.
+
+    if root is not None:
+        fields = layout.box()
+        fields.label(text="Membrane Force Fields", icon='FORCE_FORCE')
+        op = fields.operator("proteinblender.membrane_force_fields",
+                             text="Add Force Field", icon='ADD')
+        op.membrane_name = root.name
+        count = len(force_fields.membrane_emitters(root, bpy.context.scene))
+        fields.label(text=f"{count} force field object(s)")
 
     # ---- Holes (edit mode only) ---------------------------------------
     if root is not None:
@@ -1449,6 +1458,7 @@ class PROTEINBLENDER_PT_membrane_deform_banner(bpy.types.Panel):
 
 
 CLASSES = (
+    *force_field_picker.CLASSES,
     PROTEINBLENDER_OT_build_membrane,
     PROTEINBLENDER_OT_resize_membrane,
     PROTEINBLENDER_OT_add_hole,

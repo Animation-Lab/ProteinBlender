@@ -1169,7 +1169,7 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "new_name")
-        self.draw_visual_setup(layout, context)
+        self.draw_visual_setup(layout, context, show_color=self.item_type != 'CHAIN')
 
     def _rename_chain_copy(self, item):
         """Rename a chain copy, if that is what this row is.

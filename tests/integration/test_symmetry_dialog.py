@@ -12,6 +12,8 @@ against ``built_assembly_id`` or ``built_build_params`` would pass whatever
 those happened to return, including the wrong thing.
 """
 
+import json
+
 import bpy
 import pytest
 
@@ -133,75 +135,29 @@ def test_ok_builds_what_the_dialog_was_showing():
     assert _copies(molecule) == 7
 
 
-def test_ok_puts_a_symmetry_object_in_the_outliner():
-    """A built symmetry is an object, not a note on the protein.
-
-    It takes the top-level row; the protein it repeats moves *inside* it.
-    """
+def test_ok_puts_symmetry_beneath_its_source_protein():
     molecule = _import()
     _set(kind="C", order=5)
     assert bpy.ops.molecule.symmetry_dialog(
         'EXEC_DEFAULT', target_id=molecule.identifier) == {'FINISHED'}
+    row = _symmetry_rows()[0]
+    assert row.indent_level == 1
+    assert row.parent_id == molecule.identifier
+    assert "C5" in row.name
+    protein = _row(molecule.identifier)
+    assert protein.parent_id == ""
+    assert protein.indent_level == 0
+    assert _first_chain(molecule.identifier).indent_level == 1
 
-    rows = _symmetry_rows()
-    assert len(rows) == 1, "one build, one Symmetry object"
-    row = rows[0]
-    assert row.indent_level == 0, "a Symmetry is top-level, like a membrane"
-    assert row.parent_id == "", "it belongs to the scene, not to a protein"
-    assert "C5" in row.name, f"the row should name what was built, got {row.name!r}"
 
-
-def test_the_protein_moves_inside_the_symmetry_that_repeats_it():
-    """The containment, and the indents that draw it.
-
-    The protein stops being top-level and its chains follow it down a level,
-    so the tree reads Symmetry > protein > chain rather than leaving the
-    protein sitting beside the object that contains it.
-    """
+def test_clearing_symmetry_preserves_the_source_hierarchy():
     molecule = _import()
-    identifier = molecule.identifier
-
-    before = _row(identifier)
-    assert before.indent_level == 0, "an unsymmetrised protein is top-level"
-    assert before.parent_id == ""
-    chain_before = _first_chain(identifier)
-    assert chain_before.indent_level == 1
-
     _set(kind="C", order=5)
-    assert bpy.ops.molecule.symmetry_dialog(
-        'EXEC_DEFAULT', target_id=identifier) == {'FINISHED'}
-
-    symmetry = _symmetry_rows()[0]
-    protein = _row(identifier)
-    assert protein.parent_id == symmetry.item_id, (
-        "the protein is not inside the Symmetry that repeats it")
-    assert protein.indent_level == 1, "the protein did not move down a level"
-    assert _first_chain(identifier).indent_level == 2, (
-        "the chains did not follow the protein down")
-
-    top_level = [r.item_id for r in bpy.context.scene.outliner_items
-                 if r.indent_level == 0]
-    assert identifier not in top_level, (
-        "the protein is still top-level as well as inside the Symmetry")
-
-
-def test_clearing_the_symmetry_returns_the_protein_to_the_top_level():
-    """Deleting the object gives back exactly what was there before it."""
-    molecule = _import()
-    identifier = molecule.identifier
-
-    _set(kind="C", order=5)
-    bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', target_id=identifier)
-    assert _row(identifier).indent_level == 1
-
-    bpy.ops.molecule.clear_assembly('EXEC_DEFAULT', molecule_id=identifier)
-    from proteinblender.utils.scene_manager import build_outliner_hierarchy
-    build_outliner_hierarchy(bpy.context)
-
-    protein = _row(identifier)
-    assert protein.indent_level == 0, "the protein stayed indented with no parent"
-    assert protein.parent_id == "", "the protein still points at a row that is gone"
-    assert _first_chain(identifier).indent_level == 1
+    bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', target_id=molecule.identifier)
+    bpy.ops.molecule.clear_assembly('EXEC_DEFAULT', molecule_id=molecule.identifier)
+    assert _row(molecule.identifier).indent_level == 0
+    assert _first_chain(molecule.identifier).indent_level == 1
+    assert not _symmetry_rows()
 
 
 def test_the_outliner_row_goes_when_the_assembly_is_cleared():
@@ -225,20 +181,40 @@ def test_the_outliner_row_goes_when_the_assembly_is_cleared():
     assert not _symmetry_rows(), "the row outlived the build it described"
 
 
-def test_a_deposited_assembly_gets_no_symmetry_row():
-    """The row is for generated symmetry, which is what its pencil can edit."""
-    from proteinblender.core import assembly as assembly_core
-    from proteinblender.utils.scene_manager import build_outliner_hierarchy
-
+def test_biological_assembly_has_a_child_row():
     mol_id = H.import_local("4ins.pdb", "4ins")
-    molecule = H.sm().molecules[mol_id]
-    assert assembly_core.build_assembly(molecule, "3"), "assembly 3 failed to build"
-    build_outliner_hierarchy(bpy.context)
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=mol_id, source='BIOLOGICAL', assembly_id='3') == {'FINISHED'}
+    row = _symmetry_rows()[0]
+    assert row.parent_id == mol_id
+    assert "Biological" in row.name
+    assert _copies(H.sm().molecules[mol_id]) == 3
 
-    assert _copies(molecule) > 1, "the deposited assembly should be on screen"
-    assert not _symmetry_rows(), (
-        "a deposited assembly has no generator settings, so the dialog's "
-        "pencil would open on nothing")
+
+@pytest.mark.parametrize("scope", ["CHAIN", "DOMAIN"])
+def test_symmetry_repeats_only_its_chosen_chain_or_domain(scope):
+    mid = H.import_local("4hhb.pdb", "hb")
+    chain_id = _first_chain(mid).item_id
+    bpy.ops.proteinblender.edit_chain_domains(item_id=chain_id, layout_json=_split_payload(chain_id, 2))
+    scene = bpy.context.scene
+    target = (chain_id if scope == "CHAIN" else next(
+        r.item_id for r in scene.outliner_items if r.item_type == 'DOMAIN'))
+    from proteinblender.operators.pivot_operators import row_objects
+    target_objects = {o.name for o in row_objects(bpy.context, _row(target))}
+    _set(kind='C', order=3)
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=target) == {'FINISHED'}
+    row = _symmetry_rows()[0]
+    assert row.parent_id == target
+    parent_depth = next(r.indent_level for r in scene.outliner_items if r.item_id == target)
+    assert row.indent_level == parent_depth + 1
+    bpy.context.view_layer.update()
+    graph = bpy.context.evaluated_depsgraph_get()
+    for domain in H.sm().molecules[mid].domains.values():
+        name = domain.object.name
+        copies = sum(i.is_instance and i.parent is not None
+                     and i.parent.original.name == name for i in graph.object_instances)
+        assert copies == (3 if name in target_objects else 1), name
 
 
 # --------------------------------------------------------------------------
@@ -566,3 +542,33 @@ def test_seeding_survives_a_stored_value_its_property_will_not_take():
 
     assert bpy.context.scene.pb_symmetry_order == 6, (
         "a rejected field stopped the rest of the seed")
+
+
+def _split_payload(chain_id, count):
+    row = next(r for r in bpy.context.scene.outliner_items if r.item_id == chain_id)
+    low, high = row.chain_start, row.chain_end
+    size = high - low + 1
+    return json.dumps([dict(name=f"Piece {i+1}",
+        start=low + size*i//count, end=low + size*(i+1)//count - 1)
+        for i in range(count)])
+
+
+@pytest.mark.parametrize("filename, expected", [
+    ("4ins.pdb", {"3", "4", "5", "6"}),
+    ("1ubq.pdb", {""}),
+])
+def test_deposited_picker_offers_only_assemblies_that_change_the_structure(filename, expected):
+    from types import SimpleNamespace
+
+    mid = H.import_local(filename, "picker")
+    items = _dialog().biological_enum_items(SimpleNamespace(target_id=mid), bpy.context)
+    assert {item[0] for item in items} == expected
+
+
+def test_deposited_assembly_can_be_built_for_the_second_loaded_protein():
+    H.import_local('1ubq.pdb', 'first_monomer')
+    mid = H.import_local('4ins.pdb', 'second_insulin')
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=mid, source='BIOLOGICAL', assembly_id='3') == {'FINISHED'}
+    assert _copies(H.sm().molecules[mid]) == 3
+    assert _copies(H.sm().molecules['first_monomer']) == 1

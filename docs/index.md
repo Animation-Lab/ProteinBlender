@@ -19,6 +19,8 @@ ProteinBlender is a Blender addon designed for researchers, educators, and scien
 - [**Create Puppets**](puppets.html) - Group chains and domains for animation
 - [**Manage Poses**](poses.html) - Save and restore protein conformations
 - [**Keyframe Animation**](keyframes.html) - Animate your proteins
+- [**Scene Lighting**](lighting.html) - Fit soft lighting to your current scene
+- [**Conformational Transitions**](conformations.html) - Align structures and play their conformational change
 
 ## Tutorials
 
@@ -55,8 +57,6 @@ ProteinBlender is built on [MolecularNodes](https://github.com/BradyAJohnston/Mo
 
 **Author**: [Animation Lab](https://github.com/Animation-Lab)
 **License**: GPL-3.0-or-later
-
-
 
 
 

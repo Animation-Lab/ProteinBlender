@@ -28,7 +28,8 @@ class ProteinOutlinerItem(PropertyGroup):
             ('PUPPET', 'Puppet', 'Protein Puppet'),
             ('DNA_RNA', 'DNA/RNA', 'DNA or RNA molecule'),
             ('MEMBRANE', 'Membrane', 'Lipid bilayer membrane'),
-            ('SYMMETRY', 'Symmetry', 'Generated symmetric assembly'),
+            ('SYMMETRY', 'Assembly', 'Generated symmetry or deposited biological assembly'),
+            ('TRANSITION', 'Conformational transition', 'Aligned structural playback'),
         ],
         default='PROTEIN'
     )
@@ -70,8 +71,8 @@ class ProteinOutlinerItem(PropertyGroup):
 
     # The colour swatch on protein / chain / domain rows. Seeded from what the
     # item currently looks like (core.outliner_colors.sync_outliner_colors);
-    # editing it recolours the item live. Shows a neutral grey when the item's
-    # parts disagree.
+    # editing it recolours the item live. Mixed rows draw a palette icon and
+    # use this property inside their popup picker.
     row_color: FloatVectorProperty(
         name="Color",
         description="Color of this item. Click to recolor it",
@@ -79,6 +80,8 @@ class ProteinOutlinerItem(PropertyGroup):
         default=(0.5, 0.5, 0.5, 1.0),
         update=_on_row_color_edited
     )
+    row_palette_json: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    row_domain_count: IntProperty(default=0, options={'HIDDEN', 'SKIP_SAVE'})
     
     # Display properties
     indent_level: IntProperty(
@@ -202,6 +205,30 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default='cif',
     )
 
+_assembly_slider_sync = False
+
+
+def sync_assembly_controls(context):
+    """Load the clicked child's live controls without changing either assembly."""
+    global _assembly_slider_sync
+    from ..core import assembly
+    from ..utils.scene_manager import resolve_active_assembly_molecule
+    from ..operators.assembly_operators import apply_symmetry_settings
+
+    molecule = resolve_active_assembly_molecule(context)
+    if molecule is None:
+        return
+    _assembly_slider_sync = True
+    try:
+        context.scene.pb_assembly_factor = assembly.get_assembly_factor(molecule)
+        context.scene.pb_assembly_stagger = assembly.get_assembly_stagger(molecule)
+        params = assembly.built_build_params(molecule)
+        if params:
+            apply_symmetry_settings(context.scene, params)
+    finally:
+        _assembly_slider_sync = False
+
+
 def _push_assembly_factor(self, context):
     """Send the sliders straight to the assembly nodes of the active protein.
 
@@ -209,9 +236,11 @@ def _push_assembly_factor(self, context):
     what a .blend carries, so this property is only ever a live handle on it.
     """
     from ..core import assembly as assembly_core
-    from ..utils.scene_manager import resolve_active_molecule
+    from ..utils.scene_manager import resolve_active_assembly_molecule, resolve_active_molecule
 
-    molecule = resolve_active_molecule(context)
+    if _assembly_slider_sync:
+        return
+    molecule = resolve_active_assembly_molecule(context) or resolve_active_molecule(context)
     if molecule is None:
         return
     assembly_core.set_assembly_factor(
@@ -254,7 +283,8 @@ def register():
 
     # Add properties to scene
     bpy.types.Scene.protein_props = bpy.props.PointerProperty(type=ProteinProperties)
-    # Which deposited assembly the Symmetry panel will build. Scene-level
+    # Legacy build_assembly operator fallback. The Assembly dialog owns its picker.
+    # Scene-level
     # rather than per-molecule because it is a transient UI choice, not state
     # worth persisting - what is *built* is read back off the node itself.
     bpy.types.Scene.pb_assembly_id = EnumProperty(

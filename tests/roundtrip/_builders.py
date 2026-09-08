@@ -159,9 +159,25 @@ def build_biological_assembly():
 
     assert assembly_core.has_buildable_symmetry(molecule), \
         "4ins should offer a symmetric assembly"
-    assert assembly_core.build_assembly(molecule, "3"), "assembly 3 failed to build"
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=mid, source='BIOLOGICAL', assembly_id='3') == {'FINISHED'}
+    child = next(r for r in bpy.context.scene.outliner_items if r.item_type == 'SYMMETRY')
+    assert child.parent_id == mid and child.indent_level == 1
     assert assembly_core.built_assembly_id(molecule) == "3"
-    _build_outliner()
+
+
+
+def build_scoped_symmetry():
+    mid = H.import_local("4hhb.pdb", "4hhb")
+    chain = next(r.item_id for r in bpy.context.scene.outliner_items
+                 if r.item_type == 'CHAIN')
+    bpy.context.scene.pb_symmetry_kind = 'C'
+    bpy.context.scene.pb_symmetry_order = 3
+    bpy.context.scene.pb_symmetry_range = 0
+    bpy.context.scene.pb_symmetry_contact = 0
+    assert bpy.ops.molecule.symmetry_dialog(target_id=chain) == {'FINISHED'}
+    symmetry = next(r for r in bpy.context.scene.outliner_items if r.item_type == 'SYMMETRY')
+    assert symmetry.parent_id == chain
 
 
 def build_bent_filament():
@@ -577,17 +593,17 @@ def build_force_fields():
     obj = mol.object
     assert obj is not None
 
-    obj.pb_force_field_enabled = True
-    obj.pb_force_field_spacing = 1.75
-    for domain in mol.domains.values():
-        dom_obj = getattr(domain, "object", None)
-        if dom_obj is not None:
-            dom_obj.pb_force_field_enabled = True
-            dom_obj.pb_force_field_spacing = 1.75
-
-    enabled = [o.name for o in bpy.data.objects
-               if getattr(o, "pb_force_field_enabled", False)]
-    assert enabled, "no object ended up with a force field enabled"
+    assert bpy.ops.proteinblender.membrane_force_fields(
+        membrane_name=root.name, targets_json=json.dumps([mid]),
+        spacing=1.75) == {'FINISHED'}
+    second = bpy.data.objects[H.build_membrane(shape="FLAT", width=10, height=10)[0]]
+    chain_id = next(r.item_id for r in bpy.context.scene.outliner_items
+                    if r.item_type == 'CHAIN')
+    assert bpy.ops.proteinblender.membrane_force_fields(
+        membrane_name=second.name, targets_json=json.dumps([chain_id]),
+        spacing=0.5) == {'FINISHED'}
+    assert json.loads(root['pb_membrane_force_field_targets']) == [mid]
+    assert json.loads(second['pb_membrane_force_field_targets']) == [chain_id]
 
 
 def build_brownian():
@@ -731,11 +747,54 @@ def build_kitchen_sink():
 # systemic breakage reports against the simplest file that shows it.
 # ---------------------------------------------------------------------------
 
+def build_lighting():
+    H.import_local('4hhb.pdb')
+    scene = bpy.context.scene
+    light = bpy.data.objects.new('Original light', bpy.data.lights.new('Original light', 'POINT'))
+    scene.collection.objects.link(light)
+    assert bpy.ops.proteinblender.setup_lighting(preview=False) == {'FINISHED'}
+    assert len(scene['pb_scene_lighting'].objects) == 4
+    assert all(o.data.energy > 0 for o in scene['pb_scene_lighting'].objects)
+    assert light.hide_render
+    assert scene.world == scene['pb_lighting_world']
+    assert scene['pb_lighting_muted'][0]['object'] == light
+
+
+def build_conformation(style='cartoon'):
+    import json
+    first = H.import_local('1ake.pdb', 'closed')
+    second = H.import_local('4ake.pdb', 'open')
+    assert bpy.ops.proteinblender.create_conformation(
+        source_id=first, target_id=second, source_chain='A', target_chain='A',
+        start_frame=10, duration=2, smooth=False) == {'FINISHED'}
+    scene = bpy.context.scene
+    obj = next(o for o in scene.objects if o.get('pb_conformation'))
+    if style != 'cartoon':
+        assert bpy.ops.proteinblender.edit_conformation(
+            transition_id=obj['pb_conformation'], style=style,
+            start_frame=10, duration=2, smooth=False) == {'FINISHED'}
+    assert obj['pb_transition_style'] == style
+    assert any(v.value for v in obj.data.attributes['pb_cartoon_reference_turn'].data)
+    assert any(v.value for v in obj.data.attributes['pb_cartoon_helix_turn'].data)
+    assert json.loads(obj['pb_match'])['residues'] == 214
+    assert len(obj.data.shape_keys.key_blocks) == 2
+    assert obj.data.shape_keys.animation_data.action is not None
+    assert any(r.item_type == 'TRANSITION' for r in scene.outliner_items)
+    assert obj['pb_start_object'].hide_get()
+    scene.frame_set((obj['pb_start_frame'] + obj['pb_end_frame']) // 2)
+    assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < 1e-5
+
+
+def build_surface_conformation():
+    build_conformation(style='surface')
+
+
 BUILDERS = {
     "empty": build_empty,
     "single_protein": build_single_protein,
     "multi_chain": build_multi_chain,
     "biological_assembly": build_biological_assembly,
+    "scoped_symmetry": build_scoped_symmetry,
     "bent_filament": build_bent_filament,
     "domains": build_domains,
     "chain_rename": build_chain_rename,
@@ -751,6 +810,9 @@ BUILDERS = {
     "force_fields": build_force_fields,
     "brownian": build_brownian,
     "visual_style": build_visual_style,
+    "lighting": build_lighting,
+    "conformation": build_conformation,
+    "surface_conformation": build_surface_conformation,
     "kitchen_sink": build_kitchen_sink,
 }
 
@@ -762,6 +824,7 @@ BUILDER_SUBSYSTEMS = {
     "single_protein": ("core",),
     "multi_chain": ("core",),
     "biological_assembly": ("core", "operators", "panels"),
+    "scoped_symmetry": ("core", "operators", "panels"),
     "bent_filament": ("core", "operators", "panels"),
     "domains": ("core", "operators", "panels", "addon"),
     "chain_rename": ("core", "panels"),
@@ -777,6 +840,9 @@ BUILDER_SUBSYSTEMS = {
     "force_fields": ("membrane_builder",),
     "brownian": ("utils", "operators"),
     "visual_style": ("panels",),
+    "lighting": ("core", "operators", "panels"),
+    "conformation": ("core", "operators", "panels"),
+    "surface_conformation": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
                      "operators", "properties", "panels"),
 }

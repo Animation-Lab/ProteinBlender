@@ -1,35 +1,24 @@
-"""The Symmetry panel - what belongs to the *protein*, not to a Symmetry.
+"""Live controls for the assembly child selected in the PB Outliner.
 
-Generating a symmetry is not done here. A built symmetry is an object in its
-own right, so it is created from the Builders panel alongside a membrane or a
-DNA strand, and edited from its own row in the PB Outliner. What is left here
-is everything that is a property of the protein rather than of that object:
-
-* the **deposited assembly** its file describes, shown only when the file
-  describes symmetry that would put something new on screen - the meeting's
-  "only show if symmetry is present in the PDB". See
-  ``core.assembly.has_buildable_symmetry`` for why "the file mentions an
-  assembly" is not that test;
-* the **bend** rig for a built filament, and the **animation** controls for
-  whatever is built, both of which are live and continuous and so want a panel
-  that stays on screen rather than a dialog that closes over them.
+Creation and editing share the Assembly dialog. Animation and bend controls
+stay beside the viewport while working with an existing assembly child.
 """
 
 from bpy.types import Panel
 
 from ..core import assembly as assembly_core
 from ..core import symmetry_builder
-from ..utils.scene_manager import resolve_active_molecule
+from ..utils.scene_manager import resolve_active_assembly_molecule
 
 
 def _active_molecule(context):
-    return resolve_active_molecule(context)
+    return resolve_active_assembly_molecule(context)
 
 
 class PROTEINBLENDER_PT_symmetry(Panel):
-    """Deposited assemblies and generated symmetry for the active protein."""
+    """Animation and bend controls for either kind of assembly child."""
 
-    bl_label = "Symmetry"
+    bl_label = "Assembly Controls"
     bl_idname = "PROTEINBLENDER_PT_symmetry"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
@@ -39,7 +28,7 @@ class PROTEINBLENDER_PT_symmetry(Panel):
 
     @classmethod
     def poll(cls, context):
-        """Shown whenever a protein is active - the builder always applies."""
+        """Open through an assembly child, for both deposited and generated builds."""
         try:
             return _active_molecule(context) is not None
         except Exception:
@@ -53,23 +42,9 @@ class PROTEINBLENDER_PT_symmetry(Panel):
             return
 
         box = layout.box()
-        box.label(text="Symmetry", icon='MOD_ARRAY')
+        box.label(text=f"Assembly Controls - {molecule.identifier}", icon='MOD_ARRAY')
 
         built_id = assembly_core.built_assembly_id(molecule)
-
-        if assembly_core.has_buildable_symmetry(molecule):
-            self._draw_deposited(box, scene, molecule)
-        else:
-            note = box.row()
-            note.enabled = False
-            note.label(text="No assembly deposited with this structure",
-                       icon='INFO')
-
-        # No builder section here: a symmetry is an object, so it is created
-        # from the Builders panel like a membrane or a strand, and edited from
-        # its own row in the PB Outliner. This panel is left with what belongs
-        # to the *protein* - the assembly its file describes - and with the
-        # controls that act on a build already on screen.
 
         # Bend follows what is *built*, not what the dialog's picker says: a
         # path to bend exists once there is a filament on screen. It stays on
@@ -85,30 +60,6 @@ class PROTEINBLENDER_PT_symmetry(Panel):
             self._draw_animation(box, scene, molecule, built_id)
 
         box.separator(factor=0.5)
-
-    # -- deposited ---------------------------------------------------------
-
-    def _draw_deposited(self, box, scene, molecule):
-        box.label(text="Deposited Assembly")
-
-        col = box.column(align=True)
-        col.prop(scene, "pb_assembly_id", text="")
-
-        chosen = (getattr(scene, "pb_assembly_id", "")
-                  or assembly_core.ASYMMETRIC_UNIT_ID)
-        showing_unit = chosen == assembly_core.ASYMMETRIC_UNIT_ID
-
-        build = box.row(align=True)
-        build.scale_y = 1.2
-        # One button, named for whichever of the picker's states it applies -
-        # so "Build Assembly" never sits above a picker set to the asymmetric
-        # unit, where pressing it would take copies away rather than add them.
-        op = build.operator(
-            "molecule.build_assembly",
-            text="Show Asymmetric Unit" if showing_unit else "Build Assembly",
-            icon='LOOP_BACK' if showing_unit else 'MOD_ARRAY')
-        op.molecule_id = molecule.identifier
-        op.assembly_id = chosen
 
     # -- bending a filament -------------------------------------------------
 

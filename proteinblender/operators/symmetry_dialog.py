@@ -1,6 +1,6 @@
 """The Symmetry Builder dialog.
 
-One button in the Symmetry panel opens this; everything that *shapes* a
+The Create New Assembly button opens this; everything that *shapes* a
 generated symmetry lives inside it. Three ways out, and they mean different
 things:
 
@@ -96,7 +96,8 @@ def _molecules():
 
 
 def _molecule(molecule_id):
-    return _molecules().get(molecule_id)
+    from ..core.outliner_targets import resolve_target as resolve_row
+    return resolve_row(molecule_id)[0]
 
 
 def target_enum_items(self, context):
@@ -109,9 +110,11 @@ def target_enum_items(self, context):
     global _TARGET_ENUM_CACHE
 
     items = []
-    for molecule_id, molecule in _molecules().items():
-        name = getattr(molecule, "name", None) or molecule_id
-        items.append((molecule_id, name, f"Build symmetry for {name}"))
+    from ..core.outliner_targets import target_rows
+    for row in target_rows(context.scene):
+        molecule = _molecule(row.item_id)
+        name = row.name if row.item_type == 'PROTEIN' else f"{getattr(molecule, 'name', molecule.identifier)} / {row.name}"
+        items.append((row.item_id, name, f"Build symmetry for {name}"))
 
     if not items:
         items = [("", "No protein loaded", "Import a structure first")]
@@ -123,7 +126,7 @@ def target_enum_items(self, context):
 def resolve_target(context, requested: str = "") -> str:
     """Which protein the dialog should open on, or "" if there is none.
 
-    Create New Symmetry is always enabled, like the other two builders, so it
+    Create New Assembly is always enabled, like the other two builders, so it
     gets clicked when nothing in particular is selected - the state a user is
     in after deleting a protein, after an undo, or simply on a scene they have
     not clicked into yet. Refusing then is wrong twice over: the dialog has a
@@ -175,20 +178,77 @@ def restore_state(molecule, state: dict) -> None:
     assembly_core.build_assembly(molecule, str(assembly_id))
 
 
+_BIOLOGICAL_ENUM_CACHE = []
+
+
+def biological_enum_items(self, context):
+    global _BIOLOGICAL_ENUM_CACHE
+    molecule = _molecule(getattr(self, 'target_id', ''))
+    infos = assembly_core.buildable_assemblies(molecule) if molecule else []
+    _BIOLOGICAL_ENUM_CACHE = [(info.assembly_id, info.label,
+                              "Biological transformation matrices from the structure file")
+                             for info in infos] or [("", "No deposited assembly", "")]
+    return _BIOLOGICAL_ENUM_CACHE
+
+
+def _assembly_choice_changed(self, context):
+    self.assembly_id = self.assembly_choice
+
+
+def _sync_assembly_choice(self, context):
+    if self.source != 'BIOLOGICAL':
+        return
+    choices = [item[0] for item in biological_enum_items(self, context)]
+    chosen = self.assembly_id if self.assembly_id in choices else choices[0]
+    self.assembly_id = chosen
+    if chosen:
+        self.assembly_choice = chosen
+
+
+
+def build_dialog_symmetry(molecule, context, target_id, source, assembly_id):
+    if source == 'BIOLOGICAL':
+        if target_id != molecule.identifier:
+            return False, "Choose the whole protein to build its biological assembly"
+        if not assembly_id:
+            choices = assembly_core.buildable_assemblies(molecule)
+            assembly_id = choices[0].assembly_id if choices else ""
+        if not assembly_id or not assembly_core.build_assembly(molecule, assembly_id):
+            return False, "No biological assembly available for this structure"
+        return True, f"Built biological assembly {assembly_id}"
+    settings = symmetry_settings(context.scene)
+    settings['source_item_id'] = target_id or molecule.identifier
+    return build_generated_symmetry(molecule, settings)
+
+
 class MOLECULE_PB_OT_symmetry_dialog(Operator):
-    """Configure and build a generated symmetry"""
+    """Build generated symmetry or deposited biological transformations"""
 
     bl_idname = "molecule.symmetry_dialog"
-    bl_label = "Build Symmetry"
+    bl_label = "Create New Assembly"
     bl_description = (
-        "Generate a symmetric assembly - a ring, a double ring or a filament - "
-        "for a structure whose file does not describe one. Apply to preview it "
-        "in the viewport, OK to keep it")
+        "Repeat a protein, chain or domain using generated symmetry, or build "
+        "the protein's deposited biological assembly (BMT). Apply previews; OK keeps it")
     bl_options = {"REGISTER", "UNDO"}
 
+    source: EnumProperty(
+        name="Source",
+        items=[('GENERATED', 'Generated Symmetry', 'Create a ring or filament'),
+               ('BIOLOGICAL', 'Deposited Assembly (BMT)',
+                'Use the biological transformation matrices deposited with the structure')],
+        default='GENERATED',
+    )
+    # The public id is a string: Blender 5.1 validates enum keyword arguments
+    # before applying target_id, against a different protein's choices. Keep
+    # the dynamic picker separate and synchronize it on UI changes instead.
+    assembly_id: StringProperty(name="Assembly ID", options={'HIDDEN', 'SKIP_SAVE'})
+    assembly_choice: EnumProperty(
+        name="Assembly", items=biological_enum_items,
+        update=_assembly_choice_changed, options={'SKIP_SAVE'})
+
     target_id: EnumProperty(
-        name="Protein",
-        description="Which protein to build the symmetry for",
+        name="Protein, Chain or Domain",
+        description="Which protein, chain or domain to repeat",
         items=target_enum_items,
         options={'SKIP_SAVE'},
     )
@@ -197,8 +257,8 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     #: build. Empty means "configure a new one".
     molecule_id_to_update: StringProperty(
         name="Symmetry to edit",
-        description=("If set, open on this protein's existing generated "
-                     "symmetry instead of on the scene's current settings"),
+        description=("If set, open on this protein's existing assembly "
+                     "instead of on the scene's current settings"),
         default="",
         options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -217,6 +277,12 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         molecule_id = resolve_target(context, self.molecule_id_to_update)
         molecule = _molecule(molecule_id)
 
+        if molecule is not None:
+            params = assembly_core.built_build_params(molecule) or {}
+            if self.molecule_id_to_update:
+                molecule_id = params.get('source_item_id', molecule_id)
+                built_id = assembly_core.built_assembly_id(molecule)
+                self.source = 'BIOLOGICAL' if built_id and not params else 'GENERATED'
         if molecule_id:
             try:
                 self.target_id = molecule_id
@@ -233,10 +299,24 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             if stored:
                 apply_symmetry_settings(context.scene, stored)
 
+        if self.source == 'BIOLOGICAL' and molecule is not None:
+            built_id = assembly_core.built_assembly_id(molecule)
+            if self.molecule_id_to_update and built_id in {
+                    item[0] for item in biological_enum_items(self, context)}:
+                self.assembly_id = built_id
+
+        _sync_assembly_choice(self, context)
+
         # Anything left over from a dialog that was torn down without its
         # cancel() running would otherwise be restored on top of this one.
         _PREVIEWS.clear()
-        return context.window_manager.invoke_props_dialog(self, width=380)
+        return context.window_manager.invoke_props_dialog(
+            self, width=380,
+            title="Edit Assembly" if self.molecule_id_to_update else "Create New Assembly")
+
+    def check(self, context):
+        _sync_assembly_choice(self, context)
+        return True
 
     # -- body --------------------------------------------------------------
 
@@ -246,6 +326,24 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
 
         self._draw_protein_block(layout, scene)
         layout.separator(factor=0.5)
+
+        layout.prop(self, 'source', text="")
+        if self.source == 'BIOLOGICAL':
+            molecule = _molecule(self.target_id)
+            if molecule is None:
+                message = "Import a protein to use its deposited assembly"
+            elif self.target_id != molecule.identifier:
+                message = "Choose the whole protein in Build from"
+            elif not assembly_core.has_buildable_symmetry(molecule):
+                message = "No additional assembly deposited for this protein"
+            else:
+                message = ""
+            if message:
+                layout.label(text=message, icon='INFO')
+                return
+            layout.prop(self, 'assembly_choice')
+            self._draw_apply(layout)
+            return
 
         kind = getattr(scene, "pb_symmetry_kind", "C")
 
@@ -281,6 +379,9 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         note.enabled = False
         note.label(text="0 keeps every copy", icon='INFO')
 
+        self._draw_apply(layout)
+
+    def _draw_apply(self, layout):
         layout.separator(factor=0.5)
         apply_row = layout.row(align=True)
         apply_row.scale_y = 1.2
@@ -288,7 +389,8 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         apply_op = apply_row.operator("molecule.symmetry_preview",
                                       text="Apply", icon='CHECKMARK')
         apply_op.molecule_id = self.target_id
-
+        apply_op.source = self.source
+        apply_op.assembly_id = self.assembly_id
         hint = layout.row()
         hint.enabled = False
         hint.label(text="Apply previews it - OK keeps it", icon='INFO')
@@ -350,8 +452,9 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
                         "Import a protein first - a symmetry repeats one")
             return {"CANCELLED"}
 
-        ok, message = build_generated_symmetry(
-            molecule, symmetry_settings(context.scene))
+        target_id = self.target_id or molecule.identifier
+        ok, message = build_dialog_symmetry(
+            molecule, context, target_id, self.source, self.assembly_id)
         if not ok:
             self.report({"WARNING"}, message)
             return {"CANCELLED"}
@@ -394,6 +497,8 @@ class MOLECULE_PB_OT_symmetry_preview(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty(options={'SKIP_SAVE'})
+    source: EnumProperty(items=[('GENERATED', 'Generated', ''), ('BIOLOGICAL', 'Biological', '')])
+    assembly_id: StringProperty()
 
     def execute(self, context):
         molecule = _molecule(resolve_target(context, self.molecule_id))
@@ -406,8 +511,9 @@ class MOLECULE_PB_OT_symmetry_preview(Operator):
         # there *instead* of this preview.
         remember_preview_target(molecule)
 
-        ok, message = build_generated_symmetry(
-            molecule, symmetry_settings(context.scene))
+        ok, message = build_dialog_symmetry(
+            molecule, context, self.molecule_id or molecule.identifier,
+            self.source, self.assembly_id)
         if not ok:
             self.report({"WARNING"}, message)
             return {"CANCELLED"}

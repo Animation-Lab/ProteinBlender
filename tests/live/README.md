@@ -21,7 +21,22 @@ This lane measures color, and that is where its most valuable assertions live.
 
 **It runs against the deployed add-on.**
 The live Blender loads ProteinBlender from a normal Blender profile, not from the repo.
+The harness identifies the package through the registered import operator, so it supports both legacy addon and `bl_ext` extension installations.
 CLAUDE.md requires changes to be proven in exactly that configuration, and this is the only automated lane that does it.
+
+`test_live_outliner_palette.py` also reads actual window screenshots to verify
+the mixed-color bands in the PB Outliner, clicks the swatch and color wheel
+through Blender's event loop, and checks undo/redo. It requires Blender to be
+launched with `--enable-event-simulate`.
+
+`test_live_assembly_ui.py` observes Blender's native drawn layouts while driving
+Create New Assembly, Apply/Cancel, OK, the child's actual pencil arguments,
+and the shared animation/bend controls. It covers deposited, cyclic, and helical
+assemblies, and requires `--enable-event-simulate`.
+
+`test_live_lighting.py` observes the actual Set Up Lighting button and popup,
+applies all three presets, checks scene-light viewport preview, and exercises
+Cancel, OK, repeated setup, and undo/redo. It requires `--enable-event-simulate`.
 
 ## Running it
 
@@ -174,3 +189,20 @@ Guarded by `test_live_domains.py::test_toggling_domain_expansion_is_a_ui_change_
 Three separate defects, all found by looking at the viewport rather than at state: modifier inputs never bound (5.2 removed IDProperty support from `NodesModifier`, and the write was swallowed by `except: pass`), every lipid aligned to the (1,1,1) diagonal at a constant 54.7 degrees (`Capture Attribute` gained a `Selection` socket at index 1 and the normal was addressed positionally), and a visible seam down the midplane (the thickness default was larger than two lipid meshes could span).
 The full write-up is in [../COVERAGE.md](../COVERAGE.md).
 The standing lesson: **address geometry-node sockets by name or identity, never by index** - this was the third such bug in one file.
+
+## Conformational transitions
+
+`test_live_conformations.py` exercises the installed Align & Animate popup with
+1AKE/4AKE chain A, observes its real native layout and fit summary, cancels without
+creating state, confirms via keyboard events, checks the resulting child row and
+automatically opened playback popup, scrubs, compares endpoints, runs playback,
+and verifies cancellation, Done, undo and redo. The scrubber is asserted to follow
+endpoint buttons rather than retaining a stale value.
+
+The Surface regression selects Surface in the native playback popup, confirms
+with Done, reopens it to check the saved choice, and scrubs and plays while
+asserting that evaluated surface geometry remains visible.
+
+The cartoon regression reconstructs an older transition and opens its pencil at
+an intermediate frame. It verifies automatic orientation stabilization, bounded
+arrow motion while scrubbing every frame through the popup, and live playback.

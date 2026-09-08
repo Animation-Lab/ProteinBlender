@@ -250,6 +250,32 @@ def invoke_and_cancel_puppet_dialog():
     return "puppet dialog invoked and cancelled through window events"
 
 
+def invoke_mixed_swatch_picker():
+    protein = next(row for row in bpy.context.scene.outliner_items
+                   if row.item_type == 'PROTEIN')
+    assert len(json.loads(protein.row_palette_json)) > 1
+    state['palette_before'] = {
+        obj.name: _carbon_rgb(obj)
+        for mol in H.sm().molecules.values()
+        for domain in mol.domains.values() if (obj := domain.object)}
+    with protein_workspace_override():
+        result = bpy.ops.proteinblender.outliner_color_picker(
+            'INVOKE_DEFAULT', item_id=protein.item_id, item_type='PROTEIN')
+    assert result == {'RUNNING_MODAL'}, result
+    return 'mixed swatch picker opened'
+
+
+def cancel_mixed_swatch_picker():
+    active_window().event_simulate(type='ESC', value='PRESS')
+    active_window().event_simulate(type='ESC', value='RELEASE')
+
+
+def assert_mixed_picker_preserved_colors():
+    for name, before in state['palette_before'].items():
+        assert _carbon_rgb(bpy.data.objects[name]) == before
+    return 'opening and dismissing the picker preserved every domain color'
+
+
 def invoke_and_cancel_protein_visuals_dialog():
     """The protein row's edit pencil must open and draw in a real window.
 
@@ -375,7 +401,7 @@ def assert_symmetry_preview_was_reverted():
 
 
 def symmetry_dialog_opens_with_no_protein_at_all():
-    """Create New Symmetry must open its form on an empty scene.
+    """Create New Assembly must open its form on an empty scene.
 
     The dialog is where you set a symmetry up, and that includes getting hold
     of the protein to build it from: it carries the same Download / Import
@@ -405,7 +431,7 @@ def symmetry_dialog_opens_with_no_protein_at_all():
 def symmetry_dialog_opens_with_no_active_protein():
     """The Builders button is always there, so it must not refuse a loaded scene.
 
-    Create New Symmetry sits beside Create New DNA / RNA and Create New
+    Create New Assembly sits beside Create New DNA / RNA and Create New
     Membrane and is never greyed out, so it gets clicked when nothing in
     particular is selected. Refusing then is wrong: the dialog has a protein
     picker, and there is a protein to pick.
@@ -768,6 +794,20 @@ def edit_chain_domains_live_boundary_drag():
         assert row.name == "Catalytic core" or row.name == default_domain_name(
             label, row.start, row.end), f"stale auto name {row.name!r}"
 
+    # Selecting a row is enough to focus it; no boundary drag is required.
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.domain_splitter_select(index=2) == {"FINISHED"}
+    selected = bpy.data.objects[bpy.context.scene[ds._PREVIEW_OBJECT]]
+    material = ds._style_material_socket(selected).default_value
+    assert all(n.inputs['Alpha'].default_value == 1.0
+               for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    node = ds._preview_node(bpy.context)
+    assert node.inputs["Min"].default_value == instance.rows[2].start
+    assert node.inputs["Max"].default_value == instance.rows[2].end
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.domain_splitter_split(index=2) == {"FINISHED"}
+    node = ds._preview_node(bpy.context)
+    assert node.inputs["Max"].default_value == instance.rows[2].end
     state["splitter_hidden"] = ds._PREVIEW_HIDDEN in bpy.context.scene
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
@@ -1113,6 +1153,33 @@ def assert_redo():
     return "domain create -> undo -> redo"
 
 
+
+def membrane_force_field_picker_dialog():
+    root = bpy.data.objects[state["membrane"]]
+    before = root.get('pb_membrane_force_field_targets')
+    with ui_override("PROPERTIES"):
+        result = bpy.ops.proteinblender.membrane_force_fields(
+            "INVOKE_DEFAULT", membrane_name=root.name)
+    assert result == {"RUNNING_MODAL"}, result
+    assert root.get('pb_membrane_force_field_targets') == before
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return "membrane force-field target picker opened and cancelled"
+
+
+def biological_assembly_edit_dialog():
+    mid = H.import_local('5im3.pdb', 'BMT UI')
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.molecule.symmetry_dialog(
+            target_id=mid, source='BIOLOGICAL', assembly_id='1') == {'FINISHED'}
+        result = bpy.ops.molecule.symmetry_dialog(
+            "INVOKE_DEFAULT", molecule_id_to_update=mid)
+    assert result == {"RUNNING_MODAL"}, result
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+    return "biological assembly reopened in the BMT dialog and cancelled"
+
+
 def save_report_and_quit():
     ok = all(item["ok"] for item in results)
     Path(report_path).write_text(json.dumps({
@@ -1132,6 +1199,9 @@ steps = [
     ("assert ProteinBlender UI loaded", assert_proteinblender_ui_loaded),
     ("draw every panel", redraw_all_panels),
     ("settle panel redraw", lambda: "redraw event loop tick completed"),
+    ("mixed swatch picker", invoke_mixed_swatch_picker),
+    ("dismiss mixed swatch picker", cancel_mixed_swatch_picker),
+    ("mixed swatch preserves colors", assert_mixed_picker_preserved_colors),
     ("pose invoke dialog", invoke_and_cancel_pose_dialog),
     ("settle pose modal", lambda: "modal cancellation processed"),
     ("puppet invoke dialog", invoke_and_cancel_puppet_dialog),
@@ -1165,6 +1235,10 @@ steps = [
     ("assert splitter preview restored", assert_splitter_preview_restored),
     ("DNA edit mode", dna_edit_mode_roundtrip),
     ("membrane edit mode", membrane_edit_mode_roundtrip),
+    ("membrane force field picker", membrane_force_field_picker_dialog),
+    ("settle force field picker", lambda: "modal cancellation processed"),
+    ("biological assembly edit dialog", biological_assembly_edit_dialog),
+    ("settle biological assembly dialog", lambda: "modal cancellation processed"),
     ("create domain for undo", create_domain_for_undo),
     ("perform undo", perform_undo),
     ("settle undo event 1", lambda: f"undo settle: {domain_state_snapshot()}"),

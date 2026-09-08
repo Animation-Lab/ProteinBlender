@@ -228,7 +228,11 @@ def update_outliner_from_blender_selection():
             item.is_selected = bool(chain_objs) and all(
                 o.name in selected_names for o in chain_objs
             )
-        elif item.item_type in ('MEMBRANE', 'DNA_RNA'):
+        elif item.item_type == 'SYMMETRY':
+            from ..core.outliner_targets import resolve_target
+            _, objects = resolve_target(item.parent_id, include_protein_domains=True)
+            item.is_selected = bool(objects) and all(o.name in selected_names for o in objects)
+        elif item.item_type in ('MEMBRANE', 'DNA_RNA', 'TRANSITION'):
             # Single-object rows — selected iff that object is selected.
             item.is_selected = bool(
                 item.object_name and item.object_name in selected_names
@@ -371,7 +375,14 @@ def sync_outliner_to_blender_selection(context, item_id):
 
             # Don't cascade to members - puppet checkbox only controls the controller
 
-        elif item.item_type in ('MEMBRANE', 'DNA_RNA'):
+        elif item.item_type == 'SYMMETRY':
+            from ..core.outliner_targets import resolve_target
+            _, objects = resolve_target(item.parent_id, include_protein_domains=True)
+            for obj in objects:
+                obj.select_set(item.is_selected)
+            if objects and item.is_selected:
+                context.view_layer.objects.active = objects[0]
+        elif item.item_type in ('MEMBRANE', 'DNA_RNA', 'TRANSITION'):
             # Single-object rows. Select / deselect that object and, when
             # selecting, make it active. The Membrane Builder and DNA/RNA
             # Builder panels both key off active_object (the DNA panel via its

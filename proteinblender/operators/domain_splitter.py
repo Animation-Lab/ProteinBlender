@@ -1041,6 +1041,11 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self.head_color = chosen
             self.tail_color = chosen
 
+    def apply_visual_style(self, context):
+        super().apply_visual_style(context)
+        if _active() is not None:
+            self.select_row(self.selected_index)
+
     def _molecule(self, context, chain_row):
         if chain_row is None:
             return None
@@ -1108,6 +1113,23 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                     row.color = self._next_fresh_color()
             self._refresh_default_names()
 
+        self._sync_edges()
+        self.select_row(max(0, min(self.selected_index, len(self.rows) - 1)))
+
+    def select_row(self, index):
+        if index in (EDGE_HEAD, EDGE_TAIL):
+            self.selected_index = index
+            specs = self._completed_specs()
+            self._preview_layout(specs, 0 if index == EDGE_HEAD else len(specs) - 1)
+            return
+        if 0 <= index < len(self.rows):
+            self.selected_index = index
+            specs = self._completed_specs()
+            row = self.rows[index]
+            focus = next(i for i, spec in enumerate(specs)
+                         if spec.start == row.start and spec.end == row.end)
+            self._preview_layout(specs, focus)
+
     def range_edited(self, row, moved_start):
         """Re-tile the layout around a boundary the user just moved.
 
@@ -1156,6 +1178,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                 self._refresh_default_names()
 
         self._sync_edges()
+        self.selected_index = index
         self._preview_layout(retiled, new_index)
 
     def row_color_edited(self, row):
@@ -1165,7 +1188,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         index = self._index_of(row)
         if index < 0:
             return
-        self._preview_layout(self.current_specs(), index)
+        self.select_row(index)
 
     def edge_color_edited(self, head):
         """Show a colour just picked on an edge adjuster, on its domain-to-be."""
@@ -1255,6 +1278,9 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self._refresh_default_names()
             self.domain_count = self.grid_line_count()
 
+        self._sync_edges()
+        self.select_row(index)
+
     def merge_row(self, index):
         """Absorb the following row into this one."""
         if not (0 <= index < len(self.rows) - 1):
@@ -1266,6 +1292,9 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self.rows.remove(index + 1)
             self._refresh_default_names()
             self.domain_count = self.grid_line_count()
+
+        self._sync_edges()
+        self.select_row(index)
 
     # ------------------------------------------------------------------
     # Viewport preview
@@ -1360,6 +1389,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
 
         type(self)._active_instance = self
         self.begin_visual_edit(context)
+        self.select_row(0)
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def check(self, context):
@@ -1396,13 +1426,15 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self._draw_edge(grid.row(align=True), head=False)
 
         self._draw_feedback(layout)
-        self.draw_visual_setup(layout, context)
+        self.draw_visual_setup(layout, context, show_color=False)
 
     # Column widths, shared by the header and every row so they line up
     # exactly. Blender lays a row out proportionally unless told otherwise, so
     # without fixed units the header labels drift away from their fields as the
     # name column grows.
-    _COL_INDEX = 1.2
+    selected_index: IntProperty(default=0, options={'HIDDEN', 'SKIP_SAVE'})
+
+    _COL_INDEX = 2.1
     _COL_COLOR = 1.1
     _COL_NUMBER = 3.4
     _COL_TOOLS = 2.4
@@ -1418,8 +1450,14 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         """
         cell = line.row()
         cell.ui_units_x = self._COL_INDEX
-        cell.label(text="" if header else
-                   f"{grid_line_number(index, self.has_head())}.")
+        if header:
+            cell.label(text="")
+        else:
+            op = cell.operator("proteinblender.domain_splitter_select",
+                               text=f"{grid_line_number(index, self.has_head())}.",
+                               icon='RADIOBUT_ON' if index == self.selected_index else 'RADIOBUT_OFF',
+                               emboss=False)
+            op.index = index
 
         cell = line.row()
         cell.ui_units_x = self._COL_COLOR
@@ -1480,7 +1518,11 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                                   self.has_head(), len(self.rows))
         cell = line.row()
         cell.ui_units_x = self._COL_INDEX
-        cell.label(text=f"{number}.")
+        op = cell.operator("proteinblender.domain_splitter_select",
+                           text=f"{number}.",
+                           icon='RADIOBUT_ON' if self.selected_index == (EDGE_HEAD if head else EDGE_TAIL) else 'RADIOBUT_OFF',
+                           emboss=False)
+        op.index = EDGE_HEAD if head else EDGE_TAIL
 
         cell = line.row()
         cell.ui_units_x = self._COL_COLOR
@@ -1688,6 +1730,15 @@ class _RowEdit:
         raise NotImplementedError
 
 
+class PROTEINBLENDER_OT_domain_splitter_select(_RowEdit, Operator):
+    """Show this domain opaque and the rest of the protein translucent"""
+    bl_idname = "proteinblender.domain_splitter_select"
+    bl_label = "Select Domain"
+
+    def edit(self, instance):
+        instance.select_row(self.index)
+
+
 class PROTEINBLENDER_OT_domain_splitter_split(_RowEdit, Operator):
     """Split this domain into two at its midpoint"""
     bl_idname = "proteinblender.domain_splitter_split"
@@ -1709,6 +1760,7 @@ class PROTEINBLENDER_OT_domain_splitter_merge(_RowEdit, Operator):
 CLASSES = [
     PROTEINBLENDER_DomainLayoutRow,
     PROTEINBLENDER_OT_edit_chain_domains,
+    PROTEINBLENDER_OT_domain_splitter_select,
     PROTEINBLENDER_OT_domain_splitter_split,
     PROTEINBLENDER_OT_domain_splitter_merge,
 ]

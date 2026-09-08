@@ -60,7 +60,7 @@ class PROTEINBLENDER_PT_builders(Panel):
         sym_row.scale_y = 1.4
         sym_row.operator(
             "molecule.symmetry_dialog",
-            text="Create New Symmetry",
+            text="Create New Assembly",
             icon="MOD_ARRAY",
         )
 

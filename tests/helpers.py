@@ -71,6 +71,13 @@ def reset_scene():
                 pass
 
     scene = bpy.context.scene
+    # Lighting uses persistent ID references so renamed lights/worlds remain
+    # recoverable. Restore its world before scrubbing those references.
+    if scene.world == scene.get('pb_lighting_world'):
+        scene.world = scene.get('pb_lighting_previous_world')
+    for key in list(scene.keys()):
+        if key.startswith('pb_lighting_') or key == 'pb_scene_lighting':
+            del scene[key]
     # Transient pickers whose enum items are computed from the active molecule.
     # A value left behind by the previous test is meaningless against the next
     # one's structure, and now that pb_assembly_id names the *state* on screen
@@ -105,6 +112,11 @@ def reset_scene():
                 blockset.remove(blk)
             except Exception:
                 pass
+
+    for blockset in (bpy.data.lights, bpy.data.worlds):
+        for block in list(blockset):
+            if block.users == 0 and (blockset == bpy.data.lights or block.get('pb_scene_lighting')):
+                blockset.remove(block)
 
     try:
         bpy.context.view_layer.update()

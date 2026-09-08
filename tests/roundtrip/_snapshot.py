@@ -250,6 +250,8 @@ def _custom_properties(owner):
 def _plain(value):
     """Coerce an IDProperty value (which may be an IDPropertyArray or group)
     into something JSON-safe and comparable."""
+    if _is_id(value):
+        return {"__id__": type(value).__name__, "name": value.name}
     if isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -473,6 +475,24 @@ def _serialize_object_data(obj):
     if data is None:
         return None
     entry = {"name": data.name, "type": type(data).__name__}
+    entry['custom'] = {key: _plain(data[key]) for key in sorted(data.keys())
+                       if key.startswith(('pb_alignment_', 'pb_cartoon_'))}
+    shape_keys = getattr(data, 'shape_keys', None)
+    if shape_keys:
+        import numpy as np
+        entry['shape_key_animation'] = _serialize_animation(shape_keys)
+        entry['shape_keys'] = {}
+        for key in shape_keys.key_blocks:
+            coords = np.empty(len(key.data) * 3, dtype=np.float64)
+            key.data.foreach_get('co', coords)
+            entry['shape_keys'][key.name] = {
+                'coordinates': _digest(np.round(coords, FLOAT_DP).tolist()),
+                'value': _round(key.value), 'mute': key.mute,
+                'relative_key': key.relative_key.name,
+            }
+    if obj.type == 'LIGHT':
+        entry['lighting'] = {p.identifier: _serialize_value(p, getattr(data, p.identifier), 0)
+                             for p in data.bl_rna.properties if not p.is_readonly}
 
     vertices = getattr(data, "vertices", None)
     if vertices is not None:
@@ -492,6 +512,10 @@ def _serialize_object_data(obj):
         if attributes is not None:
             entry["attributes"] = sorted(
                 f"{a.name}:{a.data_type}:{a.domain}" for a in attributes)
+            entry['cartoon_reference_turns'] = {
+                name: [v.value for v in attributes[name].data]
+                for name in ('pb_cartoon_reference_turn', 'pb_cartoon_helix_turn')
+                if name in attributes}
 
     splines = getattr(data, "splines", None)
     if splines is not None:                       # curves (linkers, DNA bends)
@@ -746,6 +770,12 @@ def scene_snapshot(include_registry=True):
 
     snapshot = {
         "scene": scene_state,
+        "lighting_state": {key: _plain(scene[key]) for key in sorted(scene.keys())
+                           if key.startswith('pb_lighting_') or key == 'pb_scene_lighting'},
+        "world": ({"name": scene.world.name,
+                   "nodes": (_serialize_node_tree(scene.world.node_tree)
+                             if scene.world.node_tree else None)}
+                  if scene.world else None),
         "scene_frames": {
             "current": scene.frame_current,
             "start": scene.frame_start,

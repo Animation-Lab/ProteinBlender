@@ -160,44 +160,45 @@ def test_symmetry_is_detected_only_where_it_exists(scene, sm, fixture, ident, ex
     assert _assembly_core().has_buildable_symmetry(molecule) is expected
 
 
-def test_the_deposited_half_of_the_panel_is_gated_on_real_symmetry(scene, sm):
-    """The meeting's requirement, applied to the half it belongs to.
-
-    The panel itself is always available once a protein is loaded, because the
-    *builder* half is a construction tool whose whole purpose is giving
-    symmetry to a structure that has none - hiding it when the file has no
-    symmetry would hide it exactly when it is wanted. What is gated is the
-    *deposited assembly* half, which genuinely has nothing to offer.
-    """
+@pytest.mark.parametrize("source, assembly_id", [("BIOLOGICAL", "3"), ("GENERATED", "")])
+def test_assembly_controls_are_accessed_through_the_child(scene, sm, source, assembly_id):
     from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
 
-    core = _assembly_core()
+    molecule = _import()
+    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context), (
+        "Import must not expose a separate deposited-assembly panel")
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source=source,
+        **({"assembly_id": assembly_id} if assembly_id else {})
+    ) == {'FINISHED'}
+    # Selecting the protein can select all its descendants. That must not
+    # open assembly controls until the assembly child itself is clicked.
+    bpy.ops.proteinblender.outliner_select(item_id=molecule.identifier)
+    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context)
+    child_id = next(r.item_id for r in scene.outliner_items if r.item_type == 'SYMMETRY')
+    bpy.ops.proteinblender.outliner_select(item_id=child_id)
+    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context)
+    bpy.ops.molecule.clear_assembly(molecule_id=molecule.identifier)
+    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context)
+    assert not any(r.item_type == 'SYMMETRY' for r in scene.outliner_items), (
+        "Deleting an assembly must immediately remove its child row")
 
-    _import("4ins.pdb", "4ins")
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True
-    assert core.has_buildable_symmetry(H.sm().molecules["4ins"]) is True
 
-    monomer = _import("1ubq.pdb", "1ubq")
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True, (
-        "the builder half applies to a monomer too")
-    assert core.has_buildable_symmetry(monomer) is False, (
-        "a monomer must not be offered a deposited assembly")
+def test_assembly_controls_follow_the_clicked_child_not_the_last_import(scene, sm):
+    from proteinblender.panels.symmetry_panel import _active_molecule
 
-
-def test_panel_appears_after_a_plain_import(scene, sm):
-    """Importing a symmetric structure is enough to get the panel.
-
-    Nothing writes ``scene.selected_molecule_id`` except the rename operator,
-    so a panel resolving the active protein through that alone would be
-    invisible in every real session while still passing any test that set the
-    property by hand.
-    """
-    from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
-
-    _import()
-    assert not bpy.context.scene.selected_molecule_id, (
-        "import set selected_molecule_id after all - this test is now moot")
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context) is True
+    first = _import()
+    bpy.ops.molecule.symmetry_dialog(target_id=first.identifier, source='BIOLOGICAL', assembly_id='3')
+    second = _import("1ubq.pdb", "ubq")
+    scene.pb_symmetry_order = 5
+    bpy.ops.molecule.symmetry_dialog(target_id=second.identifier)
+    child_id = next(r.item_id for r in scene.outliner_items
+                    if r.item_type == 'SYMMETRY' and r.parent_id == first.identifier)
+    bpy.ops.proteinblender.outliner_select(item_id=child_id)
+    assert _active_molecule(bpy.context) == first
+    scene.pb_assembly_factor = 0.25
+    assert _assembly_core().get_assembly_factor(first) == pytest.approx(0.25)
+    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1.0)
 
 
 def test_operators_find_the_active_protein_without_being_told(scene, sm):
@@ -875,3 +876,12 @@ def test_brownian_motion_and_an_assembly_coexist(scene, sm):
     # The assembly is still built and still placed correctly.
     assert core.built_assembly_id(molecule) == "3"
     assert _observed_spread(molecule) == pytest.approx(assembled, rel=0.01)
+
+
+def test_building_an_assembly_preserves_the_clicked_chain(scene, sm):
+    molecule = _import()
+    chain_id = next(r.item_id for r in scene.outliner_items if r.item_type == 'CHAIN')
+    bpy.ops.proteinblender.outliner_select(item_id=chain_id)
+    bpy.ops.molecule.symmetry_dialog(target_id=molecule.identifier, source='BIOLOGICAL', assembly_id='3')
+    assert scene.outliner_items[scene.outliner_index].item_id == chain_id, (
+        'Inserting the assembly child changed which row was active')

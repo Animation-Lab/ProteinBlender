@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Panel, UIList, Operator
 from bpy.props import StringProperty
-from ..core.outliner_colors import row_has_swatch
+from ..core.outliner_colors import row_has_swatch, draw_row_swatch
 from ..utils.scene_manager import ProteinBlenderScene, symmetry_molecule_id
 from ..utils.chain_utils import get_chain_objects, get_chain_domains, chain_token_from_item
 
@@ -26,6 +26,12 @@ def _split_chain_is_visible(item, view_layer):
         except (ReferenceError, RuntimeError):
             continue
     return False
+
+
+def _symmetry_is_visible(item, view_layer):
+    from ..core.outliner_targets import resolve_target
+    _, objects = resolve_target(item.parent_id, include_protein_domains=True)
+    return any(not obj.hide_get(view_layer=view_layer) for obj in objects)
 
 
 class PROTEINBLENDER_UL_outliner(UIList):
@@ -101,12 +107,13 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
 
-        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA', 'SYMMETRY'] and not is_reference:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA'] and not is_reference:
             show_expand = True
-        elif item.item_type == 'CHAIN':
+        elif item.item_type in {'CHAIN', 'DOMAIN'}:
             # Show expand arrow for chains with domains (both original and reference items)
             # This allows collapsing/expanding domains in groups too
-            show_expand = item.has_domains
+            show_expand = item.has_domains or any(
+                r.parent_id == item.item_id for r in context.scene.outliner_items)
 
         if show_expand:
             if item.is_expanded:
@@ -138,11 +145,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
         # Colour swatch — click it to recolour the protein, chain or domain
         # on the spot, without opening its edit dialog. Seeded from what the
-        # item currently looks like; grey means its parts disagree.
+        # item currently looks like; mixed colors appear as a segmented swatch.
         if row_has_swatch(item):
-            swatch = row.row(align=True)
-            swatch.ui_units_x = 1.0
-            swatch.prop(item, "row_color", text="")
+            draw_row_swatch(row, item)
 
         # Handle different item types
         if item.item_type == 'PUPPET' and item.item_id == "puppets_separator":
@@ -231,11 +236,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
         
         # First: Buttons for proteins and DNA/RNA
         elif item.item_type in ('PROTEIN', 'DNA_RNA'):
-            # Center button (move to origin at center of mass)
-            center_op = row.operator("molecule.center_protein", text="", icon='OBJECT_ORIGIN', emboss=False)
-            if center_op:
-                center_op.molecule_id = item.item_id
-
             if item.item_type == 'PROTEIN':
                 # Duplicate button (create exact copy) - proteins only for now
                 duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
@@ -250,7 +250,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 self._draw_custom_pivot_toggle(context, row, item)
 
                 # Edit pencil — the protein's own Visual Set-up: colour, style,
-                # force field and pivot for the whole molecule at once.
+                # and representation for the whole molecule at once.
                 edit_op = row.operator(
                     "proteinblender.edit_protein_visuals",
                     text="", icon='GREASEPENCIL', emboss=False,
@@ -273,6 +273,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.molecule_id = item.item_id
         elif item.item_type == 'MEMBRANE':
+            fields = row.operator("proteinblender.membrane_force_fields",
+                                  text="", icon='FORCE_FORCE', emboss=False)
+            fields.membrane_name = item.object_name
             # Edit pencil — opens the build_membrane dialog pre-populated
             # for this membrane (same dialog as Create, but in update mode).
             edit_op = row.operator(
@@ -309,19 +312,18 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if delete_op:
                 delete_op.membrane_name = item.object_name
+        elif item.item_type == 'TRANSITION':
+            row.label(text='', icon='BLANK1')
+            row.label(text='', icon='BLANK1')
+            row.operator('proteinblender.edit_conformation', text='', icon='GREASEPENCIL',
+                         emboss=False).transition_id = item.item_id
+            row.operator('proteinblender.delete_conformation', text='', icon='TRASH',
+                         emboss=False).transition_id = item.item_id
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
 
-            # Placeholders for the Center and Duplicate columns a protein row
-            # has, so this row's pencil and trash land in the same columns as
-            # every other object's. Rows are laid out from the right, so
-            # without them these buttons slide left and read as misaligned.
+            # Match the protein row's duplicate and pivot columns.
             row.label(text="", icon='BLANK1')
-            row.label(text="", icon='BLANK1')
-            # Third placeholder holds the Pivot column. Edit Pivot on a
-            # symmetry means placing the axis it turns about, which needs the
-            # generator's unused `centre` wired through first; until then the
-            # column stays empty rather than carrying a button that lies.
             row.label(text="", icon='BLANK1')
 
             # Edit pencil — reopens the Symmetry dialog on the settings this
@@ -332,9 +334,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if edit_op:
                 edit_op.molecule_id_to_update = molecule_id
-            # Delete — takes the copies away and leaves the asymmetric unit,
-            # which is also what dissolves this row: it is derived from what
-            # is built, so the protein returns to being top-level.
+            # Delete removes the copies and this child row, leaving its source.
             delete_op = row.operator(
                 "molecule.clear_assembly", text="", icon='TRASH', emboss=False,
             )
@@ -413,6 +413,8 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
     def _get_item_visibility(self, context, item):
         """Get visibility state directly from the Blender object."""
+        if item.item_type == 'SYMMETRY':
+            return _symmetry_is_visible(item, context.view_layer)
         if not item.object_name:
             # A split chain has no single object — aggregate from its domains.
             if item.item_type == 'CHAIN':
@@ -507,6 +509,14 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
 
         if not clicked_item:
             return {'CANCELLED'}
+
+        # Track the explicitly clicked row separately from cascading checkbox
+        # selection, so selecting a protein does not open its assembly controls.
+        scene.outliner_index = next(i for i, r in enumerate(scene.outliner_items)
+                                    if r.item_id == actual_item_id)
+        if clicked_item.item_type == 'SYMMETRY':
+            from ..properties.protein_props import sync_assembly_controls
+            sync_assembly_controls(context)
 
         # Remove this block - it's redundant and interferes with proper toggling
 
@@ -725,6 +735,8 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
     
     def _get_object_visibility(self, item, view_layer):
         """Get visibility state from the Blender object."""
+        if item.item_type == 'SYMMETRY':
+            return _symmetry_is_visible(item, view_layer)
         if not item.object_name:
             # A split chain has no single object — aggregate from its domains.
             if item.item_type == 'CHAIN':
@@ -743,13 +755,14 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         view_layer = context.view_layer
         scene_manager = ProteinBlenderScene.get_instance()
         
-        if item.item_type in ('PROTEIN', 'DNA_RNA', 'SYMMETRY'):
-            # A Symmetry hides through the protein it wraps: its copies are
-            # geometry-node instances of that protein's objects, so hiding
-            # them takes the whole assembly with it.
-            lookup = (symmetry_molecule_id(item) if item.item_type == 'SYMMETRY'
-                      else item.item_id)
-            molecule = scene_manager.molecules.get(lookup)
+        if item.item_type == 'SYMMETRY':
+            from ..core.outliner_targets import resolve_target
+            _, objects = resolve_target(item.parent_id, include_protein_domains=True)
+            for obj in objects:
+                self._set_object_visibility(obj, visible, view_layer)
+
+        elif item.item_type in ('PROTEIN', 'DNA_RNA'):
+            molecule = scene_manager.molecules.get(item.item_id)
             if molecule and molecule.object:
                 self._set_object_visibility(molecule.object, visible, view_layer)
                 # Also set all domain objects
@@ -786,7 +799,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                         if domain.object:
                             self._set_object_visibility(domain.object, visible, view_layer)
                             
-        elif item.item_type == 'DOMAIN':
+        elif item.item_type in ('DOMAIN', 'TRANSITION'):
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:
@@ -882,7 +895,15 @@ class PROTEINBLENDER_OT_outliner_item_info(Operator):
         return "Outliner item"
 
     def execute(self, context):
-        # This operator is just for showing tooltips, so it does nothing when clicked
+        # Clicking a label also makes its child controls accessible without
+        # changing viewport selection. The pencil opens the assembly dialog.
+        for index, row in enumerate(context.scene.outliner_items):
+            if row.item_id == self.item_id:
+                context.scene.outliner_index = index
+                if row.item_type == 'SYMMETRY':
+                    from ..properties.protein_props import sync_assembly_controls
+                    sync_assembly_controls(context)
+                break
         return {'FINISHED'}
 
 
@@ -929,4 +950,3 @@ class PROTEINBLENDER_PT_outliner(Panel):
 
 
 # Operator and panel classes to register
-

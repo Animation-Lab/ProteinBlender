@@ -364,3 +364,49 @@ def test_remote_format_defaults_to_mmcif():
     props = bpy.context.scene.protein_props
     assert props.bl_rna.properties["remote_format"].default == "cif"
     assert props.remote_format == "cif"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('filename', ['5im3.pdb', '5im3.cif'])
+def test_5im3_bmt_builds_the_deposited_tetramer(filename, scene, sm):
+    """RCSB 5IM3: A/B repeated by identity and diag(-1, 1, -1).
+
+    Source: https://www.rcsb.org/structure/5IM3 (assembly 1, homo 4-mer).
+    The expected separation uses the deposited ATOM coordinates and BIOMT
+    matrix, independently of the addon's assembly parser and point cloud.
+    """
+    import bpy
+    from mathutils import Vector
+    from proteinblender.core import domain_space
+
+    mid = H.import_local(filename, '5im3')
+    molecule = sm.molecules[mid]
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=mid, source='BIOLOGICAL', assembly_id='1') == {'FINISHED'}
+
+    # Polymer domains may have extra ligand/water domains in mmCIF. Check the
+    # two deposited protein chains against their independent CA coordinates.
+    for chain in ('A', 'B'):
+        domain = next(d for d in molecule.domains.values() if d.chain_id == chain)
+        coords = []
+        with open(H.data_path('5im3.pdb')) as handle:
+            for line in handle:
+                if line.startswith('ATOM') and line[21] == chain and line[12:16].strip() == 'CA':
+                    coords.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+        centroid = np.mean(coords, axis=0)
+        expected = np.linalg.norm(centroid * [-1, 1, -1] - centroid) * 0.01
+        assert expected > 0.1
+        obj = domain.object
+        local = Vector(centroid * 0.01 - np.array(domain_space.get_pivot(obj)))
+        bpy.context.view_layer.update()
+        graph = bpy.context.evaluated_depsgraph_get()
+        matrices = [i.matrix_world.copy() for i in graph.object_instances
+                    if i.is_instance and i.parent is not None
+                    and i.parent.original.name == obj.name]
+        assert len(matrices) == 2
+        observed = (matrices[0] @ local - matrices[1] @ local).length
+        assert observed == pytest.approx(expected, rel=0.001)
+
+    row = next(r for r in scene.outliner_items if r.item_type == 'SYMMETRY')
+    assert row.parent_id == mid
+    assert row.name == 'Biological Assembly 1'

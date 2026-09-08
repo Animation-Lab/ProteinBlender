@@ -339,7 +339,7 @@ def build_assembly(molecule, assembly_id: str) -> bool:
     return apply_operators(molecule, operators, str(assembly_id))
 
 
-def apply_operators(molecule, operators, tag: str) -> bool:
+def apply_operators(molecule, operators, tag: str, targets=None) -> bool:
     """Place a copy of the molecule under each operator.
 
     The one path both deposited assemblies and generated symmetry go through:
@@ -354,7 +354,7 @@ def apply_operators(molecule, operators, tag: str) -> bool:
     clear_assembly(molecule)
 
     wired = 0
-    for obj in _target_objects(molecule):
+    for obj in (_target_objects(molecule) if targets is None else targets):
         group = _node_group_of(obj)
         if group is None:
             continue

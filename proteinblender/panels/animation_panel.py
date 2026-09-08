@@ -195,6 +195,14 @@ class PROTEINBLENDER_PT_animation(Panel):
         tools.separator()
         tools.label(text=f"Current Frame: {current}", icon='TIME')
 
+        lighting = col.row()
+        lighting.scale_y = 1.2
+        lighting.operator("proteinblender.setup_lighting", icon='LIGHT_AREA')
+
+        transition = col.row()
+        transition.scale_y = 1.2
+        transition.operator('proteinblender.create_conformation', icon='IPO_EASE_IN_OUT')
+
         # --- Keyframe list: scrolling once past 10 entries ---
         list_box = col.box()
 
