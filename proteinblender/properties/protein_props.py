@@ -17,6 +17,20 @@ def _on_row_color_edited(item, context):
     apply_row_color(item, context)
 
 
+
+def _palette_get(index):
+    def get(item):
+        from ..core.outliner_colors import palette_for_row
+        colors = palette_for_row(item)
+        return colors[index] if index < len(colors) else tuple(item.row_color)
+    return get
+
+
+def _palette_set(item, value):
+    # Every band edits the shared color, just like the solid row swatch.
+    item.row_color = value
+
+
 class ProteinOutlinerItem(PropertyGroup):
     """Unified item for protein outliner display"""
     item_type: EnumProperty(
@@ -71,8 +85,8 @@ class ProteinOutlinerItem(PropertyGroup):
 
     # The colour swatch on protein / chain / domain rows. Seeded from what the
     # item currently looks like (core.outliner_colors.sync_outliner_colors);
-    # editing it recolours the item live. Mixed rows draw a palette icon and
-    # use this property inside their popup picker.
+    # editing it recolours the item live. Mixed rows expose the same binding
+    # through up to four native color bands.
     row_color: FloatVectorProperty(
         name="Color",
         description="Color of this item. Click to recolor it",
@@ -80,6 +94,22 @@ class ProteinOutlinerItem(PropertyGroup):
         default=(0.5, 0.5, 0.5, 1.0),
         update=_on_row_color_edited
     )
+    palette_color_0: FloatVectorProperty(
+        name="Shared Color", description="Set one color for this entire item",
+        subtype='COLOR', size=4, min=0, max=1,
+        get=_palette_get(0), set=_palette_set)
+    palette_color_1: FloatVectorProperty(
+        name="Shared Color", description="Set one color for this entire item",
+        subtype='COLOR', size=4, min=0, max=1,
+        get=_palette_get(1), set=_palette_set)
+    palette_color_2: FloatVectorProperty(
+        name="Shared Color", description="Set one color for this entire item",
+        subtype='COLOR', size=4, min=0, max=1,
+        get=_palette_get(2), set=_palette_set)
+    palette_color_3: FloatVectorProperty(
+        name="Shared Color", description="Set one color for this entire item",
+        subtype='COLOR', size=4, min=0, max=1,
+        get=_palette_get(3), set=_palette_set)
     row_palette_json: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     row_domain_count: IntProperty(default=0, options={'HIDDEN', 'SKIP_SAVE'})
     

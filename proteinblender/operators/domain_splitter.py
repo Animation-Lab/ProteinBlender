@@ -1426,7 +1426,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self._draw_edge(grid.row(align=True), head=False)
 
         self._draw_feedback(layout)
-        self.draw_visual_setup(layout, context, show_color=False)
+        self.draw_visual_setup(layout, context, show_color=False, show_pivot=False)
 
     # Column widths, shared by the header and every row so they line up
     # exactly. Blender lays a row out proportionally unless told otherwise, so

@@ -4,6 +4,7 @@
 from .panel_import_protein import PROTEIN_PB_PT_import_protein
 from .protein_outliner_panel import (
     PROTEINBLENDER_UL_outliner,
+    draw_outliner_context_menu,
     PROTEINBLENDER_OT_toggle_expand,
     PROTEINBLENDER_OT_outliner_select,
     PROTEINBLENDER_OT_toggle_visibility,
@@ -101,7 +102,11 @@ CLASSES = [
 def register():
     """Register all panel properties"""
     animation_register_props()
+    import bpy
+    bpy.types.UI_MT_list_item_context_menu.append(draw_outliner_context_menu)
 
 def unregister():
     """Unregister all panel properties"""
+    import bpy
+    bpy.types.UI_MT_list_item_context_menu.remove(draw_outliner_context_menu)
     animation_unregister_props()

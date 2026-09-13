@@ -96,6 +96,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
         # Visual hierarchy through indentation
         row = layout.row(align=True)
+        row.context_pointer_set('pb_outliner_item', item)
 
         # Indentation based on hierarchy level
         for i in range(item.indent_level):
@@ -149,6 +150,19 @@ class PROTEINBLENDER_UL_outliner(UIList):
         if row_has_swatch(item):
             draw_row_swatch(row, item)
 
+        self.draw_actions(context, row, item)
+
+    @staticmethod
+    def draw_actions(context, row, item, *, menu=False):
+        """Use identical targets and operators in the icon row and its menu."""
+        def action(identifier, **kwargs):
+            if menu:
+                # With text omitted Blender uses the operator's readable label.
+                if not kwargs.get('text'):
+                    kwargs.pop('text', None)
+                kwargs.pop('emboss', None)
+            return row.operator(identifier, **kwargs)
+
         # Handle different item types
         if item.item_type == 'PUPPET' and item.item_id == "puppets_separator":
             # Groups separator - no controls
@@ -177,12 +191,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     # domain it has been split into. Same icon as the protein
                     # row's Duplicate: it is the same action at a different
                     # level of the hierarchy.
-                    copy_op = row.operator("molecule.copy_chain", text="", icon='DUPLICATE', emboss=False)
+                    copy_op = action("molecule.copy_chain", text="", icon='DUPLICATE', emboss=False)
                     if copy_op:
                         copy_op.molecule_id = item.parent_id
                         copy_op.chain_id = chain_token_from_item(item)
 
-                    self._draw_custom_pivot_toggle(context, row, item)
+                    PROTEINBLENDER_UL_outliner._draw_custom_pivot_toggle(context, row, item, menu=menu)
 
                     # Edit — the Domain Splitter: renames the chain, restyles
                     # it, and edits how it is divided into domains. A chain
@@ -190,19 +204,19 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     # chain it was copied from), so it keeps the plain rename
                     # dialog, which names the copy as a whole.
                     if is_chain_copy:
-                        rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
+                        rename_op = action("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
                         if rename_op:
                             rename_op.target_item_id = item.item_id
                             rename_op.item_type = 'CHAIN'
                     else:
-                        edit_op = row.operator("proteinblender.edit_chain_domains", text="", icon='GREASEPENCIL', emboss=False)
+                        edit_op = action("proteinblender.edit_chain_domains", text="", icon='GREASEPENCIL', emboss=False)
                         if edit_op:
                             edit_op.item_id = item.item_id
 
                     # Delete - one chain-level row, one chain-level delete.
                     # A copy resolves to every domain of that copy, a real
                     # chain to every domain of the chain.
-                    delete_op = row.operator("molecule.delete_chain", text="", icon='TRASH', emboss=False)
+                    delete_op = action("molecule.delete_chain", text="", icon='TRASH', emboss=False)
                     if delete_op:
                         delete_op.chain_id = chain_token_from_item(item)
                         delete_op.molecule_id = item.parent_id
@@ -215,20 +229,20 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     if domain_id in molecule.domains:
 
                         # Add copy button (same icon as every other copy)
-                        copy_op = row.operator("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
+                        copy_op = action("molecule.copy_domain", text="", icon='DUPLICATE', emboss=False)
                         if copy_op:
                             copy_op.domain_id = domain_id
 
-                        self._draw_custom_pivot_toggle(context, row, item)
+                        PROTEINBLENDER_UL_outliner._draw_custom_pivot_toggle(context, row, item, menu=menu)
 
                         # Edit — rename plus the Visual Set-up block
-                        rename_op = row.operator("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
+                        rename_op = action("proteinblender.rename_domain", text="", icon='GREASEPENCIL', emboss=False)
                         if rename_op:
                             rename_op.target_item_id = domain_id
                             rename_op.item_type = 'DOMAIN'
 
                         # Add delete button for all domains
-                        delete_op = row.operator("molecule.delete_domain", text="", icon='TRASH', emboss=False)
+                        delete_op = action("molecule.delete_domain", text="", icon='TRASH', emboss=False)
                         if delete_op:
                             delete_op.domain_id = domain_id
                             delete_op.molecule_id = molecule_id
@@ -238,7 +252,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         elif item.item_type in ('PROTEIN', 'DNA_RNA'):
             if item.item_type == 'PROTEIN':
                 # Duplicate button (create exact copy) - proteins only for now
-                duplicate_op = row.operator("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
+                duplicate_op = action("molecule.duplicate_protein", text="", icon='DUPLICATE', emboss=False)
                 if duplicate_op:
                     duplicate_op.molecule_id = item.item_id
 
@@ -247,11 +261,11 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 # a strand's shape is driven by its own builder dialog and its
                 # bend rig, so a hand-placed pivot on it has no defined meaning
                 # yet.
-                self._draw_custom_pivot_toggle(context, row, item)
+                PROTEINBLENDER_UL_outliner._draw_custom_pivot_toggle(context, row, item, menu=menu)
 
                 # Edit pencil — the protein's own Visual Set-up: colour, style,
                 # and representation for the whole molecule at once.
-                edit_op = row.operator(
+                edit_op = action(
                     "proteinblender.edit_protein_visuals",
                     text="", icon='GREASEPENCIL', emboss=False,
                 )
@@ -261,7 +275,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if item.item_type == 'DNA_RNA':
                 # Edit pencil — opens the build_dna dialog pre-populated for
                 # this strand (same dialog as Create, but in update mode).
-                edit_op = row.operator(
+                edit_op = action(
                     "proteinblender.build_dna",
                     text="", icon='GREASEPENCIL', emboss=False,
                 )
@@ -269,16 +283,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     edit_op.molecule_id_to_update = item.item_id
 
             # Delete button (trash can) - use the existing molecule.delete operator
-            delete_op = row.operator("molecule.delete", text="", icon='TRASH', emboss=False)
+            delete_op = action("molecule.delete", text="", icon='TRASH', emboss=False)
             if delete_op:
                 delete_op.molecule_id = item.item_id
         elif item.item_type == 'MEMBRANE':
-            fields = row.operator("proteinblender.membrane_force_fields",
+            fields = action("proteinblender.membrane_force_fields",
                                   text="", icon='FORCE_FORCE', emboss=False)
             fields.membrane_name = item.object_name
             # Edit pencil — opens the build_membrane dialog pre-populated
             # for this membrane (same dialog as Create, but in update mode).
-            edit_op = row.operator(
+            edit_op = action(
                 "proteinblender.build_membrane",
                 text="", icon='GREASEPENCIL', emboss=False,
             )
@@ -294,7 +308,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 is_deforming_membrane,
             )
             deforming = is_deforming_membrane(context, item.object_name)
-            deform_op = row.operator(
+            deform_op = action(
                 "proteinblender.membrane_toggle_deform",
                 text="",
                 icon='CHECKMARK' if deforming else 'MOD_LATTICE',
@@ -306,7 +320,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
             # Delete button — routes through the addon's own membrane
             # deleter (which also tears down lattice + hole children + the
             # per-membrane collection).
-            delete_op = row.operator(
+            delete_op = action(
                 "proteinblender.delete_membrane",
                 text="", icon='TRASH', emboss=False,
             )
@@ -315,9 +329,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
         elif item.item_type == 'TRANSITION':
             row.label(text='', icon='BLANK1')
             row.label(text='', icon='BLANK1')
-            row.operator('proteinblender.edit_conformation', text='', icon='GREASEPENCIL',
+            action('proteinblender.edit_conformation', text='', icon='GREASEPENCIL',
                          emboss=False).transition_id = item.item_id
-            row.operator('proteinblender.delete_conformation', text='', icon='TRASH',
+            action('proteinblender.delete_conformation', text='', icon='TRASH',
                          emboss=False).transition_id = item.item_id
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
@@ -328,14 +342,14 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
             # Edit pencil — reopens the Symmetry dialog on the settings this
             # build was actually made with (recorded on the assembly node).
-            edit_op = row.operator(
+            edit_op = action(
                 "molecule.symmetry_dialog",
                 text="", icon='GREASEPENCIL', emboss=False,
             )
             if edit_op:
                 edit_op.molecule_id_to_update = molecule_id
             # Delete removes the copies and this child row, leaving its source.
-            delete_op = row.operator(
+            delete_op = action(
                 "molecule.clear_assembly", text="", icon='TRASH', emboss=False,
             )
             if delete_op:
@@ -345,7 +359,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
             # operator, NOT edit_puppet's DELETE branch. The latter is a fallback
             # that doesn't remove the controller Empty, unparent its children, or
             # clean up linkers / pose-library references for the deleted puppet.
-            op = row.operator("proteinblender.delete_puppet", text="", icon='TRASH', emboss=False)
+            op = action("proteinblender.delete_puppet", text="", icon='TRASH', emboss=False)
             if op:
                 op.puppet_id = item.item_id
         
@@ -358,16 +372,17 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # selectable object in the scene, so ticking a row would do nothing at
         # all. Grey the checkbox rather than let it silently refuse.
         checkbox = row.row(align=True)
-        checkbox.enabled = not self._pivot_session_open(context)
-        op = checkbox.operator("proteinblender.outliner_select", text="",
+        checkbox.enabled = not PROTEINBLENDER_UL_outliner._pivot_session_open(context)
+        op = checkbox.operator("proteinblender.outliner_select",
+                               text=("Deselect" if item.is_selected else "Select") if menu else "",
                                icon=selection_icon, emboss=False)
         op.item_id = item.item_id
 
         # Third: Visibility toggle for all items
         # Read visibility directly from the Blender object (single source of truth)
-        is_visible = self._get_item_visibility(context, item)
+        is_visible = PROTEINBLENDER_UL_outliner._get_item_visibility(context, item)
         visibility_icon = 'HIDE_OFF' if is_visible else 'HIDE_ON'
-        op = row.operator("proteinblender.toggle_visibility", text="", icon=visibility_icon)
+        op = action("proteinblender.toggle_visibility", text=("Hide" if is_visible else "Show") if menu else "", icon=visibility_icon)
         op.item_id = item.item_id
     
     @staticmethod
@@ -380,7 +395,8 @@ class PROTEINBLENDER_UL_outliner(UIList):
         except (ReferenceError, RuntimeError, AttributeError):
             return False
 
-    def _draw_custom_pivot_toggle(self, context, row, item):
+    @staticmethod
+    def _draw_custom_pivot_toggle(context, row, item, *, menu=False):
         """The Edit Pivot button for a protein, chain or domain row.
 
         One click opens the mode: an orange helper appears on the item's
@@ -404,14 +420,15 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
         op = row.operator(
             "proteinblender.set_pivot_custom",
-            text="", icon='PIVOT_CURSOR',
+            text=("Apply Pivot" if editing else "Edit Pivot") if menu else "", icon='PIVOT_CURSOR',
             emboss=editing,     # the row being edited reads as pressed
             depress=editing,
         )
         if op:
             op.item_id = item.item_id
 
-    def _get_item_visibility(self, context, item):
+    @staticmethod
+    def _get_item_visibility(context, item):
         """Get visibility state directly from the Blender object."""
         if item.item_type == 'SYMMETRY':
             return _symmetry_is_visible(item, context.view_layer)
@@ -950,3 +967,25 @@ class PROTEINBLENDER_PT_outliner(Panel):
 
 
 # Operator and panel classes to register
+
+
+def draw_outliner_context_menu(self, context):
+    rows = context.scene.outliner_items
+    item = getattr(context, 'pb_outliner_item', None)
+    if item is None:
+        ui_list = getattr(context, 'ui_list', None)
+        if ui_list is None or ui_list.bl_idname != 'PROTEINBLENDER_UL_outliner':
+            return
+        index = context.scene.outliner_index
+        if not 0 <= index < len(rows):
+            return
+        item = rows[index]
+    if item.item_id == 'puppets_separator':
+        return
+    layout = self.layout
+    layout.operator_context = 'INVOKE_DEFAULT'
+    layout.label(text=item.name, icon=item.icon)
+    if row_has_swatch(item):
+        op = layout.operator('proteinblender.outliner_color_picker', text='Set Color', icon='COLOR')
+        op.item_id, op.item_type = item.item_id, item.item_type
+    PROTEINBLENDER_UL_outliner.draw_actions(context, layout, item, menu=True)

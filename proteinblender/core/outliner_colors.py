@@ -63,10 +63,6 @@ def palette_for_row(item):
     return json.loads(item.row_palette_json) if item.row_palette_json else []
 
 
-def palette_icon_key(item):
-    return f"palette:{item.id_data.as_pointer()}:{item.item_type}:{item.item_id}"
-
-
 def palette_description(item):
     count = len(palette_for_row(item))
     domains = item.row_domain_count
@@ -80,21 +76,15 @@ def palette_description(item):
 
 
 def draw_row_swatch(layout, item):
-    """Keep Blender's native picker for solids; mixed rows open the same binding."""
-    from ..utils import icons
+    """Equal native color bands share one fixed-width swatch and color binding."""
     swatch = layout.row(align=True)
     swatch.ui_units_x = 1.0
-    if len(palette_for_row(item)) > 1:
-        # Native color properties have a wider minimum than icon buttons.
-        # Fit two 0.8-unit icons with a narrow seam, matching that colored area.
-        swatch.ui_units_x = 1.75
-        swatch.operator_context = 'INVOKE_DEFAULT'
-        for half in range(2):
-            op = swatch.operator(
-                "proteinblender.outliner_color_picker", text="", emboss=False,
-                **icons.button_icon(f"{palette_icon_key(item)}:{half}", 'COLOR'))
-            op.item_id = item.item_id
-            op.item_type = item.item_type
+    count = min(4, len(palette_for_row(item)))
+    if count > 1:
+        for band in range(count):
+            part = swatch.row(align=True)
+            part.scale_x = 1.0 / count
+            part.prop(item, f"palette_color_{band}", text="")
     else:
         swatch.prop(item, "row_color", text="")
 
@@ -141,7 +131,6 @@ def sync_outliner_colors(context=None):
     # registration.
     from ..operators.visual_edit import appearance_objects_for_row, _rgba, MIXED_COLOR
     from .visual_style import get_object_color
-    from ..utils import icons
 
     with _Suspend():
         for item in scene.outliner_items:
@@ -155,16 +144,7 @@ def sync_outliner_colors(context=None):
             item.row_domain_count = len(objects)
             mixed = len(palette) > 1
             color = MIXED_COLOR if mixed else palette[0]
-            if mixed:
-                icons.update_palette_icon(palette_icon_key(item), palette)
             current = tuple(round(float(c), 4) for c in item.row_color)
             wanted = tuple(round(float(c), 4) for c in color)
             if current != wanted:
                 item.row_color = color
-
-    # Other scenes may still display their own palettes in another window.
-    icons.prune_palette_icons({
-        palette_icon_key(item) for other in bpy.data.scenes
-        for item in getattr(other, 'outliner_items', [])
-        if row_has_swatch(item) and len(palette_for_row(item)) > 1
-    })

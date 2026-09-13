@@ -1191,6 +1191,73 @@ def save_report_and_quit():
     return None
 
 
+def prepare_three_color_swatch():
+    state['swatch_colors'] = [(row.item_id, tuple(row.row_color))
+        for row in bpy.context.scene.outliner_items if row.item_type == 'CHAIN']
+    colors = [(1, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1)]
+    for i, (identifier, _) in enumerate(state['swatch_colors']):
+        row = next(r for r in bpy.context.scene.outliner_items if r.item_id == identifier)
+        row.row_color = colors[i % 3]
+    redraw_all_panels()
+
+
+def observe_three_color_swatch():
+    import numpy as np
+    path = str(Path(report_path).parent / 'outliner-review.png')
+    bpy.ops.screen.screenshot(filepath=path)
+    image = bpy.data.images.load(path, check_existing=False)
+    width, height = image.size
+    pixels = np.array(image.pixels[:]).reshape(height, width, 4)
+    bpy.data.images.remove(image)
+    area = protein_workspace_panel_area()
+    rgb = pixels[:, area.x:area.x+area.width, :3]
+    codes = np.full(rgb.shape[:2], -1)
+    for i, color in enumerate(((1,0,0), (0,1,0), (0,0,1))):
+        codes[np.max(np.abs(rgb - color), axis=2) < .15] = i
+    mixed, solids = [], []
+    for y, line in enumerate(codes):
+        xs = np.flatnonzero(line >= 0)
+        if not len(xs) or xs[-1] - xs[0] > area.width // 3:
+            continue
+        sequence = line[xs][np.r_[True, np.diff(line[xs]) != 0]].tolist()
+        if sequence == [0, 1, 2]:
+            mixed.append((y, xs))
+        elif len(sequence) == 1 and len(xs) >= 8:
+            solids.append(xs)
+    assert mixed, 'Three-color swatch is not visible'
+    assert solids, 'No solid swatch to compare widths'
+    y, xs = mixed[len(mixed)//2]
+    assert abs((xs[-1]-xs[0]) - max(x[-1]-x[0] for x in solids)) <= 2, 'Mixed swatch width differs from solid'
+    green = np.flatnonzero(codes[y] == 1)
+    assert len(green) >= 3 and np.all(np.diff(green) == 1), 'A divider cuts through the middle color'
+    # Right-click the actual protein row, without selecting its checkbox.
+    state['context_menu_rows'] = []
+    def observe_menu(menu, context):
+        row = getattr(context, 'pb_outliner_item', None)
+        if row is not None:
+            state['context_menu_rows'].append(row.item_id)
+    state['menu_observer'] = observe_menu
+    bpy.types.UI_MT_list_item_context_menu.append(observe_menu)
+    state['right_clicked_protein'] = next(r.item_id for r in bpy.context.scene.outliner_items
+                                          if r.item_type == 'PROTEIN')
+    active_window().event_simulate(type='MOUSEMOVE', value='NOTHING', x=area.x+area.width//2, y=y)
+    active_window().event_simulate(type='RIGHTMOUSE', value='PRESS', x=area.x+area.width//2, y=y)
+    active_window().event_simulate(type='RIGHTMOUSE', value='RELEASE', x=area.x+area.width//2, y=y)
+    return f'Three equal color bands occupy {xs[-1]-xs[0]+1} pixels'
+
+
+def assert_outliner_right_click():
+    try:
+        assert state['right_clicked_protein'] in state['context_menu_rows'], 'Right-click did not resolve its PB row'
+        bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'outliner-menu-review.png'))
+    finally:
+        bpy.types.UI_MT_list_item_context_menu.remove(state['menu_observer'])
+        cancel_mixed_swatch_picker()
+        for identifier, color in state['swatch_colors']:
+            row = next(r for r in bpy.context.scene.outliner_items if r.item_id == identifier)
+            row.row_color = color
+
+
 steps = [
     ("setup and real workspace", setup),
     ("settle workspace activation 1", lambda: "workspace event-loop tick"),
@@ -1199,6 +1266,12 @@ steps = [
     ("assert ProteinBlender UI loaded", assert_proteinblender_ui_loaded),
     ("draw every panel", redraw_all_panels),
     ("settle panel redraw", lambda: "redraw event loop tick completed"),
+    ("prepare three-color swatch", prepare_three_color_swatch),
+    ("settle three-color swatch", lambda: "redraw"),
+    ("observe three-color swatch", observe_three_color_swatch),
+    ("settle outliner right-click", lambda: "menu redraw"),
+    ("verify right-click target", assert_outliner_right_click),
+    ("settle context menu close", lambda: "menu close"),
     ("mixed swatch picker", invoke_mixed_swatch_picker),
     ("dismiss mixed swatch picker", cancel_mixed_swatch_picker),
     ("mixed swatch preserves colors", assert_mixed_picker_preserved_colors),

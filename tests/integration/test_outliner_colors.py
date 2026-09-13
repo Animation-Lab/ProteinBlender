@@ -183,8 +183,7 @@ def test_editing_the_protein_swatch_recolors_the_whole_protein(scene):
 
 @pytest.mark.integration
 def test_split_chain_palette_tracks_recolor_rebuild_and_solid_grey(scene):
-    from proteinblender.core.outliner_colors import palette_description, palette_icon_key
-    from proteinblender.utils import icons
+    from proteinblender.core.outliner_colors import palette_description
 
     mid = H.import_local("1ubq.pdb", "palette")
     _build_outliner()
@@ -199,24 +198,14 @@ def test_split_chain_palette_tracks_recolor_rebuild_and_solid_grey(scene):
         assert row.row_domain_count == 6
         assert "6 domains" in palette_description(row)
         assert "Showing 4 of 6 colors" in palette_description(row)
-        # Background Blender does not allocate GPU icon IDs. The live lane
-        # observes the actual displayed icon; here inspect the pixel buffer.
-        # Read Blender's actual icon buffer; the visible four bands must use
-        # the chosen RGBY colors, never an average or a grey placeholder.
         for band, color in enumerate(colors[:4]):
-            preview = icons._collection[f"{palette_icon_key(row)}:{band // 2}"]
-            pixels = list(preview.icon_pixels_float)
-            x = 8 if band % 2 == 0 else 24
-            offset = (16 * 32 + x) * 4
-            assert pixels[offset:offset + 4] == pytest.approx(color)
+            assert tuple(getattr(row, f'palette_color_{band}')) == pytest.approx(color)
 
     # A true grey shared color must remain a single swatch, never "mixed".
     chain = next(row for row in _rows("CHAIN") if row.item_id == chain_id)
     chain.row_color = (0.5, 0.5, 0.5, 1)
     for row in (*_rows("PROTEIN"), *_rows("CHAIN", parent_id=mid)):
         assert json.loads(row.row_palette_json) == [[0.5, 0.5, 0.5, 1]]
-        assert all(f"{palette_icon_key(row)}:{half}" not in icons._collection
-                   for half in range(2))
     for domain in H.sm().molecules[mid].domains.values():
         assert _rendered_rgb(domain.object) == pytest.approx((0.5, 0.5, 0.5))
 
@@ -263,3 +252,19 @@ def test_editing_a_domain_swatch_recolors_only_that_domain(scene):
     assert _rendered_rgb(sibling_obj) == pytest.approx(sibling_before,
                                                        abs=1e-4), (
         "recolouring one domain repainted its sibling")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('count', [2, 3, 4, 6])
+def test_each_native_palette_band_edits_shared_color(scene, count):
+    mid = H.import_local('1ubq.pdb', 'palette bands')
+    cid = _split_first_chain(mid, pieces=count)
+    colors = [(1, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1),
+              (1, 1, 0, 1), (1, 0, 1, 1), (0, 1, 1, 1)]
+    for row, color in zip(_rows('DOMAIN', parent_id=cid), colors):
+        row.row_color = color
+    row = next(r for r in _rows('CHAIN') if r.item_id == cid)
+    assert len(json.loads(row.row_palette_json)) == count
+    setattr(row, f'palette_color_{min(count, 4)-1}', (0.2, 0.4, 0.6, 1))
+    for domain in H.sm().molecules[mid].domains.values():
+        assert _rendered_rgb(domain.object) == pytest.approx((0.2, 0.4, 0.6))
