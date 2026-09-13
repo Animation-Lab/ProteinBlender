@@ -16,8 +16,24 @@ import bpy
 from mathutils import Vector
 
 
-repo_root, report_path = sys.argv[sys.argv.index("--") + 1:]
+repo_root, report_path, *driver_options = sys.argv[sys.argv.index("--") + 1:]
 repo_root = Path(repo_root)
+normal_profile = '--normal-profile' in driver_options
+if normal_profile:
+    # Resolve the enabled copy before adding the source tree to sys.path. Alias
+    # its already-loaded modules so the shared scenario imports observe the
+    # installed classes and singleton, including an extension namespace.
+    enabled = [name for name in bpy.context.preferences.addons.keys()
+               if name == 'proteinblender' or name.endswith('.proteinblender')]
+    assert len(enabled) == 1, f'Expected one enabled installed ProteinBlender: {enabled}'
+    installed_package = enabled[0]
+    installed = sys.modules.get(installed_package)
+    assert installed is not None, 'Enabled ProteinBlender did not load'
+    assert not Path(installed.__file__).resolve().is_relative_to(repo_root.resolve())
+    for name, module in list(sys.modules.items()):
+        if name == installed_package or name.startswith(installed_package + '.'):
+            sys.modules['proteinblender' + name[len(installed_package):]] = module
+    print(f'[normal-profile] Loaded {installed_package}: {installed.__file__}', flush=True)
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "tests"))
 
@@ -103,7 +119,11 @@ def protein_workspace_override():
 
 
 def setup():
-    proteinblender._test_register()
+    if not normal_profile:
+        proteinblender._test_register()
+    else:
+        H.PKG = installed_package
+        assert hasattr(bpy.context.scene, 'outliner_items'), 'Installed add-on failed to register'
     H.reset_scene()
     from proteinblender.addon import create_workspace_callback
     create_workspace_callback()
@@ -135,6 +155,11 @@ def setup():
                   if row.item_type == "PUPPET" and row.item_id != "puppets_separator")
     state["puppet_id"] = puppet.item_id
     assert Path(fixture).is_file()
+    if normal_profile:
+        # Normal startup displays a splash modal. Dismiss it as a user would
+        # before sending clicks to the underlying add-on panels.
+        active_window().event_simulate(type='ESC', value='PRESS')
+        active_window().event_simulate(type='ESC', value='RELEASE')
     return bpy.app.version_string
 
 
@@ -1182,9 +1207,11 @@ def biological_assembly_edit_dialog():
 
 def invoke_morph_regions_dialog():
     from proteinblender.operators import conformation_operators as operators
+    count = state.get('morph_dialog_count', 0) + 1
+    state['morph_dialog_count'] = count
     with ui_override("VIEW_3D"):
-        first = H.import_local('1ubq.pdb', 'UI morph start')
-        second = H.import_local('1ubq.pdb', 'UI morph end')
+        first = H.import_local('1ubq.pdb', f'UI morph start {count}')
+        second = H.import_local('1ubq.pdb', f'UI morph end {count}')
     state['morph_frame'] = bpy.context.scene.frame_current
     state['morph_end'] = bpy.context.scene.frame_end
     state['morph_objects'] = set(bpy.data.objects.keys())
@@ -1225,6 +1252,51 @@ def assert_morph_preview_cancelled():
     assert {obj.name: (obj.hide_get(), obj.hide_render)
             for obj in bpy.context.scene.objects} == state['morph_visibility']
     return 'cancel removed preview and helper, restored originals, current frame, and playback range'
+
+
+def open_breathing_morph_at_return_frame():
+    from proteinblender.core import conformation
+    proteins = [r.item_id for r in bpy.context.scene.outliner_items if r.item_type == 'PROTEIN']
+    first, second = proteins[-2:]
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.create_conformation(
+            source_id=first, target_id=second, source_chain='A', target_chain='A',
+            start_frame=10, end_frame=30, return_to_start=True,
+            return_frame=50, repeat=True, smooth=False) == {'FINISHED'}
+        obj = list(conformation.transitions(bpy.context.scene))[-1]
+        bpy.context.scene.frame_set(60)
+        assert bpy.ops.proteinblender.edit_conformation(
+            'INVOKE_DEFAULT', transition_id=obj[conformation.TAG]) == {'RUNNING_MODAL'}
+    assert bpy.context.scene.frame_current == 60, 'Opening playback jumped out of the breathing cycle'
+    active_window().event_simulate(type='ESC', value='PRESS')
+    active_window().event_simulate(type='ESC', value='RELEASE')
+    return 'Opening a repeated morph keeps the current animation frame'
+
+
+def confirm_morph_region_preview():
+    from proteinblender.core import conformation
+    from proteinblender.operators import conformation_operators as operators
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.preview_conformation_alignment() == {'FINISHED'}
+    state['accepted_preview_id'] = operators._creation_dialog._preview_id
+    state['accepted_previous_morphs'] = {
+        o[conformation.TAG] for o in conformation.transitions(bpy.context.scene)
+        if o[conformation.TAG] != state['accepted_preview_id']}
+    active_window().event_simulate(type='RET', value='PRESS')
+    active_window().event_simulate(type='RET', value='RELEASE')
+    return 'Confirmed the preview through the parent dialog'
+
+
+def assert_morph_preview_committed_once():
+    from proteinblender.core import conformation
+    from proteinblender.operators import conformation_operators as operators
+    assert operators._creation_dialog is None, 'Accepted dialog retained its modal slot'
+    identifiers = {o[conformation.TAG] for o in conformation.transitions(bpy.context.scene)}
+    assert state['accepted_preview_id'] not in identifiers, 'Temporary preview survived confirmation'
+    assert len(identifiers - state['accepted_previous_morphs']) == 1, 'Confirmation did not create exactly one morph'
+    active_window().event_simulate(type='ESC', value='PRESS')
+    active_window().event_simulate(type='ESC', value='RELEASE')
+    return 'Confirmation replaced the temporary preview with one permanent morph and released dialog state'
 
 
 def save_report_and_quit():
@@ -1295,8 +1367,9 @@ def observe_three_color_swatch():
 
 def assert_outliner_right_click():
     try:
-        assert state['right_clicked_protein'] in state['context_menu_rows'], 'Right-click did not resolve its PB row'
         bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'outliner-menu-review.png'))
+        assert state['right_clicked_protein'] in state['context_menu_rows'], (
+            f"Right-click did not resolve its PB row: expected {state['right_clicked_protein']}, observed {state['context_menu_rows']}")
     finally:
         bpy.types.UI_MT_list_item_context_menu.remove(state['menu_observer'])
         cancel_mixed_swatch_picker()
@@ -1458,6 +1531,12 @@ steps = [
     ("morph region dialog", invoke_morph_regions_dialog),
     ("morph region preview", preview_morph_regions_and_cancel),
     ("morph preview cancellation", assert_morph_preview_cancelled),
+    ("breathing morph dialog keeps frame", open_breathing_morph_at_return_frame),
+    ("settle breathing dialog", lambda: "modal cancellation processed"),
+    ("morph dialog for confirmation", invoke_morph_regions_dialog),
+    ("confirm morph region preview", confirm_morph_region_preview),
+    ("assert morph preview committed once", assert_morph_preview_committed_once),
+    ("settle accepted morph playback", lambda: "modal cancellation processed"),
 ]
 
 steps.extend([

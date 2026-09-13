@@ -218,6 +218,31 @@ def test_flat_material_follows_molecular_opacity(scene, sm, single_chain):
     assert alpha.inputs[0].default_value == pytest.approx(.25)
 
 
+def test_morph_context_opacity_and_animated_fades_remain_flat(scene):
+    first = H.import_local('1ubq.pdb', 'flat_start')
+    second = H.import_local('1ubq.pdb', 'flat_end')
+    assert bpy.ops.proteinblender.create_conformation(
+        source_id=first, target_id=second, source_chain='A', target_chain='A',
+        source_region='1-30', target_region='1-30') == {'FINISHED'}
+    obj = next(o for o in scene.objects if o.get('pb_conformation'))
+    _apply(preset='ILLUSTRATION')
+    assert bpy.ops.proteinblender.edit_conformation(
+        transition_id=obj['pb_conformation'], context_opacity=.4) == {'FINISHED'}
+    material = obj['pb_context_material']
+    nodes = material.node_tree.nodes
+    alpha = nodes['PB Illustration Alpha'].inputs[0]
+    assert alpha.default_value == pytest.approx(.4)
+    source = next(n for n in nodes if n.type == 'BSDF_PRINCIPLED').inputs['Alpha']
+    for frame, value in ((1, 0), (21, 1)):
+        source.default_value = value
+        source.keyframe_insert('default_value', frame=frame)
+    scene.frame_set(11)
+    bpy.context.view_layer.update()
+    evaluated = material.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    actual = evaluated.node_tree.nodes['PB Illustration Alpha'].inputs[0].default_value
+    assert actual == pytest.approx(.5, abs=.01), 'Flat shader lost the animated fade'
+
+
 @pytest.mark.parametrize('kind', ['dna', 'membrane'])
 def test_builders_are_included_in_lighting_fit(kind):
     if kind == 'dna':

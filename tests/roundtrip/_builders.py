@@ -815,6 +815,16 @@ def build_captured_conformation():
     assert any(r.name == 'Captured State' for r in bpy.context.scene.outliner_items)
 
 
+def build_illustration_conformation():
+    build_breathing_conformation()
+    assert bpy.ops.proteinblender.setup_lighting(
+        preset='ILLUSTRATION', preview=False) == {'FINISHED'}
+    obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
+    material = obj['pb_context_material']
+    assert material.node_tree.nodes.get('PB Illustration Alpha')
+    assert material.node_tree.nodes['PB Illustration Alpha'].inputs[0].default_value == .25
+
+
 def build_surface_conformation():
     build_conformation(style='surface')
 
@@ -845,6 +855,7 @@ BUILDERS = {
     "surface_conformation": build_surface_conformation,
     "breathing_conformation": build_breathing_conformation,
     "captured_conformation": build_captured_conformation,
+    "illustration_conformation": build_illustration_conformation,
     "kitchen_sink": build_kitchen_sink,
 }
 
@@ -877,6 +888,7 @@ BUILDER_SUBSYSTEMS = {
     "surface_conformation": ("core", "operators", "panels"),
     "breathing_conformation": ("core", "operators", "panels"),
     "captured_conformation": ("core", "operators", "panels"),
+    "illustration_conformation": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
                      "operators", "properties", "panels"),
 }

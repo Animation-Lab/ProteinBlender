@@ -266,5 +266,5 @@ For more advanced topics:
 [Back to Home](index.html) | [Previous: Manage Poses](poses.html)
 
 For transitions between two imported structures, use
-[Align & Animate](conformations.html). Its playback popup sets the timing
+[Align & Morph](conformations.html). Its playback popup sets the timing
 without requiring a puppet or the native Blender timeline.

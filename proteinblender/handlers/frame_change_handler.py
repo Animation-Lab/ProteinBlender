@@ -46,6 +46,9 @@ def update_colors_on_frame_change(scene):
             # Debug output (can be removed later)
             # print(f"Frame {scene.frame_current}: Updated color for {obj.name} to {color}")
 
+    from ..core.illustration import sync_animated_alpha
+    sync_animated_alpha()
+
 
 def register():
     """Register the frame change handlers"""

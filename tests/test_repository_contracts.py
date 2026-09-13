@@ -137,6 +137,9 @@ def test_no_identity_comparisons_on_blender_data():
     # very operator instance is the one holding the modal dialog slot.
     allowed = {
         ("operators/keyframe_operators.py", "self"),
+        # The creation dialog owns temporary preview state on this Python
+        # operator instance, just like the keyframe modal slot above.
+        ("operators/conformation_operators.py", "self"),
     }
 
     def is_trivial(node):

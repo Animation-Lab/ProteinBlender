@@ -41,6 +41,23 @@ def sync_alpha(material, alpha):
             node.inputs[0].default_value = alpha
 
 
+def sync_animated_alpha():
+    """Follow evaluated alpha through the existing frame-change lifecycle.
+
+    A driver between sockets in the same shader tree creates a dependency
+    cycle in Blender, including after reopening. Keep the original material
+    animation as the authority and synchronize the display wrapper instead.
+    """
+    for material in bpy.data.materials:
+        tree = material.node_tree
+        if tree is None:
+            continue
+        bypass = tree.nodes.get('PB Illustration Bypass')
+        if bypass and bypass.inputs[0].default_value and bypass.inputs[1].is_linked:
+            original = bypass.inputs[1].links[0].from_node
+            sync_alpha(material, original.inputs['Alpha'].default_value)
+
+
 def _setup(material, brightness, outlines):
     tree = material.node_tree
     if tree is None:

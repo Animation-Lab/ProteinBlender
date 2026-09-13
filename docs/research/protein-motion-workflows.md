@@ -22,6 +22,8 @@ Alignment uses a proper Kabsch rotation and translation; it does not scale or re
 
 Morph geometry retains shared atom names and elements within paired residues. At amino-acid substitutions, only shared backbone atoms survive. Bonds survive only when their vertices survive. Unmatched atoms are omitted from the morph copy while remaining intact in the original structures. A point-to-point Cartesian interpolation then moves retained atoms between the starting coordinates and the aligned target coordinates. Blender shape keys store the endpoints; easing changes the time course, not the spatial route.
 
+For each retained atom, the position is `P(w) = (1 − w) P_start + w P_end`, where `P_end` is already aligned. Linear timing uses the normalized frame fraction for `w`; easing changes that fraction. The substitution backbone allowlist is `N`, `CA`, `C`, `O`, and `OXT`, still requiring matching names and elements. ProteinBlender converts coordinates at 0.01 Blender units per ångström.
+
 This path can shorten bonds, create clashes, or pass through an implausible intermediate. A good endpoint alignment does not validate the intermediate states. The original workflow also ignores puppet/domain poses when computing the match, parents the result to the start protein, and stores duration in seconds. Its popup already provides a forward/backward preview, but that preview alone does not create a persistent breathing animation in the scene.
 
 ## Chimera and ChimeraX: useful distinctions
@@ -125,7 +127,7 @@ The practical research priority is therefore: trajectory import for externally g
 [^7]: ISOLDE. [Introduction to cryo-EM model rebuilding](https://tristanic.github.io/isolde/static/isolde/doc/tutorials/intro/cryo_intro/cryo_intro.html). Online version 1.12.0 documentation, accessed September 13, 2026.
 [^8]: O'Connor et al. [Interactive molecular dynamics in virtual reality from quantum chemistry to drug binding: an open-source multi-person framework](https://arxiv.org/abs/1902.01827). 2019 preprint describing Narupa.
 [^9]: OpenMM. [Custom forces](https://docs.openmm.org/latest/userguide/theory/03_custom_forces.html). User Guide 8.6, accessed September 13, 2026.
-[^10]: Croll and colleagues. [Adaptive Cartesian and torsional restraints for interactive model rebuilding](https://pmc.ncbi.nlm.nih.gov/articles/PMC8025879/). Acta Crystallographica D (2021).
+[^10]: Croll, T. I., and Read, R. J. [Adaptive Cartesian and torsional restraints for interactive model rebuilding](https://pmc.ncbi.nlm.nih.gov/articles/PMC8025879/). Acta Crystallographica D 77, 438–446 (2021). DOI: 10.1107/S2059798321001145.
 [^11]: Deeptime developers. [Markov state models](https://deeptime-ml.github.io/latest/index_msm.html). Version 0.4.5 documentation, accessed September 13, 2026.
 [^12]: Deeptime developers. [MarkovStateModel API](https://deeptime-ml.github.io/latest/api/generated/deeptime.markov.msm.MarkovStateModel.html). Accessed September 13, 2026.
 [^13]: Johnston, B. [Trajectories](https://bradyajohnston.github.io/MolecularNodes/tutorials/trajectories.html). MolecularNodes tutorial, accessed September 13, 2026; checked against the locally vendored implementation.

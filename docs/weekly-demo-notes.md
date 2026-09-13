@@ -2,15 +2,15 @@
 
 ## Work organization
 
-The work is divided into independent branches from `alpha` at `7ca96f0`. Each implementation branch includes its tests and a change note. A final integration branch brings them together for one demonstration. Review and merge the individual branches by topic; use the integration branch to test interactions and rehearse the demo.
+The work is divided into independent branches from `alpha` at `7ca96f0`. Each implementation branch includes its tests and a change note. **`demo/weekly-improvements` is the combined working version.** Review individual branches by topic; use the combined branch to rehearse and merge the complete result. It also contains integration fixes for flat-shader fades and morph-context opacity, plus the normal-profile UI test harness.
 
-| Branch | Scope | Change note |
+| Branch / topic commit | Scope | Change note |
 |---|---|---|
-| `fix/weekly-outliner` | Four-color swatches, three-color divider, Edit Chain pivots, labeled right-click actions | [Outliner](change-notes/outliner.md) |
-| `fix/weekly-lighting` | Flat illustration, contours, Apply without closing | [Lighting](change-notes/lighting.md) |
-| `fix/weekly-membrane-force-fields` | Reproduced missing-gap defect; displayed geometry and moving-chain fields | [Membrane](change-notes/membrane.md) |
-| `feat/weekly-morph-workflow` | Independent morphs, frame timing, alignment control, context, breathing, captured conformations | [Morphing](change-notes/morphing.md) |
-| `docs/weekly-motion-research` | Sculpting, ChimeraX, Markov models, MolecularNodes trajectories, next milestones | [Research report](research/protein-motion-workflows.md) |
+| `fix/weekly-outliner` · `314af13` | Four-color swatches, three-color divider, Edit Chain pivots, labeled right-click actions | [Outliner](change-notes/outliner.md) |
+| `fix/weekly-lighting` · `d884b10` | Flat illustration, contours, Apply without closing | [Lighting](change-notes/lighting.md) |
+| `fix/weekly-membrane-force-fields` · `860822f` | Reproduced missing-gap defect; displayed geometry and moving-chain fields | [Membrane](change-notes/membrane.md) |
+| `feat/weekly-morph-workflow` · `58c8269` | Independent morphs, frame timing, alignment control, context, breathing, captured conformations | [Morphing](change-notes/morphing.md) |
+| `docs/weekly-motion-research` · `4b13883` | Sculpting, ChimeraX, Markov models, MolecularNodes trajectories, next milestones | [Research report](research/protein-motion-workflows.md) |
 
 The exploratory items are treated as research and implementation planning. The report distinguishes proposed capabilities from implemented behavior. It recommends trajectory playback and restrained endpoint editing before a full molecular sculpting engine.
 
@@ -44,8 +44,8 @@ The exploratory items are treated as research and implementation planning. The r
 1. **Outliner usability:** use three colored domains to show the uninterrupted center band. Add more domains to show the four-color preview cap. Right-click a protein and a chain, then open Edit Chain.
 2. **Lighting:** choose Bright Illustration, press Apply, toggle Outlines, and Apply again. Switch to Studio to show restored depth shading. Close after applying.
 3. **Membrane:** move a chain off its protein origin, select the whole protein as the membrane target, and show the gap around the actual chain. Change its pivot, lift it above the membrane, and lower it again.
-4. **Morph:** use bundled adenylate kinase structures `1ake.pdb` and `4ake.pdb`, chain A. Show the actual residue match and fit report, choose an anchor, and preview the colored region with faded context.
-5. **Animation:** create a morph at frames 10–30, return at 50, and enable Repeat. Scrub frames 10, 20, 30, 40, 50, 60, and 70 to show 0%, 50%, 100%, 50%, 0%, 50%, and 100% at linear timing.
+4. **Morph:** use bundled adenylate kinase structures `tests/data/1ake.pdb` and `tests/data/4ake.pdb`, chain A. Leave residue fields empty and choose `1-40` as an anchor to compare fitting. Then select `122-159` in both residue fields, choose All paired residues, and preview the colored region with faded context. Anchors must belong to the selected matched region. Cancel the preview to show restoration.
+5. **Animation:** clear the residue fields to morph chain A, create it at frames 10–30, return at 50, enable Repeat, and disable Ease in and out. Scrub frames 10, 20, 30, 40, 50, 60, and 70 to show 0%, 50%, 100%, 50%, 0%, 50%, and 100%. The popup slider covers the forward leg; use Play to observe the repeat.
 6. **Independence:** collapse the proteins and show that the morph remains visible as its own row. Create another morph for a different region. Delete one morph and retain the other.
 7. **Authored conformation:** split a protein, pose one domain, capture a named conformation, and choose it as an endpoint. Explain the current capture scope: native chain/domain poses, without arbitrary deformers or ambiguous duplicate copies.
 8. **Research discussion:** show the motion-workflow report. Emphasize externally supplied trajectories as the first extension, then restrained conformation editing. Keep Markov state scheduling separate from atom-path generation.
@@ -58,11 +58,14 @@ The existing interpolation is Cartesian atom-position interpolation between corr
 
 ## Verification record
 
-- Baseline: 42 focused tests passed in Blender 5.2 before changes.
-- Outliner: 52 focused tests passed in Blender 5.2; foreground pixel checks measured equal swatch width and an uninterrupted middle color; actual right-click targeting passed.
-- Lighting: 17 tests passed in Blender 5.2, including real flat/contour/Studio renders and opacity; foreground Apply/close lifecycle passed.
-- Membrane: the new geometry regression failed before the fix; 34 tests passed in both Blender 5.1 and 5.2 afterward. The foreground event-loop test also passed.
-- Morph, integration, persistence, and normal-profile verification: results to be completed before final delivery.
+- Broad offline checks: 708 passed per version in Blender 5.1 and 5.2. A modal-instance policy finding was resolved and its contract checks rerun; existing skips and platform diagnostics are detailed in the [verification record](change-notes/verification.md).
+- Final affected checks: 46 lighting/morph/save-reopen tests passed in Blender 5.2; 55 including keyframes passed in Blender 5.1. An additional 28 contract/keyframe checks passed in Blender 5.2.
+- Blender 5.0: 85 focused tests passed for morphing, lighting, membranes, and outliner colors. The final Blender 5.1 contract rerun passed all 19 checks.
+- Foreground UI: 75 combined source scenarios passed per version. The expanded set of 79 scenarios passed against the enabled installed copies in fresh normal Blender 5.1 and 5.2 profiles.
+- The membrane regression failed before the fix and passed afterward. Real rendered pixels verify flat shading, contours, molecular color, morph geometry, and swatch width. Seven save/reopen cases include breathing, capture, and illustration morphs.
+- Deployment byte-verified 144 Python files per installed copy. The demonstration branch is ready locally; no branches were pushed or published.
+
+The long test runs emitted Windows environment-variable diagnostics that also reproduce on unchanged `alpha`. The focused final checks and installed-profile UI checks did not emit them. See the verification record for exact commands, counts, and limitations.
 
 ## Follow-up boundaries
 

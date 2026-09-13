@@ -145,6 +145,9 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
         proteins = (self.source_id, self.target_id)
         if proteins != getattr(self, '_last_proteins', proteins):
             self.source_chain = self.target_chain = 'ALL'
+            self.chain_pairs = ''
+        if self.source_chain != 'ALL' or self.target_chain != 'ALL':
+            self.chain_pairs = ''
         self._last_proteins = proteins
         self._preview_dirty = bool(getattr(self, '_preview_id', ''))
         self._analyze()
@@ -201,6 +204,7 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
         self._analyze()
         if self._match is None:
             self.report({'WARNING'}, self._problem)
+            self.cancel(context)
             return {'CANCELLED'}
         molecules = ProteinBlenderScene.get_instance().molecules
         try:
@@ -210,6 +214,7 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
                               **_timing(self, context))
         except ValueError as exc:
             self.report({'WARNING'}, str(exc))
+            self.cancel(context)
             return {'CANCELLED'}
         context.scene.frame_set(self.start_frame)
         self.report({'INFO'}, 'Transition created. Its Outliner pencil opens playback.')

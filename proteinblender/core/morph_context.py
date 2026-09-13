@@ -85,6 +85,8 @@ def set_visible(obj, visible, opacity=.18):
         for node in material.node_tree.nodes:
             if node.type == 'BSDF_PRINCIPLED':
                 node.inputs['Alpha'].default_value = opacity
+        from .illustration import sync_alpha
+        sync_alpha(material, opacity)
 
 
 def remove(obj):

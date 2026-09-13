@@ -30,6 +30,10 @@ python tests/run_isolated_tests.py
 # real foreground window/event loop (use xvfb-run on headless Linux)
 python tests/run_ui_tests.py
 
+# Same UI scenarios in a fresh normal profile, using its enabled installed copy
+# (run deployment first; this process does not save its test scene/preferences)
+python tests/run_ui_tests.py --normal-profile --blender "<path-to-blender>"
+
 # a Blender you already have open, observed through its viewport
 python tests/run_live_tests.py --preflight
 python tests/run_live_tests.py -v

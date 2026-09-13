@@ -202,7 +202,7 @@ class PROTEINBLENDER_PT_animation(Panel):
         transition = col.row()
         transition.scale_y = 1.2
         transition.operator('proteinblender.create_conformation', icon='IPO_EASE_IN_OUT')
-        layout.operator('proteinblender.capture_conformation', text='Capture Conformation', icon='DUPLICATE')
+        col.operator('proteinblender.capture_conformation', text='Capture Conformation', icon='DUPLICATE')
 
         # --- Keyframe list: scrolling once past 10 entries ---
         list_box = col.box()

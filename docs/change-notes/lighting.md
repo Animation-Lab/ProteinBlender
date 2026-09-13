@@ -17,3 +17,9 @@ ChimeraX's flat preset uses ambient-only illumination, no shadows, and silhouett
 ## Verification
 
 The 17-test Blender 5.2 lighting suite passes, including real molecular renders, neutral color, instance bounds, mute/restore, flat sphere pixels, visible dark contours, idempotent reapplication, restored Studio shading, and molecular opacity. The foreground suite checks the Apply operator while the parent dialog is modal, then verifies that Escape still reaches the parent and preserves applied settings. Aggregate results are recorded in the weekly demo notes.
+
+Integration adds an eighteenth regression for morph-context opacity and animated
+fades. The existing frame-change handler synchronizes the flat wrapper with the
+original shader's animated alpha. A fresh-process save/reopen test caught a
+dependency cycle in the first synchronization approach; the final implementation
+uses no shader-socket driver and passes that persistence check.
