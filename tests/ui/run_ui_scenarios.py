@@ -1258,6 +1258,52 @@ def assert_outliner_right_click():
             row.row_color = color
 
 
+def invoke_lighting_apply_dialog():
+    from proteinblender.operators.lighting_operators import PROTEINBLENDER_OT_setup_lighting as cls
+    original_draw = cls.draw
+    original_cancel = getattr(cls, 'cancel', None)
+    state['lighting_draws'] = []
+    state['lighting_cancelled'] = False
+    def draw(self, context):
+        original_draw(self, context)
+        state['lighting_draws'].append(self.layout.introspect())
+    def cancel(self, context):
+        state['lighting_cancelled'] = True
+        if original_cancel:
+            original_cancel(self, context)
+    cls.draw, cls.cancel = draw, cancel
+    state['lighting_original_callbacks'] = (cls, original_draw, original_cancel)
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.setup_lighting('INVOKE_DEFAULT', preset='ILLUSTRATION') == {'RUNNING_MODAL'}
+
+
+def apply_lighting_inside_dialog():
+    assert state['lighting_draws'], 'Lighting dialog did not draw'
+    layout = str(state['lighting_draws'][-1])
+    assert 'Apply' in layout and 'proteinblender.apply_lighting' in layout
+    # Execute the very operator exposed by the dialog's Apply button while
+    # the parent popup is still modal; Escape below must still reach it.
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.apply_lighting('EXEC_DEFAULT', preset='ILLUSTRATION') == {'FINISHED'}
+    assert bpy.context.scene['pb_scene_lighting']['preset'] == 'ILLUSTRATION'
+    cancel_mixed_swatch_picker()
+
+
+def assert_lighting_apply_kept_dialog_open():
+    try:
+        assert state['lighting_cancelled'], 'Apply closed its parent dialog'
+        assert bpy.context.scene['pb_scene_lighting']['preset'] == 'ILLUSTRATION', 'Closing discarded applied lighting'
+        with protein_workspace_override():
+            bpy.ops.proteinblender.setup_lighting('EXEC_DEFAULT', preset='STUDIO')
+    finally:
+        cls, draw, cancel = state['lighting_original_callbacks']
+        cls.draw = draw
+        if cancel is None:
+            del cls.cancel
+        else:
+            cls.cancel = cancel
+
+
 steps = [
     ("setup and real workspace", setup),
     ("settle workspace activation 1", lambda: "workspace event-loop tick"),
@@ -1272,6 +1318,11 @@ steps = [
     ("settle outliner right-click", lambda: "menu redraw"),
     ("verify right-click target", assert_outliner_right_click),
     ("settle context menu close", lambda: "menu close"),
+    ("lighting Apply dialog", invoke_lighting_apply_dialog),
+    ("settle lighting dialog", lambda: "dialog redraw"),
+    ("apply lighting without closing", apply_lighting_inside_dialog),
+    ("settle lighting close", lambda: "Escape delivered"),
+    ("verify lighting Apply lifecycle", assert_lighting_apply_kept_dialog_open),
     ("mixed swatch picker", invoke_mixed_swatch_picker),
     ("dismiss mixed swatch picker", cancel_mixed_swatch_picker),
     ("mixed swatch preserves colors", assert_mixed_picker_preserved_colors),

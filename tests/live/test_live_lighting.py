@@ -77,7 +77,8 @@ rig = scene['pb_scene_lighting']
 assert rig['preset'] == preset
 assert len(rig.objects) == 4
 assert scene.render.engine in {'CYCLES', 'BLENDER_EEVEE'}
-assert all(o.type == 'LIGHT' and o.data.energy > 0 for o in rig.objects)
+assert all(o.type == 'LIGHT' for o in rig.objects)
+assert all((o.data.energy == 0) if preset == 'ILLUSTRATION' else (o.data.energy > 0) for o in rig.objects)
 for area in bpy.context.screen.areas:
     if area.type == 'VIEW_3D':
         shading = area.spaces.active.shading
