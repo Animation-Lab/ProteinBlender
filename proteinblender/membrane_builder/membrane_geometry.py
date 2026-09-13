@@ -352,7 +352,10 @@ TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 #        minimal (Rodrigues) rotation taking the rest normal to the deformed
 #        normal, so it is perpendicular to the primary by construction at every
 #        frame. Tilt is unchanged.
-GN_TREE_VERSION = 38
+#   v39: force fields use displayed chain/domain bounds in membrane space.
+#        Origins may be edited pivots; empty protein controllers have no body.
+#        Bounds and size now follow the geometry during motion and scaling.
+GN_TREE_VERSION = 39
 
 
 # ===========================================================================
@@ -544,6 +547,8 @@ def _build_membrane_gn_tree(num_holes: int = 0,
         _new_input(tree, f"Protein FF {i}", "NodeSocketObject")
         _new_input(tree, f"Protein FF {i} Radius", "NodeSocketFloat",
                    default=0.0, min_val=0.0, max_val=50.0)
+        _new_input(tree, f"Protein FF {i} Spacing", "NodeSocketFloat",
+                   default=0.15, min_val=0.0, max_val=50.0)
 
     nodes = tree.nodes
     links = tree.links
@@ -1296,14 +1301,40 @@ def _build_membrane_gn_tree(num_holes: int = 0,
             # ---- Protein force-field slots -------------------------------
             ff_hy_base = y_pos - 600 - (num_holes + 1) * 260
             for f in range(1, num_ffs + 1):
+                # Read displayed geometry in membrane coordinates, including
+                # point clouds and instances. Object origins can be edited
+                # pivots and are not reliable molecular centers.
+                info = new('GeometryNodeObjectInfo', name=f'FF Bounds Object {f} L{leaflet_index}')
+                info.transform_space = 'RELATIVE'
+                links.new(get_in(f'Protein FF {f}'), info.inputs['Object'])
+                realize = new('GeometryNodeRealizeInstances', name=f'FF Realize {f} L{leaflet_index}')
+                links.new(info.outputs['Geometry'], realize.inputs['Geometry'])
+                bounds = new('GeometryNodeBoundBox', name=f'FF Bounds {f} L{leaflet_index}')
+                links.new(realize.outputs['Geometry'], bounds.inputs['Geometry'])
+                middle = new('ShaderNodeVectorMath', name=f'FF Center Sum {f} L{leaflet_index}')
+                middle.operation = 'ADD'
+                links.new(bounds.outputs['Min'], middle.inputs[0])
+                links.new(bounds.outputs['Max'], middle.inputs[1])
+                center = new('ShaderNodeVectorMath', name=f'FF Center {f} L{leaflet_index}')
+                center.operation = 'SCALE'
+                center.inputs['Scale'].default_value = .5
+                links.new(middle.outputs[0], center.inputs[0])
+                span = new('ShaderNodeVectorMath', name=f'FF Span {f} L{leaflet_index}')
+                span.operation = 'DISTANCE'
+                links.new(bounds.outputs['Min'], span.inputs[0])
+                links.new(bounds.outputs['Max'], span.inputs[1])
+                radius = new('ShaderNodeMath', name=f'FF Radius {f} L{leaflet_index}')
+                radius.operation = 'MULTIPLY_ADD'
+                links.new(span.outputs['Value'], radius.inputs[0])
+                radius.inputs[1].default_value = .5
+                links.new(get_in(f'Protein FF {f} Spacing'), radius.inputs[2])
                 _add_slot(
                     slot_label=f"FF{f}",
                     enabled_sock=get_in(f"Protein FF {f} Enabled"),
                     obj_sock=get_in(f"Protein FF {f}"),
-                    radius_source=get_in(f"Protein FF {f} Radius"),
+                    radius_source=radius.outputs[0],
                     hy=ff_hy_base - f * 260,
-                    # center_sock left None: read the protein's live position
-                    # from Object Info, so the field tracks it as it moves.
+                    center_sock=center.outputs[0],
                 )
 
             # ---- Combiner: softmax direction + softmax-weighted-mean sdf --
