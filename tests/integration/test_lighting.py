@@ -152,6 +152,72 @@ def test_camera_orientation_and_materials_are_preserved(scene):
     assert tuple(material.diffuse_color) == pytest.approx((.1, .4, .8, .6))
 
 
+@pytest.mark.visual
+def test_illustration_is_flat_has_contours_and_restores_shader(scene, tmp_path):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24)
+    sphere = bpy.context.object
+    for face in sphere.data.polygons:
+        face.use_smooth = True
+    material = bpy.data.materials.new('Flat test blue')
+    material.use_nodes = True
+    shader = material.node_tree.nodes.get('Principled BSDF')
+    shader.inputs['Base Color'].default_value = (.04, .25, .8, 1)
+    sphere.data.materials.append(material)
+    original_color = tuple(shader.inputs['Base Color'].default_value)
+    camera = bpy.data.objects.new('Flat camera', bpy.data.cameras.new('Flat camera'))
+    scene.collection.objects.link(camera)
+    scene.camera = camera
+    camera.data.type = 'ORTHO'
+    camera.data.ortho_scale = 2.4
+    camera.location = (0, 0, 5)
+    scene.render.engine = 'CYCLES'
+    scene.cycles.samples = 8
+    scene.render.resolution_x = scene.render.resolution_y = 96
+    scene.render.resolution_percentage = 100
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.image_settings.color_mode = 'RGBA'
+
+    def render(name):
+        scene.render.filepath = str(tmp_path / (name + '.png'))
+        bpy.ops.render.render(write_still=True)
+        image = bpy.data.images.load(scene.render.filepath, check_existing=False)
+        try:
+            pixels = np.array(image.pixels[:]).reshape(-1, 4)
+            return pixels[pixels[:, 3] > .999, :3]
+        finally:
+            bpy.data.images.remove(image)
+
+    _apply(preset='ILLUSTRATION', outlines=False)
+    flat = render('flat')
+    assert len(flat) > 3000
+    assert np.max(np.std(flat, axis=0)) < .01, 'Flat preset still shades the surface'
+    count = len(material.node_tree.nodes)
+    _apply(preset='ILLUSTRATION', outlines=True)
+    outlined = render('outlined')
+    assert len(material.node_tree.nodes) == count, 'Apply duplicated shader nodes'
+    assert np.count_nonzero(outlined.max(axis=1) < .03) > 20, 'No dark contour appeared'
+    assert np.mean(outlined[:, 2]) > np.mean(outlined[:, 0]) * 1.5
+    assert tuple(shader.inputs['Base Color'].default_value) == original_color
+    _apply(preset='STUDIO')
+    restored = render('studio')
+    assert np.std(restored.mean(axis=1)) > .04, 'Studio did not restore surface shading'
+
+
+def test_flat_material_follows_molecular_opacity(scene, sm, single_chain):
+    from proteinblender.core.visual_style import apply_color_to_object
+    _apply(preset='ILLUSTRATION')
+    obj = next(d.object for d in sm.molecules[single_chain].domains.values())
+    apply_color_to_object(obj, (.3, .5, .9, .25))
+    materials = [n.inputs['Material'].default_value for m in obj.modifiers if m.type == 'NODES'
+                 for n in m.node_group.nodes if 'Material' in n.inputs
+                 and n.inputs['Material'].type == 'MATERIAL' and n.inputs['Material'].default_value]
+    assert materials
+    alpha = materials[0].node_tree.nodes.get('PB Illustration Alpha')
+    assert alpha is not None
+    assert alpha.inputs[0].default_value == pytest.approx(.25)
+
+
 @pytest.mark.parametrize('kind', ['dna', 'membrane'])
 def test_builders_are_included_in_lighting_fit(kind):
     if kind == 'dna':
@@ -208,7 +274,8 @@ def test_molecule_render_is_lit_and_keeps_color(scene, sm, single_chain, tmp_pat
         assert rgb.mean() > .08, 'Molecule is effectively unlit'
         assert np.mean(np.min(rgb, axis=1) > .95) < .05, 'Lighting washed out the colors'
         assert rgb[:, 2].mean() > rgb[:, 0].mean() * 1.2, 'Blue molecular color was lost'
-        assert np.std(rgb.mean(axis=1)) > .015, 'Surface shape has no visible shading'
+        if preset != 'ILLUSTRATION':
+            assert np.std(rgb.mean(axis=1)) > .015, 'Surface shape has no visible shading'
         lit_mean = rgb.mean()
     finally:
         bpy.data.images.remove(image)

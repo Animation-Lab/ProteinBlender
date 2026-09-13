@@ -195,6 +195,8 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
             if node.type == 'BSDF_PRINCIPLED':
                 # Update the alpha value - this is what will be keyframed
                 node.inputs['Alpha'].default_value = alpha_value
+                from .illustration import sync_alpha
+                sync_alpha(mat, alpha_value)
 
                 # Update blend method based on alpha for better viewport display
                 if alpha_value >= 0.98:
@@ -703,4 +705,3 @@ def unregister_props():
         del bpy.types.Scene.visual_setup_color
     if hasattr(bpy.types.Scene, "visual_setup_style"):
         del bpy.types.Scene.visual_setup_style
-

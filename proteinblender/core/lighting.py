@@ -17,7 +17,7 @@ PRESETS = {
     # key, fill, rim, lower fill; powers are for a one-unit bounding radius.
     "STUDIO": ((220, 140, 200, 60), 2.0, 0.20, True),
     "SURFACE": ((280, 85, 210, 40), 1.2, 0.12, True),
-    "ILLUSTRATION": ((170, 170, 100, 100), 2.8, 0.30, False),
+    "ILLUSTRATION": ((0, 0, 0, 0), 2.8, 0.30, False),
 }
 OFFSETS = ((-2, 2.5, 3), (2.5, 0.8, 2), (0.5, 2, -3), (0, -2.5, 1.5))
 ROLES = ("Key", "Fill", "Rim", "Lower Fill")
@@ -157,7 +157,7 @@ def _world(scene, strength):
 
 
 def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
-                   mute_existing=True, preview=True):
+                   mute_existing=True, preview=True, outlines=True):
     center, radius = scene_bounds(context)  # Validate before changing the scene.
     rotation = view_rotation(context, alignment)
     powers, softness, ambient, shadows = PRESETS[preset]
@@ -192,6 +192,8 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
     rig["preset"] = preset
     _other_lights(context, rig, mute_existing)
     _world(scene, ambient * brightness)
+    from .illustration import set_illustration
+    set_illustration(scene, preset == 'ILLUSTRATION', brightness, outlines)
     if scene.render.engine == 'BLENDER_WORKBENCH':
         scene.render.engine = 'BLENDER_EEVEE'
     if preview and context.screen:
