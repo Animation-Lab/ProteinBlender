@@ -1180,6 +1180,53 @@ def biological_assembly_edit_dialog():
     return "biological assembly reopened in the BMT dialog and cancelled"
 
 
+def invoke_morph_regions_dialog():
+    from proteinblender.operators import conformation_operators as operators
+    with ui_override("VIEW_3D"):
+        first = H.import_local('1ubq.pdb', 'UI morph start')
+        second = H.import_local('1ubq.pdb', 'UI morph end')
+    state['morph_frame'] = bpy.context.scene.frame_current
+    state['morph_end'] = bpy.context.scene.frame_end
+    state['morph_objects'] = set(bpy.data.objects.keys())
+    state['morph_visibility'] = {
+        obj.name: (obj.hide_get(), obj.hide_render) for obj in bpy.context.scene.objects}
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.create_conformation(
+            'INVOKE_DEFAULT', source_id=first, target_id=second,
+            source_chain='A', target_chain='A', source_region='1-30', target_region='1-30',
+            start_frame=300, end_frame=330) == {'RUNNING_MODAL'}
+    assert operators._creation_dialog is not None
+    assert operators._creation_dialog._match.summary['residues'] == 30
+    return 'Align & Morph dialog opened with a matched residue region'
+
+
+def preview_morph_regions_and_cancel():
+    from proteinblender.operators import conformation_operators as operators
+    from proteinblender.core import conformation
+    with ui_override("PROPERTIES"):
+        assert bpy.ops.proteinblender.preview_conformation_alignment() == {'FINISHED'}
+    dialog = operators._creation_dialog
+    obj = conformation.find(bpy.context.scene, dialog._preview_id)
+    assert obj is not None and obj.parent is None and not obj.children
+    assert obj.get('pb_context_object') is not None
+    assert bpy.context.scene.frame_current == 300
+    assert bpy.context.scene.frame_end >= 330
+    active_window().event_simulate(type='ESC', value='PRESS')
+    active_window().event_simulate(type='ESC', value='RELEASE')
+    return 'preview created a colored region and translucent context; Escape sent to parent dialog'
+
+
+def assert_morph_preview_cancelled():
+    from proteinblender.operators import conformation_operators as operators
+    assert operators._creation_dialog is None, 'Escape did not cancel the creation dialog'
+    assert set(bpy.data.objects.keys()) == state['morph_objects']
+    assert bpy.context.scene.frame_current == state['morph_frame']
+    assert bpy.context.scene.frame_end == state['morph_end']
+    assert {obj.name: (obj.hide_get(), obj.hide_render)
+            for obj in bpy.context.scene.objects} == state['morph_visibility']
+    return 'cancel removed preview and helper, restored originals, current frame, and playback range'
+
+
 def save_report_and_quit():
     ok = all(item["ok"] for item in results)
     Path(report_path).write_text(json.dumps({
@@ -1247,6 +1294,9 @@ steps = [
     ("settle redo event 1", lambda: f"redo settle: {domain_state_snapshot()}"),
     ("settle redo event 2", lambda: f"redo settle: {domain_state_snapshot()}"),
     ("assert redo", assert_redo),
+    ("morph region dialog", invoke_morph_regions_dialog),
+    ("morph region preview", preview_morph_regions_and_cancel),
+    ("morph preview cancellation", assert_morph_preview_cancelled),
 ]
 
 

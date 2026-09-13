@@ -5,7 +5,6 @@ import uuid
 import bpy
 import bmesh
 import numpy as np
-from mathutils import Matrix
 
 from . import structural_alignment as alignment
 from .domain_space import get_pivot
@@ -32,24 +31,21 @@ def rebuild_outliner(context):
 def add_outliner_rows(context, selection):
     scene = context.scene
     for obj in transitions(scene):
-        parent = obj.get('pb_start_object')
-        parent_row = next((r for r in scene.outliner_items
-                           if r.item_type == 'PROTEIN' and parent and r.object_name == parent.name), None)
-        if parent_row is None:
-            continue
-        parent_id = parent_row.item_id
-        index = next(i for i, r in enumerate(scene.outliner_items) if r.item_id == parent_id)
+        make_independent(obj)
         row = scene.outliner_items.add()
         row.item_type = 'TRANSITION'
         row.item_id = obj[TAG]
-        row.parent_id = parent_id
+        row.parent_id = ""
         row.name = obj.name
         row.object_name = obj.name
-        row.indent_level = 1
+        row.indent_level = 0
         row.icon = 'IPO_EASE_IN_OUT'
         row.is_selected = selection.get(row.item_id, obj.select_get())
         row.tooltip = 'Conformational transition. Open the pencil to scrub, play, or change timing.'
-        scene.outliner_items.move(len(scene.outliner_items) - 1, index + 1)
+        separator = next((i for i, r in enumerate(scene.outliner_items)
+                          if r.item_id == 'puppets_separator'), None)
+        if separator is not None:
+            scene.outliner_items.move(len(scene.outliner_items) - 1, separator)
 
 
 def source_visibility(obj, hide):
@@ -81,31 +77,55 @@ def source_visibility(obj, hide):
     obj['pb_hide_originals'] = hide
 
 
-def set_timing(obj, start, duration, smooth=True):
+def make_independent(obj):
+    if obj.parent is not None:
+        world = obj.matrix_world.copy()
+        obj.parent = None
+        obj.matrix_world = world
+
+
+def set_timing(obj, start, duration=3, smooth=True, *, end=None,
+               return_to_start=False, return_frame=None, repeat=False):
     scene = bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
-    end = start + max(1, round(duration * fps))
+    end = int(end) if end is not None else start + max(1, round(duration * fps))
+    if end <= start:
+        raise ValueError('End frame must be after start frame.')
+    return_frame = int(return_frame) if return_frame is not None else end + end - start
+    if return_to_start and return_frame <= end:
+        raise ValueError('Return frame must be after end frame.')
+    if repeat and not return_to_start:
+        raise ValueError('Enable Return to start before repeating a breathing cycle.')
     keys = obj.data.shape_keys
     old_action = keys.animation_data.action if keys.animation_data else None
     keys.animation_data_clear()
     if old_action and old_action.users == 0:
         bpy.data.actions.remove(old_action)
     key = keys.key_blocks['End conformation']
-    for frame, value in ((start, 0.0), (end, 1.0)):
+    points = [(start, 0.0), (end, 1.0)]
+    if return_to_start:
+        points.append((return_frame, 0.0))
+    for frame, value in points:
         key.value = value
         key.keyframe_insert('value', frame=frame)
     from ..utils.animation import get_fcurves_from_action
     for curve in get_fcurves_from_action(keys.animation_data.action, keys.animation_data):
+        if repeat:
+            cycle = curve.modifiers.new('CYCLES')
+            cycle.mode_before, cycle.mode_after = 'NONE', 'REPEAT'
         for point in curve.keyframe_points:
             point.interpolation = 'SINE' if smooth else 'LINEAR'
             point.easing = 'EASE_IN_OUT'
     obj['pb_start_frame'], obj['pb_end_frame'] = start, end
-    obj['pb_duration'], obj['pb_smooth'] = duration, smooth
-    scene.frame_end = max(scene.frame_end, end)
+    obj['pb_duration'], obj['pb_smooth'] = (end - start) / fps, smooth
+    obj['pb_return_to_start'], obj['pb_return_frame'] = return_to_start, return_frame
+    obj['pb_repeat'] = repeat
+    scene.frame_end = max(scene.frame_end, return_frame if return_to_start else end)
     scene.frame_set(scene.frame_current)
 
 
-def create(context, source, target, match, start=1, duration=3, smooth=True):
+def create(context, source, target, match, start=1, duration=3, smooth=True,
+           show_context=True, context_opacity=.18, **timing):
     from ..utils.molecularnodes.blender.nodes import create_starting_node_tree
     from .visual_style import apply_color_to_object
     source_name = getattr(source, 'name', source.identifier)
@@ -131,9 +151,7 @@ def create(context, source, target, match, start=1, duration=3, smooth=True):
         pivot = np.asarray(get_pivot(source.object))
         mesh.vertices.foreach_set('co', (match.start - pivot).ravel())
         mesh.update()
-        obj.parent = source.object
-        obj.matrix_parent_inverse = Matrix.Identity(4)
-        obj.matrix_basis = Matrix.Identity(4)
+        obj.matrix_world = source.object.matrix_world.copy()
         obj.shape_key_add(name='Start conformation')
         key = obj.shape_key_add(name='End conformation')
         key.data.foreach_set('co', (match.end - pivot).ravel())
@@ -149,7 +167,10 @@ def create(context, source, target, match, start=1, duration=3, smooth=True):
         for molecule in (source, target):
             originals += [molecule.object] + [d.object for d in molecule.domains.values() if d.object]
         obj['pb_original_objects'] = [{'object': original} for original in dict.fromkeys(originals)]
-        set_timing(obj, start, duration, smooth)
+        from . import morph_context
+        morph_context.create(obj, source, match.source_indices, show_context, context_opacity)
+        morph_context.set_visible(obj, show_context, context_opacity)
+        set_timing(obj, start, duration, smooth, **timing)
         source_visibility(obj, True)
         rebuild_outliner(context)
         return obj
@@ -160,6 +181,10 @@ def create(context, source, target, match, start=1, duration=3, smooth=True):
 
 def remove(context, obj, rebuild=True):
     source_visibility(obj, False)
+    from . import morph_context
+    material = obj.get('pb_context_material')
+    context_style = obj.get('pb_context_style')
+    morph_context.remove(obj)
     mesh = obj.data
     action = (mesh.shape_keys.animation_data.action
               if mesh.shape_keys and mesh.shape_keys.animation_data else None)
@@ -172,6 +197,10 @@ def remove(context, obj, rebuild=True):
             bpy.data.node_groups.remove(tree)
     if action and action.users == 0:
         bpy.data.actions.remove(action)
+    if context_style and context_style.users == 0:
+        bpy.data.node_groups.remove(context_style)
+    if material and material.users == 0:
+        bpy.data.materials.remove(material)
     if rebuild:
         rebuild_outliner(context)
 
@@ -179,4 +208,4 @@ def remove(context, obj, rebuild=True):
 def clear_for_source(context, source):
     for obj in transitions(context.scene):
         if obj.get('pb_start_object') == source:
-            remove(context, obj, rebuild=False)
+            make_independent(obj)
