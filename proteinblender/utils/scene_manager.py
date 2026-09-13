@@ -1782,7 +1782,8 @@ def build_outliner_hierarchy(context=None):
         protein_item.item_type = 'DNA_RNA' if is_nucleic else 'PROTEIN'
         protein_item.item_id = molecule_id
         protein_item.parent_id = ""
-        protein_item.name = getattr(molecule, 'name', molecule.identifier)
+        protein_item.name = ((mol_object.get('pb_conformation_name') if mol_object else None)
+                             or getattr(molecule, 'name', molecule.identifier))
 
         # Safely get object name and visibility
         try:

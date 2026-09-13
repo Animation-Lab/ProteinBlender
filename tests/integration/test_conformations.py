@@ -55,7 +55,7 @@ def test_known_rigid_transform_has_no_conformational_motion(sm):
     keys = obj.data.shape_keys.key_blocks
     np.testing.assert_allclose(_coords(keys[0]), _coords(keys[1]), atol=1e-6)
     assert json.loads(obj['pb_match'])['rmsd'] < 1e-4
-    assert obj.parent == source.object
+    assert obj.parent is None
     np.testing.assert_allclose(A.positions(source.object), original, atol=1e-6)
     np.testing.assert_allclose(A.positions(target.object), transformed, atol=1e-4)
     # Independent ground truth: the source atoms Blender displayed before
@@ -111,7 +111,7 @@ def test_whole_protein_chains_and_visibility_lifecycle(scene, sm):
     assert json.loads(obj['pb_match'])['mapping'] == ['A → A', 'B → B', 'C → C', 'D → D']
     row = next(r for r in scene.outliner_items if r.item_type == 'TRANSITION')
     identifier = row.item_id
-    assert row.parent_id == first
+    assert row.parent_id == '' and row.indent_level == 0
     assert all(o.hide_get() and o.hide_render for o in original_objects)
     selected = obj.select_get()
     assert bpy.ops.proteinblender.outliner_select(item_id=identifier) == {'FINISHED'}
@@ -126,7 +126,7 @@ def test_whole_protein_chains_and_visibility_lifecycle(scene, sm):
     assert not any(r.item_type == 'TRANSITION' for r in scene.outliner_items)
 
 
-def test_deleting_start_cascades_but_end_is_not_required_for_playback(scene):
+def test_deleting_either_endpoint_preserves_independent_morph(scene):
     first, second = _pair()
     obj = _create(first, second)
     identifier = obj[C.TAG]
@@ -135,7 +135,8 @@ def test_deleting_start_cascades_but_end_is_not_required_for_playback(scene):
     assert bpy.ops.proteinblender.conformation_preview(transition_id=identifier, action='END') == {'FINISHED'}
     assert obj.data.shape_keys.key_blocks[1].value == pytest.approx(1)
     assert bpy.ops.molecule.delete(molecule_id=first) == {'FINISHED'}
-    assert not C.transitions(scene)
+    assert C.find(scene, identifier) is not None
+    assert bpy.ops.proteinblender.delete_conformation(transition_id=identifier) == {'FINISHED'}
 
 
 def test_invalid_same_structure_and_mismatched_scope_leave_scene_untouched(scene):
@@ -367,3 +368,100 @@ def test_stable_core_never_fits_fewer_than_half_the_pairs(sm):
     report = json.loads(obj['pb_match'])
     assert report['residues'] == 214
     assert report['fit_residues'] >= 107
+
+
+def test_end_frames_return_and_repeat_evaluate_in_normal_animation(scene):
+    first, second = _pair('1ake.pdb', '4ake.pdb')
+    obj = _create(first, second, source_chain='A', target_chain='A',
+                  start_frame=10, end_frame=30, return_to_start=True,
+                  return_frame=50, repeat=True, smooth=False)
+    key = obj.data.shape_keys.key_blocks['End conformation']
+    for frame, value in ((10, 0), (20, .5), (30, 1), (40, .5), (50, 0), (60, .5), (70, 1)):
+        scene.frame_set(frame)
+        assert key.value == pytest.approx(value, abs=1e-6)
+    assert obj.parent is None and not obj.children
+    assert obj['pb_start_frame'] == 10 and obj['pb_end_frame'] == 30
+    assert bpy.ops.proteinblender.edit_conformation(
+        transition_id=obj[C.TAG], start_frame=50, end_frame=40) == {'CANCELLED'}
+    scene.frame_set(30)
+    assert key.value == pytest.approx(1), 'Invalid timing damaged the existing action'
+
+
+def test_selected_regions_and_alignment_anchor_are_reported(scene, sm):
+    first, second = _pair('1ake.pdb', '4ake.pdb')
+    obj = _create(first, second, source_chain='A', target_chain='A',
+                  source_region='1-40,65-76', target_region='1-40,65-76',
+                  fit='REGION', fit_region='1-20')
+    report = json.loads(obj['pb_match'])
+    assert report['residues'] == 52 and report['fit_residues'] == 20
+    residues = {v.value for v in obj.data.attributes['res_id'].data}
+    assert residues == set(range(1,41)) | set(range(65,77))
+    assert obj.get('pb_context_object') is not None
+    assert all(p[0][1] <= 20 for p in report['fit_pairs'])
+    helper = obj['pb_context_object']
+    assert helper.parent is None and helper.hide_render
+    assert bpy.ops.proteinblender.edit_conformation(
+        transition_id=obj[C.TAG], show_context=False) == {'FINISHED'}
+    tree = obj.modifiers[0].node_group
+    assert not tree.nodes['PB Morph Context Visibility'].inputs[0].default_value
+
+
+def test_current_placement_is_used_without_superposition(scene, sm):
+    first, second = _pair()
+    source, target = sm.molecules[first], sm.molecules[second]
+    target.object.location.x += 2
+    scene.view_layers[0].update()
+    obj = _create(first, second, fit='NONE')
+    a, b = [_coords(key) for key in obj.data.shape_keys.key_blocks]
+    np.testing.assert_allclose(b-a, np.broadcast_to([2,0,0], a.shape), atol=1e-5)
+    before = obj.matrix_world.copy()
+    source.object.location.x += 4
+    scene.view_layers[0].update()
+    assert obj.matrix_world == before
+
+
+def test_multiple_morphs_and_explicit_chain_pairing(scene):
+    first, second = _pair('4hhb.pdb', '4hhb.pdb')
+    a = _create(first, second, chain_pairs='A:C,B:D')
+    b = _create(first, second, source_chain='C', target_chain='A')
+    assert json.loads(a['pb_match'])['mapping'] == ['A → C', 'B → D']
+    rows = [r for r in scene.outliner_items if r.item_type == 'TRANSITION']
+    assert len(rows) == 2 and all(r.parent_id == '' and r.indent_level == 0 for r in rows)
+    helper_names = [o['pb_context_object'].name for o in (a,b)]
+    aid = a[C.TAG]
+    assert bpy.ops.proteinblender.delete_conformation(transition_id=aid) == {'FINISHED'}
+    assert helper_names[0] not in bpy.data.objects and helper_names[1] in bpy.data.objects
+    assert C.find(scene, b[C.TAG]) is not None
+
+
+def test_capture_current_domain_pose_without_modifying_source(scene, sm, single_chain):
+    from mathutils import Matrix
+    from scipy.spatial import cKDTree
+    source = sm.molecules[single_chain]
+    chain_id = next(r.item_id for r in scene.outliner_items if r.item_type == 'CHAIN')
+    assert bpy.ops.proteinblender.edit_chain_domains(item_id=chain_id,
+        layout_json=json.dumps([dict(name='Fixed', start=1, end=35),
+                                dict(name='Moving', start=36, end=76)])) == {'FINISHED'}
+    domains = [d.object for d in source.domains.values()]
+    domains[1].rotation_euler.z += .5
+    domains[1].location.x += .3
+    scene.view_layers[0].update()
+    expected = H.evaluated_atom_positions(domains)
+    before = {o.name: o.matrix_world.copy() for o in domains}
+    original = A.positions(source.object).copy()
+    identifiers = set(sm.molecules)
+    assert bpy.ops.proteinblender.capture_conformation(
+        source_id=single_chain, name='Authored Open State') == {'FINISHED'}
+    identifier = (set(sm.molecules)-identifiers).pop()
+    captured = sm.molecules[identifier]
+    scene.view_layers[0].update()
+    actual = H.evaluated_atom_positions([captured.object]+[d.object for d in captured.domains.values()])
+    assert len(actual) == len(expected) > 100
+    assert cKDTree(expected).query(actual)[0].max() < 2e-5
+    assert cKDTree(actual).query(expected)[0].max() < 2e-5
+    assert all(bpy.data.objects[name].matrix_world == matrix for name, matrix in before.items())
+    np.testing.assert_array_equal(A.positions(source.object), original)
+    assert A.read_identity(captured).atom_name == A.read_identity(source).atom_name
+    assert next(r.name for r in scene.outliner_items if r.item_id == identifier) == 'Authored Open State'
+    obj = _create(single_chain, identifier, fit='ALL')
+    assert json.loads(obj['pb_match'])['rmsd'] > 1

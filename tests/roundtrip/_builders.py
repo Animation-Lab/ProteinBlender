@@ -785,6 +785,36 @@ def build_conformation(style='cartoon'):
     assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < 1e-5
 
 
+def build_breathing_conformation():
+    build_conformation()
+    scene = bpy.context.scene
+    obj = next(o for o in scene.objects if o.get('pb_conformation'))
+    assert bpy.ops.proteinblender.edit_conformation(
+        transition_id=obj['pb_conformation'], start_frame=10, end_frame=30,
+        return_to_start=True, return_frame=50, repeat=True,
+        smooth=False, show_context=True, context_opacity=.25) == {'FINISHED'}
+    scene.frame_set(60)
+    assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < 1e-5
+    assert obj.parent is None and not obj.children
+    assert obj.get('pb_context_object') is not None
+    assert next(r for r in scene.outliner_items if r.item_id == obj['pb_conformation']).parent_id == ''
+
+
+def build_captured_conformation():
+    mid = H.import_local('1ubq.pdb', 'capture_source')
+    molecule = H.sm().molecules[mid]
+    domain = next(iter(molecule.domains.values())).object
+    domain.rotation_euler.z = .4
+    domain.location.x += .5
+    bpy.context.view_layer.update()
+    before = set(H.sm().molecules)
+    assert bpy.ops.proteinblender.capture_conformation(source_id=mid, name='Captured State') == {'FINISHED'}
+    captured = H.sm().molecules[(set(H.sm().molecules)-before).pop()]
+    assert captured.object.get('pb_captured_conformation')
+    assert captured.object.data.get('pb_alignment_identity')
+    assert any(r.name == 'Captured State' for r in bpy.context.scene.outliner_items)
+
+
 def build_surface_conformation():
     build_conformation(style='surface')
 
@@ -813,6 +843,8 @@ BUILDERS = {
     "lighting": build_lighting,
     "conformation": build_conformation,
     "surface_conformation": build_surface_conformation,
+    "breathing_conformation": build_breathing_conformation,
+    "captured_conformation": build_captured_conformation,
     "kitchen_sink": build_kitchen_sink,
 }
 
@@ -843,6 +875,8 @@ BUILDER_SUBSYSTEMS = {
     "lighting": ("core", "operators", "panels"),
     "conformation": ("core", "operators", "panels"),
     "surface_conformation": ("core", "operators", "panels"),
+    "breathing_conformation": ("core", "operators", "panels"),
+    "captured_conformation": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
                      "operators", "properties", "panels"),
 }

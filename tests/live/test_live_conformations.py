@@ -140,7 +140,7 @@ for text in ('Start', 'End', 'Play', 'Duration', 'Color', 'Match details'):
     assert text in str(layout), str(layout)
 obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
 row = next(r for r in bpy.context.scene.outliner_items if r.item_type == 'TRANSITION')
-assert row.parent_id == first and row.object_name == obj.name
+assert row.parent_id == '' and row.indent_level == 0 and row.object_name == obj.name
 op.progress = .5
 assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < .05
 bpy.ops.proteinblender.conformation_preview(transition_id=obj['pb_conformation'], action='END')

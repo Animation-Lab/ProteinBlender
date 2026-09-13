@@ -6,6 +6,7 @@ side effects; dialog analysis can therefore be cancelled without touching data.
 """
 from dataclasses import dataclass
 import json
+import re
 
 import numpy as np
 
@@ -140,14 +141,63 @@ class Match:
     summary: dict
 
 
-def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit='CORE'):
+def parse_regions(text, default_chain='ALL'):
+    """Inclusive residue intervals; insertion variants of a number stay together."""
+    if not text.strip():
+        return []
+    result = []
+    for token in text.split(','):
+        parts = token.strip().split(':', 1)
+        chain, span = (parts if len(parts) == 2 else (default_chain, parts[0]))
+        if chain == 'ALL':
+            raise ValueError('Prefix each region with its chain, for example A:1-40,B:10-50.')
+        match = re.fullmatch(r'(-?\d+)(?:-(-?\d+))?', span.strip())
+        if not match:
+            raise ValueError('Use residue ranges such as 1-40,65-76 or A:1-40,B:10-50.')
+        start = int(match[1])
+        end = int(match[2]) if match[2] is not None else start
+        if end < start:
+            raise ValueError('A residue range must end at or after its start.')
+        result.append((chain.strip(), start, end))
+    return result
+
+
+def in_regions(key, regions):
+    return not regions or any(key[0] == chain and start <= key[1] <= end
+                              for chain, start, end in regions)
+
+
+def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit='CORE', *,
+                     source_region='', target_region='', fit_region='', chain_pairs=''):
     if source.object == target.object:
         raise ValueError('Choose two different structures.')
     a, b = read_identity(source), read_identity(target)
     ac, bc = protein_chains(a), protein_chains(b)
+    for chains, text, chain in ((ac, source_region, source_chain), (bc, target_region, target_chain)):
+        regions = parse_regions(text, chain)
+        if regions:
+            for name in list(chains):
+                chains[name] = [r for r in chains[name] if in_regions(r['key'], regions)]
+                if not chains[name]:
+                    del chains[name]
+            if not chains:
+                raise ValueError('The selected residue region contains no protein alpha carbons.')
     if (source_chain == 'ALL') != (target_chain == 'ALL'):
         raise ValueError('Choose Whole protein for both structures, or select two chains.')
-    if source_chain != 'ALL':
+    if chain_pairs.strip():
+        if source_chain != 'ALL' or target_chain != 'ALL':
+            raise ValueError('Use Whole protein with explicit chain pairing.')
+        assignments = []
+        for entry in chain_pairs.split(','):
+            pair = tuple(x.strip() for x in entry.split(':'))
+            if len(pair) != 2 or pair[0] not in ac or pair[1] not in bc:
+                raise ValueError('Use available chain pairs such as A:B,C:D.')
+            assignments.append(pair)
+        if (len({a for a, b in assignments}) != len(assignments) or
+                len({b for a, b in assignments}) != len(assignments)):
+            raise ValueError('Each chain can appear only once in the chain pairing.')
+        cache = {}
+    elif source_chain != 'ALL':
         if source_chain not in ac or target_chain not in bc:
             raise ValueError('The selected chain is no longer available.')
         assignments = [(source_chain, target_chain)]
@@ -199,19 +249,41 @@ def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit
         raise ValueError('The structure contains invalid atom coordinates.')
     fixed, mobile = p[cas_a], q[cas_b]
     selected = np.arange(matches)
-    minimum = max(3, int(np.ceil(matches / 2)))
-    for _ in range(30 if fit == 'CORE' else 1):
+    if fit == 'REGION':
+        anchors = parse_regions(fit_region, source_chain)
+        if not anchors:
+            raise ValueError('Choose an alignment anchor region on the start structure.')
+        selected = np.asarray([i for i, pair in enumerate(residues) if in_regions(pair[0], anchors)])
+        if len(selected) < 3:
+            raise ValueError('The alignment anchor must contain at least three paired alpha carbons.')
+    if fit == 'NONE':
+        from mathutils import Matrix
+        from .domain_space import get_pivot
+        fixed_space = source.object.matrix_world @ Matrix.Translation(-get_pivot(source.object))
+        moving_space = target.object.matrix_world @ Matrix.Translation(-get_pivot(target.object))
+        try:
+            transform = np.asarray(fixed_space.inverted() @ moving_space)
+        except ValueError:
+            raise ValueError('The start structure has a zero scale; restore its scale before morphing.')
+        q = q @ transform[:3, :3].T + transform[:3, 3] / SCALE
+        mobile = q[cas_b]
+    if fit == 'NONE':
+        rotation, translation = np.eye(3), np.zeros(3)
+        distances = np.linalg.norm(mobile - fixed, axis=1)
+    else:
+        minimum = max(3, int(np.ceil(matches / 2)))
+        for _ in range(30 if fit == 'CORE' else 1):
+            rotation, translation = rigid_fit(fixed[selected], mobile[selected])
+            distances = np.linalg.norm(mobile @ rotation + translation - fixed, axis=1)
+            if fit != 'CORE' or distances[selected].max() <= 2 or len(selected) <= minimum:
+                break
+            remove = max(1, min(int(np.ceil(len(selected) * .1)),
+                                int(np.ceil(np.sum(distances[selected] > 2) * .5))))
+            remove = min(remove, len(selected) - minimum)
+            selected = selected[np.argsort(distances[selected])[:-remove]]
+        # Refit after the last pruning pass, too.
         rotation, translation = rigid_fit(fixed[selected], mobile[selected])
         distances = np.linalg.norm(mobile @ rotation + translation - fixed, axis=1)
-        if fit != 'CORE' or distances[selected].max() <= 2 or len(selected) <= minimum:
-            break
-        remove = max(1, min(int(np.ceil(len(selected) * .1)),
-                            int(np.ceil(np.sum(distances[selected] > 2) * .5))))
-        remove = min(remove, len(selected) - minimum)
-        selected = selected[np.argsort(distances[selected])[:-remove]]
-    # Refit after the last pruning pass, too.
-    rotation, translation = rigid_fit(fixed[selected], mobile[selected])
-    distances = np.linalg.norm(mobile @ rotation + translation - fixed, axis=1)
     order = np.argsort(atoms_a)
     ia, ib = np.asarray(atoms_a)[order], np.asarray(atoms_b)[order]
     total_a = sum(map(len, ac.values())) if source_chain == 'ALL' else len(ac[source_chain])
@@ -221,6 +293,8 @@ def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit
                    target_residues=total_b, atoms=len(ia),
                    rmsd=float(np.sqrt(np.mean(distances ** 2))),
                    fit_rmsd=float(np.sqrt(np.mean(distances[selected] ** 2))),
-                   residue_pairs=residues, fit=fit,
+                   residue_pairs=residues, fit=fit, fit_region=fit_region,
+                   source_region=source_region, target_region=target_region,
+                   chain_pairs=chain_pairs, fit_pairs=[residues[i] for i in selected],
                    omitted_atoms=[len(p) - len(ia), len(q) - len(ib)])
     return Match(ia, ib, p[ia] * SCALE, (q[ib] @ rotation + translation) * SCALE, summary)
