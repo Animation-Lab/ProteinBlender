@@ -1304,6 +1304,43 @@ def assert_lighting_apply_kept_dialog_open():
             cls.cancel = cancel
 
 
+def membrane_force_field_tracks_displayed_chain():
+    import numpy as np
+    with ui_override('VIEW_3D'):
+        mid = H.import_local('1ubq.pdb', 'ui_forcefield')
+        domain = next(iter(H.sm().molecules[mid].domains.values())).object
+        domain.location.x += 1
+        bpy.context.view_layer.update()
+        center = H.evaluated_atom_positions([domain]).mean(axis=0)
+        root = bpy.data.objects[H.build_membrane(width=40, height=40)[0]]
+        state['ff_root'], state['ff_domain'], state['ff_center'] = root.name, domain.name, center
+        state['ff_baseline'] = membrane_force_field_clearance()
+        assert bpy.ops.proteinblender.membrane_force_fields(
+            membrane_name=root.name, targets_json=json.dumps([mid]), spacing=1.75) == {'FINISHED'}
+
+
+def membrane_force_field_clearance():
+    import numpy as np
+    bpy.context.view_layer.update()
+    root = bpy.data.objects[state['ff_root']]
+    positions = [tuple(i.matrix_world.translation) for i in bpy.context.evaluated_depsgraph_get().object_instances
+                 if i.is_instance and i.parent and i.parent.original == root]
+    assert len(positions) > 100
+    return float(np.linalg.norm((np.asarray(positions)-state['ff_center'])[:, :2], axis=1).min())
+
+
+def membrane_force_field_raise_chain():
+    near = membrane_force_field_clearance()
+    assert near > state['ff_baseline'] + .15, (near, state['ff_baseline'])
+    bpy.data.objects[state['ff_domain']].location.z += 5
+
+
+def membrane_force_field_assert_far():
+    far = membrane_force_field_clearance()
+    assert abs(far-state['ff_baseline']) < .01, (far, state['ff_baseline'])
+    return 'The real event loop closed the gap after the chain left the membrane'
+
+
 steps = [
     ("setup and real workspace", setup),
     ("settle workspace activation 1", lambda: "workspace event-loop tick"),
@@ -1372,6 +1409,14 @@ steps = [
     ("settle redo event 2", lambda: f"redo settle: {domain_state_snapshot()}"),
     ("assert redo", assert_redo),
 ]
+
+steps.extend([
+    ('membrane displayed chain target', membrane_force_field_tracks_displayed_chain),
+    ('settle membrane field', lambda: 'event loop'),
+    ('raise force-field chain', membrane_force_field_raise_chain),
+    ('settle raised force field', lambda: 'event loop'),
+    ('verify force-field height', membrane_force_field_assert_far),
+])
 
 
 def advance():

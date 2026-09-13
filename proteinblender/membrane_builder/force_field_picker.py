@@ -80,7 +80,7 @@ class PROTEINBLENDER_OT_membrane_force_fields(Operator):
                 raise ValueError("Expected a list of protein, chain or domain IDs")
             owners = set()
             for item_id in ids:
-                molecule, objects = resolve_target(item_id)
+                molecule, objects = force_fields.resolve_membrane_target(item_id)
                 if molecule is None or not objects:
                     raise ValueError(f"Target no longer exists: {item_id}")
                 owners.update(o.name for o in objects)

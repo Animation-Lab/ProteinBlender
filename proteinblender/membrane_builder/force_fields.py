@@ -156,24 +156,56 @@ def membrane_target_ids(root):
 
 
 def membrane_target_objects(root):
-    from ..core.outliner_targets import resolve_target
     found = {}
     for item_id in membrane_target_ids(root):
         if not isinstance(item_id, str):
             continue
-        _molecule, objects = resolve_target(item_id)
+        _molecule, objects = resolve_membrane_target(item_id)
         for obj in objects:
             if obj is not None and obj.type == 'MESH':
                 found[obj.name] = obj
     return list(found.values())
 
 
+def resolve_membrane_target(item_id):
+    """Proteins emit through their displayed chains, which can move separately."""
+    from ..core.outliner_targets import resolve_target
+    molecule, objects = resolve_target(item_id)
+    if molecule is not None and item_id == molecule.identifier:
+        displayed = [d.object for d in molecule.domains.values() if d.object]
+        if displayed:
+            objects = displayed
+    return molecule, objects
+
+
 def membrane_emitters(root, scene=None):
     if TARGETS_KEY in root:
         return membrane_target_objects(root)
     objects = scene.objects if scene is not None else bpy.data.objects
-    return [o for o in objects if not o.get(_FF_ANCHOR_MARKER, False)
-            and getattr(o, "pb_force_field_enabled", False)]
+    from ..utils.scene_manager import ProteinBlenderScene
+    molecules = ProteinBlenderScene.get_instance().molecules
+    found = {}
+    for obj in objects:
+        if obj.get(_FF_ANCHOR_MARKER, False) or not getattr(obj, 'pb_force_field_enabled', False):
+            continue
+        molecule = next((m for m in molecules.values() if m.object == obj), None)
+        expanded = ([d.object for d in molecule.domains.values() if d.object]
+                    if molecule else []) or [obj]
+        found.update((o.name, o) for o in expanded)
+    return list(found.values())
+
+
+def emitter_spacing(root, owner):
+    if TARGETS_KEY in root:
+        return float(root.get(SPACING_KEY, 1.5))
+    if owner.pb_force_field_enabled:
+        return float(owner.pb_force_field_spacing)
+    from ..utils.scene_manager import ProteinBlenderScene
+    for molecule in ProteinBlenderScene.get_instance().molecules.values():
+        if (molecule.object and molecule.object.pb_force_field_enabled
+                and any(d.object == owner for d in molecule.domains.values())):
+            return float(molecule.object.pb_force_field_spacing)
+    return float(owner.pb_force_field_spacing)
 
 
 def _evaluated_coords_local(obj: bpy.types.Object):
@@ -373,9 +405,7 @@ def collect_force_field_slots(scene: Optional[bpy.types.Scene], root=None
     if root is None:
         entries = iter_active_force_fields(scene)
     else:
-        entries = ((owner, compute_force_field_radius_bu(owner,
-                    float(root.get(SPACING_KEY, 1.5)) if TARGETS_KEY in root
-                    else float(owner.pb_force_field_spacing)))
+        entries = ((owner, compute_force_field_radius_bu(owner, emitter_spacing(root, owner)))
                    for owner in membrane_emitters(root, scene))
     for entry in entries:
         out.append(entry)
@@ -454,10 +484,13 @@ def apply_force_fields_to_membrane(root_obj: bpy.types.Object,
             _set_mod_input(mod, f"Protein FF {i}", owner)
             _set_mod_input(mod, f"Protein FF {i} Enabled", True)
             _set_mod_input(mod, f"Protein FF {i} Radius", float(radius_bu))
+            spacing = emitter_spacing(root_obj, owner)
+            _set_mod_input(mod, f"Protein FF {i} Spacing", spacing / NM_PER_BU)
         else:
             _set_mod_input(mod, f"Protein FF {i}", None)
             _set_mod_input(mod, f"Protein FF {i} Enabled", False)
             _set_mod_input(mod, f"Protein FF {i} Radius", 0.0)
+            _set_mod_input(mod, f"Protein FF {i} Spacing", 0.0)
 
     if not defer_refresh:
         _refresh_modifier(mod)
@@ -546,7 +579,9 @@ def _deferred_membrane_refresh():
 def _ff_watched_names(scene) -> set:
     """Names whose transform should kick a membrane refresh: every
     FF-enabled object (one per emitter, parented anchor follows for free)."""
-    return {obj.name for obj in iter_ff_emitter_objects()}
+    return ({obj.name for obj in iter_ff_emitter_objects()} |
+            {obj.name for root in scene.objects if root.get('pb_is_membrane')
+             for obj in membrane_emitters(root, scene)})
 
 
 @persistent
