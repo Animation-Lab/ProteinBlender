@@ -185,6 +185,26 @@ def test_named_library_endpoints_create_independent_breathing_morph(scene):
     assert C.find(scene, obj[C.TAG]) is not None
 
 
+def test_morph_can_pair_stored_states_from_different_proteins(scene, sm):
+    first, library = ensemble()
+    second_id = H.import_local('1d3z.pdb.gz', 'second ensemble')
+    second = sm.molecules[second_id]
+    # Choose endpoints that differ from both proteins' displayed states.
+    assert bpy.ops.proteinblender.create_conformation(
+        source_id=first.identifier, target_id=second_id,
+        source_state=library.states[2].uid,
+        target_state=second.object.pb_conformations.states[7].uid,
+        fit='NONE', start_frame=10, end_frame=30) == {'FINISHED'}
+    obj = C.transitions(scene)[0]
+    raw = original_models()
+    from proteinblender.core.domain_space import get_pivot
+    mask = np.isin(A.read_identity(first).residue_name, list(A.AA))
+    for index, block in zip((2, 7), obj.data.shape_keys.key_blocks):
+        coords = np.empty((len(block.data), 3))
+        block.data.foreach_get('co', coords.ravel())
+        np.testing.assert_allclose(coords, raw[index].coord[mask] * .01 - np.asarray(get_pivot(first.object)), atol=1e-6)
+
+
 def test_file_append_rejects_mismatch_without_partial_change(scene):
     mol, library = ensemble()
     before = L.read_mesh(mol.object.data).copy()

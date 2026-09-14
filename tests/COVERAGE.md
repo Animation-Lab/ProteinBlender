@@ -1658,3 +1658,26 @@ by passing that state directly (no dialog needed):
 - Final focused Blender 5.0 run: **18 passed**, including the missing-template case and persistence. Final installed native popup tests: **4 passed each** in Blender 5.1 and 5.2. A saved earlier renderer upgrades successfully through its pencil after normal-profile reopen.
 - Visually reviewed adjacent 512-pixel Cycles frames from the final installed 5.2 addon. The final chain-A cartoon's largest frame step is **0.348 Å**. The 5.2-saved animation reopens in normal-profile 5.1 and has the same maximum across all 73 frames without calling any operator that could rebuild it. All six installed addon copies are byte-verified.
 - Final full suites: **726 passed, 7 skipped, 1 existing xfail** in Blender 5.2 (797.99 s) and 5.1 (795.52 s), both exit 0. The 5.2 run emitted 44 Windows native access-violation diagnostics while continuing; the 5.1 run emitted none. Their cause remains undetermined. Focused 5.0 and final native popup/render/reopen checks were clean. Logs: `/tmp/pb-arrow-verified-full52.log`, `/tmp/pb-arrow-verified-full51.log`.
+
+- **Unified Morph workflow:** stored states can be paired across proteins; the
+  same popup browses, previews, creates, and edits. Covered by
+  `test_conformation_library.py::test_morph_can_pair_stored_states_from_different_proteins`,
+  `test_conformations.py::test_shared_morph_entry_point_edits_after_sources_are_deleted`,
+  and the foreground Morph scenarios. Source deletion after preview/confirmation
+  exposed stale domain-mask RNA pointers; the cache now stores node names and
+  deletion resolves each node immediately before removal. The foreground
+  `verify single Morph and edit without sources` scenario reproduced the error
+  before the fix and passes after it.
+- **Unified popup regressions, reproduced before fixing:** replacing a 610-frame
+  preview with a 50-frame preview releases the old playback range; Show From
+  retains the stored From coordinates under alignment instead of fitting them
+  to To; selecting individual chains clears a now-hidden whole-protein pairing.
+- Unified Morph final validation: **758 passed, 7 skipped, 2 network tests
+  deselected, 1 existing xfail** in the Blender 5.2 offline suite (exit 0);
+  **102/102** foreground scenarios in each installed normal Blender 5.1 and 5.2
+  profile; **24/24** focused foreground scenarios in 5.0. Focused 5.0 regressions
+  passed 55 tests, 5.1 conformation/save-reopen passed 42, and 5.2
+  conformation/domain/persistence contracts passed 124. The full run emitted 81
+  Windows native diagnostics in pytest environment updates, a previously observed
+  class of unresolved diagnostic; focused and foreground runs did not. Full log:
+  `/tmp/pb-unified-full52.log`; demo notes: `docs/change-notes/unified-morph.md`.

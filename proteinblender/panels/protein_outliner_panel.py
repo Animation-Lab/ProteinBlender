@@ -262,9 +262,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 obj = bpy.data.objects.get(item.object_name)
                 count = len(obj.pb_conformations.states) if obj else 0
                 if count > 1:
-                    op = action('proteinblender.browse_conformations',
+                    op = action('proteinblender.morph',
                                 text='', icon='SHAPEKEY_DATA', emboss=False)
-                    op.molecule_id = item.item_id
+                    op.source_id = item.item_id
                 # Custom Pivot, then the edit pencil. DNA/RNA rows get neither:
                 # a strand's shape is driven by its own builder dialog and its
                 # bend rig, so a hand-placed pivot on it has no defined meaning
@@ -337,7 +337,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         elif item.item_type == 'TRANSITION':
             row.label(text='', icon='BLANK1')
             row.label(text='', icon='BLANK1')
-            action('proteinblender.edit_conformation', text='', icon='GREASEPENCIL',
+            action('proteinblender.morph', text='', icon='GREASEPENCIL',
                          emboss=False).transition_id = item.item_id
             action('proteinblender.delete_conformation', text='', icon='TRASH',
                          emboss=False).transition_id = item.item_id

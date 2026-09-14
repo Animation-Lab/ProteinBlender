@@ -102,6 +102,7 @@ from .brownian_operators import (
 
 from .conformation_operators import CLASSES as CONFORMATION_CLASSES
 from .conformation_library import CLASSES as CONFORMATION_LIBRARY_CLASSES
+from .morph_dialog import CLASSES as MORPH_DIALOG_CLASSES
 
 CLASSES = (
     # PropertyGroups must be registered before operators that use them
@@ -173,4 +174,5 @@ CLASSES = (
     *LIGHTING_CLASSES,
     *CONFORMATION_CLASSES,
     *CONFORMATION_LIBRARY_CLASSES,
+    *MORPH_DIALOG_CLASSES,
 )

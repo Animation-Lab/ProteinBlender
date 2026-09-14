@@ -92,7 +92,7 @@ class MoleculeWrapper:
         #self._setup_preview_domain()
         
         # Dictionary to track domain mask nodes in the parent molecule's node group
-        self.domain_mask_nodes = {}  # Maps domain_id to tuple(chain_select_node, res_select_node)
+        self.domain_mask_nodes = {}  # Maps domain_id to the two mask node names
         
         # Reference to the join node for domain selections
         self.domain_join_node = None
@@ -1606,39 +1606,22 @@ class MoleculeWrapper:
         if domain_id not in self.domain_mask_nodes:
             return
 
-        nodes_to_remove = self.domain_mask_nodes[domain_id]
-        
-        # Get the parent molecule's node group
+        names = self.domain_mask_nodes.pop(domain_id)
+        # Older live wrappers can still contain stale RNA pointers. Never
+        # dereference those: node collection changes can invalidate them even
+        # before deletion starts. Newly built caches contain only names.
+        if not all(isinstance(name, str) for name in names):
+            names = (f"Domain_Chain_Select_{domain_id}", f"Domain_Res_Select_{domain_id}")
         parent_modifier = self.molecule.object.modifiers.get("MolecularNodes")
         if not parent_modifier or not parent_modifier.node_group:
             return
-            
-        parent_node_group = parent_modifier.node_group
-        
-        # Remove only the links connected to these specific nodes
-        for link in list(parent_node_group.links):
-            for node in nodes_to_remove:
-                try:
-                    if node and (link.from_node == node or link.to_node == node):
-                        parent_node_group.links.remove(link)
-                        break
-                except ReferenceError:
-                    continue
+        tree = parent_modifier.node_group
+        for name in names:
+            node = tree.nodes.get(name)
+            if node is not None:
+                # Blender removes this node's connected links as well.
+                tree.nodes.remove(node)
 
-        # Remove the nodes safely
-        for node in nodes_to_remove:
-            try:
-                if node:
-                    # membership check on name avoids TypeError when node is invalid
-                    if node.name in parent_node_group.nodes:
-                        parent_node_group.nodes.remove(parent_node_group.nodes[node.name])
-            except ReferenceError:
-                # Node might already be freed; ignore
-                pass
-            
-        # Remove from tracking dictionary
-        del self.domain_mask_nodes[domain_id]
-        
         # Note: We're no longer removing the domain infrastructure nodes (join node and NOT node)
         # when all domains are deleted. They will persist for future domain creations.
 
@@ -2357,6 +2340,8 @@ class MoleculeWrapper:
                                       self.domain_join_node.location.y - 100 - len(self.domain_mask_nodes) * 100)
                 chain_select.name = chain_select_name
             
+            chain_select_name = chain_select.name
+
             # Step 2: Configure chain selection. Resolve via the integer chain
             # index (what the iswitch's Index attribute is) rather than the
             # author/label-ambiguous get_blender_chain_id, so the parent mask
@@ -2391,6 +2376,8 @@ class MoleculeWrapper:
                 res_select.location = (chain_select.location.x + 200, chain_select.location.y)
                 res_select.name = res_select_name
             
+            res_select_name = res_select.name
+
             # Update the residue range
             res_select.inputs["Min"].default_value = start
             res_select.inputs["Max"].default_value = end
@@ -2446,7 +2433,7 @@ class MoleculeWrapper:
             parent_node_group.links.new(res_select.outputs["Selection"], last_join.inputs[available_input])
             
             # Store the nodes for future reference
-            self.domain_mask_nodes[domain_id] = (chain_select, res_select)
+            self.domain_mask_nodes[domain_id] = (chain_select_name, res_select_name)
             
             # Remove any direct connections between chain selection and style node
             for link in list(parent_node_group.links):

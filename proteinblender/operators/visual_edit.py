@@ -540,7 +540,7 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             layout.label(text=row.name, icon=row.icon or 'MESH_DATA')
         self.draw_visual_setup(layout, context, show_pivot=False)
         layout.separator()
-        layout.operator('proteinblender.create_conformation', icon='IPO_EASE_IN_OUT').source_id = self.item_id
+        layout.operator('proteinblender.morph', icon='IPO_EASE_IN_OUT').source_id = self.item_id
         layout.operator('proteinblender.capture_conformation', icon='DUPLICATE').source_id = self.item_id
 
     def execute(self, context):

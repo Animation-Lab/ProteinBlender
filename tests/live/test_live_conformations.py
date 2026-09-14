@@ -1,4 +1,4 @@
-"""Native alignment popup, outliner child, playback and undo in installed Blender."""
+"""Unified Morph popup, independent objects, playback and undo in installed Blender."""
 import time
 
 import pytest
@@ -27,7 +27,7 @@ for key in list(obj.data.keys()):
     if key.startswith('pb_cartoon_'):
         del obj.data[key]
 bpy.context.scene.frame_set(50)
-cls = importlib.import_module(H.PKG + '.operators.conformation_operators').PROTEINBLENDER_OT_edit_conformation
+cls = importlib.import_module(H.PKG + '.operators.morph_dialog').PROTEINBLENDER_OT_morph
 original = cls.draw
 def draw(self, context):
     original(self, context)
@@ -35,7 +35,7 @@ def draw(self, context):
 cls.draw = draw
 bpy.app.driver_namespace['pb_cartoon_draw'] = (cls, original)
 with R.view3d_override():
-    bpy.ops.proteinblender.edit_conformation('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
 ''', chain=chain)
     try:
         time.sleep(.4)
@@ -89,9 +89,9 @@ with R.view3d_override():
     second = H.import_local('4ake.pdb', 'open')
 bpy.context.window.workspace = bpy.data.workspaces['Protein Blender']
 R.frame_all(zoom=.8)
-mod = importlib.import_module(H.PKG + '.operators.conformation_operators')
+mod = importlib.import_module(H.PKG + '.operators.morph_dialog')
 records, originals = {}, []
-for cls in (mod.PROTEINBLENDER_OT_create_conformation, mod.PROTEINBLENDER_OT_edit_conformation):
+for cls in (mod.PROTEINBLENDER_OT_morph,):
     original = cls.draw
     def make_draw(cls, original):
         def draw(self, context):
@@ -102,15 +102,15 @@ for cls in (mod.PROTEINBLENDER_OT_create_conformation, mod.PROTEINBLENDER_OT_edi
     cls.draw = make_draw(cls, original)
 bpy.app.driver_namespace['pb_conformation_ui'] = (records, originals, first, second)
 with R.view3d_override():
-    assert bpy.ops.proteinblender.create_conformation('INVOKE_DEFAULT', source_id=first,
+    assert bpy.ops.proteinblender.morph('INVOKE_DEFAULT', source_id=first,
         target_id=second, source_chain='A', target_chain='A') == {'RUNNING_MODAL'}
 ''')
     try:
         time.sleep(.6)
         blender.call('''
 records, _, first, second = bpy.app.driver_namespace['pb_conformation_ui']
-layout, op = records['PROTEINBLENDER_OT_create_conformation']
-for text in ('Start structure', 'End structure', 'Residue match', '214 paired residues', 'Fit RMSD'):
+layout, op = records['PROTEINBLENDER_OT_morph']
+for text in ('From:', 'To:', 'Start frame', 'End frame', 'Advanced'):
     assert text in str(layout), str(layout)
 assert not any(o.get('pb_conformation') for o in bpy.context.scene.objects)
 win = bpy.context.window
@@ -123,8 +123,8 @@ _, _, first, second = bpy.app.driver_namespace['pb_conformation_ui']
 assert not any(o.get('pb_conformation') for o in bpy.context.scene.objects)
 bpy.ops.ed.undo_push(message='Before transition')
 with R.view3d_override():
-    bpy.ops.proteinblender.create_conformation('INVOKE_DEFAULT', source_id=first,
-        target_id=second, source_chain='A', target_chain='A', duration=1)
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', source_id=first,
+        target_id=second, source_chain='A', target_chain='A', start_frame=1, end_frame=25)
 ''')
         time.sleep(.4)
         blender.call('''
@@ -134,9 +134,17 @@ win.event_simulate(type='RET', value='RELEASE')
 ''')
         time.sleep(.8)
         blender.call('''
+assert importlib.import_module(H.PKG + '.operators.conformation_operators')._creation_dialog is None
+obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
+with R.view3d_override():
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj['pb_conformation'],
+        advanced=True, show_details=True)
+''')
+        time.sleep(.4)
+        blender.call('''
 records, _, first, second = bpy.app.driver_namespace['pb_conformation_ui']
-layout, op = records['PROTEINBLENDER_OT_edit_conformation']
-for text in ('Start', 'End', 'Play', 'Duration', 'Color', 'Match details'):
+layout, op = records['PROTEINBLENDER_OT_morph']
+for text in ('From', 'To', 'Play', 'End frame', 'Color', 'Match details'):
     assert text in str(layout), str(layout)
 obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
 row = next(r for r in bpy.context.scene.outliner_items if r.item_type == 'TRANSITION')
@@ -177,7 +185,7 @@ with R.view3d_override():
 obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
 assert any(r.item_type == 'TRANSITION' for r in bpy.context.scene.outliner_items)
 with R.view3d_override():
-    bpy.ops.proteinblender.edit_conformation('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
 ''')
         time.sleep(.4)
         blender.call('''
@@ -208,7 +216,7 @@ with R.view3d_override():
     bpy.ops.proteinblender.create_conformation(source_id=first, target_id=second,
         source_chain='A', target_chain='A', duration=2)
 obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
-cls = importlib.import_module(H.PKG + '.operators.conformation_operators').PROTEINBLENDER_OT_edit_conformation
+cls = importlib.import_module(H.PKG + '.operators.morph_dialog').PROTEINBLENDER_OT_morph
 original = cls.draw
 def draw(self, context):
     original(self, context)
@@ -216,13 +224,13 @@ def draw(self, context):
 cls.draw = draw
 bpy.app.driver_namespace['pb_surface_draw'] = (cls, original)
 with R.view3d_override():
-    bpy.ops.proteinblender.edit_conformation('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
 ''')
     try:
         time.sleep(.4)
         blender.call('''
 op = bpy.app.driver_namespace['pb_surface_popup']
-properties = bpy.ops.proteinblender.edit_conformation.get_rna_type().properties
+properties = bpy.ops.proteinblender.morph.get_rna_type().properties
 choices = {item.identifier: item.name for item in properties['style'].enum_items}
 assert choices.get('surface') == 'Surface', choices
 op.style = 'surface'
@@ -236,7 +244,7 @@ obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
 assert obj['pb_transition_style'] == 'surface'
 assert len(H.eval_positions(obj)) > 100
 with R.view3d_override():
-    bpy.ops.proteinblender.edit_conformation('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
+    bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj['pb_conformation'])
 ''')
         time.sleep(.4)
         blender.call('''

@@ -5,49 +5,62 @@ title: Conformational Transitions
 
 # Alignment and morphing
 
-## Browsing a protein's conformations
+## One Morph popup
 
-Click the **conformations icon** on a protein's PB Outliner row, or choose
-**Browse Conformations** from its right-click menu. The icon appears only when
-that protein has multiple conformations. A compact popup opens for the clicked
-protein, even if a different object is selected.
+Use **Morph** in Animate Scene or a protein's visual editor. A protein with
+multiple conformations also has an icon in the PB Outliner that opens this same
+popup with that protein selected. An existing morph's pencil opens the same
+interface with its saved timing and playback controls.
 
-- Choose **Conformation**, then **Apply** to update the viewport while keeping
-  the popup open. **Showing** identifies the state actually displayed. Switching
-  preserves the scene frame, object placement, colors, domains, and representation.
-- Choose **Morph to**, then **Create Morph…**. The selected Conformation is the
-  start; Morph to is the end. This opens the existing alignment/morph dialog,
-  including timing and breathing controls. The morph owns its coordinates and
-  appears as an independent sibling in the Outliner.
-- **Apply & Close** applies the pending view and closes the popup. Cancel/Escape
-  discards pending view fields but keeps the last Apply. Closing removes temporary
-  comparison helpers. Library tools perform their named actions immediately.
+1. Choose **From** and **To**. Both menus list proteins and their named states.
+   You can choose two states of one protein, two separate proteins, or stored
+   states from different proteins. The clicked protein is filled in automatically.
+   **Current structure** uses the displayed coordinates; named states use stored
+   coordinates even when another state is currently displayed.
+2. For simple state browsing, use the **eye button** beside From or To. It shows
+   that state on its protein without moving the playhead or creating a morph.
+3. Set **Start frame** and **End frame**. Optionally enable **Return to start**,
+   choose the return frame, and enable **Repeat** for a breathing cycle.
+4. Click **Apply**. Preview the motion with the **From → To** slider, endpoint
+   buttons, and **Play** in this popup. Change settings and Apply again to update
+   the preview. An invalid Apply leaves the last valid preview intact.
+5. Click **Create Morph** to keep the preview as one independent Outliner object.
+   No second dialog opens. Cancel removes the temporary morph and restores the
+   opening frame, playback range, and original visibility. States shown with the
+   eye buttons stay applied; temporary comparison helpers are removed.
+6. Reopen a saved morph with its pencil to scrub, play, or change timing and
+   appearance. **Apply** commits edits without closing; **Done** applies and
+   closes. Cancel discards pending fields, retains prior Apply results, stops
+   playback, and restores the opening frame. Saved endpoints belong to the morph,
+   so this editing workflow works after either source protein is deleted. To
+   choose a different endpoint pair, create a new morph.
 
-Two optional sections start collapsed on every opening:
+**Advanced** starts collapsed. It contains chain/residue selection, alignment,
+easing, surrounding-region opacity, representation, color, original visibility,
+and optional match details. Alignment and residue selection define new morph
+endpoints; existing morphs use their stored endpoints. Residue fields accept
+`1-40,65-76` for a selected chain or `A:1-40,B:10-50` for whole proteins.
+Alignment can use the stable core, all paired residues, a chosen anchor region
+such as `A:1-30`, or current placement. Chain pairing is automatic unless you
+enter pairs such as `A:B,C:D`.
 
-- **Alignment & comparison** contains the fixed **Reference**, **Keep steady**
-  alignment (stable core, whole protein, selected anchor residues such as
-  `A:1-30`, or original placement), transparent reference, opacity, and motion
-  markers. Change these settings and use **Apply**. Invalid alignment leaves the
-  last valid state and settings intact. Gray reference cartoons and orange Cα
-  motion markers are viewport-only; use Cartoon for a clear view of the markers.
-- **Library tools** contains names, provenance, file/PDB additions, pose capture,
-  and extraction. Renaming preserves the original source and model number.
+When both endpoints are states of the same protein, Advanced also offers a
+transparent reference and orange motion markers. Use an eye button to show one
+state; both use From as the fixed alignment reference. Show To to compare the
+motion against From. The marker threshold is in Å; Cartoon
+representation makes these backbone markers easiest to see.
 
-**Add from File…** and **Add from PDB…** append compatible conformations to the
-same library. Atoms are matched by chain, residue number, insertion code, residue
-name, atom name, and element, so a different atom order is acceptable. The entire
-batch is checked before adding anything. Missing atoms, extra ligands, changed
-residue numbering, or duplicate identities require importing a separate protein
-and using **Align & Morph** for its sequence-based partial matching.
+**Library tools**, inside Advanced, includes renaming, provenance, Add from
+File/PDB, Capture Pose, and Extract as Protein for the From protein. These named
+actions take effect immediately. Capture and extraction use the displayed protein
+pose. Stored states keep their original source/model provenance and are saved
+inside the `.blend`, including states that are not currently displayed.
 
-**Capture Current Pose…** saves a named coordinate snapshot in this library,
-including native chain/domain and puppet transforms. Captured states compensate
-for the current domain transforms when displayed, so the pose is not applied
-twice. **Extract as Protein** creates a separate protein at the same placement
-with the displayed conformation and presentation; move that protein for a
-side-by-side comparison. Stored coordinate sets are immutable and saved inside
-the `.blend`, including states that are not currently displayed.
+Added files must have compatible atom identities: chain, residue number,
+insertion code, residue name, atom name, and element. A different atom order is
+acceptable; the entire batch is checked before anything is added. For structures
+with different numbering or atom content, import separately and choose them as
+From/To for sequence-based partial matching.
 
 ### Importing model ensembles and assemblies
 
@@ -70,36 +83,10 @@ Reimport the original ensemble to obtain all its models and the browsing icon.
 Legacy domains with separate atom meshes and proteins with existing shape keys
 need a separate fresh import for browsing.
 
-## Morphing separately imported proteins
-
-Import two conformations, then click **Align & Morph** in **Animate Scene** or a
-protein's Edit dialog.
-
-1. Choose the **Start structure** and **End structure**, then whole proteins or
-   one chain from each. Whole-protein mode pairs chains by sequence. **Chain
-   pairing** can override it, for example `A:B,C:D`.
-2. Leave residue fields empty for all residues, or enter inclusive ranges such as
-   `1-40,65-76` for a chosen chain and `A:1-40,B:10-50` for whole-protein mode.
-   Insertion-code variants at an included residue number are included together.
-3. Choose the reference frame: **Stable core**, **All paired residues**, **Chosen
-   anchor region**, or **Current placement**. An anchor is specified in start
-   residue numbering and must include at least three non-collinear matched Cα
-   atoms. Current placement skips superposition and uses the objects' transforms.
-4. Inspect the sequence match, coverage, chain assignment, and RMSD in Å.
-   **Preview Regions and Alignment** shows morphing atoms in blue with optional
-   translucent gray surrounding regions. Change settings and use **Update
-   Preview**. Cancelling removes the preview and restores visibility and timing.
-5. Set **Start frame** and **End frame**. Optionally enable **Return to start**,
-   set a later **Return frame**, and enable **Repeat breathing cycle**. Disable
-   **Ease in and out** for constant interpolation speed.
-6. Click **Create Morph**. The playback dialog opens. Scrub **Start → End**, jump
-   to either endpoint, or **Play**. Timing, color, representation, context
-   visibility/opacity, and original visibility are applied with **Done**.
-   Cancelling this playback dialog restores its opening frame; either exit stops
-   preview playback.
+## Morph objects and matching
 
 The morph is an independent top-level PB Outliner entry with no children. Its
-pencil opens playback; its checkbox selects it; its eye hides it; its trash
+pencil opens Morph; its checkbox selects it; its eye hides it; its trash
 button deletes it. Deleting either input protein leaves the morph usable. The
 morph initially copies the start protein's placement and then moves independently.
 Older saved morphs become independent when the outliner is rebuilt.
@@ -124,7 +111,7 @@ Use **Capture Conformation** in Animate Scene or a protein's Edit dialog. Pose
 native chains/domains, including those controlled by a puppet, choose the protein,
 and name its new conformation. Capture creates an independent imported coordinate
 snapshot at the current frame without changing the original pose. Select the
-snapshot as an endpoint in Align & Morph. Use Current placement when that authored
+snapshot as an endpoint in Morph. Use Current placement when that authored
 placement should be retained, or an anchor to hold one region stationary.
 
 Capture supports native chain/domain transforms. Ambiguous duplicate domains,

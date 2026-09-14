@@ -70,7 +70,7 @@ def _summary(layout, summary):
 class PROTEINBLENDER_OT_create_conformation(Operator):
     """Align two protein conformations and create an animated transition"""
     bl_idname = 'proteinblender.create_conformation'
-    bl_label = 'Align & Morph'
+    bl_label = 'Morph'
     bl_options = {'REGISTER', 'UNDO'}
 
     source_id: EnumProperty(name='Start structure', items=_molecules)
@@ -105,16 +105,23 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
         try:
             source, target = molecules.get(self.source_id), molecules.get(self.target_id)
             if source is None or target is None:
-                raise ValueError('Import two protein structures to compare their conformations.')
+                raise ValueError('Choose two conformations or import two protein structures.')
             kwargs = dict(source_region=self.source_region, target_region=self.target_region,
                           fit_region=self.fit_region, chain_pairs=self.chain_pairs)
             if self.source_state or self.target_state:
                 from ..core import conformation_library as library
-                if self.source_id != self.target_id:
-                    raise ValueError('Library endpoints must belong to the same protein.')
-                self._match = library.match(source, self.source_state, self.target_state,
-                                            self.fit, source_chain=self.source_chain,
-                                            target_chain=self.target_chain, **kwargs)
+                if source.object == target.object and self.source_state == self.target_state:
+                    raise ValueError('Choose different From and To conformations.')
+                def coordinates(mol, uid):
+                    mesh = library.state(mol, uid).mesh if uid else mol.object.data
+                    return library.read_mesh(mesh)
+                start = coordinates(source, self.source_state)
+                end = coordinates(target, self.target_state)
+                self._match = alignment.match_structures(
+                    source, target, self.source_chain, self.target_chain, self.fit,
+                    source_coordinates=start / alignment.SCALE,
+                    target_coordinates=end / alignment.SCALE, **kwargs)
+                self._match.source_context = start
             else:
                 self._match = alignment.match_structures(
                     source, target, self.source_chain, self.target_chain, self.fit, **kwargs)
@@ -122,97 +129,9 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
             self._problem = str(exc)
 
     def invoke(self, context, event):
-        global _creation_dialog
-        _creation_dialog = self
-        self._preview_id = ''
-        self._preview_frame = context.scene.frame_current
-        self._preview_end = context.scene.frame_end
-        self._preview_dirty = False
-        self._interactive = True
-        items = _molecules(self, context)
-        identifiers = [item[0] for item in items]
-        if not self.properties.is_property_set('source_id') and identifiers:
-            selected = [r.item_id for r in context.scene.outliner_items
-                        if r.item_type == 'PROTEIN' and r.is_selected and r.item_id in identifiers]
-            self.source_id = selected[0] if selected else identifiers[0]
-        if not self.properties.is_property_set('target_id'):
-            others = [mid for mid in identifiers if mid != self.source_id]
-            if others:
-                self.target_id = others[0]
-        if not self.properties.is_property_set('start_frame'):
-            self.start_frame = max(1, context.scene.frame_current)
-        if not self.properties.is_property_set('end_frame'):
-            self.end_frame = self.start_frame + 72
-        if not self.properties.is_property_set('return_frame'):
-            self.return_frame = self.end_frame + self.end_frame - self.start_frame
-        self._last_proteins = (self.source_id, self.target_id)
-        self._analyze()
-        return context.window_manager.invoke_props_dialog(self, width=540, confirm_text='Create Morph')
-
-    def check(self, context):
-        if not self.return_to_start:
-            self.repeat = False
-        proteins = (self.source_id, self.target_id)
-        if proteins != getattr(self, '_last_proteins', proteins):
-            self.source_chain = self.target_chain = 'ALL'
-            self.chain_pairs = ''
-            self.source_state = self.target_state = ''
-        if self.source_chain != 'ALL' or self.target_chain != 'ALL':
-            self.chain_pairs = ''
-        self._last_proteins = proteins
-        self._preview_dirty = bool(getattr(self, '_preview_id', ''))
-        self._analyze()
-        return True
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        layout.label(text='Compare two conformations of a protein', icon='IPO_EASE_IN_OUT')
-        labels = self._labels()
-        if self.source_state:
-            layout.label(text='Start: ' + labels.get('source_label', 'Unavailable'))
-        else:
-            layout.prop(self, 'source_id')
-        layout.prop(self, 'source_chain', text='Include')
-        layout.prop(self, 'source_region')
-        if self.target_state:
-            layout.label(text='End: ' + labels.get('target_label', 'Unavailable'))
-        else:
-            layout.prop(self, 'target_id')
-        layout.prop(self, 'target_chain', text='Include')
-        layout.prop(self, 'target_region')
-        if self.source_chain == self.target_chain == 'ALL':
-            layout.prop(self, 'chain_pairs')
-        layout.prop(self, 'fit')
-        if self.fit == 'REGION':
-            layout.prop(self, 'fit_region')
-        if getattr(self, '_match', None):
-            _summary(layout, self._match.summary)
-        elif getattr(self, '_problem', ''):
-            box = layout.box()
-            box.alert = True
-            # Break long actionable errors without relying on Blender wrapping.
-            import textwrap
-            for line in textwrap.wrap(self._problem, 70):
-                box.label(text=line, icon='INFO')
-        row = layout.row(align=True)
-        row.prop(self, 'start_frame')
-        row.prop(self, 'end_frame')
-        layout.prop(self, 'return_to_start')
-        if self.return_to_start:
-            layout.prop(self, 'return_frame')
-            layout.prop(self, 'repeat')
-        layout.prop(self, 'smooth')
-        layout.prop(self, 'show_context')
-        if self.show_context:
-            layout.prop(self, 'context_opacity', slider=True)
-        preview = layout.row()
-        preview.enabled = getattr(self, '_match', None) is not None
-        preview.operator('proteinblender.preview_conformation_alignment', text='Update Preview' if getattr(self, '_preview_dirty', False) else 'Preview Regions and Alignment', icon='HIDE_OFF')
-        layout.label(text='Blue: morphing atoms. Transparent gray: surrounding regions.')
-        layout.label(text='The starting structure defines the reference frame.')
-        layout.label(text='Interpolated motion; intermediate geometry may be distorted.', icon='INFO')
+        return bpy.ops.proteinblender.morph('INVOKE_DEFAULT', **{
+            name: getattr(self, name) for name in self.__annotations__
+            if self.properties.is_property_set(name)})
 
     def execute(self, context):
         global _creation_dialog
@@ -243,13 +162,6 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
             source.object.pb_conformations['highlight_motion'] = False
             clear(source)
         self.report({'INFO'}, 'Transition created. Its Outliner pencil opens playback.')
-        if getattr(self, '_interactive', False) and not bpy.app.background:
-            identifier = obj[core.TAG]
-            def open_playback():
-                if core.find(bpy.context.scene, identifier):
-                    bpy.ops.proteinblender.edit_conformation('INVOKE_DEFAULT', transition_id=identifier)
-                return None
-            bpy.app.timers.register(open_playback, first_interval=.1)
         return {'FINISHED'}
 
     def _labels(self):
@@ -288,27 +200,7 @@ class PROTEINBLENDER_OT_preview_conformation_alignment(Operator):
 
     def execute(self, context):
         dialog = _creation_dialog
-        if dialog is None:
-            return {'CANCELLED'}
-        dialog._clear_preview(context)
-        dialog._analyze()
-        if dialog._match is None:
-            self.report({'WARNING'}, dialog._problem)
-            return {'CANCELLED'}
-        molecules = ProteinBlenderScene.get_instance().molecules
-        try:
-            obj = core.create(context, molecules[dialog.source_id], molecules[dialog.target_id],
-                              dialog._match, dialog.start_frame, dialog.duration, dialog.smooth,
-                              show_context=dialog.show_context, context_opacity=dialog.context_opacity,
-                              **dialog._labels(),
-                              **_timing(dialog, context))
-        except ValueError as exc:
-            self.report({'WARNING'}, str(exc))
-            return {'CANCELLED'}
-        dialog._preview_id = obj[core.TAG]
-        dialog._preview_dirty = False
-        context.scene.frame_set(obj['pb_start_frame'])
-        return {'FINISHED'}
+        return dialog.apply(context) if dialog is not None else {'CANCELLED'}
 
 
 def _timing(operator, context, obj=None):
@@ -411,7 +303,7 @@ class PROTEINBLENDER_OT_conformation_preview(Operator):
 class PROTEINBLENDER_OT_edit_conformation(Operator):
     """Scrub the conformational transition, preview playback, or change its timing"""
     bl_idname = 'proteinblender.edit_conformation'
-    bl_label = 'Conformational Transition'
+    bl_label = 'Morph'
     bl_options = {'REGISTER', 'UNDO'}
     transition_id: StringProperty()
     progress: FloatProperty(name='Start → End', min=0, max=1, subtype='FACTOR',
@@ -435,66 +327,7 @@ class PROTEINBLENDER_OT_edit_conformation(Operator):
                                min=0, max=1, default=(.25, .65, .9, 1.0))
 
     def invoke(self, context, event):
-        obj = core.find(context.scene, self.transition_id)
-        if obj is None:
-            return {'CANCELLED'}
-        from ..core.cartoon_motion import stabilize
-        stabilize(obj)
-        self._old_frame = context.scene.frame_current
-        self.start_frame, self.duration = obj['pb_start_frame'], obj['pb_duration']
-        self.end_frame = obj['pb_end_frame']
-        self.return_to_start = obj.get('pb_return_to_start', False)
-        self.return_frame = obj.get('pb_return_frame', self.end_frame + self.end_frame - self.start_frame)
-        self.repeat = obj.get('pb_repeat', False)
-        self.smooth = obj['pb_smooth']
-        self.show_context = obj.get('pb_show_context', True)
-        self.context_opacity = obj.get('pb_context_opacity', .18)
-        self.hide_originals = obj['pb_hide_originals']
-        self.style = obj['pb_transition_style']
-        from ..core.visual_style import get_object_color
-        self.color = get_object_color(obj)
-        return context.window_manager.invoke_props_dialog(self, width=540, confirm_text='Done')
-
-    def check(self, context):
-        if not self.return_to_start:
-            self.repeat = False
-        return True
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_decorate = False
-        obj = core.find(context.scene, self.transition_id)
-        if obj is None:
-            layout.label(text='This transition was removed.')
-            return
-        layout.label(text=obj.name, icon='IPO_EASE_IN_OUT')
-        # The actual keyed value follows playback even while the popup is open.
-        frame = context.scene.frame_current
-        layout.label(text=f"Frame {frame} · {obj['pb_start_frame']}–{obj['pb_end_frame']}")
-        layout.prop(self, 'progress', slider=True)
-        row = layout.row(align=True)
-        for action, label, icon in [('START', 'Start', 'REW'), ('PLAY', 'Pause' if _playing else 'Play',
-                                    'PAUSE' if _playing else 'PLAY'), ('END', 'End', 'FF')]:
-            op = row.operator('proteinblender.conformation_preview', text=label, icon=icon)
-            op.transition_id, op.action = self.transition_id, action
-        row = layout.row(align=True)
-        row.prop(self, 'start_frame')
-        row.prop(self, 'end_frame')
-        layout.prop(self, 'return_to_start')
-        if self.return_to_start:
-            layout.prop(self, 'return_frame')
-            layout.prop(self, 'repeat')
-        layout.prop(self, 'smooth')
-        layout.prop(self, 'show_context')
-        if self.show_context:
-            layout.prop(self, 'context_opacity', slider=True)
-        layout.prop(self, 'style')
-        layout.prop(self, 'color')
-        layout.prop(self, 'hide_originals')
-        layout.prop(self, 'show_details', icon='TRIA_DOWN' if self.show_details else 'TRIA_RIGHT', emboss=False)
-        if self.show_details:
-            _summary(layout, json.loads(obj['pb_match']))
-        layout.label(text='Illustrative interpolation between imported conformations.', icon='INFO')
+        return bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=self.transition_id)
 
     def execute(self, context):
         stop_playback()

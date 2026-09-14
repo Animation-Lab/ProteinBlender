@@ -187,23 +187,7 @@ class PROTEINBLENDER_OT_browse_conformations(Operator):
     show_library_tools: BoolProperty(name='Library tools', options={'SKIP_SAVE'})
 
     def invoke(self, context, event):
-        if self._open(context) == {'CANCELLED'}:
-            return {'CANCELLED'}
-        library = molecule(self.molecule_id).object.pb_conformations
-        self.state_uid = library.states[library.active_index].uid
-        self.target_uid = library.end_uid
-        if self.target_uid == self.state_uid and len(library.states) > 1:
-            self.target_uid = library.states[(library.active_index + 1) % len(library.states)].uid
-        self.reference_uid = library.reference_uid
-        for name in VIEW_FIELDS:
-            setattr(self, name, getattr(library, name))
-        return context.window_manager.invoke_props_dialog(self, width=390, confirm_text='Apply & Close')
-
-    def draw(self, context):
-        draw_browser(self.layout, context, self)
-
-    def check(self, context):
-        return True  # Rebuild the popup when a disclosure or pending field changes.
+        return bpy.ops.proteinblender.morph('INVOKE_DEFAULT', source_id=self.molecule_id)
 
     def _open(self, context):
         try:
@@ -397,74 +381,6 @@ class PROTEINBLENDER_OT_extract_library_conformation(Operator):
             self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}
         return {'FINISHED'}
-
-
-def draw_browser(layout, context, popup):
-    mol = ProteinBlenderScene.get_instance().molecules.get(popup.molecule_id)
-    if mol is None or not mol.object.pb_conformations.states:
-        layout.label(text='This protein is no longer available.', icon='ERROR')
-        return
-    library = mol.object.pb_conformations
-    layout.label(text=f'{mol.identifier} · {len(library.states)} conformations', icon='SHAPEKEY_DATA')
-    layout.prop(popup, 'state_uid')
-    row = layout.row()
-    row.operator_context = 'EXEC_DEFAULT'
-    op = row.operator('proteinblender.apply_conformation_view', text='Apply', icon='CHECKMARK')
-    for name in PROTEINBLENDER_OT_apply_conformation_view.__annotations__:
-        setattr(op, name, getattr(popup, name))
-    shown = library.states[library.active_index]
-    layout.label(text=f'Showing: {shown.name}')
-
-    box = layout.box()
-    box.prop(popup, 'target_uid')
-    row = box.row()
-    row.enabled = popup.state_uid != popup.target_uid
-    row.operator_context = 'INVOKE_DEFAULT'
-    op = row.operator('proteinblender.create_conformation', text='Create Morph…', icon='IPO_EASE_IN_OUT')
-    op.source_id = op.target_id = mol.identifier
-    op.source_state, op.target_state = popup.state_uid, popup.target_uid
-    op.fit, op.fit_region = popup.fit, popup.fit_region
-
-    layout.prop(popup, 'show_comparison_tools', emboss=False,
-                icon='TRIA_DOWN' if popup.show_comparison_tools else 'TRIA_RIGHT')
-    if popup.show_comparison_tools:
-        box = layout.box()
-        box.prop(popup, 'reference_uid')
-        box.prop(popup, 'fit')
-        if popup.fit == 'REGION':
-            box.prop(popup, 'fit_region')
-        box.prop(popup, 'show_comparison')
-        if popup.show_comparison:
-            box.prop(popup, 'opacity', slider=True)
-        box.prop(popup, 'highlight_motion')
-        if popup.highlight_motion:
-            box.prop(popup, 'motion_threshold')
-        box.label(text='Use Apply to update the viewport.', icon='INFO')
-
-    layout.prop(popup, 'show_library_tools', emboss=False,
-                icon='TRIA_DOWN' if popup.show_library_tools else 'TRIA_RIGHT')
-    if popup.show_library_tools:
-        box = layout.box()
-        selected = next((s for s in library.states if s.uid == popup.state_uid), None)
-        if selected:
-            box.prop(selected, 'name', text='Name')
-            box.label(text=selected.source)
-        box.label(text=library.method or 'Coordinate set')
-        if 'NMR' in library.method:
-            box.label(text='Model order does not define motion.', icon='INFO')
-        row = box.row(align=True)
-        row.operator_context = 'INVOKE_DEFAULT'
-        row.operator('proteinblender.add_conformation_file', text='Add from File…', icon='FILE_FOLDER').molecule_id = mol.identifier
-        row.operator('proteinblender.add_conformation_pdb', text='Add from PDB…', icon='URL').molecule_id = mol.identifier
-        box.label(text='From the displayed conformation:')
-        row = box.row(align=True)
-        row.operator_context = 'INVOKE_DEFAULT'
-        row.operator('proteinblender.capture_library_conformation', text='Capture Pose…', icon='DUPLICATE').molecule_id = mol.identifier
-        row.operator('proteinblender.extract_library_conformation', text='Extract as Protein', icon='OUTLINER_OB_MESH').molecule_id = mol.identifier
-    if library.error:
-        import textwrap
-        for line in textwrap.wrap(library.error, 55):
-            layout.label(text=line, icon='ERROR')
 
 
 def register_props():

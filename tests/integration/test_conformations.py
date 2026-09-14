@@ -36,6 +36,26 @@ def _raw_pdb_ca(filename, chain):
     return arr.coord[(arr.chain_id == chain) & (arr.atom_name == 'CA') & ~arr.hetero]
 
 
+def test_shared_morph_entry_point_edits_after_sources_are_deleted(scene):
+    first, second = _pair()
+    assert bpy.ops.proteinblender.morph(source_id=first, target_id=second,
+        start_frame=10, end_frame=30, smooth=False) == {'FINISHED'}
+    obj = C.transitions(scene)[0]
+    identifier = obj[C.TAG]
+    coords = [_coords(block).copy() for block in obj.data.shape_keys.key_blocks]
+    assert bpy.ops.molecule.delete(molecule_id=first) == {'FINISHED'}
+    assert bpy.ops.molecule.delete(molecule_id=second) == {'FINISHED'}
+    assert bpy.ops.proteinblender.morph(transition_id=identifier,
+        end_frame=40, return_to_start=True, return_frame=70, repeat=True) == {'FINISHED'}
+    assert obj['pb_end_frame'] == 40 and obj['pb_repeat']
+    scene.frame_set(25)
+    assert obj.data.shape_keys.key_blocks['End conformation'].value == pytest.approx(.5)
+    for block, before in zip(obj.data.shape_keys.key_blocks, coords):
+        np.testing.assert_array_equal(_coords(block), before)
+    assert obj.parent is None and not obj.children
+    assert len(C.transitions(scene)) == 1
+
+
 def test_known_rigid_transform_has_no_conformational_motion(sm):
     first, second = _pair()
     source, target = sm.molecules[first], sm.molecules[second]

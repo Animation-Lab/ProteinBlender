@@ -2,6 +2,10 @@
 
 Branch: `feat/conformation-library`, based on `demo/weekly-improvements`.
 
+The browser and morph dialogs have since been consolidated. See the
+[current unified Morph demo notes](unified-morph.md) for the interface to demonstrate.
+The notes below record the earlier library and compact-browser revisions.
+
 One protein owns a library of named coordinate sets. Its **conformations icon**
 opens a compact popup scoped to that protein. The icon appears only on protein
 rows with multiple states; it has no text label. Switching states preserves the
