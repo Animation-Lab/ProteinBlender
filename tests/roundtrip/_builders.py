@@ -829,7 +829,26 @@ def build_surface_conformation():
     build_conformation(style='surface')
 
 
+def build_conformation_library():
+    mid = H.import_local('1d3z.pdb.gz', 'saved_ensemble')
+    assert bpy.ops.proteinblender.browse_conformations(molecule_id=mid) == {'FINISHED'}
+    library = H.sm().molecules[mid].object.pb_conformations
+    library.states[0].name = 'Rest'
+    library.states[6].name = 'Alternate'
+    library.fit = 'NONE'
+    assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid, index=6) == {'FINISHED'}
+    assert bpy.ops.proteinblender.mark_conformation(molecule_id=mid, endpoint='END') == {'FINISHED'}
+    library.show_comparison = True
+    library.motion_threshold = .2
+    library.highlight_motion = True
+    assert not library.error
+    assert len(library.states) == 10 and all(s.mesh is not None for s in library.states)
+    assert library.active_index == 6
+    assert any(o.get('pb_state_preview_owner') == library.id_data for o in bpy.context.scene.objects)
+
+
 BUILDERS = {
+    "conformation_library": build_conformation_library,
     "empty": build_empty,
     "single_protein": build_single_protein,
     "multi_chain": build_multi_chain,
@@ -863,6 +882,7 @@ BUILDERS = {
 # test_persistence_contract.py against the add-on's registered feature
 # packages, so adding a subsystem without adding a builder fails the suite.
 BUILDER_SUBSYSTEMS = {
+    "conformation_library": ("core", "operators", "panels"),
     "empty": (),
     "single_protein": ("core",),
     "multi_chain": ("core",),

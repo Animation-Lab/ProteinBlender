@@ -7,6 +7,7 @@ from biotite import InvalidFileError
 import os
 import io
 import gzip
+import re
 
 from ...download import FileDownloadPDBError, download, CACHE_DIR
 from ...blender import path_resolve
@@ -90,6 +91,8 @@ def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molec
             raise ValueError(f"Error processing file path {filepath_or_stream}: {e}")
 
 
+    if suffix == '.ent' or re.fullmatch(r'\.pdb\d+', suffix):
+        suffix = '.pdb'
     parser = {
         ".pdb": PDB,
         ".pdbx": CIF, # .pdbx is sometimes used, maps to CIF
@@ -121,6 +124,7 @@ def parse(filepath_or_stream, *, stream_format_hint: str | None = None) -> Molec
         print(f"Error during parsing with {selected_parser.__name__} for suffix {suffix} using input '{str(input_for_parser)[:100]}...': {e}")
         raise
 
+    molecule.pb_import_path = original_filepath_str or ''
     return molecule
 
 

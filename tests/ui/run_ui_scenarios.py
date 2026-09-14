@@ -1461,6 +1461,117 @@ def membrane_force_field_assert_far():
     return 'The real event loop closed the gap after the chain left the membrane'
 
 
+def open_conformation_browser():
+    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
+    # Isolate the demonstration in this runner's disposable scene.
+    H.reset_scene()
+    with protein_workspace_override():
+        mid = H.import_local('1d3z.pdb.gz', 'Ubiquitin')
+        state['library_mid'] = mid
+        state['library_draws'] = []
+        original = cls.draw
+        def draw(self, context):
+            original(self, context)
+            state['library_draws'].append(self.layout.introspect())
+        state['library_draw_original'] = original
+        cls.draw = draw
+        assert bpy.ops.proteinblender.browse_conformations(molecule_id=mid) == {'FINISHED'}
+        library = H.sm().molecules[mid].object.pb_conformations
+        library.fit = 'NONE'
+        assert bpy.ops.proteinblender.edit_protein_visuals(item_id=mid, vs_style='cartoon',
+            vs_color=(.15, .5, .8, 1)) == {'FINISHED'}
+        bpy.context.scene.frame_set(119)
+        bpy.ops.ed.undo_push(message='Conformation browser baseline')
+    with ui_override('VIEW_3D'):
+        space = bpy.context.space_data
+        space.region_3d.view_location = (0, 0, 0)
+        space.region_3d.view_distance = .65
+        space.shading.type = 'MATERIAL'
+        space.shading.use_scene_lights = False
+        space.shading.use_scene_world = False
+        space.show_gizmo = False
+        space.overlay.show_overlays = False
+    redraw_all_panels()
+
+
+def observe_conformation_browser_and_switch():
+    assert state['library_draws'], 'Conformation browser did not draw'
+    layout = str(state['library_draws'][-1])
+    for label in ['Conformations (10)', 'Previous', 'Next', 'Set as Start', 'Set as End',
+                  'Animate Between Conformations', 'Add from PDB', 'Capture Current Pose']:
+        assert label in layout, f'Missing browser control: {label}'
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.switch_conformation(molecule_id=state['library_mid'], index=7) == {'FINISHED'}
+        bpy.ops.ed.undo_push(message='Conformation switched')
+    assert bpy.context.scene.frame_current == 119
+    redraw_all_panels()
+
+
+def library_undo():
+    with protein_workspace_override():
+        assert bpy.ops.ed.undo() == {'FINISHED'}
+
+
+def library_assert_undo_and_redo():
+    library = H.sm().molecules[state['library_mid']].object.pb_conformations
+    assert library.active_index == 0
+    assert bpy.context.scene.frame_current == 119
+    with protein_workspace_override():
+        assert bpy.ops.ed.redo() == {'FINISHED'}
+
+
+def library_compare_and_mark_endpoints():
+    mid = state['library_mid']
+    library = H.sm().molecules[mid].object.pb_conformations
+    assert library.active_index == 7
+    assert bpy.context.scene.frame_current == 119
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.mark_conformation(molecule_id=mid, endpoint='END') == {'FINISHED'}
+    library.show_comparison = True
+    library.motion_threshold = .5
+    library.highlight_motion = True
+    redraw_all_panels()
+
+
+def library_open_morph_dialog():
+    from proteinblender.operators import conformation_operators as operators
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'conformation-browser.png'))
+    mid = state['library_mid']
+    library = H.sm().molecules[mid].object.pb_conformations
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.create_conformation('INVOKE_DEFAULT',
+            source_id=mid, target_id=mid, source_state=library.start_uid,
+            target_state=library.end_uid, source_chain='A', target_chain='A',
+            source_region='1-20', target_region='1-20', fit=library.fit) == {'RUNNING_MODAL'}
+    assert operators._creation_dialog._match is not None
+    assert operators._creation_dialog._match.source_context is not None
+    assert operators._creation_dialog._labels() == {'source_label': 'Model 1', 'target_label': 'Model 8'}
+
+
+def library_cancel_morph():
+    from proteinblender.operators import conformation_operators as operators
+    from proteinblender.core import conformation
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.preview_conformation_alignment() == {'FINISHED'}
+    obj = conformation.find(bpy.context.scene, operators._creation_dialog._preview_id)
+    assert obj.get('pb_context_object') is not None
+    cancel_mixed_swatch_picker()
+
+
+def library_verify_cancel_and_close():
+    from proteinblender.operators import conformation_operators as operators
+    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
+    try:
+        assert operators._creation_dialog is None
+        assert bpy.context.scene.frame_current == 119
+        assert bpy.context.scene.pb_conformation_browser == state['library_mid']
+        with protein_workspace_override():
+            assert bpy.ops.proteinblender.close_conformations() == {'FINISHED'}
+        assert not any(o.get('pb_state_preview_owner') for o in bpy.context.scene.objects)
+    finally:
+        cls.draw = state['library_draw_original']
+
+
 steps = [
     ("setup and real workspace", setup),
     ("settle workspace activation 1", lambda: "workspace event-loop tick"),
@@ -1545,6 +1656,21 @@ steps.extend([
     ('raise force-field chain', membrane_force_field_raise_chain),
     ('settle raised force field', lambda: 'event loop'),
     ('verify force-field height', membrane_force_field_assert_far),
+    ('dismiss previous playback popup', cancel_mixed_swatch_picker),
+    ('settle previous popup dismissal', lambda: 'event loop'),
+    ('open persistent conformation browser', open_conformation_browser),
+    ('settle conformation browser', lambda: 'redraw'),
+    ('verify browser controls and switch', observe_conformation_browser_and_switch),
+    ('undo conformation switch', library_undo),
+    ('settle conformation undo', lambda: 'undo event loop'),
+    ('verify conformation undo and redo', library_assert_undo_and_redo),
+    ('settle conformation redo', lambda: 'redo event loop'),
+    ('compare and mark conformations', library_compare_and_mark_endpoints),
+    ('settle conformation comparison', lambda: 'redraw'),
+    ('settle conformation materials', lambda: 'allow material preview to compile'),
+    ('open library morph dialog', library_open_morph_dialog),
+    ('cancel library morph dialog', library_cancel_morph),
+    ('close browser after morph cancellation', library_verify_cancel_and_close),
 ])
 
 
@@ -1554,6 +1680,8 @@ def advance():
         record(name, function)
         if not results[-1]["ok"]:
             steps.clear()
+        if name == 'settle conformation materials':
+            return 5.0
         return 0.15
     return save_report_and_quit()
 

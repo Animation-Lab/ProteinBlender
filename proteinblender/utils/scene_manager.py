@@ -210,6 +210,8 @@ class ProteinBlenderScene:
         """Finalize the import of a molecule: create domains, update UI, set active, refresh."""
         from ..core.structural_alignment import store_identity
         store_identity(molecule)
+        from ..core.conformation_library import initialize
+        initialize(molecule)
         # Set protein pivot to center of mass and move to world origin
         print("Setting protein pivot to center of mass...")
         molecule.set_protein_pivot_to_center_of_mass(bpy.context)
@@ -435,17 +437,20 @@ class ProteinBlenderScene:
         scene.display_settings = data['display_settings']
         return scene 
 
-    def import_molecule_from_file(self, filepath: str, identifier: str) -> bool:
+    def import_molecule_from_file(self, filepath: str, identifier: str,
+                                  model_interpretation='AUTO') -> bool:
         """Import a molecule from a local file"""
         try:
             ensure_object_mode()
             # Import the molecule using MoleculeManager
-            molecule = self.molecule_manager.import_from_file(filepath, identifier)
+            molecule = self.molecule_manager.import_from_file(filepath, identifier, model_interpretation)
             if not molecule:
                 return False
             # Finalize import (domains, UI, etc.)
             self._finalize_imported_molecule(molecule)
             return True
+        except ValueError:
+            raise
         except Exception:
             import traceback
             traceback.print_exc()
@@ -1020,6 +1025,8 @@ def _refresh_object_references_only(scene_manager, scene):
 def _is_molecular_nodes_protein(obj):
     """Check if object is a MolecularNodes protein"""
     try:
+        if 'pb_state_preview_owner' in obj:
+            return False
         # Check for MolecularNodes modifier
         if not obj.modifiers.get("MolecularNodes"):
             return False

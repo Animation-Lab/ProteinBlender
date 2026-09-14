@@ -5,6 +5,70 @@ title: Conformational Transitions
 
 # Alignment and morphing
 
+## Browsing a protein's conformations
+
+Click **Conformations (N)** on a protein's PB Outliner row, or choose **Browse
+Conformations** from its right-click menu. The browser stays open below the
+Outliner. It shows the file/model provenance and the current conformation name.
+
+- Choose a model from the dropdown, use **Previous / Next**, or drag **Browse**.
+  This changes the displayed coordinates immediately without changing the scene
+  frame, object placement, colors, chain/domain selections, or representation.
+- Rename a conformation with **Name**. Its original source and model number stay
+  attached to it.
+- **Compare with** chooses a fixed reference. **Keep steady** aligns each model
+  to that reference using the stable core, the whole protein, or entered anchor
+  residues such as `A:1-30`. **Original placement** shows the stored coordinates.
+  An invalid anchor leaves the last valid geometry visible and explains the error.
+- **Show transparent reference** adds a gray reference cartoon. **Highlight
+  motion (Cα markers)** places orange markers at alpha carbons displaced by at
+  least the chosen threshold in Å. Compare in cartoon representation for a clear
+  view of these backbone markers. Comparison helpers are for the viewport and
+  are excluded from renders; closing the browser removes them.
+- Choose a conformation and click **Set as Start**, then another and **Set as
+  End**. **Animate Between Conformations…** opens the existing alignment/morph
+  dialog with those endpoints filled in. The created morph owns its coordinates,
+  appears as an independent sibling in the Outliner, and supports end frames,
+  return frames, and repeated breathing cycles.
+
+**Add from File…** and **Add from PDB…** append compatible conformations to the
+same library. Atoms are matched by chain, residue number, insertion code, residue
+name, atom name, and element, so a different atom order is acceptable. The entire
+batch is checked before adding anything. Missing atoms, extra ligands, changed
+residue numbering, or duplicate identities require importing a separate protein
+and using **Align & Morph** for its sequence-based partial matching.
+
+**Capture Current Pose…** saves a named coordinate snapshot in this library,
+including native chain/domain and puppet transforms. Captured states compensate
+for the current domain transforms when displayed, so the pose is not applied
+twice. **Extract as Protein** creates a separate protein at the same placement
+with the displayed conformation and presentation; move that protein for a
+side-by-side comparison. Stored coordinate sets are immutable and saved inside
+the `.blend`, including states that are not currently displayed.
+
+### Importing model ensembles and assemblies
+
+NMR ensembles are detected in PDB and mmCIF files, including compressed files.
+Each model becomes a named conformation under one protein. Existing biological
+assembly controls remain separate. Legacy `.pdb1`, `.pdb2`, etc. assembly files
+combine their model copies into one assembly, with distinct chain labels.
+For an ambiguous local file, choose **Multiple models → Conformations** or
+**Assembly copies** in the file browser. The importer does not infer a trajectory
+or conformational states from coordinate similarity. Alternate atom locations
+continue to use the parser's existing alternate-location policy and do not become
+whole-protein states.
+
+An NMR ensemble is a collection of models consistent with experimental
+restraints. The numbering does not establish a chronological motion path; the
+animation order and timing are authored by the user. See [RCSB's NMR guide](https://pdb101.rcsb.org/learn/guide-to-understanding-pdb-data/methods-for-determining-structure).
+
+Files imported before the library feature can open a one-state library from
+their saved geometry. Reimport the original ensemble to obtain all its models.
+Legacy domains with separate atom meshes and proteins with existing shape keys
+need a separate fresh import for browsing.
+
+## Morphing separately imported proteins
+
 Import two conformations, then click **Align & Morph** in **Animate Scene** or a
 protein's Edit dialog.
 

@@ -125,11 +125,11 @@ def set_timing(obj, start, duration=3, smooth=True, *, end=None,
 
 
 def create(context, source, target, match, start=1, duration=3, smooth=True,
-           show_context=True, context_opacity=.18, **timing):
+           show_context=True, context_opacity=.18, source_label=None, target_label=None, **timing):
     from ..utils.molecularnodes.blender.nodes import create_starting_node_tree
     from .visual_style import apply_color_to_object
-    source_name = getattr(source, 'name', source.identifier)
-    target_name = getattr(target, 'name', target.identifier)
+    source_name = source_label or getattr(source, 'name', source.identifier)
+    target_name = target_label or getattr(target, 'name', target.identifier)
     mesh = source.object.data.copy()
     mesh.name = 'Conformational transition atoms'
     if alignment.IDENTITY_KEY in mesh:
@@ -168,7 +168,8 @@ def create(context, source, target, match, start=1, duration=3, smooth=True,
             originals += [molecule.object] + [d.object for d in molecule.domains.values() if d.object]
         obj['pb_original_objects'] = [{'object': original} for original in dict.fromkeys(originals)]
         from . import morph_context
-        morph_context.create(obj, source, match.source_indices, show_context, context_opacity)
+        morph_context.create(obj, source, match.source_indices, show_context, context_opacity,
+                             coordinates=match.source_context)
         morph_context.set_visible(obj, show_context, context_opacity)
         set_timing(obj, start, duration, smooth, **timing)
         source_visibility(obj, True)

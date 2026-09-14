@@ -139,6 +139,7 @@ class Match:
     start: np.ndarray
     end: np.ndarray
     summary: dict
+    source_context: np.ndarray | None = None
 
 
 def parse_regions(text, default_chain='ALL'):
@@ -168,8 +169,9 @@ def in_regions(key, regions):
 
 
 def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit='CORE', *,
-                     source_region='', target_region='', fit_region='', chain_pairs=''):
-    if source.object == target.object:
+                     source_region='', target_region='', fit_region='', chain_pairs='',
+                     source_coordinates=None, target_coordinates=None):
+    if source.object == target.object and (source_coordinates is None or target_coordinates is None):
         raise ValueError('Choose two different structures.')
     a, b = read_identity(source), read_identity(target)
     ac, bc = protein_chains(a), protein_chains(b)
@@ -244,7 +246,8 @@ def match_structures(source, target, source_chain='ALL', target_chain='ALL', fit
         raise ValueError('No suitable protein match (at least 3 residues and 30% sequence identity).')
     if source_chain == 'ALL' and len(mapping) != len(assignments):
         raise ValueError('Some chains do not match. Choose a specific chain pair.')
-    p, q = positions(source.object), positions(target.object)
+    p = positions(source.object) if source_coordinates is None else np.asarray(source_coordinates)
+    q = positions(target.object) if target_coordinates is None else np.asarray(target_coordinates)
     if not np.isfinite(p).all() or not np.isfinite(q).all():
         raise ValueError('The structure contains invalid atom coordinates.')
     fixed, mobile = p[cas_a], q[cas_b]

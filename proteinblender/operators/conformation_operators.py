@@ -75,6 +75,8 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
 
     source_id: EnumProperty(name='Start structure', items=_molecules)
     target_id: EnumProperty(name='End structure', items=_molecules)
+    source_state: StringProperty(options={'HIDDEN'})
+    target_state: StringProperty(options={'HIDDEN'})
     source_chain: EnumProperty(name='Start chain', items=_source_chains, default=0)
     target_chain: EnumProperty(name='End chain', items=_target_chains, default=0)
     fit: EnumProperty(name='Superpose using', items=[
@@ -104,10 +106,18 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
             source, target = molecules.get(self.source_id), molecules.get(self.target_id)
             if source is None or target is None:
                 raise ValueError('Import two protein structures to compare their conformations.')
-            self._match = alignment.match_structures(
-                source, target, self.source_chain, self.target_chain, self.fit,
-                source_region=self.source_region, target_region=self.target_region,
-                fit_region=self.fit_region, chain_pairs=self.chain_pairs)
+            kwargs = dict(source_region=self.source_region, target_region=self.target_region,
+                          fit_region=self.fit_region, chain_pairs=self.chain_pairs)
+            if self.source_state or self.target_state:
+                from ..core import conformation_library as library
+                if self.source_id != self.target_id:
+                    raise ValueError('Library endpoints must belong to the same protein.')
+                self._match = library.match(source, self.source_state, self.target_state,
+                                            self.fit, source_chain=self.source_chain,
+                                            target_chain=self.target_chain, **kwargs)
+            else:
+                self._match = alignment.match_structures(
+                    source, target, self.source_chain, self.target_chain, self.fit, **kwargs)
         except ValueError as exc:
             self._problem = str(exc)
 
@@ -146,6 +156,7 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
         if proteins != getattr(self, '_last_proteins', proteins):
             self.source_chain = self.target_chain = 'ALL'
             self.chain_pairs = ''
+            self.source_state = self.target_state = ''
         if self.source_chain != 'ALL' or self.target_chain != 'ALL':
             self.chain_pairs = ''
         self._last_proteins = proteins
@@ -158,10 +169,17 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
         layout.use_property_split = True
         layout.use_property_decorate = False
         layout.label(text='Compare two conformations of a protein', icon='IPO_EASE_IN_OUT')
-        layout.prop(self, 'source_id')
+        labels = self._labels()
+        if self.source_state:
+            layout.label(text='Start: ' + labels.get('source_label', 'Unavailable'))
+        else:
+            layout.prop(self, 'source_id')
         layout.prop(self, 'source_chain', text='Include')
         layout.prop(self, 'source_region')
-        layout.prop(self, 'target_id')
+        if self.target_state:
+            layout.label(text='End: ' + labels.get('target_label', 'Unavailable'))
+        else:
+            layout.prop(self, 'target_id')
         layout.prop(self, 'target_chain', text='Include')
         layout.prop(self, 'target_region')
         if self.source_chain == self.target_chain == 'ALL':
@@ -211,12 +229,19 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
             obj = core.create(context, molecules[self.source_id], molecules[self.target_id],
                               self._match, self.start_frame, self.duration, self.smooth,
                               show_context=self.show_context, context_opacity=self.context_opacity,
+                              **self._labels(),
                               **_timing(self, context))
         except ValueError as exc:
             self.report({'WARNING'}, str(exc))
             self.cancel(context)
             return {'CANCELLED'}
         context.scene.frame_set(self.start_frame)
+        if self.source_state:
+            from ..core.conformation_comparison import clear
+            source = molecules[self.source_id]
+            source.object.pb_conformations['show_comparison'] = False
+            source.object.pb_conformations['highlight_motion'] = False
+            clear(source)
         self.report({'INFO'}, 'Transition created. Its Outliner pencil opens playback.')
         if getattr(self, '_interactive', False) and not bpy.app.background:
             identifier = obj[core.TAG]
@@ -226,6 +251,19 @@ class PROTEINBLENDER_OT_create_conformation(Operator):
                 return None
             bpy.app.timers.register(open_playback, first_interval=.1)
         return {'FINISHED'}
+
+    def _labels(self):
+        from ..core import conformation_library as library
+        molecules = ProteinBlenderScene.get_instance().molecules
+        labels = {}
+        for side, mid, uid in [('source', self.source_id, self.source_state),
+                               ('target', self.target_id, self.target_state)]:
+            if uid and mid in molecules:
+                try:
+                    labels[side + '_label'] = library.state(molecules[mid], uid).name
+                except ValueError:
+                    pass
+        return labels
 
     def _clear_preview(self, context):
         identifier = getattr(self, '_preview_id', '')
@@ -262,6 +300,7 @@ class PROTEINBLENDER_OT_preview_conformation_alignment(Operator):
             obj = core.create(context, molecules[dialog.source_id], molecules[dialog.target_id],
                               dialog._match, dialog.start_frame, dialog.duration, dialog.smooth,
                               show_context=dialog.show_context, context_opacity=dialog.context_opacity,
+                              **dialog._labels(),
                               **_timing(dialog, context))
         except ValueError as exc:
             self.report({'WARNING'}, str(exc))

@@ -8,10 +8,11 @@ import os
 import logging
 from typing import Set
 from bpy.types import Operator
-from bpy.props import StringProperty
+from bpy.props import StringProperty, EnumProperty
 from bpy_extras.io_utils import ImportHelper
 
 from ..utils.scene_manager import ProteinBlenderScene
+from .conformation_library import MODEL_INTERPRETATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +21,13 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
     bl_idname = "molecule.import_local"
     bl_label = "Import Local Structure File"
     bl_description = "Import a protein structure file (PDB, CIF, etc.) from your local filesystem"
+    bl_options = {'REGISTER', 'UNDO'}
+    model_interpretation: EnumProperty(name='Multiple models', items=MODEL_INTERPRETATIONS)
     
     # File browser properties
     filename_ext = ".pdb"
     filter_glob: StringProperty(
-        default="*.pdb;*.ent;*.cif;*.mmcif;*.bcif;*.pdbx;*.gz",
+        default="*.pdb;*.pdb[0-9]*;*.ent;*.cif;*.mmcif;*.bcif;*.pdbx;*.gz",
         options={'HIDDEN'},
         description="File types to filter in the file browser"
     )
@@ -61,7 +64,7 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         
         try:
             scene_manager = ProteinBlenderScene.get_instance()
-            success = scene_manager.import_molecule_from_file(filepath, identifier)
+            success = scene_manager.import_molecule_from_file(filepath, identifier, self.model_interpretation)
             
             if not success:
                 self.report({'ERROR'}, f"Failed to import {filepath}")

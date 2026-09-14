@@ -102,6 +102,8 @@ CLASSES = [
 def register():
     """Register all panel properties"""
     animation_register_props()
+    from ..operators.conformation_library import register_props
+    register_props()
     import bpy
     bpy.types.UI_MT_list_item_context_menu.append(draw_outliner_context_menu)
 
@@ -110,3 +112,5 @@ def unregister():
     import bpy
     bpy.types.UI_MT_list_item_context_menu.remove(draw_outliner_context_menu)
     animation_unregister_props()
+    from ..operators.conformation_library import unregister_props
+    unregister_props()

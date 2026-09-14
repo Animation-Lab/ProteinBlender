@@ -278,6 +278,11 @@ class DomainDefinition:
             # more: the pivot moved onto the modifier (core/domain_space.py), and
             # it was the sole writer.
             self.object = parent_obj.copy()
+            # Conformations belong to the protein controller. A domain shares
+            # its live mesh but must not inherit a second library and retain
+            # references to every immutable coordinate mesh.
+            if hasattr(self.object, 'pb_conformations'):
+                self.object.pb_conformations.states.clear()
             self.object.name = f"{self.name}_{self.chain_id}_{self.start}_{self.end}"
             # Store name for later restoration
             self.object_name = self.object.name
@@ -387,6 +392,8 @@ class DomainDefinition:
             # Get current object (with healing if needed)
             obj = self.object
             if obj:
+                from .conformation_comparison import clear_for_parent
+                clear_for_parent(obj)
                 # Clean up node groups from modifiers first
                 try:
                     if obj.modifiers:

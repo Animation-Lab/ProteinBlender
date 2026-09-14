@@ -7,7 +7,7 @@ from . import structural_alignment as alignment
 from .domain_space import get_pivot
 
 
-def create(obj, source, matched_indices, visible=True, opacity=.18):
+def create(obj, source, matched_indices, visible=True, opacity=.18, coordinates=None):
     identity = alignment.read_identity(source)
     matched = set(matched_indices.tolist())
     keep = [i for i, name in enumerate(identity.residue_name)
@@ -25,7 +25,9 @@ def create(obj, source, matched_indices, visible=True, opacity=.18):
         bm.to_mesh(mesh)
     finally:
         bm.free()
-    coords = alignment.positions(source.object)[keep] * alignment.SCALE - np.asarray(get_pivot(source.object))
+    if coordinates is None:
+        coordinates = alignment.positions(source.object) * alignment.SCALE
+    coords = coordinates[keep] - np.asarray(get_pivot(source.object))
     mesh.vertices.foreach_set('co', coords.ravel())
     mesh.update()
     helper = bpy.data.objects.new(obj.name + ' context data', mesh)

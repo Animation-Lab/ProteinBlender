@@ -40,6 +40,8 @@ class MoleculeManager:
                 build_assembly=False,
                 **kwargs
             )
+            from .conformation_library import prepare_import
+            prepare_import(mol, deposited=True)
             
             # Create our wrapper object
             wrapper = MoleculeWrapper(mol, molecule_id)
@@ -51,11 +53,15 @@ class MoleculeManager:
             print(f"Failed to import PDB {pdb_id}: {str(e)}")
             raise
             
-    def import_from_file(self, filepath: str, name: Optional[str] = None) -> MoleculeWrapper:
+    def import_from_file(self, filepath: str, name: Optional[str] = None,
+                         model_interpretation='AUTO') -> MoleculeWrapper:
         """Import a molecule from a local file"""
         try:
-            mol = load_local(
-                file_path=filepath,
+            from ..utils.molecularnodes.entities import parse
+            from .conformation_library import prepare_import
+            mol = parse(filepath)
+            prepare_import(mol, model_interpretation)
+            mol.create_object(
                 name=name or Path(filepath).stem,
                 style="spheres",
                 del_solvent=True
@@ -140,6 +146,9 @@ class MoleculeManager:
         if not molecule_wrapper:
             print(f"Molecule {identifier} not found in manager.")
             return
+
+        from .conformation_library import clear as clear_conformations
+        clear_conformations(molecule_wrapper)
 
         # 0. Capture every Blender datablock the molecule references BEFORE
         # any cleanup runs. Walks the parent's modifiers *and* every

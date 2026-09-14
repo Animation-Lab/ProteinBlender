@@ -241,6 +241,22 @@ def main():
         out["snapshot"] = scene_snapshot()
         checkpoint("snapshotted")
 
+        # Stored ensemble coordinates must remain usable through the public
+        # browser after reconstruction, not merely survive as named pointers.
+        from proteinblender.utils.scene_manager import ProteinBlenderScene
+        import numpy as np
+        for mid, molecule in ProteinBlenderScene.get_instance().molecules.items():
+            library = molecule.object.pb_conformations
+            if len(library.states) <= 1:
+                continue
+            before = np.array([v.co[:] for v in molecule.object.data.vertices])
+            index = library.active_index
+            assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid,
+                index=(index + 1) % len(library.states)) == {'FINISHED'}
+            assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid, index=index) == {'FINISHED'}
+            after = np.array([v.co[:] for v in molecule.object.data.vertices])
+            np.testing.assert_allclose(after, before, atol=1e-6)
+
         if WANT_RENDER:
             try:
                 out["render_covered_pixels"] = _render_coverage()

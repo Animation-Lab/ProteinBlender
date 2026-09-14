@@ -14,6 +14,11 @@ The work is divided into independent branches from `alpha` at `7ca96f0`. Each im
 
 The exploratory items are treated as research and implementation planning. The report distinguishes proposed capabilities from implemented behavior. It recommends trajectory playback and restrained endpoint editing before a full molecular sculpting engine.
 
+The follow-up **`feat/conformation-library`** branch builds on the combined
+version and adds the persistent PDB ensemble browser, comparison controls,
+library pose capture, and two-state animation. See its
+[demo and change notes](change-notes/conformation-library.md).
+
 ## Todo coverage
 
 | Requested item | Work |

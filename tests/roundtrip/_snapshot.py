@@ -90,12 +90,14 @@ SCENE_PROPS = (
     "visual_setup_color", "visual_setup_style",
     "pb_keyframe_list", "pb_keyframe_list_index",
     "pb_keyframe_filter_by_selection",
+    "pb_conformation_browser",
 )
 
 OBJECT_PROPS = (
     "domain_expanded", "domain_color", "domain_style", "domain_name",
     "temp_domain_name",
     "pb_force_field_enabled", "pb_force_field_spacing",
+    "pb_conformations",
 )
 
 EXCLUSIONS = {
@@ -584,7 +586,10 @@ def _serialize_object(obj, object_props):
         except Exception as exc:
             addon[name] = f"<unreadable: {type(exc).__name__}>"
             continue
-        if hasattr(value, "__len__") and not isinstance(value, str):
+        prop = obj.bl_rna.properties.get(name)
+        if prop and prop.type == 'POINTER':
+            addon[name] = _serialize_value(prop, value, 0)
+        elif hasattr(value, "__len__") and not isinstance(value, str):
             addon[name] = [_round(v) for v in value]
         elif isinstance(value, float):
             addon[name] = _round(value)
@@ -782,6 +787,9 @@ def scene_snapshot(include_registry=True):
             "end": scene.frame_end,
         },
         "objects": objects,
+        "conformation_coordinates": {
+            s.mesh.name: _digest(tuple(vertex.co) for vertex in s.mesh.vertices)
+            for obj in bpy.data.objects for s in obj.pb_conformations.states if s.mesh},
         "object_names": sorted(objects),
         "materials": materials,
         "collections": _reachable_collections(),
