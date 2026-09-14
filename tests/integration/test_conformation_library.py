@@ -28,6 +28,41 @@ def original_models():
     return pdb.PDBFile.read(io.StringIO(gzip.decompress(Path(H.data_path('1d3z.pdb.gz')).read_bytes()).decode())).get_structure()
 
 
+def test_popup_apply_targets_its_protein_and_rejects_invalid_fit_atomically(scene, sm):
+    mol, library = ensemble()
+    other_id = H.import_local('1ubq.pdb', 'unrelated')
+    other = sm.molecules[other_id]
+    untouched = L.read_mesh(other.object.data).copy()
+    scene.frame_set(119)
+    # The active object and browser context can both point elsewhere.
+    bpy.context.view_layer.objects.active = other.object
+    scene.pb_conformation_browser = other_id
+    args = dict(molecule_id=mol.identifier, state_uid=library.states[7].uid,
+                target_uid=library.states[9].uid, reference_uid=library.states[0].uid,
+                fit='NONE')
+    assert bpy.ops.proteinblender.apply_conformation_view(**args) == {'FINISHED'}
+    np.testing.assert_allclose(L.read_mesh(mol.object.data), original_models()[7].coord * .01, atol=1e-7)
+    np.testing.assert_array_equal(L.read_mesh(other.object.data), untouched)
+    assert library.start_uid == library.states[7].uid and library.end_uid == library.states[9].uid
+    assert scene.frame_current == 119
+    shown = L.read_mesh(mol.object.data).copy()
+    args.update(state_uid=library.states[5].uid, fit='REGION', fit_region='A:999-1000')
+    assert bpy.ops.proteinblender.apply_conformation_view(**args) == {'CANCELLED'}
+    assert library.active_index == 7 and library.fit == 'NONE'
+    assert library.start_uid == library.states[7].uid
+    np.testing.assert_array_equal(L.read_mesh(mol.object.data), shown)
+    np.testing.assert_array_equal(L.read_mesh(other.object.data), untouched)
+    library.show_comparison = True
+    assert any(o.get('pb_state_preview_owner') == mol.object for o in scene.objects)
+    # Confirmation closes even when execution fails. It must clean up only
+    # its own helpers and preserve the previous Apply and unrelated browser.
+    assert bpy.ops.proteinblender.browse_conformations(**args) == {'CANCELLED'}
+    assert not library.show_comparison
+    assert not any(o.get('pb_state_preview_owner') == mol.object for o in scene.objects)
+    assert scene.pb_conformation_browser == other_id
+    np.testing.assert_array_equal(L.read_mesh(mol.object.data), shown)
+
+
 @pytest.mark.parametrize('filename', ['1d3z.pdb.gz', '1d3z.cif.gz'])
 def test_deposited_ensemble_import_and_exact_switch(filename, scene):
     mol, library = ensemble(filename)

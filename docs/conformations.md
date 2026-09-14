@@ -7,29 +7,32 @@ title: Conformational Transitions
 
 ## Browsing a protein's conformations
 
-Click **Conformations (N)** on a protein's PB Outliner row, or choose **Browse
-Conformations** from its right-click menu. The browser stays open below the
-Outliner. It shows the file/model provenance and the current conformation name.
+Click the **conformations icon** on a protein's PB Outliner row, or choose
+**Browse Conformations** from its right-click menu. The icon appears only when
+that protein has multiple conformations. A compact popup opens for the clicked
+protein, even if a different object is selected.
 
-- Choose a model from the dropdown, use **Previous / Next**, or drag **Browse**.
-  This changes the displayed coordinates immediately without changing the scene
-  frame, object placement, colors, chain/domain selections, or representation.
-- Rename a conformation with **Name**. Its original source and model number stay
-  attached to it.
-- **Compare with** chooses a fixed reference. **Keep steady** aligns each model
-  to that reference using the stable core, the whole protein, or entered anchor
-  residues such as `A:1-30`. **Original placement** shows the stored coordinates.
-  An invalid anchor leaves the last valid geometry visible and explains the error.
-- **Show transparent reference** adds a gray reference cartoon. **Highlight
-  motion (Cα markers)** places orange markers at alpha carbons displaced by at
-  least the chosen threshold in Å. Compare in cartoon representation for a clear
-  view of these backbone markers. Comparison helpers are for the viewport and
-  are excluded from renders; closing the browser removes them.
-- Choose a conformation and click **Set as Start**, then another and **Set as
-  End**. **Animate Between Conformations…** opens the existing alignment/morph
-  dialog with those endpoints filled in. The created morph owns its coordinates,
-  appears as an independent sibling in the Outliner, and supports end frames,
-  return frames, and repeated breathing cycles.
+- Choose **Conformation**, then **Apply** to update the viewport while keeping
+  the popup open. **Showing** identifies the state actually displayed. Switching
+  preserves the scene frame, object placement, colors, domains, and representation.
+- Choose **Morph to**, then **Create Morph…**. The selected Conformation is the
+  start; Morph to is the end. This opens the existing alignment/morph dialog,
+  including timing and breathing controls. The morph owns its coordinates and
+  appears as an independent sibling in the Outliner.
+- **Apply & Close** applies the pending view and closes the popup. Cancel/Escape
+  discards pending view fields but keeps the last Apply. Closing removes temporary
+  comparison helpers. Library tools perform their named actions immediately.
+
+Two optional sections start collapsed on every opening:
+
+- **Alignment & comparison** contains the fixed **Reference**, **Keep steady**
+  alignment (stable core, whole protein, selected anchor residues such as
+  `A:1-30`, or original placement), transparent reference, opacity, and motion
+  markers. Change these settings and use **Apply**. Invalid alignment leaves the
+  last valid state and settings intact. Gray reference cartoons and orange Cα
+  motion markers are viewport-only; use Cartoon for a clear view of the markers.
+- **Library tools** contains names, provenance, file/PDB additions, pose capture,
+  and extraction. Renaming preserves the original source and model number.
 
 **Add from File…** and **Add from PDB…** append compatible conformations to the
 same library. Atoms are matched by chain, residue number, insertion code, residue
@@ -62,8 +65,8 @@ An NMR ensemble is a collection of models consistent with experimental
 restraints. The numbering does not establish a chronological motion path; the
 animation order and timing are authored by the user. See [RCSB's NMR guide](https://pdb101.rcsb.org/learn/guide-to-understanding-pdb-data/methods-for-determining-structure).
 
-Files imported before the library feature can open a one-state library from
-their saved geometry. Reimport the original ensemble to obtain all its models.
+Files imported before the library feature retain their saved geometry.
+Reimport the original ensemble to obtain all its models and the browsing icon.
 Legacy domains with separate atom meshes and proteins with existing shape keys
 need a separate fresh import for browsing.
 

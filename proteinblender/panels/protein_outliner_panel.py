@@ -261,9 +261,10 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if item.item_type == 'PROTEIN':
                 obj = bpy.data.objects.get(item.object_name)
                 count = len(obj.pb_conformations.states) if obj else 0
-                op = action('proteinblender.browse_conformations',
-                            text=f'Conformations ({count or 1})', icon='SHAPEKEY_DATA', emboss=False)
-                op.molecule_id = item.item_id
+                if count > 1:
+                    op = action('proteinblender.browse_conformations',
+                                text='', icon='SHAPEKEY_DATA', emboss=False)
+                    op.molecule_id = item.item_id
                 # Custom Pivot, then the edit pencil. DNA/RNA rows get neither:
                 # a strand's shape is driven by its own builder dialog and its
                 # bend rig, so a hand-placed pivot on it has no defined meaning
@@ -970,8 +971,6 @@ class PROTEINBLENDER_PT_outliner(Panel):
         )
         
         # Add bottom spacing
-        from ..operators.conformation_library import draw_browser
-        draw_browser(layout, context)
         layout.separator()
 
 

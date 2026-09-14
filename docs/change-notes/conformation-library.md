@@ -2,33 +2,47 @@
 
 Branch: `feat/conformation-library`, based on `demo/weekly-improvements`.
 
-One protein now owns a library of named coordinate sets. Clicking its
-**Conformations (N)** badge opens a persistent browser beneath the PB Outliner.
-Switching states preserves the playhead, transforms, styling, and domain layout.
-The library supplies two endpoints to the existing independent morph workflow.
+One protein owns a library of named coordinate sets. Its **conformations icon**
+opens a compact popup scoped to that protein. The icon appears only on protein
+rows with multiple states; it has no text label. Switching states preserves the
+playhead, transforms, styling, and domain layout. The library supplies two
+endpoints to the existing independent morph workflow.
 
-![Conformation browser with a transparent reference and orange motion markers](../images/conformation-browser.png)
+![Compact conformation popup with Apply and morph controls](../images/conformation-browser.png)
 
 ## Demo
 
 1. Import **1D3Z** from PDB, or the bundled `tests/data/1d3z.pdb.gz`. Its Outliner
-   row shows **Conformations (10)**. Set the protein representation to Cartoon.
-2. Click the badge. Use the model dropdown, Previous/Next, and Browse slider.
-   Point out that the current scene frame remains unchanged.
-3. Compare with Model 1 and choose Stable core. Enable the transparent reference
-   and orange motion markers. Lower the motion threshold to **0.5 Å** to see
-   differences in this fairly similar ensemble. Change the reference or use
-   Selected region with `A:1-30` to demonstrate alignment control.
-4. Rename Model 1 to "Rest" and set it as Start. Select Model 8, rename it to
-   "Alternate", and set it as End. Show that browsing another model leaves those
-   choices intact.
-5. Click **Animate Between Conformations…**. Set frames **10 → 30**, enable
-   Return to start at **50**, and enable Repeat breathing cycle. Create the morph.
-   Its independent Outliner entry has no children. Its pencil opens playback.
-6. Demonstrate Add from File/PDB, Capture Current Pose, and Extract as Protein.
-   Extraction places the copy at the same location; move it for side-by-side use.
-7. Save and reopen. The named library, inactive states, active model, comparison
-   settings, and animation endpoints remain available without the input file.
+   row has a conformations icon. A single-state protein such as **1UBQ** has none.
+2. Click the icon. Choose **Model 8** and click **Apply**. The popup remains open;
+   **Showing** updates to Model 8 and the current scene frame remains unchanged.
+3. Choose **Morph to → Model 1**, then **Create Morph…**. Set frames **10 → 30**,
+   enable Return to start at **50**, and enable Repeat breathing cycle. Create
+   the morph. Its independent Outliner entry has no children; its pencil opens
+   playback.
+4. For comparison, reopen the protein popup and expand **Alignment & comparison**.
+   Choose Reference Model 1 and Stable core. Enable the transparent reference and
+   orange motion markers, set the threshold to **0.5 Å**, then **Apply**. Use
+   Cartoon representation to see the markers clearly.
+5. **Library tools** reveals renaming, provenance, Add from File/PDB, Capture Pose,
+   and Extract as Protein. Extraction places the copy at the same location; move
+   it for side-by-side use.
+6. **Apply & Close** commits pending view fields. Cancel/Escape keeps earlier
+   Apply results and discards pending view fields. Either exit removes temporary
+   comparison helpers. Optional sections start collapsed when reopened.
+7. Save and reopen. Named coordinate sets, including inactive ones, are stored in
+   the `.blend` without needing the input file.
+
+## Popup simplification
+
+The everyday interface now contains one state selector, Apply, and a morph
+destination. Alignment, comparison, and library management remain available in
+collapsed sections. The persistent panel beneath the Outliner, duplicate browsing
+controls, and separate Set as Start/End buttons were removed from the interface.
+The selected conformation and Morph to now define the animation endpoints.
+Apply and Apply & Close follow the Lighting dialog's committed-change behavior.
+Invalid alignment restores the previously applied view and settings together.
+A failed confirmation also removes temporary comparison helpers when it closes.
 
 ## Implementation notes
 
@@ -56,11 +70,29 @@ The library supplies two endpoints to the existing independent morph workflow.
 
 ## Verification
 
+Popup revision checks cover targeting the clicked protein while another protein
+is active; applying exact coordinates; rejecting invalid alignment without
+partial changes; icon visibility; compact and expanded layouts; Apply remaining
+open; Cancel preserving applied changes and discarding pending fields; Apply &
+Close; cleanup; and opening a morph dialog from the popup.
+
+| Popup revision validation | Result |
+|---|---|
+| Blender 5.2: library, morph, and repository contracts | 44 passed; one network test excluded |
+| Blender 5.1: conformation library | 13 passed; one network test excluded |
+| Blender 5.2: focused foreground popup workflow | 31 scenarios passed |
+| Blender 5.2: final library and repository contracts, including failed-confirmation cleanup | 23 passed; one network test excluded |
+| Final deployed build: full foreground UI, Blender 5.1 normal profile | 109/109 scenarios passed |
+| Final deployed build: full foreground UI, Blender 5.2 normal profile | 109/109 scenarios passed |
+
+The following matrix records the original library implementation.
+
 Regression coverage includes deposited PDB/mmCIF ensembles, a legacy assembly,
 ambiguous imports, raw coordinate endpoints, rendered atom geometry, fixed
 alignment references, invalid anchors, comparison cleanup, named endpoints,
 breathing cycles, append rejection, pose capture, extraction, and deletion.
-Foreground scenarios exercise the actual panel, undo/redo, and the morph dialog.
+Foreground scenarios exercise the Outliner icon, popup, Apply/Cancel/confirmation,
+collapsed tools, undo/redo, and nested morph dialog.
 The save/reopen lane checks every stored coordinate mesh and switches states
 again after reconstructing the scene in a fresh process.
 

@@ -107,20 +107,110 @@ class PBConformationLibrary(PropertyGroup):
     error: StringProperty()
 
 
-class PROTEINBLENDER_OT_browse_conformations(Operator):
-    """Open this protein's conformation library below the PB Outliner"""
-    bl_idname = 'proteinblender.browse_conformations'
-    bl_label = 'Browse Conformations'
+def _popup_items(self, context):
+    mol = ProteinBlenderScene.get_instance().molecules.get(self.molecule_id)
+    return _items(mol.object.pb_conformations, context) if mol else [('NONE', 'Unavailable', '', 0)]
+
+
+VIEW_FIELDS = ('fit', 'fit_region', 'show_comparison', 'highlight_motion',
+               'opacity', 'motion_threshold')
+
+
+def _close_browser(context, identifier):
+    """Only clean up the protein that this popup owns, regardless of selection."""
+    from ..core.conformation_comparison import clear
+    mol = ProteinBlenderScene.get_instance().molecules.get(identifier)
+    if mol:
+        library = mol.object.pb_conformations
+        library['show_comparison'] = False
+        library['highlight_motion'] = False
+        clear(mol)
+    if context.scene.pb_conformation_browser == identifier:
+        context.scene.pb_conformation_browser = ''
+
+
+class PROTEINBLENDER_OT_apply_conformation_view(Operator):
+    """Show the chosen conformation and comparison settings without closing the popup"""
+    bl_idname = 'proteinblender.apply_conformation_view'
+    bl_label = 'Apply Conformation'
     bl_options = {'REGISTER', 'UNDO'}
-    molecule_id: StringProperty()
+    molecule_id: StringProperty(options={'HIDDEN'})
+    state_uid: EnumProperty(name='Conformation', items=_popup_items)
+    target_uid: EnumProperty(name='Morph to', items=_popup_items)
+    reference_uid: EnumProperty(name='Reference', items=_popup_items)
+    fit: EnumProperty(name='Keep steady', items=FIT_ITEMS, default='CORE')
+    fit_region: StringProperty(name='Anchor residues', description='Reference residues, e.g. A:1-30')
+    show_comparison: BoolProperty(name='Show transparent reference')
+    highlight_motion: BoolProperty(name='Highlight motion (Cα markers)')
+    opacity: FloatProperty(name='Reference opacity', subtype='FACTOR', min=0, max=1, default=.18)
+    motion_threshold: FloatProperty(name='Motion threshold (Å)', min=.1, max=100, default=2)
 
     def execute(self, context):
         try:
             mol = molecule(self.molecule_id)
+            library = mol.object.pb_conformations
+            for uid in (self.state_uid, self.target_uid, self.reference_uid):
+                core.state(mol, uid)
+            values = {name: getattr(self, name) for name in VIEW_FIELDS}
+            # Write the fields together, then refresh once. A failed alignment
+            # must not leave the dropdown and displayed coordinates disagreeing.
+            values['fit'] = next(i for i, item in enumerate(FIT_ITEMS) if item[0] == self.fit)
+            values.update(active_index=next(i for i, s in enumerate(library.states) if s.uid == self.state_uid),
+                          reference_uid=self.reference_uid, start_uid=self.state_uid, end_uid=self.target_uid)
+            before = {name: library.get(name) for name in values}
+            for name, value in values.items():
+                library[name] = value
+            try:
+                core.refresh(mol)
+            except ValueError:
+                for name, value in before.items():
+                    if value is None:
+                        del library[name]
+                    else:
+                        library[name] = value
+                core.refresh(mol)
+                raise
+            library.error = ''
+        except ValueError as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class PROTEINBLENDER_OT_browse_conformations(Operator):
+    """Browse this protein's conformations and choose a pair to morph"""
+    bl_idname = 'proteinblender.browse_conformations'
+    bl_label = 'Browse Conformations'
+    bl_options = {'REGISTER', 'UNDO'}
+    __annotations__ = PROTEINBLENDER_OT_apply_conformation_view.__annotations__.copy()
+    show_comparison_tools: BoolProperty(name='Alignment & comparison', options={'SKIP_SAVE'})
+    show_library_tools: BoolProperty(name='Library tools', options={'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        if self._open(context) == {'CANCELLED'}:
+            return {'CANCELLED'}
+        library = molecule(self.molecule_id).object.pb_conformations
+        self.state_uid = library.states[library.active_index].uid
+        self.target_uid = library.end_uid
+        if self.target_uid == self.state_uid and len(library.states) > 1:
+            self.target_uid = library.states[(library.active_index + 1) % len(library.states)].uid
+        self.reference_uid = library.reference_uid
+        for name in VIEW_FIELDS:
+            setattr(self, name, getattr(library, name))
+        return context.window_manager.invoke_props_dialog(self, width=390, confirm_text='Apply & Close')
+
+    def draw(self, context):
+        draw_browser(self.layout, context, self)
+
+    def check(self, context):
+        return True  # Rebuild the popup when a disclosure or pending field changes.
+
+    def _open(self, context):
+        try:
+            mol = molecule(self.molecule_id)
             previous = ProteinBlenderScene.get_instance().molecules.get(context.scene.pb_conformation_browser)
             if previous and previous.object != mol.object:
-                from ..core.conformation_comparison import clear
-                clear(previous)
+                _close_browser(context, previous.identifier)
             core.initialize(mol)
             context.scene.pb_conformation_browser = self.molecule_id
             core.refresh(mol)
@@ -128,6 +218,20 @@ class PROTEINBLENDER_OT_browse_conformations(Operator):
             self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}
         return {'FINISHED'}
+
+    def execute(self, context):
+        # Preserve the public noninteractive entry point used by scripts.
+        if not self.properties.is_property_set('state_uid'):
+            return self._open(context)
+        result = PROTEINBLENDER_OT_apply_conformation_view.execute(self, context)
+        # Blender also dismisses a confirmed dialog when execute() cancels.
+        _close_browser(context, self.molecule_id)
+        return result
+
+    def cancel(self, context):
+        # Apply commits coordinates; Escape only discards pending fields and
+        # removes temporary viewport comparison helpers, as in Lighting.
+        _close_browser(context, self.molecule_id)
 
 
 class PROTEINBLENDER_OT_close_conformations(Operator):
@@ -137,14 +241,7 @@ class PROTEINBLENDER_OT_close_conformations(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        from ..core.conformation_comparison import clear
-        mol = ProteinBlenderScene.get_instance().molecules.get(context.scene.pb_conformation_browser)
-        if mol:
-            library = mol.object.pb_conformations
-            library['show_comparison'] = False
-            library['highlight_motion'] = False
-            clear(mol)
-        context.scene.pb_conformation_browser = ''
+        _close_browser(context, context.scene.pb_conformation_browser)
         return {'FINISHED'}
 
 
@@ -302,68 +399,72 @@ class PROTEINBLENDER_OT_extract_library_conformation(Operator):
         return {'FINISHED'}
 
 
-def draw_browser(layout, context):
-    mol = ProteinBlenderScene.get_instance().molecules.get(context.scene.pb_conformation_browser)
+def draw_browser(layout, context, popup):
+    mol = ProteinBlenderScene.get_instance().molecules.get(popup.molecule_id)
     if mol is None or not mol.object.pb_conformations.states:
+        layout.label(text='This protein is no longer available.', icon='ERROR')
         return
     library = mol.object.pb_conformations
+    layout.label(text=f'{mol.identifier} · {len(library.states)} conformations', icon='SHAPEKEY_DATA')
+    layout.prop(popup, 'state_uid')
+    row = layout.row()
+    row.operator_context = 'EXEC_DEFAULT'
+    op = row.operator('proteinblender.apply_conformation_view', text='Apply', icon='CHECKMARK')
+    for name in PROTEINBLENDER_OT_apply_conformation_view.__annotations__:
+        setattr(op, name, getattr(popup, name))
+    shown = library.states[library.active_index]
+    layout.label(text=f'Showing: {shown.name}')
+
     box = layout.box()
-    header = box.row()
-    header.label(text=f'{mol.identifier} · Conformations', icon='SHAPEKEY_DATA')
-    header.operator('proteinblender.close_conformations', text='', icon='X')
-    active = library.states[library.active_index]
-    box.label(text=f'{active.source} · {library.method or "Coordinate set"}')
-    if 'NMR' in library.method:
-        box.label(text='NMR ensemble; model order does not define motion.', icon='INFO')
-    box.prop(library, 'active')
-    row = box.row(align=True)
-    prev = row.row(align=True)
-    prev.enabled = library.active_index > 0
-    op = prev.operator('proteinblender.switch_conformation', text='Previous', icon='TRIA_LEFT')
-    op.molecule_id, op.step = mol.identifier, -1
-    row.label(text=f'{library.active_index + 1} / {len(library.states)}')
-    following = row.row(align=True)
-    following.enabled = library.active_index + 1 < len(library.states)
-    op = following.operator('proteinblender.switch_conformation', text='Next', icon='TRIA_RIGHT')
-    op.molecule_id, op.step = mol.identifier, 1
-    if len(library.states) > 1:
-        box.prop(library, 'browse', slider=True)
-    box.prop(active, 'name', text='Name')
-    row = box.row(align=True)
-    for endpoint, label in [('START', 'Set as Start'), ('END', 'Set as End')]:
-        op = row.operator('proteinblender.mark_conformation', text=label)
-        op.molecule_id, op.endpoint = mol.identifier, endpoint
-    box.prop(library, 'reference')
-    box.prop(library, 'fit')
-    if library.fit == 'REGION':
-        box.prop(library, 'fit_region')
-    box.prop(library, 'show_comparison')
-    if library.show_comparison:
-        box.prop(library, 'opacity', slider=True)
-    box.prop(library, 'highlight_motion')
-    if library.highlight_motion:
-        box.prop(library, 'motion_threshold')
-    if library.show_comparison or library.highlight_motion:
-        box.label(text='Viewport comparison · gray reference · orange motion')
+    box.prop(popup, 'target_uid')
+    row = box.row()
+    row.enabled = popup.state_uid != popup.target_uid
+    row.operator_context = 'INVOKE_DEFAULT'
+    op = row.operator('proteinblender.create_conformation', text='Create Morph…', icon='IPO_EASE_IN_OUT')
+    op.source_id = op.target_id = mol.identifier
+    op.source_state, op.target_state = popup.state_uid, popup.target_uid
+    op.fit, op.fit_region = popup.fit, popup.fit_region
+
+    layout.prop(popup, 'show_comparison_tools', emboss=False,
+                icon='TRIA_DOWN' if popup.show_comparison_tools else 'TRIA_RIGHT')
+    if popup.show_comparison_tools:
+        box = layout.box()
+        box.prop(popup, 'reference_uid')
+        box.prop(popup, 'fit')
+        if popup.fit == 'REGION':
+            box.prop(popup, 'fit_region')
+        box.prop(popup, 'show_comparison')
+        if popup.show_comparison:
+            box.prop(popup, 'opacity', slider=True)
+        box.prop(popup, 'highlight_motion')
+        if popup.highlight_motion:
+            box.prop(popup, 'motion_threshold')
+        box.label(text='Use Apply to update the viewport.', icon='INFO')
+
+    layout.prop(popup, 'show_library_tools', emboss=False,
+                icon='TRIA_DOWN' if popup.show_library_tools else 'TRIA_RIGHT')
+    if popup.show_library_tools:
+        box = layout.box()
+        selected = next((s for s in library.states if s.uid == popup.state_uid), None)
+        if selected:
+            box.prop(selected, 'name', text='Name')
+            box.label(text=selected.source)
+        box.label(text=library.method or 'Coordinate set')
+        if 'NMR' in library.method:
+            box.label(text='Model order does not define motion.', icon='INFO')
+        row = box.row(align=True)
+        row.operator_context = 'INVOKE_DEFAULT'
+        row.operator('proteinblender.add_conformation_file', text='Add from File…', icon='FILE_FOLDER').molecule_id = mol.identifier
+        row.operator('proteinblender.add_conformation_pdb', text='Add from PDB…', icon='URL').molecule_id = mol.identifier
+        box.label(text='From the displayed conformation:')
+        row = box.row(align=True)
+        row.operator_context = 'INVOKE_DEFAULT'
+        row.operator('proteinblender.capture_library_conformation', text='Capture Pose…', icon='DUPLICATE').molecule_id = mol.identifier
+        row.operator('proteinblender.extract_library_conformation', text='Extract as Protein', icon='OUTLINER_OB_MESH').molecule_id = mol.identifier
     if library.error:
         import textwrap
-        for line in textwrap.wrap(library.error, 65):
-            box.label(text=line, icon='ERROR')
-    a = next((s for s in library.states if s.uid == library.start_uid), None)
-    b = next((s for s in library.states if s.uid == library.end_uid), None)
-    box.label(text=f'{a.name if a else "Choose start"} → {b.name if b else "Choose end"}')
-    row = box.row()
-    row.enabled = bool(a and b and a.uid != b.uid and not library.error)
-    op = row.operator('proteinblender.create_conformation', text='Animate Between Conformations…', icon='IPO_EASE_IN_OUT')
-    op.source_id = op.target_id = mol.identifier
-    op.source_state, op.target_state = library.start_uid, library.end_uid
-    op.fit, op.fit_region = library.fit, library.fit_region
-    row = box.row(align=True)
-    row.operator('proteinblender.add_conformation_file', text='Add from File…', icon='FILE_FOLDER').molecule_id = mol.identifier
-    row.operator('proteinblender.add_conformation_pdb', text='Add from PDB…', icon='URL').molecule_id = mol.identifier
-    row = box.row(align=True)
-    row.operator('proteinblender.capture_library_conformation', text='Capture Current Pose…', icon='DUPLICATE').molecule_id = mol.identifier
-    row.operator('proteinblender.extract_library_conformation', text='Extract as Protein', icon='OUTLINER_OB_MESH').molecule_id = mol.identifier
+        for line in textwrap.wrap(library.error, 55):
+            layout.label(text=line, icon='ERROR')
 
 
 def register_props():
@@ -377,6 +478,7 @@ def unregister_props():
 
 
 CLASSES = [PBConformationState, PBConformationLibrary,
+           PROTEINBLENDER_OT_apply_conformation_view,
            PROTEINBLENDER_OT_browse_conformations, PROTEINBLENDER_OT_close_conformations,
            PROTEINBLENDER_OT_switch_conformation, PROTEINBLENDER_OT_mark_conformation,
            PROTEINBLENDER_OT_add_conformation_file, PROTEINBLENDER_OT_capture_library_conformation,

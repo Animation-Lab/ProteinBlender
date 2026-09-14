@@ -1463,12 +1463,22 @@ def membrane_force_field_assert_far():
 
 def open_conformation_browser():
     from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
+    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_UL_outliner as rows
     # Isolate the demonstration in this runner's disposable scene.
     H.reset_scene()
     with protein_workspace_override():
         mid = H.import_local('1d3z.pdb.gz', 'Ubiquitin')
         state['library_mid'] = mid
+        state['library_single_mid'] = H.import_local('1ubq.pdb', 'Single state')
+        bpy.ops.proteinblender.toggle_visibility(item_id=state['library_single_mid'])
         state['library_draws'] = []
+        state['library_rows'] = {}
+        original_row = rows.draw_item
+        def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+            original_row(self, context, layout, data, item, icon, active_data, active_propname)
+            state['library_rows'][item.item_id] = str(layout.introspect())
+        state['library_row_original'] = original_row
+        rows.draw_item = draw_item
         original = cls.draw
         def draw(self, context):
             original(self, context)
@@ -1497,9 +1507,15 @@ def open_conformation_browser():
 def observe_conformation_browser_and_switch():
     assert state['library_draws'], 'Conformation browser did not draw'
     layout = str(state['library_draws'][-1])
-    for label in ['Conformations (10)', 'Previous', 'Next', 'Set as Start', 'Set as End',
-                  'Animate Between Conformations', 'Add from PDB', 'Capture Current Pose']:
-        assert label in layout, f'Missing browser control: {label}'
+    assert 'Conformations (10)' not in layout
+    assert 'Set as Start' not in layout and 'Animate Between Conformations' not in layout
+    rows = state['library_rows']
+    assert 'proteinblender.browse_conformations' in rows[state['library_mid']]
+    assert 'Conformations (' not in rows[state['library_mid']]
+    assert 'proteinblender.browse_conformations' not in rows[state['library_single_mid']]
+    for item in bpy.context.scene.outliner_items:
+        if item.item_type != 'PROTEIN' and item.item_id in rows:
+            assert 'proteinblender.browse_conformations' not in rows[item.item_id]
     with protein_workspace_override():
         assert bpy.ops.proteinblender.switch_conformation(molecule_id=state['library_mid'], index=7) == {'FINISHED'}
         bpy.ops.ed.undo_push(message='Conformation switched')
@@ -1520,28 +1536,134 @@ def library_assert_undo_and_redo():
         assert bpy.ops.ed.redo() == {'FINISHED'}
 
 
-def library_compare_and_mark_endpoints():
+def library_open_popup():
+    from proteinblender.operators.conformation_library import PROTEINBLENDER_OT_browse_conformations as cls
     mid = state['library_mid']
     library = H.sm().molecules[mid].object.pb_conformations
     assert library.active_index == 7
     assert bpy.context.scene.frame_current == 119
+    original_draw, original_cancel = cls.draw, cls.cancel
+    state['library_popup_draws'] = []
+    state['library_popup_cancelled'] = 0
+    def draw(self, context):
+        original_draw(self, context)
+        state['library_popup'] = self
+        state['library_popup_draws'].append(str(self.layout.introspect()))
+    def cancel(self, context):
+        state['library_popup_cancelled'] += 1
+        original_cancel(self, context)
+    cls.draw, cls.cancel = draw, cancel
+    state['library_popup_original'] = cls, original_draw, original_cancel
     with protein_workspace_override():
-        assert bpy.ops.proteinblender.mark_conformation(molecule_id=mid, endpoint='END') == {'FINISHED'}
-    library.show_comparison = True
-    library.motion_threshold = .5
-    library.highlight_motion = True
+        # Selection of a different protein must not redirect this popup.
+        bpy.context.view_layer.objects.active = H.sm().molecules[state['library_single_mid']].object
+        assert bpy.ops.proteinblender.browse_conformations('INVOKE_DEFAULT', molecule_id=mid) == {'RUNNING_MODAL'}
+
+
+def library_apply_popup():
+    from proteinblender.operators.conformation_library import PROTEINBLENDER_OT_apply_conformation_view as apply_cls
+    assert state['library_popup_draws'], 'Conformation popup did not draw'
+    layout = state['library_popup_draws'][-1]
+    for label in ['Apply', 'Create Morph', 'Morph to', 'Alignment & comparison', 'Library tools']:
+        assert label in layout, f'Missing popup control: {label}'
+    for label in ['Keep steady', 'Reference opacity', 'Add from PDB', 'Capture Pose', 'Browse slider']:
+        assert label not in layout, f'Advanced control visible by default: {label}'
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'conformation-browser.png'))
+    popup = state['library_popup']
+    assert popup.molecule_id == state['library_mid']
+    library = H.sm().molecules[popup.molecule_id].object.pb_conformations
+    popup.state_uid = library.states[0].uid
+    popup.target_uid = library.states[7].uid
+    assert library.active_index == 7, 'Pending selection changed coordinates before Apply'
+    with protein_workspace_override():
+        args = {name: getattr(popup, name) for name in apply_cls.__annotations__}
+        assert bpy.ops.proteinblender.apply_conformation_view('EXEC_DEFAULT', **args) == {'FINISHED'}
+    assert library.active_index == 0
+    assert bpy.context.scene.frame_current == 119
+    assert not state['library_popup_cancelled']
     redraw_all_panels()
+
+
+def library_cancel_pending_selection():
+    popup = state['library_popup']
+    library = H.sm().molecules[popup.molecule_id].object.pb_conformations
+    popup.state_uid = library.states[3].uid
+    cancel_mixed_swatch_picker()
+
+
+def library_open_optional_tools():
+    assert state['library_popup_cancelled'] == 1, 'Apply closed the compact popup'
+    mid = state['library_mid']
+    library = H.sm().molecules[mid].object.pb_conformations
+    assert library.active_index == 0, 'Cancel discarded Apply or committed a pending state'
+    assert bpy.context.scene.pb_conformation_browser == ''
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.browse_conformations('INVOKE_DEFAULT', molecule_id=mid,
+            show_comparison_tools=True, show_library_tools=True,
+        ) == {'RUNNING_MODAL'}
+
+
+def library_compare_in_popup():
+    from proteinblender.operators.conformation_library import PROTEINBLENDER_OT_apply_conformation_view as apply_cls
+    popup = state['library_popup']
+    layout = state['library_popup_draws'][-1]
+    for label in ['Keep steady', 'Show transparent reference', 'Add from PDB', 'Capture Pose']:
+        assert label in layout, f'Missing expanded control: {label}'
+    library = H.sm().molecules[popup.molecule_id].object.pb_conformations
+    popup.state_uid = library.states[7].uid
+    popup.target_uid = library.states[0].uid
+    popup.show_comparison = popup.highlight_motion = True
+    popup.motion_threshold = .5
+    with protein_workspace_override():
+        args = {name: getattr(popup, name) for name in apply_cls.__annotations__}
+        assert bpy.ops.proteinblender.apply_conformation_view('EXEC_DEFAULT', **args) == {'FINISHED'}
+    assert library.active_index == 7
+    assert any(o.get('pb_state_preview_kind') == 'MOTION' for o in bpy.context.scene.objects)
+    # Stage a further change, then Escape: the last Apply must remain.
+    popup.state_uid = library.states[3].uid
+    cancel_mixed_swatch_picker()
+
+
+def library_verify_apply_and_reopen():
+    assert state['library_popup_cancelled'] == 2, 'Apply closed its parent popup'
+    mid = state['library_mid']
+    library = H.sm().molecules[mid].object.pb_conformations
+    assert library.active_index == 7, 'Escape discarded Apply or committed a pending selection'
+    assert bpy.context.scene.pb_conformation_browser == ''
+    assert not any(o.get('pb_state_preview_owner') for o in bpy.context.scene.objects)
+    assert bpy.context.scene.frame_current == 119
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.browse_conformations('INVOKE_DEFAULT', molecule_id=mid) == {'RUNNING_MODAL'}
+
+
+def library_confirm_popup():
+    library = H.sm().molecules[state['library_mid']].object.pb_conformations
+    popup = state['library_popup']
+    assert not popup.show_comparison_tools and not popup.show_library_tools
+    assert popup.state_uid == library.states[7].uid
+    popup.state_uid = library.states[0].uid
+    popup.target_uid = library.states[7].uid
+    active_window().event_simulate(type='RET', value='PRESS')
+    active_window().event_simulate(type='RET', value='RELEASE')
+
+
+def library_verify_confirm_and_reopen():
+    library = H.sm().molecules[state['library_mid']].object.pb_conformations
+    assert library.active_index == 0, 'Apply & Close did not apply the pending state'
+    assert bpy.context.scene.pb_conformation_browser == ''
+    with protein_workspace_override():
+        assert bpy.ops.proteinblender.browse_conformations('INVOKE_DEFAULT', molecule_id=state['library_mid']) == {'RUNNING_MODAL'}
 
 
 def library_open_morph_dialog():
     from proteinblender.operators import conformation_operators as operators
-    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'conformation-browser.png'))
     mid = state['library_mid']
     library = H.sm().molecules[mid].object.pb_conformations
+    popup = state['library_popup']
     with protein_workspace_override():
         assert bpy.ops.proteinblender.create_conformation('INVOKE_DEFAULT',
-            source_id=mid, target_id=mid, source_state=library.start_uid,
-            target_state=library.end_uid, source_chain='A', target_chain='A',
+            source_id=popup.molecule_id, target_id=popup.molecule_id, source_state=popup.state_uid,
+            target_state=popup.target_uid, source_chain='A', target_chain='A',
             source_region='1-20', target_region='1-20', fit=library.fit) == {'RUNNING_MODAL'}
     assert operators._creation_dialog._match is not None
     assert operators._creation_dialog._match.source_context is not None
@@ -1560,16 +1682,23 @@ def library_cancel_morph():
 
 def library_verify_cancel_and_close():
     from proteinblender.operators import conformation_operators as operators
+    assert operators._creation_dialog is None
+    assert bpy.context.scene.frame_current == 119
+    cancel_mixed_swatch_picker()
+
+
+def library_restore_observers():
     from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
+    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_UL_outliner as rows
     try:
-        assert operators._creation_dialog is None
-        assert bpy.context.scene.frame_current == 119
-        assert bpy.context.scene.pb_conformation_browser == state['library_mid']
-        with protein_workspace_override():
-            assert bpy.ops.proteinblender.close_conformations() == {'FINISHED'}
+        assert state['library_popup_cancelled'] == 3
+        assert bpy.context.scene.pb_conformation_browser == ''
         assert not any(o.get('pb_state_preview_owner') for o in bpy.context.scene.objects)
     finally:
         cls.draw = state['library_draw_original']
+        rows.draw_item = state['library_row_original']
+        popup_cls, draw, cancel = state['library_popup_original']
+        popup_cls.draw, popup_cls.cancel = draw, cancel
 
 
 steps = [
@@ -1658,19 +1787,34 @@ steps.extend([
     ('verify force-field height', membrane_force_field_assert_far),
     ('dismiss previous playback popup', cancel_mixed_swatch_picker),
     ('settle previous popup dismissal', lambda: 'event loop'),
-    ('open persistent conformation browser', open_conformation_browser),
+    ('prepare conformation Outliner rows', open_conformation_browser),
     ('settle conformation browser', lambda: 'redraw'),
     ('verify browser controls and switch', observe_conformation_browser_and_switch),
     ('undo conformation switch', library_undo),
     ('settle conformation undo', lambda: 'undo event loop'),
     ('verify conformation undo and redo', library_assert_undo_and_redo),
     ('settle conformation redo', lambda: 'redo event loop'),
-    ('compare and mark conformations', library_compare_and_mark_endpoints),
+    ('open contextual conformation popup', library_open_popup),
+    ('settle conformation popup', lambda: 'redraw'),
+    ('apply conformation inside popup', library_apply_popup),
+    ('settle conformation Apply', lambda: 'redraw'),
+    ('cancel pending conformation selection', library_cancel_pending_selection),
+    ('settle compact popup cancellation', lambda: 'event loop'),
+    ('open optional conformation tools', library_open_optional_tools),
+    ('settle expanded tools', lambda: 'redraw'),
+    ('apply comparison and discard pending state', library_compare_in_popup),
+    ('settle conformation popup cancellation', lambda: 'event loop'),
+    ('verify Apply persists and reopen popup', library_verify_apply_and_reopen),
+    ('settle reopened popup', lambda: 'redraw'),
+    ('confirm conformation popup', library_confirm_popup),
+    ('settle confirmed popup', lambda: 'event loop'),
+    ('verify confirmation and reopen for morph', library_verify_confirm_and_reopen),
     ('settle conformation comparison', lambda: 'redraw'),
     ('settle conformation materials', lambda: 'allow material preview to compile'),
     ('open library morph dialog', library_open_morph_dialog),
     ('cancel library morph dialog', library_cancel_morph),
     ('close browser after morph cancellation', library_verify_cancel_and_close),
+    ('verify nested popup cleanup', library_restore_observers),
 ])
 
 
