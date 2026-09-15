@@ -823,6 +823,10 @@ def build_illustration_conformation():
     material = obj['pb_context_material']
     assert material.node_tree.nodes.get('PB Illustration Alpha')
     assert material.node_tree.nodes['PB Illustration Alpha'].inputs[0].default_value == .25
+    scene = bpy.context.scene
+    assert scene.compositing_node_group
+    assert scene.render.use_compositing and bpy.context.view_layer.use_pass_z
+    assert scene.view_settings.view_transform == 'Standard'
 
 
 def build_surface_conformation():

@@ -3,16 +3,16 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
-Latest lighting validation: **708 passing, 7 skipped, 1 xfailed** in the full
-Blender 5.1 suite. Blender 5.2 passed 706 full-suite tests before the last two
-renderer checks were added, then all 15 final lighting tests. Blender 5.0
-passed the lighting tests and the final Workbench/Eevee/Cycles checks. Both
-normal installed profiles passed all three live lighting UI cases.
+Latest illustration validation: **777 passed, 7 skipped, 2 network tests
+deselected, 1 existing xfailed** in the full offline Blender 5.2 suite, exit 0,
+with no native crash diagnostics. Blender 5.1 passed **39** focused lighting,
+silhouette, and save/reopen cases. Blender 5.0 passed all **29** initial lighting
+cases and the final expanded **19-case** silhouette matrix. Normal installed
+Blender 5.1 and 5.2 profiles each passed **102 UI scenarios** plus **8** focused
+settled-surface lighting steps. See the [illustration change notes](../docs/change-notes/chimerax-illustration.md).
 
-The long 5.1 run completed with no assertion failures but logged intermittent
-native Windows access-violation diagnostics, also seen during earlier work.
-The 5.2 full run and final live checks were clean. The single xfail is the
-existing modal pose dialog that cannot be driven headless (see below).
+The single xfail is the existing modal pose dialog that cannot be driven
+headless (see below).
 
 ## Lanes
 
@@ -1681,3 +1681,5 @@ by passing that state directly (no dialog needed):
   Windows native diagnostics in pytest environment updates, a previously observed
   class of unresolved diagnostic; focused and foreground runs did not. Full log:
   `/tmp/pb-unified-full52.log`; demo notes: `docs/change-notes/unified-morph.md`.
+
+- **ChimeraX-style depth silhouettes:** real Eevee/Cycles pixel tests cover front-facing occlusion boundaries, perspective/orthographic views, pixel widths, transparent-film edges, implicit compositor inputs, repeated Apply, and restoration of artist compositor/color settings. Save/reopen snapshots include the compositor topology, depth passes, and display settings; foreground tests cover Apply and viewport-guide restoration.

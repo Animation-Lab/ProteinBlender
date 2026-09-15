@@ -1,5 +1,8 @@
 # Lighting
 
+The later [ChimeraX-style silhouette update](chimerax-illustration.md) replaces
+the curvature-based contours described in this historical change note.
+
 Branch: `fix/weekly-lighting`, based on `alpha` (`7ca96f0`).
 
 Bright Illustration now uses flat molecular colors and optional dark contours in Material Preview, Eevee, and Cycles. Apply updates the scene while the settings dialog remains open. Closing after Apply keeps the applied result. Reapplying reuses the existing rig and shader wrappers; Studio/Surface restore the original shaders through a bypass. Molecular transparency continues to work.

@@ -1,7 +1,7 @@
 """One dialog for setting up and refreshing the scene's molecular light rig."""
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 from ..core.lighting import setup_lighting
 
@@ -28,7 +28,9 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
     preview: BoolProperty(name="Show Lighting in Viewport", default=True,
         description="Show Material Preview using the scene's lights and world")
     outlines: BoolProperty(name="Outlines", default=True,
-        description="Add dark contours to Bright Illustration")
+        description="Draw black silhouettes at visible depth boundaries")
+    outline_width: IntProperty(name="Width (px)", default=1, min=1, max=4,
+        description="Silhouette thickness in viewport or output-image pixels")
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=420)
@@ -45,13 +47,16 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
         layout.prop(self, 'brightness', slider=True)
         if self.preset == 'ILLUSTRATION':
             layout.prop(self, 'outlines')
-        layout.prop(self, 'alignment')
+            if self.outlines:
+                layout.prop(self, 'outline_width')
+        else:
+            layout.prop(self, 'alignment')
         layout.prop(self, 'mute_existing')
         layout.prop(self, 'preview')
         row = layout.row()
         row.operator_context = 'EXEC_DEFAULT'
         apply = row.operator('proteinblender.apply_lighting', text='Apply', icon='CHECKMARK')
-        for name in ('preset', 'brightness', 'alignment', 'mute_existing', 'preview', 'outlines'):
+        for name in ('preset', 'brightness', 'alignment', 'mute_existing', 'preview', 'outlines', 'outline_width'):
             setattr(apply, name, getattr(self, name))
         layout.separator()
         layout.label(text="Fits visible geometry at the current frame.", icon='INFO')
@@ -60,7 +65,7 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
     def execute(self, context):
         try:
             setup_lighting(context, self.preset, self.brightness, self.alignment,
-                           self.mute_existing, self.preview, self.outlines)
+                           self.mute_existing, self.preview, self.outlines, self.outline_width)
         except ValueError as exc:
             self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}

@@ -18,6 +18,10 @@ def restore_lighting_state(scene):
     world = scene.world
     engine = scene.render.engine
     yield
+    from proteinblender.core.illustration_outline import restore
+    from proteinblender.core.lighting import _illustration_display
+    restore(scene)
+    _illustration_display(bpy.context, False, False, False)
     scene.world = world
     scene.render.engine = engine
     for key in list(scene.keys()):

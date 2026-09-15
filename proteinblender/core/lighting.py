@@ -17,7 +17,7 @@ PRESETS = {
     # key, fill, rim, lower fill; powers are for a one-unit bounding radius.
     "STUDIO": ((220, 140, 200, 60), 2.0, 0.20, True),
     "SURFACE": ((280, 85, 210, 40), 1.2, 0.12, True),
-    "ILLUSTRATION": ((0, 0, 0, 0), 2.8, 0.30, False),
+    "ILLUSTRATION": ((0, 0, 0, 0), 2.8, 1.0, False),
 }
 OFFSETS = ((-2, 2.5, 3), (2.5, 0.8, 2), (0.5, 2, -3), (0, -2.5, 1.5))
 ROLES = ("Key", "Fill", "Rim", "Lower Fill")
@@ -156,8 +156,57 @@ def _world(scene, strength):
     world.node_tree.links.new(nodes['PB Ambient'].outputs[0], nodes['PB Output'].inputs['Surface'])
 
 
+def _illustration_display(context, enabled, preview, outlines):
+    scene = context.scene
+    settings = scene.view_settings
+    key = 'pb_lighting_previous_display'
+    if enabled:
+        if key not in scene:
+            scene[key] = {name: getattr(settings, name) for name in
+                          ('view_transform', 'look', 'exposure', 'gamma')}
+        settings.view_transform = 'Standard'
+        settings.look = 'None'
+        settings.exposure = 0
+        settings.gamma = 1
+    elif key in scene:
+        for name in ('view_transform', 'look', 'exposure', 'gamma'):
+            setattr(settings, name, scene[key][name])
+        del scene[key]
+
+    viewport_key = 'pb_lighting_previous_viewports'
+    # Restore before reapplying so repeated Apply never overwrites the backup.
+    for record in scene.get(viewport_key, ()):
+        screen = record['screen']
+        index = record['area']
+        if index >= len(screen.areas) or screen.areas[index].type != 'VIEW_3D':
+            continue
+        space = screen.areas[index].spaces.active
+        space.shading.use_compositor = record['compositor']
+        for name, value in record['overlays'].items():
+            setattr(space.overlay, name, value)
+    if viewport_key in scene:
+        del scene[viewport_key]
+    if enabled and preview and context.screen:
+        records = []
+        for index, area in enumerate(context.screen.areas):
+            if area.type != 'VIEW_3D':
+                continue
+            space = area.spaces.active
+            overlays = {name: getattr(space.overlay, name) for name in (
+                'show_extras', 'show_floor', 'show_axis_x', 'show_axis_y',
+                'show_axis_z', 'show_cursor', 'show_relationship_lines')}
+            records.append({'screen': context.screen, 'area': index,
+                            'compositor': space.shading.use_compositor, 'overlays': overlays})
+            if outlines:
+                space.shading.use_compositor = 'ALWAYS'
+            for name in overlays:
+                setattr(space.overlay, name, False)
+        if records:
+            scene[viewport_key] = records
+
+
 def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
-                   mute_existing=True, preview=True, outlines=True):
+                   mute_existing=True, preview=True, outlines=True, outline_width=1):
     center, radius = scene_bounds(context)  # Validate before changing the scene.
     rotation = view_rotation(context, alignment)
     powers, softness, ambient, shadows = PRESETS[preset]
@@ -191,9 +240,12 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
     rig["radius"] = radius
     rig["preset"] = preset
     _other_lights(context, rig, mute_existing)
-    _world(scene, ambient * brightness)
+    _world(scene, 1 if preset == 'ILLUSTRATION' else ambient * brightness)
     from .illustration import set_illustration
     set_illustration(scene, preset == 'ILLUSTRATION', brightness, outlines)
+    from .illustration_outline import configure
+    configure(scene, preset == 'ILLUSTRATION' and outlines, outline_width, radius)
+    _illustration_display(context, preset == 'ILLUSTRATION', preview, outlines)
     if scene.render.engine == 'BLENDER_WORKBENCH':
         scene.render.engine = 'BLENDER_EEVEE'
     if preview and context.screen:

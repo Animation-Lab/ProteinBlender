@@ -1380,10 +1380,25 @@ def assert_outliner_right_click():
 
 def invoke_lighting_apply_dialog():
     from proteinblender.operators.lighting_operators import PROTEINBLENDER_OT_setup_lighting as cls
+    from proteinblender.core.lighting import scene_bounds
+    scene = bpy.context.scene
+    state['lighting_previous_style'] = H.list_item(state['molecule_id']).style
+    scene.selected_molecule_id = state['molecule_id']
+    scene.molecule_style = 'surface'
+    center, radius = scene_bounds(bpy.context)
+    for area in active_window().screen.areas:
+        if area.type == 'VIEW_3D':
+            area.spaces.active.region_3d.view_location = center
+            area.spaces.active.region_3d.view_distance = radius * 3.2
     original_draw = cls.draw
     original_cancel = getattr(cls, 'cancel', None)
     state['lighting_draws'] = []
     state['lighting_cancelled'] = False
+    state['lighting_viewports'] = [(i, area.spaces.active.shading.use_compositor,
+                                   area.spaces.active.overlay.show_extras,
+                                   area.spaces.active.overlay.show_floor)
+                                  for i, area in enumerate(active_window().screen.areas)
+                                  if area.type == 'VIEW_3D']
     def draw(self, context):
         original_draw(self, context)
         state['lighting_draws'].append(self.layout.introspect())
@@ -1401,11 +1416,17 @@ def apply_lighting_inside_dialog():
     assert state['lighting_draws'], 'Lighting dialog did not draw'
     layout = str(state['lighting_draws'][-1])
     assert 'Apply' in layout and 'proteinblender.apply_lighting' in layout
+    assert 'Width (px)' in layout and 'Orient From' not in layout
     # Execute the very operator exposed by the dialog's Apply button while
     # the parent popup is still modal; Escape below must still reach it.
     with protein_workspace_override():
         assert bpy.ops.proteinblender.apply_lighting('EXEC_DEFAULT', preset='ILLUSTRATION') == {'FINISHED'}
     assert bpy.context.scene['pb_scene_lighting']['preset'] == 'ILLUSTRATION'
+    for area in active_window().screen.areas:
+        if area.type == 'VIEW_3D':
+            space = area.spaces.active
+            assert space.shading.use_compositor == 'ALWAYS'
+            assert not space.overlay.show_extras and not space.overlay.show_floor
     cancel_mixed_swatch_picker()
 
 
@@ -1413,8 +1434,14 @@ def assert_lighting_apply_kept_dialog_open():
     try:
         assert state['lighting_cancelled'], 'Apply closed its parent dialog'
         assert bpy.context.scene['pb_scene_lighting']['preset'] == 'ILLUSTRATION', 'Closing discarded applied lighting'
+        bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'bright-illustration.png'))
         with protein_workspace_override():
             bpy.ops.proteinblender.setup_lighting('EXEC_DEFAULT', preset='STUDIO')
+        bpy.context.scene.molecule_style = state['lighting_previous_style']
+        for index, compositor, extras, floor in state['lighting_viewports']:
+            space = active_window().screen.areas[index].spaces.active
+            assert space.shading.use_compositor == compositor
+            assert space.overlay.show_extras == extras and space.overlay.show_floor == floor
     finally:
         cls, draw, cancel = state['lighting_original_callbacks']
         cls.draw = draw
@@ -1842,7 +1869,7 @@ def advance():
         record(name, function)
         if not results[-1]["ok"]:
             steps.clear()
-        if name == 'settle conformation materials':
+        if name in {'settle conformation materials', 'settle lighting close'}:
             return 5.0
         return 0.15
     return save_report_and_quit()

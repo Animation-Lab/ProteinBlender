@@ -1,9 +1,8 @@
-"""Flat molecular colors with view-dependent contours in Eevee and Cycles.
+"""Flat molecular colors in Eevee and Cycles.
 
 The original surface remains connected to a bypass, so changing presets restores
-the original shader, including its links and animated values. These contours
-follow surface normals; unlike ChimeraX's depth-buffer silhouettes their width
-depends on local curvature.
+the original shader, including its links and animated values. Pixel silhouettes
+are applied separately by the compositor, using visible depth rather than normals.
 """
 import bpy
 
@@ -68,56 +67,45 @@ def _setup(material, brightness, outlines):
         output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
         if output is None or not output.inputs['Surface'].is_linked:
             return
-        original = output.inputs['Surface'].links[0].from_socket
+        shader = output.inputs['Surface'].links[0].from_node
         # Only wrap a directly connected Principled material; arbitrary artist
         # shader graphs are left intact rather than guessing their base color.
-        shader = original.node
         if shader.type != 'BSDF_PRINCIPLED':
             return
+        shader_name, output_name = shader.name, output.name
 
         def new(kind, name):
-            node = nodes.new(kind)
-            node.name = name
-            node[TAG] = True
-            return node
+            nodes.new(kind).name = name
+            nodes[name][TAG] = True
 
-        geometry = new('ShaderNodeNewGeometry', 'PB Illustration Geometry')
-        dot = new('ShaderNodeVectorMath', 'PB Illustration Facing')
-        dot.operation = 'DOT_PRODUCT'
-        links.new(geometry.outputs['Normal'], dot.inputs[0])
-        links.new(geometry.outputs['Incoming'], dot.inputs[1])
-        absolute = new('ShaderNodeMath', 'PB Illustration Absolute')
-        absolute.operation = 'ABSOLUTE'
-        links.new(dot.outputs['Value'], absolute.inputs[0])
-        edge = new('ShaderNodeMath', 'PB Illustration Edge')
-        edge.operation = 'LESS_THAN'
-        links.new(absolute.outputs[0], edge.inputs[0])
-        color = new('ShaderNodeMixRGB', 'PB Illustration Color')
-        links.new(edge.outputs[0], color.inputs[0])
-        source_color = shader.inputs['Base Color']
+        def link(source, output, target, input):
+            links.new(nodes[source].outputs[output], nodes[target].inputs[input])
+
+        new('ShaderNodeMixRGB', 'PB Illustration Color')
+        new('ShaderNodeEmission', 'PB Illustration Emission')
+        new('ShaderNodeBsdfTransparent', 'PB Illustration Transparent')
+        new('ShaderNodeMixShader', 'PB Illustration Alpha')
+        new('ShaderNodeMixShader', 'PB Illustration Bypass')
+        nodes['PB Illustration Bypass'][TAG] = 'bypass'
+        link('PB Illustration Color', 0, 'PB Illustration Emission', 'Color')
+        link('PB Illustration Transparent', 0, 'PB Illustration Alpha', 1)
+        link('PB Illustration Emission', 0, 'PB Illustration Alpha', 2)
+        link(shader_name, 'BSDF', 'PB Illustration Bypass', 1)
+        link('PB Illustration Alpha', 0, 'PB Illustration Bypass', 2)
+        link('PB Illustration Bypass', 0, output_name, 'Surface')
+        source_color = nodes[shader_name].inputs['Base Color']
         if source_color.is_linked:
-            links.new(source_color.links[0].from_socket, color.inputs[1])
-        else:
-            color.inputs[1].default_value = source_color.default_value
-        color.inputs[2].default_value = (0, 0, 0, 1)
-        emission = new('ShaderNodeEmission', 'PB Illustration Emission')
-        links.new(color.outputs[0], emission.inputs['Color'])
-        transparent = new('ShaderNodeBsdfTransparent', 'PB Illustration Transparent')
-        alpha = new('ShaderNodeMixShader', 'PB Illustration Alpha')
-        links.new(transparent.outputs[0], alpha.inputs[1])
-        links.new(emission.outputs[0], alpha.inputs[2])
-        original_alpha = shader.inputs['Alpha']
+            links.new(source_color.links[0].from_socket, nodes['PB Illustration Color'].inputs[1])
+        original_alpha = nodes[shader_name].inputs['Alpha']
         if original_alpha.is_linked:
-            links.new(original_alpha.links[0].from_socket, alpha.inputs[0])
-        else:
-            alpha.inputs[0].default_value = original_alpha.default_value
-        bypass = new('ShaderNodeMixShader', 'PB Illustration Bypass')
-        bypass[TAG] = 'bypass'
-        links.new(original, bypass.inputs[1])
-        links.new(alpha.outputs[0], bypass.inputs[2])
-        links.new(bypass.outputs[0], output.inputs['Surface'])
+            links.new(original_alpha.links[0].from_socket, nodes['PB Illustration Alpha'].inputs[0])
+    bypass = nodes['PB Illustration Bypass']
     bypass.inputs[0].default_value = 1
-    nodes['PB Illustration Edge'].inputs[1].default_value = .4 if outlines else 0
+    # Upgrade existing files by disconnecting the old surface-angle mask.
+    color_factor = nodes['PB Illustration Color'].inputs[0]
+    for link in list(color_factor.links):
+        links.remove(link)
+    color_factor.default_value = 0
     nodes['PB Illustration Emission'].inputs['Strength'].default_value = brightness
     original_shader = bypass.inputs[1].links[0].from_node
     color = nodes['PB Illustration Color'].inputs[1]

@@ -643,6 +643,8 @@ def _reachable_node_groups():
         for slot in (getattr(obj.data, "materials", None) or []):
             if slot is not None and slot.use_nodes:
                 walk(slot.node_tree)
+    for scene in bpy.data.scenes:
+        walk(scene.compositing_node_group)
     return sorted(seen)
 
 
@@ -777,6 +779,12 @@ def scene_snapshot(include_registry=True):
         "scene": scene_state,
         "lighting_state": {key: _plain(scene[key]) for key in sorted(scene.keys())
                            if key.startswith('pb_lighting_') or key == 'pb_scene_lighting'},
+        "compositor": (_serialize_node_tree(scene.compositing_node_group)
+                       if scene.compositing_node_group else None),
+        "compositing_enabled": scene.render.use_compositing,
+        "depth_passes": {v.name: v.use_pass_z for v in scene.view_layers},
+        "color_management": {key: getattr(scene.view_settings, key) for key in
+                             ('view_transform', 'look', 'exposure', 'gamma')},
         "world": ({"name": scene.world.name,
                    "nodes": (_serialize_node_tree(scene.world.node_tree)
                              if scene.world.node_tree else None)}

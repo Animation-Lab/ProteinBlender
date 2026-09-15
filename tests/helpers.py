@@ -75,6 +75,11 @@ def reset_scene():
     # recoverable. Restore its world before scrubbing those references.
     if scene.world == scene.get('pb_lighting_world'):
         scene.world = scene.get('pb_lighting_previous_world')
+    import importlib
+    importlib.import_module(PKG + '.core.illustration_outline').restore(scene)
+    importlib.import_module(PKG + '.core.lighting')._illustration_display(
+        bpy.context, False, False, False)
+    scene.compositing_node_group = None
     for key in list(scene.keys()):
         if key.startswith('pb_lighting_') or key == 'pb_scene_lighting':
             del scene[key]

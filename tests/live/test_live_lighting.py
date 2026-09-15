@@ -50,13 +50,17 @@ with R.view3d_override():
         blender.call('''
 records, _ = bpy.app.driver_namespace['pb_lighting_ui']
 layout = str(records['PROTEINBLENDER_OT_setup_lighting'])
-for label in ('Set Up Lighting', 'Brightness', 'Orient From', 'Mute Other Lights', 'Show Lighting in Viewport'):
+for label in ('Set Up Lighting', 'Brightness', 'Mute Other Lights', 'Show Lighting in Viewport'):
     assert label in layout, layout
+if preset == 'ILLUSTRATION':
+    assert 'Width (px)' in layout and 'Orient From' not in layout, layout
+else:
+    assert 'Orient From' in layout, layout
 assert not any(o.get('pb_scene_lighting') for o in bpy.context.scene.objects)
 win = bpy.context.window
 win.event_simulate(type='ESC', value='PRESS')
 win.event_simulate(type='ESC', value='RELEASE')
-''')
+''', preset=preset)
         time.sleep(.4)
         blender.call('''
 assert not any(o.get('pb_scene_lighting') for o in bpy.context.scene.objects)
