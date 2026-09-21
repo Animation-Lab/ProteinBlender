@@ -175,8 +175,12 @@ class ProteinWorkspaceManager:
             return
         # Idempotent: if the canonical three-editor layout is already in place
         # at the right width, leave it be (the load flow calls setup 2-3 times).
-        if self._layout_is_canonical():
+        if self._layout_is_canonical() and self.screen.get('pb_layout_revision', 0) >= 3:
             return
+        # Blender saves runtime panel order in the Properties editor. Changing
+        # Panel.bl_order alone leaves existing projects in the previous order.
+        # Recreate our panel/timeline areas once for the state-library layout;
+        # subsequent setup calls and saved files retain the user's arrangement.
 
         # Otherwise rebuild from a single viewport so the panel and timeline get
         # their intended proportions regardless of what the duplicated default
@@ -198,6 +202,7 @@ class ProteinWorkspaceManager:
         self.timeline_area = self._split_area(
             self.main_area, 'HORIZONTAL', 0.2, 'DOPESHEET_EDITOR')
         self._discover_editor_areas()
+        self.screen['pb_layout_revision'] = 3
 
     def _split_area(self, area, direction, factor, new_type):
         # Helper function to split an area and set the new area type

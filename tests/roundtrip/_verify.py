@@ -245,21 +245,21 @@ def main():
         from proteinblender.core import morphsets
         keys = morphsets.keyframes(bpy.context.scene)
         if keys:
-            edited = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Closing')
-            end = morphsets.states(edited)[-1]
+            edited = next(m for m in morphsets.morphs(bpy.context.scene)
+                          if any(s['name'] == 'Final' for s in morphsets.states(m)))
+            end = next(s for s in morphsets.states(edited) if s['name'] == 'Final')
             assert end['name'] == 'Final' and end['model_name'] == 'Model 8'
             source = end['members'][0]['source']
             assert end['model_uid'] == source.pb_conformations.states[7].uid
-            shared = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Later transition')
-            assert morphsets.records(edited)[0]['object'] == morphsets.records(shared)[0]['object']
-            assert morphsets.outputs(bpy.context.scene, edited[morphsets.MORPH]) == morphsets.outputs(
-                bpy.context.scene, shared[morphsets.MORPH])
+            assert len(morphsets.morphs(bpy.context.scene)) == 2
+            assert keys['21'][edited[morphsets.MORPH]]['transition'] == 'HOLD'
+            assert all(root.get('pb_schema') == 3 for root in morphsets.sets(bpy.context.scene))
             frame, rows = next(iter(keys.items()))
             expected = {(m[morphsets.MORPH], slot): member['style']
                         for m in morphsets.morphs(bpy.context.scene)
                         for slot, member in enumerate(morphsets.records(m))}
             assert bpy.ops.proteinblender.create_keyframe(frame_number=int(frame), morph_items=[
-                dict(visible=True, show_visibility=False, set_name='', name=uid, morph_id=uid, use_morph=True, state=value['state'],
+                dict(visible=True, show_visibility=False, set_name='', name=uid, morph_id=uid, use_morph=True, transition='MORPH', state=value['state'],
                      members=[dict(name=str(i), visible=v) for i, v in enumerate(value['visible'])]) for uid, value in rows.items()
             ]) == {'FINISHED'}
             assert len(morphsets.outputs(bpy.context.scene)) == 2

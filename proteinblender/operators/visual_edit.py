@@ -535,6 +535,8 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         return find_row(context.scene, self.item_id)
 
     def invoke(self, context, event):
+        from ..core.conformation_sets import clear_preview
+        clear_preview(context.scene, remove=True)
         if self.visual_row(context) is None:
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}

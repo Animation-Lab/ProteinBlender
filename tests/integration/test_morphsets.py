@@ -24,7 +24,7 @@ def _morph(root, mid, name='Closing', **kwargs):
 
 
 def _row(morph, state_index=0, visible=None, checked=True):
-    row = dict(visible=True, show_visibility=False, members=[], set_name=morph.parent.name, name=morph.name, morph_id=morph[morphsets.MORPH], use_morph=checked,
+    row = dict(visible=True, show_visibility=False, members=[], set_name=morph.parent.name, name=morph.name, morph_id=morph[morphsets.MORPH], use_morph=checked, transition='MORPH',
                state=morphsets.states(morph)[state_index]['uid'])
     if visible is not None:
         row['members'] = [dict(name=str(i), visible=v) for i, v in enumerate(visible)]

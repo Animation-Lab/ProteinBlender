@@ -104,6 +104,8 @@ def morph_keys(scene, uid, keys=None):
 def rebuild(context):
     from ..utils.scene_manager import build_outliner_hierarchy
     build_outliner_hierarchy(context)
+    from ..operators.conformation_browser import sync
+    sync(context.scene)
     for window in context.window_manager.windows:
         for area in window.screen.areas:
             area.tag_redraw()
@@ -156,9 +158,9 @@ def _capture(context, row_ids, model='', origin=None):
 
 
 def _discard_snapshots(members):
-    for member in members:
-        mesh = member.get('mesh')
-        if mesh and not mesh.users:
+    meshes = {member.get('mesh') for member in members} - {None}
+    for mesh in meshes:
+        if not mesh.users:
             bpy.data.meshes.remove(mesh)
 
 
@@ -198,15 +200,22 @@ def add_morph(context, root, name, start_ids, end_ids, start_model='', end_model
     except Exception:
         _discard_snapshots(first + last)
         raise
+    definitions = [
+        _state_definition(uuid.uuid4().hex, start_name.strip() or 'Start', first, start_model),
+        _state_definition(uuid.uuid4().hex, end_name.strip() or 'End', last, end_model)]
+    return _install_morph(context, root, name, definitions, origin)
+
+
+def _install_morph(context, root, name, definitions, origin):
+    """Install prevalidated snapshots; shared by legacy files and state libraries."""
+    first = definitions[0]['members']
     morph = bpy.data.objects.new(name.strip() or 'Morph', None)
     context.scene.collection.objects.link(morph)
     morph.parent = root
     morph[MORPH] = uuid.uuid4().hex
     morph['pb_origin'] = origin
     morph['pb_order'] = max((m.get('pb_order', 0) for m in morphs(context.scene)), default=0) + 1
-    morph['pb_states'] = [
-        _state_definition(uuid.uuid4().hex, start_name.strip() or 'Start', first, start_model),
-        _state_definition(uuid.uuid4().hex, end_name.strip() or 'End', last, end_model)]
+    morph['pb_states'] = definitions
     members = []
     for source in first:
         obj = source['original']
@@ -249,7 +258,7 @@ def add_state(context, morph, name, row_ids, model=''):
         raise
     value = _state_definition(uuid.uuid4().hex, name.strip() or 'Intermediate', members, model)
     values = [s.to_dict() for s in states(morph)]
-    values.insert(len(values) - 1, value)
+    values.insert(len(values) if morph.parent.get('pb_schema', 2) >= 3 else len(values) - 1, value)
     morph['pb_states'] = values
     _refresh_owners(context.scene)
     _hide_members(context.scene, keyframes(context.scene))
@@ -276,6 +285,8 @@ def edit_state(context, morph, uid, name, row_ids=None, model=''):
     except Exception:
         _discard_snapshots(members)
         raise
+    from .conformation_sets import clear_preview
+    clear_preview(context.scene, remove=True)
     previous = current.to_dict()
     # Copy all nested records before replacing the owning IDProperty array.
     morph['pb_states'] = [replacement if s['uid'] == uid else s.to_dict() for s in states(morph)]
@@ -292,10 +303,16 @@ def edit_state(context, morph, uid, name, row_ids=None, model=''):
 def remove_state(context, morph, uid):
     values = states(morph)
     index = next((i for i, s in enumerate(values) if s['uid'] == uid), -1)
-    if index <= 0 or index == len(values) - 1:
+    if index < 0:
+        raise ValueError('Choose an available state.')
+    if len(values) == 1:
+        raise ValueError('Keep at least one state in this library.')
+    if morph.parent.get('pb_schema', 2) < 3 and (index == 0 or index == len(values) - 1):
         raise ValueError('Keep the Start and End states; use their pencils to change the models or names.')
     if any(v['state'] == uid for v in morph_keys(context.scene, morph[MORPH]).values()):
         raise ValueError('Remove or change the keyframes using this state before removing it.')
+    from .conformation_sets import clear_preview
+    clear_preview(context.scene, remove=True)
     members = [dict(m) for m in values[index]['members']]
     morph['pb_states'] = [s.to_dict() for s in values if s['uid'] != uid]
     _release_unused_sources(context.scene, morph)
@@ -463,14 +480,15 @@ def _animation_groups(scene, keys, replacements):
                 if shape not in shapes:
                     shapes[shape] = _match(base['member']['mesh'], target['members'][slot]['mesh']) + offset
                 visible = bool(value['visible'][slot])
+                transition = value.get('transition', 'MORPH')
                 previous = samples.get(int(frame))
-                if previous and (previous['visible'] != visible or not np.allclose(
+                if previous and (previous['visible'] != visible or previous['transition'] != transition or not np.allclose(
                         shapes[previous['state']], shapes[shape], atol=1e-6, rtol=0)):
                     raise ValueError(
                         f"Frame {frame}: {previous['name']} and {morph.name} assign different states or "
                         f"visibility to {base['member']['name']}. Edit or remove one of those keys.")
                 if previous is None:
-                    samples[int(frame)] = dict(state=shape, visible=visible, name=morph.name)
+                    samples[int(frame)] = dict(state=shape, visible=visible, name=morph.name, transition=transition)
         result.append(dict(base=base, bindings=bindings, samples=samples, shapes=shapes))
     return result
 
@@ -484,6 +502,8 @@ def validate(scene, keys, replacements=None):
             morph = find(scene, uid)
             if morph is None or not morph.get(MORPH):
                 raise ValueError('A keyframe refers to a deleted morph.')
+            if value.get('transition', 'MORPH') not in {'MORPH', 'HOLD'}:
+                raise ValueError('Choose Morph or Hold for the transition to the next key.')
             target = replacements.get((uid, value['state'])) or state(morph, value['state'])
             if target is None:
                 raise ValueError('Choose an available state for each checked morph.')
@@ -496,6 +516,8 @@ def validate(scene, keys, replacements=None):
 def compile_animation(context, keys):
     scene = context.scene
     groups = validate(scene, keys)  # Validate all changes before replacing any animation.
+    from .conformation_sets import clear_preview
+    clear_preview(scene, remove=True)
     controller = track(scene, True)
     _remove_outputs(scene)
     _clear_curves(controller)
@@ -537,6 +559,12 @@ def compile_animation(context, keys):
             obj.keyframe_insert('hide_viewport', frame=frame)
             obj.keyframe_insert('hide_render', frame=frame)
         _interpolation(obj.data.shape_keys, 'LINEAR')
+        ad = obj.data.shape_keys.animation_data
+        for curve in get_fcurves_from_action(ad.action, ad):
+            for point in curve.keyframe_points:
+                sample = group['samples'].get(round(point.co.x))
+                if sample and sample['transition'] == 'HOLD':
+                    point.interpolation = 'CONSTANT'
         _interpolation(obj, 'CONSTANT')
     _hide_members(scene, keys)
     if keys:
@@ -656,7 +684,7 @@ def add_outliner_rows(context, selection, expansion):
                 child.item_id = morph[MORPH] + ':' + str(slot)
                 child.parent_id = root[TAG]
                 child.object_name = obj.name
-                child.name = morph.name + ' · ' + member['name']
+                child.name = member['name'] if root.get('pb_schema', 2) >= 3 else morph.name + ' · ' + member['name']
                 child.indent_level = 1
                 child.icon = 'GROUP_VERTEX'
                 child.is_selected = selection.get(child.item_id, False)

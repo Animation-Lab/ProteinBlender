@@ -1,11 +1,11 @@
-"""Morphset library editing and per-morph keyframe form rows."""
+"""Conformation creation and editing; legacy morph operators for saved scripts."""
 import json
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator, PropertyGroup
 
-from ..core import morphsets
+from ..core import morphsets, conformation_sets
 
 _ENUM_CACHE = {}
 
@@ -120,8 +120,8 @@ def _source_models(context, source, encoded=''):
 
 
 def state_sources(self, context):
-    return _stable('state_sources', [('MORPH_MEMBERS', 'This morph’s members',
-        'Use the protein chains/domains already defined in this state', 0)] +
+    return _stable('state_sources', [('MORPH_MEMBERS', 'This Morphset’s members',
+        'Use the chains/domains already defined in this state', 0)] +
         [(a, b, c, i + 1) for i, (a, b, c, _) in enumerate(source_items(self, context))])
 
 
@@ -157,7 +157,7 @@ def morph_state_items(self, context):
     morph = morphsets.find(context.scene, self.morph_id)
     values = morphsets.states(morph) if morph else []
     return _stable('morph_states', [
-        (s['uid'], f"{'Start' if i == 0 else 'End' if i == len(values)-1 else 'State'} — {morphsets.state_label(s)}",
+        (s['uid'], morphsets.state_label(s),
          'Reach this state at the keyed frame', i) for i, s in enumerate(values)
     ] or [('NONE', 'No states defined', '', 0)])
 
@@ -171,11 +171,14 @@ class PBMorphKeyframeRow(PropertyGroup):
     morph_id: StringProperty()
     set_name: StringProperty()
     name: StringProperty()
-    use_morph: BoolProperty(name='Keyframe', description='Record this morph at this frame; unchecked rows keep their existing animation')
+    use_morph: BoolProperty(name='Keyframe', description='Record this subject at this frame; unchecked rows keep their existing animation')
     state: EnumProperty(name='State at this frame', items=morph_state_items)
+    transition: EnumProperty(name='To next key', items=[
+        ('MORPH', 'Morph', 'Interpolate atom coordinates toward the next keyed state'),
+        ('HOLD', 'Hold, then switch', 'Keep this structure until the next key, then switch immediately')], default='MORPH')
     members: CollectionProperty(type=PBMorphMemberVisibility)
     show_visibility: BoolProperty(name='Visibility', default=False)
-    visible: BoolProperty(name='Visible', default=True, description='Show this morph; expand for individual members')
+    visible: BoolProperty(name='Visible', default=True, description='Show this subject; expand for individual chains/domains')
 
 
 def populate_keyframe_rows(operator, context):
@@ -185,13 +188,14 @@ def populate_keyframe_rows(operator, context):
     for root in morphsets.sets(context.scene):
         for morph in morphsets.morphs(context.scene, root):
             row = operator.morph_items.add()
-            row.morph_id, row.set_name, row.name = morph[morphsets.MORPH], root.name, morph.name
+            row.morph_id, row.set_name, row.name = morph[morphsets.MORPH], root.name, root.name if root.get('pb_schema', 2) >= 3 else morph.name
             keyed = morphsets.morph_keys(context.scene, row.morph_id, keys)
             saved = keyed.get(str(frame))
             preceding = [f for f in keyed if int(f) <= frame]
-            previous = saved or (keyed[max(preceding, key=int)] if preceding else None)
+            previous = saved or (keyed[max(preceding, key=int)] if preceding else keyed[min(keyed, key=int)] if keyed else None)
             row.use_morph = bool(saved)
             row.state = previous['state'] if previous else morphsets.states(morph)[0]['uid']
+            row.transition = previous.get('transition', 'MORPH') if previous else 'MORPH'
             visibility = previous['visible'] if previous else [True] * len(morphsets.records(morph))
             row.visible = any(visibility)
             for m, visible in zip(morphsets.records(morph), visibility):
@@ -206,63 +210,82 @@ def populate_keyframe_rows(operator, context):
 class PROTEINBLENDER_OT_create_morphset(Operator):
     bl_idname = 'proteinblender.create_morphset'
     bl_label = 'Create Morphset'
+    bl_description = 'Give a protein, chain/domain, or complex a library of states to keyframe'
     bl_options = {'REGISTER', 'UNDO'}
-    name: StringProperty(name='Name', default='Morphset')
+    _active_instance = None
+    name: StringProperty(name='Name', options={'SKIP_SAVE'})
+    source: EnumProperty(name='Members', items=source_items, options={'SKIP_SAVE'})
+    member_ids: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     def check(self, context):
         return True
 
     def invoke(self, context, event):
-        self.name = f'Morphset {len(morphsets.sets(context.scene)) + 1}'
-        return context.window_manager.invoke_props_dialog(self, width=420)
+        conformation_sets.upgrade(context)
+        if not self.properties.is_property_set('source'):
+            selected = _ids(context, 'SELECTED')
+            available = [uid for uid, *_ in source_items(self, context)
+                         if uid != 'SELECTED' and _available_source(context, uid)]
+            self.source = 'SELECTED' if selected else next(iter(available), 'SELECTED')
+        type(self)._active_instance = self
+        return context.window_manager.invoke_props_dialog(self, width=550)
 
     def draw(self, context):
-        self.layout.prop(self, 'name')
-        self.layout.label(text='Next, add morphs with named Start and End states.')
+        self.layout.prop(self, 'source')
+        self.layout.prop(self, 'name', placeholder='Use protein name')
+        ids = _ids(context, self.source, self.member_ids)
+        models = _source_models(context, self.source, self.member_ids)[1:]
+        self.layout.label(text=f'{len(models)} imported states will be available immediately.' if models else
+                          'The current structure becomes the first state.', icon='SHAPEKEY_DATA')
+        if not ids:
+            self.layout.label(text='Choose a protein, or check chains/domains in the PB Outliner.', icon='INFO')
+        self.layout.label(text='Members share one state choice. Set timing in Keyframes.')
+
+    def cancel(self, context):
+        type(self)._active_instance = None
 
     def execute(self, context):
-        root = morphsets.create(context, self.name)
-        if self.options.is_invoke:
-            bpy.ops.proteinblender.edit_morphset('INVOKE_DEFAULT', morphset_id=root[morphsets.TAG])
+        type(self)._active_instance = None
+        # Old scripts create an empty container then call add_morph. Preserve
+        # that non-UI API while the interactive path always creates a library.
+        if not self.options.is_invoke and not self.properties.is_property_set('source') and not self.member_ids:
+            morphsets.create(context, self.name)
+            return {'FINISHED'}
+        try:
+            root = conformation_sets.create(context, self.name, _ids(context, self.source, self.member_ids))
+        except (ValueError, KeyError) as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
+        from .conformation_browser import focus
+        focus(context, root)
+        self.report({'INFO'}, 'State library ready. Choose a state in Create / Edit Keyframe.')
         return {'FINISHED'}
 
 
 class PROTEINBLENDER_OT_edit_morphset(Operator):
     bl_idname = 'proteinblender.edit_morphset'
-    bl_label = 'Edit Morphset'
+    bl_label = 'Rename Morphset'
     bl_options = {'REGISTER', 'UNDO'}
     morphset_id: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     name: StringProperty(name='Name')
-
-    def check(self, context):
-        return True
 
     def invoke(self, context, event):
         root = morphsets.find(context.scene, self.morphset_id)
         if root is None:
             return {'CANCELLED'}
         self.name = root.name
-        return context.window_manager.invoke_props_dialog(self, width=660)
+        return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
-        layout = self.layout
-        layout.prop(self, 'name')
-        root = morphsets.find(context.scene, self.morphset_id)
-        if root:
-            for morph in morphsets.morphs(context.scene, root):
-                values = morphsets.states(morph)
-                row = layout.row(align=True)
-                row.label(text=morph.name)
-                row.label(text=f"{morphsets.state_label(values[0])} → {morphsets.state_label(values[-1])} · {len(values)} states")
-                row.operator('proteinblender.edit_morph', text='', icon='GREASEPENCIL').morph_id = morph[morphsets.MORPH]
-                row.operator('proteinblender.remove_morph', text='', icon='REMOVE').morph_id = morph[morphsets.MORPH]
-        layout.operator('proteinblender.add_morph', text='Add Morph', icon='ADD').morphset_id = self.morphset_id
-        layout.label(text='Choose each morph’s state and visibility in Create Keyframe.', icon='KEYFRAME')
+        self.layout.prop(self, 'name')
 
     def execute(self, context):
         root = morphsets.find(context.scene, self.morphset_id)
         if root:
             root.name = self.name.strip() or root.name
+            for morph in morphsets.morphs(context.scene, root):
+                if root.get('pb_schema', 2) >= 3:
+                    morph.name = root.name
             morphsets.rebuild(context)
         return {'FINISHED'}
 
@@ -271,7 +294,7 @@ class PROTEINBLENDER_OT_add_morph(Operator):
     bl_idname = 'proteinblender.add_morph'
     bl_label = 'Add Morph'
     bl_description = 'Define another transition; the same protein or chains can be used in multiple morph rows'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
     _active_instance = None
     morphset_id: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     # Choose fresh defaults from the current selection and existing transitions
@@ -363,7 +386,7 @@ class PROTEINBLENDER_OT_add_morph(Operator):
 class PROTEINBLENDER_OT_edit_morph(Operator):
     bl_idname = 'proteinblender.edit_morph'
     bl_label = 'Edit Morph'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
     morph_id: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     name: StringProperty(name='Morph name')
 
@@ -405,12 +428,12 @@ class PROTEINBLENDER_OT_edit_morph(Operator):
 
 class PROTEINBLENDER_OT_add_morph_state(Operator):
     bl_idname = 'proteinblender.add_morph_state'
-    bl_label = 'Add Model / State'
-    bl_description = 'Add another model or structure to this morph, then choose it in Create Keyframe'
+    bl_label = 'Add State'
+    bl_description = 'Save another aligned structure as a reusable state'
     bl_options = {'REGISTER', 'UNDO'}
     _active_instance = None
     morph_id: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
-    name: StringProperty(name='State name', default='Intermediate', options={'SKIP_SAVE'})
+    name: StringProperty(name='State name', default='', options={'SKIP_SAVE'})
     source: EnumProperty(name='Members', items=state_sources, update=reset_start, options={'SKIP_SAVE'})
     model: EnumProperty(name='Model / State', items=state_models, options={'SKIP_SAVE'})
     member_ids: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
@@ -428,7 +451,7 @@ class PROTEINBLENDER_OT_add_morph_state(Operator):
         self.layout.prop(self, 'name')
         self.layout.prop(self, 'source')
         self.layout.prop(self, 'model')
-        self.layout.label(text='Choose this state at the desired frame in Create Keyframe.', icon='KEYFRAME')
+        self.layout.label(text='Use structures with matching atoms, aligned before import.', icon='INFO')
 
     def cancel(self, context):
         type(self)._active_instance = None
@@ -436,7 +459,7 @@ class PROTEINBLENDER_OT_add_morph_state(Operator):
     def execute(self, context):
         type(self)._active_instance = None
         try:
-            morphsets.add_state(context, morphsets.find(context.scene, self.morph_id), self.name,
+            morphsets.add_state(context, morphsets.find(context.scene, self.morph_id), self.name or next((label for uid, label, *_ in state_models(self, context) if uid == self.model), 'Structure'),
                                 _state_ids(self, context), '' if self.model == 'CURRENT' else self.model)
         except (ValueError, KeyError) as exc:
             self.report({'WARNING'}, str(exc))
@@ -446,7 +469,7 @@ class PROTEINBLENDER_OT_add_morph_state(Operator):
 
 class PROTEINBLENDER_OT_edit_morph_state(Operator):
     bl_idname = 'proteinblender.edit_morph_state'
-    bl_label = 'Edit Model / State'
+    bl_label = 'Edit State'
     bl_description = 'Change this state’s model or name while preserving the keyframes that use it'
     bl_options = {'REGISTER', 'UNDO'}
     _active_instance = None
@@ -567,7 +590,7 @@ class PROTEINBLENDER_OT_delete_morphset(Operator):
 class PROTEINBLENDER_OT_remove_morph_key(Operator):
     bl_idname = 'proteinblender.remove_morph_key'
     bl_label = 'Remove Morph Keyframe'
-    bl_description = 'Remove only this morph’s key at this frame'
+    bl_description = 'Remove only this subject’s key at this frame'
     bl_options = {'REGISTER', 'UNDO'}
     morph_id: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     frame: IntProperty()

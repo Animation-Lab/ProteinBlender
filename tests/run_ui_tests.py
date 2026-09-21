@@ -32,14 +32,12 @@ def main():
     parser.add_argument("--keep-report", action="store_true")
     parser.add_argument("--normal-profile", action="store_true",
                         help="Test the enabled installed add-on in a fresh normal-profile process")
-    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs'), default='all',
+    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'state-library'), default='all',
                         help="Run a focused workflow in a fresh Blender process")
     parser.add_argument("--artifact-dir", type=Path,
                         help="Keep the report and screenshots, including failed runs")
     args = parser.parse_args()
-    drivers = {'morph-states': ROOT / 'tests/ui/run_morph_state_scenarios.py',
-               'shared-morphs': ROOT / 'tests/ui/run_shared_morph_scenarios.py'}
-    driver = drivers.get(args.scenario, DRIVER)
+    driver = ROOT / 'tests/ui/run_conformation_library_scenarios.py'
 
     with tempfile.TemporaryDirectory(prefix="pb-ui-") as tmp:
         report = Path(tmp) / "ui-report.json"
@@ -47,12 +45,13 @@ def main():
             args.blender,
             *([] if args.normal_profile else ["--factory-startup"]),
             "--no-window-focus",
+            "--window-geometry", "60", "60", "1800", "1100",
             "--enable-event-simulate",
             "--python-exit-code", "23",
             "--python", _for_blender(driver, args.blender),
             "--", _for_blender(ROOT, args.blender), _for_blender(report, args.blender),
             *(["--normal-profile"] if args.normal_profile else []),
-            *(['--morphsets-only'] if args.scenario == 'morphsets' else []),
+            *(['--full-ui'] if args.scenario == 'all' else []),
         ]
         print("[ui]", " ".join(command), flush=True)
         # Keep Blender output readable while a scenario is running, and retain
