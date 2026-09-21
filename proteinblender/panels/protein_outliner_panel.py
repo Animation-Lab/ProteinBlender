@@ -108,7 +108,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
 
-        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA'] and not is_reference:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA', 'MORPHSET'] and not is_reference:
             show_expand = True
         elif item.item_type in {'CHAIN', 'DOMAIN'}:
             # Show expand arrow for chains with domains (both original and reference items)
@@ -259,12 +259,6 @@ class PROTEINBLENDER_UL_outliner(UIList):
                     duplicate_op.molecule_id = item.item_id
 
             if item.item_type == 'PROTEIN':
-                obj = bpy.data.objects.get(item.object_name)
-                count = len(obj.pb_conformations.states) if obj else 0
-                if count > 1:
-                    op = action('proteinblender.morph',
-                                text='', icon='SHAPEKEY_DATA', emboss=False)
-                    op.source_id = item.item_id
                 # Custom Pivot, then the edit pencil. DNA/RNA rows get neither:
                 # a strand's shape is driven by its own builder dialog and its
                 # bend rig, so a hand-placed pivot on it has no defined meaning
@@ -334,13 +328,13 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if delete_op:
                 delete_op.membrane_name = item.object_name
-        elif item.item_type == 'TRANSITION':
-            row.label(text='', icon='BLANK1')
-            row.label(text='', icon='BLANK1')
-            action('proteinblender.morph', text='', icon='GREASEPENCIL',
-                         emboss=False).transition_id = item.item_id
-            action('proteinblender.delete_conformation', text='', icon='TRASH',
-                         emboss=False).transition_id = item.item_id
+        elif item.item_type == 'MORPHSET':
+            action('proteinblender.edit_morphset', text='', icon='GREASEPENCIL',
+                   emboss=False).morphset_id = item.item_id
+            action('proteinblender.delete_morphset', text='', icon='TRASH',
+                   emboss=False).morphset_id = item.item_id
+        elif item.item_type == 'MORPH_MEMBER':
+            row.label(text='Keyframe visibility', icon='KEYFRAME')
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
 
@@ -385,6 +379,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
                                text=("Deselect" if item.is_selected else "Select") if menu else "",
                                icon=selection_icon, emboss=False)
         op.item_id = item.item_id
+
+        if item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+            from ..core.morphsets import row_has_keys
+            if row_has_keys(context.scene, item):
+                row.label(text='', icon='KEYFRAME')
+                return
 
         # Third: Visibility toggle for all items
         # Read visibility directly from the Blender object (single source of truth)
@@ -731,6 +731,12 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         if not item:
             return {'CANCELLED'}
         
+        if item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+            from ..core.morphsets import row_has_keys
+            if row_has_keys(scene, item):
+                self.report({'INFO'}, 'Set Morphset member visibility in the Keyframes menu.')
+                return {'CANCELLED'}
+
         # Get current visibility from the object (single source of truth)
         current_visible = self._get_object_visibility(item, view_layer)
         new_visibility = not current_visible
@@ -739,7 +745,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         self._set_visibility_for_item(context, item, new_visibility)
         
         # If this is a protein or puppet, update children too
-        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA']:
+        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA', 'MORPHSET']:
             self._update_children_visibility(context, item.item_id, new_visibility)
 
             # If this is a protein, also update puppets containing its chains
@@ -824,7 +830,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                         if domain.object:
                             self._set_object_visibility(domain.object, visible, view_layer)
                             
-        elif item.item_type in ('DOMAIN', 'TRANSITION'):
+        elif item.item_type in ('DOMAIN', 'MORPHSET', 'MORPH_MEMBER'):
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:

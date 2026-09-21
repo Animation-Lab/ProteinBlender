@@ -1683,3 +1683,249 @@ by passing that state directly (no dialog needed):
   `/tmp/pb-unified-full52.log`; demo notes: `docs/change-notes/unified-morph.md`.
 
 - **ChimeraX-style depth silhouettes:** real Eevee/Cycles pixel tests cover front-facing occlusion boundaries, perspective/orthographic views, pixel widths, transparent-film edges, implicit compositor inputs, repeated Apply, and restoration of artist compositor/color settings. Save/reopen snapshots include the compositor topology, depth passes, and display settings; foreground tests cover Apply and viewport-guide restoration.
+
+
+### Morphsets, lighting restoration, and temperature motion (2026-09-15)
+
+Morphsets replace the old alignment/morph browser and authoring operators.
+`test_morphsets.py` covers moved ownership, exact atom correspondence without
+fitting, preservation of pre-aligned PDB coordinates through import centering,
+model states, frame interpolation, per-member visibility, selection/filtering,
+source deletion, and reversible temperature motion. The model-storage tests now
+exercise imported ensembles through Morphsets and verify the retired operators
+are unavailable. Save/load builders cover Morphsets alone and combined with
+B-factor motion and colored illustration lighting. Foreground scenarios exercise
+the new creation and Keyframes dialogs, including cancellation and member visibility.
+
+Validation logs are in `/tmp/pb_final_contracts.log` (40 passed),
+`/tmp/pb_roundtrip_final.log` (2 passed), `/tmp/pb_51.log` (44 passed including
+renders), and `/tmp/pb_normal52_final.log` / `/tmp/pb_normal51_final.log` (installed UI).
+The 5.1 headless run emitted three Windows access-violation diagnostics in pytest's
+environment updates while completing with exit 0; the focused 5.2 run and save/load
+checks did not emit these diagnostics. Their cause is not established.
+
+### Style changes with B-factor motion (2026-09-15)
+
+The regression reproduced three failures before fixing: domain style changes
+with temperature motion enabled, and stale Morphset playback with motion both
+off and on. Style lookup now finds the representation after motion modifiers;
+source style edits update extracted states and the corresponding animated
+members without replacing their shape keys. Playback style choices persist
+through key edits, motion toggles, and save/reopen. Cartoon stabilization is
+restored when switching back from another style.
+
+Blender 5.2 passed 40 visual-dialog/Morphset tests (`/tmp/pb_style_fixed52.log`),
+plus the later-source isolation regression and updated thermal-Morphset
+save/reopen case (`/tmp/pb_style_persistence52.log`). All five new style
+regressions passed cleanly in Blender 5.1 (`/tmp/pb_style_focused51.log`). The
+broader 5.1 run exited 11 after repeated Windows access-violation diagnostics
+in pytest environment updates (`/tmp/pb_style_fixed51.log`); its cause remains
+unresolved, and that run is not counted as passing.
+
+After deployment, fresh normal-profile Blender 5.1 and 5.2 windows each passed
+all 97 UI steps, including live Surface/Cartoon changes with B-factor on/off
+for ordinary proteins and Morphset playback. Both exited 0 with no native
+diagnostics or Python tracebacks (`/tmp/pb_style_ui51.log`,
+`/tmp/pb_style_ui52.log`; screenshots in `/tmp/pb-style-ui51` and
+`/tmp/pb-style-ui52`).
+
+## Independent morph rows in Morphsets (2026-09-16)
+
+Morphsets now group complete morph definitions. Each morph owns matching atom
+snapshots for named Start, End, and optional intermediate states, with its own
+state and member-visibility keyframes. The Keyframe dialog lists selectable
+morph rows; unchecked rows retain their existing keys. Removing a morph restores
+its members and removes only its keys. The previous snapshot-per-set format is
+converted during hierarchy reconstruction without dropping saved coordinates
+or timing.
+
+`test_morphsets.py` covers independent timing for two multi-model proteins,
+evaluated midpoint geometry, holds/reversal, unchecked-row preservation,
+constant member visibility, state/morph removal, invalid pairing and duplicate
+ownership, source deletion, selection filtering, style/B-factor retention,
+pre-aligned PDB coordinates, combined puppet/morph keys, and old-format conversion.
+Both Blender 5.1 and 5.2 completed all 13 cases. The related keyframe, visual-edit,
+lighting, and imported-model cases completed 58 checks in Blender 5.2.
+Both Morphset save/reopen cases passed with two independent morphs, a third named
+state, hidden members, and B-factor/style edits; the verifier rekeys the reopened
+file through the public operator.
+
+Some earlier long-lived Windows runs exited with native access violations
+(including pytest environment-variable updates); these are not counted as
+passes. The fresh full Morphset runs completed without those diagnostics.
+A reproducible state-removal crash found during development was fixed by copying
+member records before replacing their owning Blender IDProperty array.
+
+The added outliner regression also verifies that an unkeyed morph retains its
+visibility toggle while another morph is animated (passed in Blender 5.2).
+The installed normal-profile UI suite completed **111/111 scenarios on both
+Blender 5.1 and 5.2**, including live endpoint selection, independent keyframe
+checkboxes and visibility, the stacked morph editor, removing one morph, native
+Undo restoring its definition/keys/outliner members, and B-factor/style changes.
+Both runs exited cleanly without Python/draw or native-crash diagnostics.
+
+During foreground verification, a timer-driven Undo test lacked a VIEW_3D
+context, and temporary progress-file rewrites failed with Windows/WSL EINVAL.
+The test now supplies the same context as existing Undo scenarios and logs to
+stdout. The UI launcher retains Blender's log and screenshots even on timeout,
+so a stopped timer leaves actionable diagnostics rather than only a timeout.
+Deployment byte-verified all 150 Python files in each installed legacy/extension
+copy before the final normal-profile runs.
+
+### Repeated Add Morph clicks and Builders placement (2026-09-16)
+
+The previous foreground scenarios opened the first Add Morph form but created
+the second morph through the operator API. That left repeated clicks in the
+parent editor untested. A click-through probe confirmed that the editor can
+stack multiple morphs, but Blender remembered the previous row's protein and
+model choices. Confirming those defaults again fails the duplicate-ownership
+check. New Add Morph forms now start with unused checked members or the next
+unassigned protein/chain, and explain the ownership restriction in the form.
+Additional states of the same members remain in Edit Morph → Add State.
+
+The foreground regression creates a Morphset, clicks the actual Add Morph
+button twice, checks the untouched member/model defaults, fills each live form,
+and confirms both with window events. It asserts two rows and two removal
+buttons in the drawn editor, then verifies both definitions in Keyframes.
+Panel introspection verifies Create Morphset immediately follows Create New
+Assembly in Builders and is absent from the Keyframe panel. The focused run
+also includes keyframe visibility, removal/Undo, and B-factor/style changes.
+Dialog fields are assigned on the live operator; dropdown choices themselves
+are not selected with simulated mouse clicks.
+
+All **49/49 focused scenarios passed** from source in Blender 5.2 and in fresh
+installed normal-profile Blender 5.1 and 5.2 windows, with clean exits and no
+Python or native-crash diagnostics. Deployment byte-verified 150 Python files
+in each of the six installed legacy/extension copies. Reports, logs, and
+screenshots are in `/tmp/pb-morph-repeat-focused52b`,
+`/tmp/pb-morph-repeat-installed51`, and `/tmp/pb-morph-repeat-installed52`.
+Run this subset with `python tests/run_ui_tests.py --scenario morphsets`.
+
+After correcting the observer, the full installed normal-profile Blender 5.2
+foreground suite passed **119/119 scenarios** with a clean exit and no Python
+or native diagnostics (`/tmp/pb-morph-repeat-all-installed52`). Blender 5.1
+also passed all **14 Morphset integration tests**, without native diagnostics
+(`/tmp/pb_morph_repeat_core51.log`).
+
+This is not a claim that the full suite is green. Two headless Blender 5.2
+Morphset integration attempts ended with native access violations while
+evaluating animation in `compile_animation` (`scene.frame_set`), including
+independent key edits and rekeying after source deletion. Logs are
+`/tmp/pb_morph_repeat_core52.log` and `/tmp/pb_morph_repeat_core52b.log`; these
+runs are failures. An initial UI test observer also caused a native failure;
+its draw callback now uses Blender's two-argument signature, and the focused
+UI runs above passed after that test correction.
+
+### Grouped keyframe panel (2026-09-16)
+
+Set Up Lighting now sits above a shared box containing Create/Edit Keyframe,
+navigation, the current frame, and the individual keyframe list. Deployment
+byte-verified all installed copies. Screenshots from fresh normal-profile
+Blender 5.1 and 5.2 windows confirm the layout with populated keyframe lists
+(`/tmp/pb-keyframe-layout51/morphset-editor.png` and
+`/tmp/pb-keyframe-layout52/morphset-keyframe-dialog.png`). The existing focused
+foreground suite passed 49/49 scenarios in 5.1. The 5.2 run exited 11 with a
+native access violation during step 27, Morphset keyframe/visibility verification,
+after capturing the layout; it is not a passing suite run. Its log is
+`/tmp/pb_keyframe_layout52.log`.
+
+### Editable models and the 1D3Z 1 → 4 → 8 sequence (2026-09-16)
+
+Reproduced the reported editor in installed Blender 5.1: a state's pencil opened
+a rename-only form with editable `morph_id` and `state_id` strings, while Add
+State defaulted to checked outliner members and offered no 1D3Z models until
+the protein was selected again. Baseline screenshots are in
+`/tmp/pb-1d3z-baseline`.
+
+State pencils now open Edit Model / State. Definitions retain model provenance
+and show model names in the morph editor and Keyframes dropdown. Adding a state
+defaults to the existing members. Model replacement validates atom correspondence,
+retains the state's ID and all keyed times, updates playback, and releases unused
+snapshots. Name-only edits preserve coordinates; older definitions without model
+provenance can keep their saved coordinates. Internal IDs are hidden.
+
+The new integration cases verify 1D3Z Model 1 at frame 1, Model 4 at frame 45,
+and Model 8 at frame 90 against imported model-coordinate differences and
+evaluated atom coordinates, including intermediate frames 23 and 67. They also
+cover correcting an already-keyed End model, preserving times and state identity,
+name-only edits, rejecting mismatched structures without mutation, and repeated
+model/key updates. Save/reopen builders edit a keyed End to Model 8 and verify
+that provenance, coordinates, labels, styles, and keys survive.
+
+`--scenario morph-states` runs a new 53-step foreground workflow. It clicks the
+actual End pencil and Add Model / State buttons, checks prefilled model choices,
+confirms and cancels through window events, fills three live Create Keyframe
+forms, and checks the evaluated shape and Cartoon mesh at each keyed frame.
+Fields/dropdowns are assigned on the live operators. It saves a framed, editable
+example with keys at 1/45/90. An initial test incorrectly treated the default
+sphere point cloud as a mesh; the demo now explicitly selects Cartoon before
+measuring rendered mesh vertices.
+
+A native access violation recurred during the first broader 5.2 save/reopen run
+(`/tmp/pb_state_edit_roundtrip52.log`). Key edits now retain the existing morph
+controller action/slot binding and replace its curves, instead of deleting and
+replacing the action while the controller remains alive. After that change:
+
+- Blender 5.1: **17 Morphset integration cases passed**
+  (`/tmp/pb_state_edit_all51.log`).
+- Blender 5.2: **17 Morphset cases plus 2 save/reopen cases passed**
+  (`/tmp/pb_state_edit_stable_actions52.log`), including twelve successive model
+  replacements and repeated key edits.
+- Installed normal-profile Blender 5.1 and 5.2: **53/53 new UI steps each**
+  (`/tmp/pb-state-edit-installed51`, `/tmp/pb-state-edit-installed52`).
+- Installed 5.2: the previous two-morph, keyframe/visibility, removal/Undo, and
+  B-factor/style workflow passed **49/49** (`/tmp/pb-state-edit-regression52`).
+- The actual example saved in 5.1 was reopened in a fresh normal-profile 5.2
+  process: all three keyed shapes, visible Cartoon geometry, model provenance,
+  and the End model editor were verified (`/tmp/pb-state-edit-reopen-example52`).
+
+These final runs exited cleanly without Python or native-crash diagnostics.
+Deployment byte-verified 150 Python files in each installed legacy/extension
+copy. The user example is `tmp_tests/morphset-model-editor/1d3z-model-sequence.blend`
+(an ignored local artifact); the updated walkthrough is in `docs/morphsets.md`.
+
+### Multiple morph rows on the same protein (2026-09-16)
+
+Removed the exclusive member-ownership restriction. Morph definitions sharing
+a Start member now contribute keys to one animated object for that member.
+Matching endpoints at the same frame are allowed; conflicting shapes or
+visibility are rejected before changing the animation. Independent proteins
+still produce separate animated objects. Add Morph can reuse checked members
+and existing proteins, and continuing the same members defaults Start to the
+previous End model. Chain labels no longer accumulate earlier morph names.
+
+Six new integration cases cover the exact 1D3Z two-row sequence (Model 1 → 4
+at frames 1/45, Model 4 → 8 at 45/90), intermediate coordinates, atomic key/model
+conflict handling, deletion in either order across separate Morphsets, shared
+source deletion, and partial chain overlap. Save/reopen fixtures now include
+a third row sharing the first protein, including the thermal/style variant.
+An initial roundtrip run failed because the new test row omitted Blender's
+required collection `name`; supplying the same row metadata as the existing
+fixtures fixed the test setup.
+
+Verification:
+
+- Blender 5.1 and 5.2: all **6 new shared-member integration cases passed**
+  (`/tmp/pb_shared_morphs51.log`, `/tmp/pb_shared_morphs52.log`).
+- Blender 5.2: **23 Morphset integration cases passed** in the broader run
+  (`/tmp/pb_shared_morphs_full52.log`); the corrected **2 save/reopen cases
+  passed** separately (`/tmp/pb_shared_morphs_roundtrip52.log`).
+- Installed normal-profile Blender 5.1 and 5.2: the new `shared-morphs` workflow
+  passed **49/49 steps each** (`/tmp/pb-shared-morphs-installed51` and
+  `/tmp/pb-shared-morphs-installed52`). It clicks Add Morph twice for one protein,
+  assigns fields on live dialogs, confirms through window events, checks all
+  three keyed shapes plus two intermediate frames, verifies one visible Cartoon
+  object, and exercises removal and native Undo.
+- Installed 5.2: the existing two-different-proteins, visibility, Undo, B-factor,
+  and live style workflow passed **49/49** (`/tmp/pb-shared-morphs-regression52`).
+- The example saved by installed 5.1 was reopened in a fresh normal-profile 5.2
+  window: **6/6 checks passed**, including both morph definitions, one shared
+  output, all three keyed shapes, and the second End model editor
+  (`/tmp/pb-shared-morphs-reopen52`).
+
+All final runs exited cleanly with no Python tracebacks or native crashes.
+Normal-profile 5.2 logs include a BlenderMCP socket-closed message during its
+shutdown; the Morphset checks and Blender process completed successfully.
+Deployment byte-verified all 150 Python files in each installed copy. The new
+local example is `tmp_tests/shared-morphs/1d3z-two-morphs.blend`; the earlier
+single-morph example remains available. The full unrelated suite was not rerun.

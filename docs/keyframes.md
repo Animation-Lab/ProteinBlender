@@ -7,9 +7,11 @@ title: Keyframe Animation
 
 [Back to Home](index.html)
 
-Create animations by keyframing puppet positions, poses, and colors.
+Create animations by keyframing Morphsets, puppet positions, poses, and colors.
 
-Use **Set Up Lighting** below the keyframe controls to light your current scene.
+For structural changes, see [Morphsets](morphsets.html).
+
+Use **Set Up Lighting** above the keyframe controls to light your current scene.
 See [Scene Lighting](lighting.html) for presets and options.
 
 Watch the full tutorial:
@@ -21,6 +23,7 @@ Watch the full tutorial:
 **Keyframing** is the process of defining specific values at specific points in time. Blender automatically interpolates between keyframes to create smooth animation.
 
 In ProteinBlender, you can keyframe:
+- **Morph states and member visibility** (independently for each morph in a Morphset)
 - **Puppet positions** (location, rotation, scale)
 - **Poses** (apply different conformations)
 - **Colors** (change appearance over time)
@@ -265,6 +268,10 @@ For more advanced topics:
 
 [Back to Home](index.html) | [Previous: Manage Poses](poses.html)
 
-For transitions between two imported structures, use
-[Align & Morph](conformations.html). Its playback popup sets the timing
-without requiring a puppet or the native Blender timeline.
+For structural transitions, define the available states in
+[Morphsets](morphsets.html), then check each morph and choose its state in
+**Create Keyframe**. Two keyed states determine the timing of the transition.
+Several morph rows can use the same protein: for example, key a Model 1 → 4
+row at frames 1 and 45, then a Model 4 → 8 row at frames 45 and 90. Shared
+members follow one combined animation. Rows keyed at the same frame must agree
+on that member's shape and visibility.

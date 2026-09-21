@@ -10,6 +10,8 @@ ProteinBlender is a powerful Blender addon designed for researchers, educators, 
 - **Rich Visualization Styles** - Cartoon, surface, ribbon, ball-and-stick, and more molecular representations
 - **Protein Puppets** - Group chains and domains together for coordinated animation
 - **Pose Library** - Save and restore different protein conformations
+- **Morphsets** - Define named morphs with Start, End, and intermediate states; keyframe each morph and its member visibility independently
+- **Temperature Motion** - Animate gentle movement weighted by protein B-factors
 - **Keyframe Animation** - Animate protein movements, conformational changes, and colors
 - **Domain Selection** - Split proteins into domains for independent styling and animation
 - **Hierarchical Outliner** - Manage complex multi-protein scenes with ease

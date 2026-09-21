@@ -505,6 +505,12 @@ class VisualEditMixin:
             self.apply_visual_force_field(context)
 
 
+def _on_thermal_edited(_operator, context):
+    dialog = _live()
+    if dialog is not None and hasattr(dialog, 'apply_thermal'):
+        dialog.apply_thermal(context)
+
+
 class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
     """Edit this protein's colour and representation"""
     bl_idname = "proteinblender.edit_protein_visuals"
@@ -515,6 +521,16 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         name="Protein Row",
         description="item_id of the protein row in the Protein Outliner")
 
+    bfactor_motion: BoolProperty(name='B-factor (Temperature) Motion',
+        description='Animate gentle motion weighted by the imported temperature factors',
+        default=False, update=_on_thermal_edited)
+
+    def apply_thermal(self, context):
+        from ..core.thermal_motion import set_enabled
+        mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
+        if mol:
+            set_enabled(mol, self.bfactor_motion)
+
     def visual_row(self, context):
         return find_row(context.scene, self.item_id)
 
@@ -523,6 +539,9 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}
         self.begin_visual_edit(context)
+        mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
+        with _Suspend():
+            self.bfactor_motion = bool(mol and mol.object.get('pb_bfactor_enabled'))
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def check(self, context):
@@ -540,8 +559,9 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             layout.label(text=row.name, icon=row.icon or 'MESH_DATA')
         self.draw_visual_setup(layout, context, show_pivot=False)
         layout.separator()
-        layout.operator('proteinblender.morph', icon='IPO_EASE_IN_OUT').source_id = self.item_id
-        layout.operator('proteinblender.capture_conformation', icon='DUPLICATE').source_id = self.item_id
+        layout.prop(self, 'bfactor_motion')
+        if self.bfactor_motion:
+            layout.label(text='Play the timeline to see temperature motion.', icon='INFO')
 
     def execute(self, context):
         row = self.visual_row(context)
@@ -550,6 +570,8 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}
         self.commit_visual_edit(context)
+        if self.properties.is_property_set('bfactor_motion'):
+            self.apply_thermal(context)
         self.end_visual_edit()
         return {'FINISHED'}
 

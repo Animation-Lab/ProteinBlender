@@ -210,48 +210,29 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
     return True
 
 
-def get_object_style(obj):
-    """Get the current style from an object's geometry nodes"""
+def find_style_node(obj):
+    """Find the representation, regardless of preceding motion modifiers."""
     if not obj:
         return None
-    
-    # Find the geometry nodes modifier
-    mod = None
-    for modifier in obj.modifiers:
-        if modifier.type == 'NODES' and ('MolecularNodes' in modifier.name or 'DomainNodes' in modifier.name):
-            mod = modifier
-            break
-    
-    if not mod or not mod.node_group:
-        # Try any nodes modifier
-        for modifier in obj.modifiers:
-            if modifier.type == 'NODES':
-                mod = modifier
-                break
-        if not mod or not mod.node_group:
-            return None
+    modifiers = [m for m in obj.modifiers if m.type == 'NODES' and m.node_group]
+    modifiers.sort(key=lambda m: m.name not in {'DomainNodes', 'MolecularNodes'})
+    for modifier in modifiers:
+        for node in modifier.node_group.nodes:
+            if node.type == 'GROUP' and node.node_tree and 'Style ' in node.node_tree.name:
+                return node
+    return None
 
-    node_tree = mod.node_group
 
-    # Find the style node and determine its type
-    for node in node_tree.nodes:
-        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
-            node_tree_name = node.node_tree.name
-            
-            # Map MolecularNodes style node names to our style names
-            style_map = {
-                'Style Spheres': 'spheres',
-                'Style Cartoon': 'cartoon',
-                'Style Surface': 'surface',
-                'Style Ribbon': 'ribbon',
-                'Style Sticks': 'sticks',
-                'Style Ball and Stick': 'ball_and_stick'
-            }
-            
-            for style_node_name, style_key in style_map.items():
-                if style_node_name in node_tree_name:
-                    return style_key
-    
+def get_object_style(obj):
+    """Get the current style from an object's geometry nodes."""
+    node = find_style_node(obj)
+    if node:
+        for name, key in {
+                'Style Spheres': 'spheres', 'Style Cartoon': 'cartoon',
+                'Style Surface': 'surface', 'Style Ribbon': 'ribbon',
+                'Style Sticks': 'sticks', 'Style Ball and Stick': 'ball_and_stick'}.items():
+            if name in node.node_tree.name:
+                return key
     return None
 
 
@@ -543,33 +524,9 @@ def apply_domain_style_direct(scene_manager, domain_item, style):
                 break
 
 
-def apply_style_to_object(obj, style):
+def apply_style_to_object(obj, style, *, sync_morphsets=True):
     """Apply style to a molecular object through its geometry nodes"""
-    # Find the MolecularNodes modifier
-    mod = None
-    for modifier in obj.modifiers:
-        if modifier.type == 'NODES' and modifier.name == "MolecularNodes":
-            mod = modifier
-            break
-    
-    if not mod or not mod.node_group:
-        # Try to find any nodes modifier if exact name doesn't match
-        for modifier in obj.modifiers:
-            if modifier.type == 'NODES':
-                mod = modifier
-                break
-        if not mod or not mod.node_group:
-            return
-    
-    node_tree = mod.node_group
-
-    # Find the style node
-    style_node = None
-    for node in node_tree.nodes:
-        if node.type == 'GROUP' and node.node_tree and 'Style' in node.node_tree.name:
-            style_node = node
-            break
-
+    style_node = find_style_node(obj)
     if not style_node:
         return
 
@@ -587,12 +544,15 @@ def apply_style_to_object(obj, style):
     }
 
     target_style_name = style_map.get(style)
-    if target_style_name:
-        try:
-            # Use the swap function from MolecularNodes
-            nodes.swap(style_node, target_style_name)
-        except Exception:
-            pass
+    if not target_style_name:
+        return
+    nodes.swap(style_node, target_style_name)
+    if obj.get('pb_morphset_output') and style == 'cartoon':
+        from .cartoon_motion import stabilize
+        stabilize(obj)
+    if sync_morphsets:
+        from .morphsets import sync_style
+        sync_style(bpy.context.scene, obj, style)
     
     # Force update
     obj.data.update()

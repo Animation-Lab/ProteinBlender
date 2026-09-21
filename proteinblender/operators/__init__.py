@@ -100,11 +100,11 @@ from .brownian_operators import (
     PROTEINBLENDER_OT_brownian_clear_all,
 )
 
-from .conformation_operators import CLASSES as CONFORMATION_CLASSES
 from .conformation_library import CLASSES as CONFORMATION_LIBRARY_CLASSES
-from .morph_dialog import CLASSES as MORPH_DIALOG_CLASSES
+from .morphset_operators import CLASSES as MORPHSET_CLASSES
 
 CLASSES = (
+    *MORPHSET_CLASSES,
     # PropertyGroups must be registered before operators that use them
     PuppetKeyframeSettings,
     # Operators
@@ -172,7 +172,5 @@ CLASSES = (
     *VISUAL_EDIT_CLASSES,
     *OUTLINER_COLOR_CLASSES,
     *LIGHTING_CLASSES,
-    *CONFORMATION_CLASSES,
     *CONFORMATION_LIBRARY_CLASSES,
-    *MORPH_DIALOG_CLASSES,
 )

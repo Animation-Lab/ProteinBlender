@@ -32,9 +32,14 @@ def main():
     parser.add_argument("--keep-report", action="store_true")
     parser.add_argument("--normal-profile", action="store_true",
                         help="Test the enabled installed add-on in a fresh normal-profile process")
+    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs'), default='all',
+                        help="Run a focused workflow in a fresh Blender process")
     parser.add_argument("--artifact-dir", type=Path,
                         help="Keep the report and screenshots, including failed runs")
     args = parser.parse_args()
+    drivers = {'morph-states': ROOT / 'tests/ui/run_morph_state_scenarios.py',
+               'shared-morphs': ROOT / 'tests/ui/run_shared_morph_scenarios.py'}
+    driver = drivers.get(args.scenario, DRIVER)
 
     with tempfile.TemporaryDirectory(prefix="pb-ui-") as tmp:
         report = Path(tmp) / "ui-report.json"
@@ -44,20 +49,32 @@ def main():
             "--no-window-focus",
             "--enable-event-simulate",
             "--python-exit-code", "23",
-            "--python", _for_blender(DRIVER, args.blender),
+            "--python", _for_blender(driver, args.blender),
             "--", _for_blender(ROOT, args.blender), _for_blender(report, args.blender),
             *(["--normal-profile"] if args.normal_profile else []),
+            *(['--morphsets-only'] if args.scenario == 'morphsets' else []),
         ]
         print("[ui]", " ".join(command), flush=True)
-        proc = subprocess.run(command, cwd=ROOT, text=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              timeout=args.timeout)
-        print(proc.stdout)
+        # Keep Blender output readable while a scenario is running, and retain
+        # it on timeout. A stopped timer otherwise leaves only a timeout error.
+        log_path = Path(tmp) / 'blender.log'
+        timed_out = None
+        try:
+            with log_path.open('w', encoding='utf-8') as log:
+                proc = subprocess.run(command, cwd=ROOT, text=True,
+                                      stdout=log, stderr=subprocess.STDOUT,
+                                      timeout=args.timeout)
+        except subprocess.TimeoutExpired as exc:
+            timed_out = exc
+        output = log_path.read_text(encoding='utf-8', errors='replace')
+        print(output)
         if args.artifact_dir:
             args.artifact_dir.mkdir(parents=True, exist_ok=True)
             for path in Path(tmp).iterdir():
                 if path.is_file():
                     shutil.copy2(path, args.artifact_dir / path.name)
+        if timed_out:
+            raise SystemExit(f"Blender UI scenarios timed out after {args.timeout} seconds")
         if proc.returncode:
             raise SystemExit(proc.returncode)
         if not report.exists():
@@ -69,7 +86,7 @@ def main():
             raise SystemExit("one or more foreground UI scenarios failed")
         # Blender often prints draw callback failures instead of surfacing them.
         bad = ("Traceback (most recent call last)", "Error: Python:")
-        if any(token in proc.stdout for token in bad):
+        if any(token in output for token in bad):
             raise SystemExit("Blender reported a Python/draw exception during UI scenarios")
         if args.keep_report:
             target = ROOT / "ui-test-report.json"

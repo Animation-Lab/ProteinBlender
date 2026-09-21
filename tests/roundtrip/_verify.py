@@ -241,21 +241,31 @@ def main():
         out["snapshot"] = scene_snapshot()
         checkpoint("snapshotted")
 
-        # Stored ensemble coordinates must remain usable through the public
-        # browser after reconstruction, not merely survive as named pointers.
-        from proteinblender.utils.scene_manager import ProteinBlenderScene
-        import numpy as np
-        for mid, molecule in ProteinBlenderScene.get_instance().molecules.items():
-            library = molecule.object.pb_conformations
-            if len(library.states) <= 1:
-                continue
-            before = np.array([v.co[:] for v in molecule.object.data.vertices])
-            index = library.active_index
-            assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid,
-                index=(index + 1) % len(library.states)) == {'FINISHED'}
-            assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid, index=index) == {'FINISHED'}
-            after = np.array([v.co[:] for v in molecule.object.data.vertices])
-            np.testing.assert_allclose(after, before, atol=1e-6)
+        # Saved Morphsets must remain editable through the same Keyframes UI.
+        from proteinblender.core import morphsets
+        keys = morphsets.keyframes(bpy.context.scene)
+        if keys:
+            edited = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Closing')
+            end = morphsets.states(edited)[-1]
+            assert end['name'] == 'Final' and end['model_name'] == 'Model 8'
+            source = end['members'][0]['source']
+            assert end['model_uid'] == source.pb_conformations.states[7].uid
+            shared = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Later transition')
+            assert morphsets.records(edited)[0]['object'] == morphsets.records(shared)[0]['object']
+            assert morphsets.outputs(bpy.context.scene, edited[morphsets.MORPH]) == morphsets.outputs(
+                bpy.context.scene, shared[morphsets.MORPH])
+            frame, rows = next(iter(keys.items()))
+            expected = {(m[morphsets.MORPH], slot): member['style']
+                        for m in morphsets.morphs(bpy.context.scene)
+                        for slot, member in enumerate(morphsets.records(m))}
+            assert bpy.ops.proteinblender.create_keyframe(frame_number=int(frame), morph_items=[
+                dict(visible=True, show_visibility=False, set_name='', name=uid, morph_id=uid, use_morph=True, state=value['state'],
+                     members=[dict(name=str(i), visible=v) for i, v in enumerate(value['visible'])]) for uid, value in rows.items()
+            ]) == {'FINISHED'}
+            assert len(morphsets.outputs(bpy.context.scene)) == 2
+            from proteinblender.core.visual_style import get_object_style
+            for obj in morphsets.outputs(bpy.context.scene):
+                assert get_object_style(obj) == expected[(obj['pb_morph_uid'], obj['pb_slot'])]
 
         if WANT_RENDER:
             try:

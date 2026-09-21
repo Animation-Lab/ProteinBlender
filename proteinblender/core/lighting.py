@@ -137,13 +137,13 @@ def _other_lights(context, rig, mute):
         scene["pb_lighting_muted"] = records
 
 
-def _world(scene, strength):
+def _world(scene, strength, color=(1, 1, 1)):
     world = scene.get("pb_lighting_world")
     if not isinstance(world, bpy.types.World):
         world = bpy.data.worlds.new("PB Lighting World")
         world[TAG] = True
         scene["pb_lighting_world"] = world
-    if scene.world and scene.world != world:
+    if scene.world and scene.world != world and 'pb_lighting_previous_world' not in scene:
         scene["pb_lighting_previous_world"] = scene.world
     scene.world = world
     world.use_nodes = True
@@ -151,7 +151,7 @@ def _world(scene, strength):
     nodes.clear()
     nodes.new('ShaderNodeBackground').name = "PB Ambient"
     nodes.new('ShaderNodeOutputWorld').name = "PB Output"
-    nodes['PB Ambient'].inputs['Color'].default_value = (1, 1, 1, 1)
+    nodes['PB Ambient'].inputs['Color'].default_value = (*color, 1)
     nodes['PB Ambient'].inputs['Strength'].default_value = strength
     world.node_tree.links.new(nodes['PB Ambient'].outputs[0], nodes['PB Output'].inputs['Surface'])
 
@@ -206,12 +206,20 @@ def _illustration_display(context, enabled, preview, outlines):
 
 
 def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
-                   mute_existing=True, preview=True, outlines=True, outline_width=1):
+                   mute_existing=True, preview=True, outlines=True, outline_width=1, background_color=(1, 1, 1)):
+    if preset == 'DEFAULT':
+        return remove_lighting(context)
     center, radius = scene_bounds(context)  # Validate before changing the scene.
     rotation = view_rotation(context, alignment)
     powers, softness, ambient, shadows = PRESETS[preset]
     scene = context.scene
+    if 'pb_lighting_original_engine' not in scene:
+        scene['pb_lighting_original_engine'] = scene.render.engine
+        scene['pb_lighting_had_world'] = scene.world is not None
     rig = _collection(scene)
+    scene['pb_lighting_settings'] = dict(preset=preset, brightness=brightness,
+        alignment=alignment, mute_existing=mute_existing, preview=preview,
+        outlines=outlines, outline_width=outline_width, background_color=list(background_color))
     for role, offset, power in zip(ROLES, OFFSETS, powers):
         obj = next((o for o in rig.objects if o.get(TAG) == role and o.type == 'LIGHT'), None)
         if obj is None:
@@ -240,7 +248,8 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
     rig["radius"] = radius
     rig["preset"] = preset
     _other_lights(context, rig, mute_existing)
-    _world(scene, 1 if preset == 'ILLUSTRATION' else ambient * brightness)
+    _world(scene, 1 if preset == 'ILLUSTRATION' else ambient * brightness,
+           background_color if preset == 'ILLUSTRATION' else (1, 1, 1))
     from .illustration import set_illustration
     set_illustration(scene, preset == 'ILLUSTRATION', brightness, outlines)
     from .illustration_outline import configure
@@ -249,6 +258,7 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
     if scene.render.engine == 'BLENDER_WORKBENCH':
         scene.render.engine = 'BLENDER_EEVEE'
     if preview and context.screen:
+        _save_preview(context)
         for area in context.screen.areas:
             if area.type == 'VIEW_3D':
                 shading = area.spaces.active.shading
@@ -259,3 +269,62 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
                 shading.type = 'MATERIAL'
     context.view_layer.update()
     return rig
+
+
+PREVIEW_FIELDS = ('type', 'use_scene_lights', 'use_scene_world',
+                  'use_scene_lights_render', 'use_scene_world_render')
+
+
+def _save_preview(context):
+    records = list(context.scene.get('pb_lighting_original_preview', ()))
+    for index, area in enumerate(context.screen.areas):
+        if area.type != 'VIEW_3D' or any(
+                r['screen'] == context.screen and r['area'] == index for r in records):
+            continue
+        records.append(dict(screen=context.screen, area=index,
+                            values={key: getattr(area.spaces.active.shading, key)
+                                    for key in PREVIEW_FIELDS}))
+    if records:
+        context.scene['pb_lighting_original_preview'] = records
+
+
+def remove_lighting(context):
+    """Restore the saved scene and remove only the rig owned by this tool."""
+    scene = context.scene
+    from .illustration import set_illustration
+    from .illustration_outline import restore
+    set_illustration(scene, False)
+    restore(scene)
+    _illustration_display(context, False, False, False)
+    _other_lights(context, None, False)
+    world = scene.get('pb_lighting_world')
+    if world and scene.world == world:
+        scene.world = scene.get('pb_lighting_previous_world')
+    if 'pb_lighting_original_engine' in scene:
+        scene.render.engine = scene['pb_lighting_original_engine']
+    for record in scene.get('pb_lighting_original_preview', ()):
+        screen, index = record.get('screen'), record['area']
+        if screen and index < len(screen.areas) and screen.areas[index].type == 'VIEW_3D':
+            shading = screen.areas[index].spaces.active.shading
+            for key, value in record['values'].items():
+                setattr(shading, key, value)
+    rig = scene.get(TAG)
+    if rig:
+        for obj in list(rig.objects):
+            if obj.get(TAG):
+                data = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                if data.users == 0:
+                    bpy.data.lights.remove(data)
+            else:
+                if obj.name not in scene.collection.objects:
+                    scene.collection.objects.link(obj)
+        bpy.data.collections.remove(rig)
+    for key in (TAG, 'pb_lighting_world', 'pb_lighting_previous_world',
+                'pb_lighting_original_engine', 'pb_lighting_had_world',
+                'pb_lighting_original_preview', 'pb_lighting_settings'):
+        if key in scene:
+            del scene[key]
+    if world and world.users == 0:
+        bpy.data.worlds.remove(world)
+    context.view_layer.update()

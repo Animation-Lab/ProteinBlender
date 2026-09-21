@@ -372,6 +372,9 @@ class DomainDefinition:
             # The detailed node setup will be handled by MoleculeWrapper._setup_domain_network
             # We just need to ensure we have a valid node group at this point
 
+            from .thermal_motion import NAME, install
+            if any(m.name.startswith(NAME) for m in self.object.modifiers):
+                install(self.object)
             self._setup_complete = True
             return True
 

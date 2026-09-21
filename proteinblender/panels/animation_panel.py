@@ -166,6 +166,11 @@ class PROTEINBLENDER_PT_animation(Panel):
         main_box.separator()
         col = main_box.column(align=True)
 
+        lighting = col.row()
+        lighting.scale_y = 1.2
+        lighting.operator("proteinblender.setup_lighting", icon='LIGHT_AREA')
+        col.separator()
+
         # --- Keyframe tools:  |< prev  |  Create/Edit  |  next >|  ---
         tools = col.box().column(align=True)
         tools.label(text="Keyframe Tools", icon='KEYFRAME')
@@ -195,17 +200,9 @@ class PROTEINBLENDER_PT_animation(Panel):
         tools.separator()
         tools.label(text=f"Current Frame: {current}", icon='TIME')
 
-        lighting = col.row()
-        lighting.scale_y = 1.2
-        lighting.operator("proteinblender.setup_lighting", icon='LIGHT_AREA')
-
-        transition = col.row()
-        transition.scale_y = 1.2
-        transition.operator('proteinblender.morph', icon='IPO_EASE_IN_OUT')
-        col.operator('proteinblender.capture_conformation', text='Capture Conformation', icon='DUPLICATE')
-
         # --- Keyframe list: scrolling once past 10 entries ---
-        list_box = col.box()
+        tools.separator()
+        list_box = tools.column(align=True)
 
         # Header: title on the left, "filter by selection" toggle on the
         # right. The toggle pinches to icon-only (FILTER) and depresses
@@ -298,6 +295,10 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
         if self.frame < 0:
             return {'CANCELLED'}
         for _label, obj, kind, item_id in get_keyframe_targets(context):
+            if kind == 'MORPHSET':
+                from ..core.morphsets import delete_key
+                delete_key(context, self.frame, item_id)
+                continue
             objs = list(get_keyframe_animated_objects(obj, kind))  # molecule + DNA bend nodes, or membrane + holes
             if kind == 'PUPPET':
                 objs += get_puppet_member_objects(context, item_id)

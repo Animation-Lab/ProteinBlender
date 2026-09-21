@@ -63,6 +63,7 @@ def active_window():
 
 
 def record(name, function):
+    print(f'[ui step {len(results) + 1}] {name}', flush=True)
     try:
         detail = function()
         results.append({"name": name, "ok": True, "detail": detail or ""})
@@ -313,6 +314,9 @@ def invoke_and_cancel_protein_visuals_dialog():
     protein = next(row for row in bpy.context.scene.outliner_items
                    if row.item_type == "PROTEIN")
     with ui_override("PROPERTIES"):
+        # Make this fixture explicit; imports currently default to cartoon.
+        assert bpy.ops.proteinblender.edit_protein_visuals(
+            item_id=protein.item_id, vs_style='spheres') == {'FINISHED'}
         result = bpy.ops.proteinblender.edit_protein_visuals(
             "INVOKE_DEFAULT", item_id=protein.item_id)
     assert result == {"RUNNING_MODAL"}, result
@@ -1205,100 +1209,6 @@ def biological_assembly_edit_dialog():
     return "biological assembly reopened in the BMT dialog and cancelled"
 
 
-def invoke_morph_regions_dialog():
-    from proteinblender.operators import conformation_operators as operators
-    count = state.get('morph_dialog_count', 0) + 1
-    state['morph_dialog_count'] = count
-    with ui_override("VIEW_3D"):
-        first = H.import_local('1ubq.pdb', f'UI morph start {count}')
-        second = H.import_local('1ubq.pdb', f'UI morph end {count}')
-    state['morph_frame'] = bpy.context.scene.frame_current
-    state['morph_end'] = bpy.context.scene.frame_end
-    state['morph_objects'] = set(bpy.data.objects.keys())
-    state['morph_visibility'] = {
-        obj.name: (obj.hide_get(), obj.hide_render) for obj in bpy.context.scene.objects}
-    with ui_override("PROPERTIES"):
-        assert bpy.ops.proteinblender.morph(
-            'INVOKE_DEFAULT', source_id=first, target_id=second,
-            source_chain='A', target_chain='A', source_region='1-30', target_region='1-30',
-            start_frame=300, end_frame=330) == {'RUNNING_MODAL'}
-    assert operators._creation_dialog is not None
-    assert operators._creation_dialog._match.summary['residues'] == 30
-    return 'Align & Morph dialog opened with a matched residue region'
-
-
-def preview_morph_regions_and_cancel():
-    from proteinblender.operators import conformation_operators as operators
-    from proteinblender.core import conformation
-    with ui_override("PROPERTIES"):
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    dialog = operators._creation_dialog
-    obj = conformation.find(bpy.context.scene, dialog._preview_id)
-    assert obj is not None and obj.parent is None and not obj.children
-    assert obj.get('pb_context_object') is not None
-    assert bpy.context.scene.frame_current == 300
-    assert bpy.context.scene.frame_end >= 330
-    active_window().event_simulate(type='ESC', value='PRESS')
-    active_window().event_simulate(type='ESC', value='RELEASE')
-    return 'preview created a colored region and translucent context; Escape sent to parent dialog'
-
-
-def assert_morph_preview_cancelled():
-    from proteinblender.operators import conformation_operators as operators
-    assert operators._creation_dialog is None, 'Escape did not cancel the creation dialog'
-    assert set(bpy.data.objects.keys()) == state['morph_objects']
-    assert bpy.context.scene.frame_current == state['morph_frame']
-    assert bpy.context.scene.frame_end == state['morph_end']
-    assert {obj.name: (obj.hide_get(), obj.hide_render)
-            for obj in bpy.context.scene.objects} == state['morph_visibility']
-    return 'cancel removed preview and helper, restored originals, current frame, and playback range'
-
-
-def open_breathing_morph_at_return_frame():
-    from proteinblender.core import conformation
-    proteins = [r.item_id for r in bpy.context.scene.outliner_items if r.item_type == 'PROTEIN']
-    first, second = proteins[-2:]
-    with ui_override('PROPERTIES'):
-        assert bpy.ops.proteinblender.create_conformation(
-            source_id=first, target_id=second, source_chain='A', target_chain='A',
-            start_frame=10, end_frame=30, return_to_start=True,
-            return_frame=50, repeat=True, smooth=False) == {'FINISHED'}
-        obj = list(conformation.transitions(bpy.context.scene))[-1]
-        bpy.context.scene.frame_set(60)
-        assert bpy.ops.proteinblender.morph(
-            'INVOKE_DEFAULT', transition_id=obj[conformation.TAG]) == {'RUNNING_MODAL'}
-    assert bpy.context.scene.frame_current == 60, 'Opening playback jumped out of the breathing cycle'
-    active_window().event_simulate(type='ESC', value='PRESS')
-    active_window().event_simulate(type='ESC', value='RELEASE')
-    return 'Opening a repeated morph keeps the current animation frame'
-
-
-def confirm_morph_region_preview():
-    from proteinblender.core import conformation
-    from proteinblender.operators import conformation_operators as operators
-    with ui_override('PROPERTIES'):
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    state['accepted_preview_id'] = operators._creation_dialog._preview_id
-    state['accepted_previous_morphs'] = {
-        o[conformation.TAG] for o in conformation.transitions(bpy.context.scene)
-        if o[conformation.TAG] != state['accepted_preview_id']}
-    active_window().event_simulate(type='RET', value='PRESS')
-    active_window().event_simulate(type='RET', value='RELEASE')
-    return 'Confirmed the preview through the parent dialog'
-
-
-def assert_morph_preview_committed_once():
-    from proteinblender.core import conformation
-    from proteinblender.operators import conformation_operators as operators
-    assert operators._creation_dialog is None, 'Accepted dialog retained its modal slot'
-    identifiers = {o[conformation.TAG] for o in conformation.transitions(bpy.context.scene)}
-    assert state['accepted_preview_id'] in identifiers, 'Confirmation replaced the preview instead of promoting it'
-    assert len(identifiers - state['accepted_previous_morphs']) == 1, 'Confirmation did not create exactly one morph'
-    active_window().event_simulate(type='ESC', value='PRESS')
-    active_window().event_simulate(type='ESC', value='RELEASE')
-    return 'Confirmation kept one morph and released the popup without opening a second dialog'
-
-
 def save_report_and_quit():
     ok = all(item["ok"] for item in results)
     Path(report_path).write_text(json.dumps({
@@ -1488,269 +1398,266 @@ def membrane_force_field_assert_far():
     return 'The real event loop closed the gap after the chain left the membrane'
 
 
-def open_conformation_browser():
-    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
-    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_UL_outliner as rows
-    # Isolate the demonstration in this runner's disposable scene.
+def setup_morphset_workspace():
+    if not normal_profile:
+        proteinblender._test_register()
+    else:
+        H.PKG = installed_package
+    from proteinblender.addon import create_workspace_callback
+    create_workspace_callback()
+    if normal_profile:
+        active_window().event_simulate(type='ESC', value='PRESS')
+        active_window().event_simulate(type='ESC', value='RELEASE')
+    return bpy.app.version_string
+
+
+def prepare_morphset_builder():
+    from proteinblender.operators import morphset_operators as M
+    from proteinblender.dna_builder.dna_panel import PROTEINBLENDER_PT_builders
+    from proteinblender.panels.animation_panel import PROTEINBLENDER_PT_animation
     H.reset_scene()
-    with protein_workspace_override():
-        mid = H.import_local('1d3z.pdb.gz', 'Ubiquitin')
-        state['library_mid'] = mid
-        state['library_single_mid'] = H.import_local('1ubq.pdb', 'Single state')
-        bpy.ops.proteinblender.toggle_visibility(item_id=state['library_single_mid'])
-        state['library_draws'] = []
-        state['library_rows'] = {}
-        original_row = rows.draw_item
-        def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-            original_row(self, context, layout, data, item, icon, active_data, active_propname)
-            state['library_rows'][item.item_id] = str(layout.introspect())
-        state['library_row_original'] = original_row
-        rows.draw_item = draw_item
+    state['morphset_mid'] = H.import_local('1d3z.pdb.gz', 'Morphset UI')
+    state['morphset_second_mid'] = H.import_local('1d3z.pdb.gz', 'Morphset UI second')
+    for row in bpy.context.scene.outliner_items:
+        row.is_selected = False
+    for obj in bpy.context.selected_objects:
+        obj.select_set(False)
+    state['morph_draws'], state['morph_draw_originals'] = {}, []
+    def observe(cls):
         original = cls.draw
         def draw(self, context):
             original(self, context)
-            state['library_draws'].append(self.layout.introspect())
-        state['library_draw_original'] = original
+            state['morph_draws'][cls.__name__] = self.layout.introspect()
+        state['morph_draw_originals'].append((cls, original))
         cls.draw = draw
-        assert bpy.ops.proteinblender.browse_conformations(molecule_id=mid) == {'FINISHED'}
-        library = H.sm().molecules[mid].object.pb_conformations
-        library.fit = 'NONE'
-        assert bpy.ops.proteinblender.edit_protein_visuals(item_id=mid, vs_style='cartoon',
-            vs_color=(.15, .5, .8, 1)) == {'FINISHED'}
-        bpy.context.scene.frame_set(119)
-        bpy.ops.ed.undo_push(message='Conformation browser baseline')
-    with ui_override('VIEW_3D'):
-        space = bpy.context.space_data
-        space.region_3d.view_location = (0, 0, 0)
-        space.region_3d.view_distance = .65
-        space.shading.type = 'MATERIAL'
-        space.shading.use_scene_lights = False
-        space.shading.use_scene_world = False
-        space.show_gizmo = False
-        space.overlay.show_overlays = False
-    redraw_all_panels()
+    for cls in [PROTEINBLENDER_PT_builders, PROTEINBLENDER_PT_animation,
+                M.PROTEINBLENDER_OT_create_morphset, M.PROTEINBLENDER_OT_edit_morphset]:
+        observe(cls)
+    active_window().event_simulate(type='MOUSEMOVE', value='NOTHING', x=0, y=0)
+    for area in active_window().screen.areas:
+        area.tag_redraw()
+    return 'Two separate multi-model proteins imported for the actual Add Morph button sequence'
 
 
-def observe_conformation_browser_and_switch():
-    assert state['library_draws'], 'Conformation browser did not draw'
-    layout = str(state['library_draws'][-1])
-    assert 'Conformations (10)' not in layout
-    assert 'Set as Start' not in layout and 'Animate Between Conformations' not in layout
-    rows = state['library_rows']
-    assert 'proteinblender.morph' in rows[state['library_mid']]
-    assert 'Conformations (' not in rows[state['library_mid']]
-    assert 'proteinblender.morph' not in rows[state['library_single_mid']]
-    for item in bpy.context.scene.outliner_items:
-        if item.item_type != 'PROTEIN' and item.item_id in rows:
-            assert 'proteinblender.morph' not in rows[item.item_id]
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.switch_conformation(molecule_id=state['library_mid'], index=7) == {'FINISHED'}
-        bpy.ops.ed.undo_push(message='Conformation switched')
-    assert bpy.context.scene.frame_current == 119
-    redraw_all_panels()
+def invoke_morphset_dialog():
+    draws = state['morph_draws']
+    builders = str(draws['PROTEINBLENDER_PT_builders'])
+    animation = str(draws['PROTEINBLENDER_PT_animation'])
+    assert builders.index('Create New Assembly') < builders.index('Create Morphset')
+    assert 'proteinblender.create_morphset' not in animation
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.create_morphset('INVOKE_DEFAULT') == {'RUNNING_MODAL'}
+    return 'Create Morphset is drawn below Create New Assembly in Builders, and opens its dialog'
 
 
-def library_undo():
-    with protein_workspace_override():
-        assert bpy.ops.ed.undo() == {'FINISHED'}
-
-
-def library_assert_undo_and_redo():
-    library = H.sm().molecules[state['library_mid']].object.pb_conformations
-    assert library.active_index == 0
-    assert bpy.context.scene.frame_current == 119
-    with protein_workspace_override():
-        assert bpy.ops.ed.redo() == {'FINISHED'}
-
-
-def library_open_popup():
-    from proteinblender.operators.morph_dialog import PROTEINBLENDER_OT_morph as cls
-    original_draw, original_cancel = cls.draw, cls.cancel
-    state['unified_original_range'] = bpy.context.scene.frame_end
-    state['library_popup_draws'] = []
-    state['library_popup_cancelled'] = 0
-    def draw(self, context):
-        original_draw(self, context)
-        state['library_popup'] = self
-        state['library_popup_draws'].append(str(self.layout.introspect()))
-    def cancel(self, context):
-        state['library_popup_cancelled'] += 1
-        original_cancel(self, context)
-    cls.draw, cls.cancel = draw, cancel
-    state['library_popup_original'] = cls, original_draw, original_cancel
-    with protein_workspace_override():
-        bpy.context.view_layer.objects.active = H.sm().molecules[state['library_single_mid']].object
-        assert bpy.ops.proteinblender.morph('INVOKE_DEFAULT', source_id=state['library_mid'], fit='NONE') == {'RUNNING_MODAL'}
-
-
-def library_show_state_and_preview():
-    from proteinblender.operators import conformation_operators as operators
-    from proteinblender.operators.morph_dialog import _key
-    from proteinblender.core import conformation
-    popup = state['library_popup']
-    layout = state['library_popup_draws'][-1]
-    for text in ['From:', 'To:', 'Start frame', 'End frame', 'Apply', 'Advanced']:
-        assert text in layout, f'Missing main Morph control: {text}'
-    for text in ['Alignment', 'From residues', 'Representation', 'Add from PDB']:
-        assert text not in layout, f'Advanced control visible by default: {text}'
-    assert popup.source_id == state['library_mid']
-    assert popup.target_id == popup.source_id
-    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'conformation-browser.png'))
-    lib = H.sm().molecules[popup.source_id].object.pb_conformations
-    popup.source_pick = _key(popup.source_id, lib.states[0].uid)
-    popup.target_pick = _key(popup.source_id, lib.states[7].uid)
-    popup.fit = 'ALL'
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='SHOW_FROM') == {'FINISHED'}
-    assert lib.active_index == 0
-    # Showing either endpoint must use the same From-state alignment anchor.
-    # Read raw stored coordinates, independent of the display/alignment helpers.
-    import numpy as np
-    expected = np.asarray([v.co[:] for v in lib.states[0].mesh.vertices])
-    displayed = np.asarray([v.co[:] for v in H.sm().molecules[popup.source_id].object.data.vertices])
-    np.testing.assert_allclose(displayed, expected, atol=1e-6)
-    assert lib.reference_uid == lib.states[0].uid
-    popup.fit = 'NONE'
-    assert bpy.context.scene.frame_current == 119
-    assert not conformation.transitions(bpy.context.scene)
-    popup.start_frame, popup.end_frame, popup.return_frame = 10, 30, 50
-    popup.return_to_start = popup.repeat = True
-    popup.smooth = False
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    assert operators._creation_dialog == popup
-    obj = conformation.find(bpy.context.scene, popup._preview_id)
-    assert obj is not None and obj['pb_end_frame'] == 30
-    assert len(conformation.transitions(bpy.context.scene)) == 1
-    # Replacing a long preview with a short one must release the old range.
-    popup.end_frame, popup.return_frame = 600, 610
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    assert bpy.context.scene.frame_end >= 610
-    popup.end_frame, popup.return_frame = 30, 50
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    assert bpy.context.scene.frame_end == max(state['unified_original_range'], 50)
-    assert len(conformation.transitions(bpy.context.scene)) == 1
-    obj = conformation.find(bpy.context.scene, popup._preview_id)
-    state['unified_preview_id'] = obj[conformation.TAG]
-    assert popup._labels() == {'source_label': 'Model 1', 'target_label': 'Model 8'}
-    popup.progress = .5
-    assert bpy.context.scene.frame_current == 20
-    assert abs(obj.data.shape_keys.key_blocks['End conformation'].value - .5) < 1e-5
-
-
-def library_invalid_apply_and_cancel():
-    from proteinblender.core import conformation
-    popup = state['library_popup']
-    popup.end_frame = 5
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'CANCELLED'}
-    obj = conformation.find(bpy.context.scene, state['unified_preview_id'])
-    assert obj is not None and obj['pb_end_frame'] == 30
-    assert popup._preview_id == state['unified_preview_id']
-    cancel_mixed_swatch_picker()
-
-
-def library_open_optional_tools():
-    from proteinblender.operators import conformation_operators as operators
-    from proteinblender.core import conformation
-    assert operators._creation_dialog is None
-    assert state['library_popup_cancelled'] == 1
-    assert not conformation.transitions(bpy.context.scene)
-    assert bpy.context.scene.frame_current == 119
-    mid = state['library_mid']
-    lib = H.sm().molecules[mid].object.pb_conformations
-    assert lib.active_index == 0, 'Closing discarded the shown conformation'
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph('INVOKE_DEFAULT', source_id=mid,
-            target_id=mid, source_state=lib.states[0].uid, target_state=lib.states[7].uid,
-            advanced=True, library_tools=True, fit='NONE',
-            start_frame=10, end_frame=30, return_to_start=True,
-            return_frame=50, repeat=True, smooth=False) == {'RUNNING_MODAL'}
-
-
-def library_compare_and_create_preview():
-    from proteinblender.core import conformation
-    popup = state['library_popup']
-    layout = state['library_popup_draws'][-1]
-    for text in ['Alignment', 'From residues', 'Add from PDB', 'Capture Pose']:
-        assert text in layout, f'Missing optional Morph control: {text}'
-    # Switching to explicit chains must release a now-hidden whole-protein map.
-    popup.chain_pairs = 'A:A'
-    popup.source_chain = popup.target_chain = 'A'
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}, popup._problem
-    assert popup.chain_pairs == ''
-    popup.show_comparison = popup.highlight_motion = True
-    popup.motion_threshold = .5
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='SHOW_TO') == {'FINISHED'}
-    lib = H.sm().molecules[popup.source_id].object.pb_conformations
-    assert lib.active_index == 7
-    assert any(o.get('pb_state_preview_kind') == 'MOTION' for o in bpy.context.scene.objects)
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    assert not any(o.get('pb_state_preview_owner') for o in bpy.context.scene.objects)
-    obj = conformation.find(bpy.context.scene, popup._preview_id)
-    assert obj is not None
-    state['unified_saved_id'] = obj[conformation.TAG]
+def confirm_create_morphset_dialog():
     active_window().event_simulate(type='RET', value='PRESS')
     active_window().event_simulate(type='RET', value='RELEASE')
+    return 'Confirmed creation using the dialog’s keyboard event'
 
 
-def library_verify_creation_and_open_edit():
-    from proteinblender.operators import conformation_operators as operators
-    from proteinblender.core import conformation
-    assert operators._creation_dialog is None, 'Creation opened a second dialog'
-    assert len(conformation.transitions(bpy.context.scene)) == 1
-    obj = conformation.find(bpy.context.scene, state['unified_saved_id'])
-    assert obj is not None and obj.parent is None and not obj.children
-    with protein_workspace_override():
-        assert bpy.ops.molecule.delete(molecule_id=state['library_mid']) == {'FINISHED'}
-        bpy.context.scene.frame_set(60)
-        assert bpy.ops.proteinblender.morph('INVOKE_DEFAULT', transition_id=obj[conformation.TAG]) == {'RUNNING_MODAL'}
-    assert bpy.context.scene.frame_current == 60
+def click_add_morph_button():
+    # The popup was opened at (0, 0), so Blender clamps it above the bottom
+    # edge. Add Morph sits above the help line and OK/Cancel footer even as
+    # rows are stacked above it. Click the real widget, not bpy.ops.add_morph.
+    from proteinblender.core import morphsets
+    roots = morphsets.sets(bpy.context.scene)
+    assert len(roots) == 1
+    state['morphset_id'] = roots[0][morphsets.TAG]
+    assert 'Add Morph' in str(state['morph_draws']['PROTEINBLENDER_OT_edit_morphset'])
+    scale = bpy.context.preferences.system.ui_scale
+    x, y = round(340 * scale), round(80 * scale)
+    window = active_window()
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+    return 'Clicked Add Morph in the open editor'
 
 
-def library_edit_apply_and_cancel():
-    from proteinblender.core import conformation
-    popup = state['library_popup']
-    layout = state['library_popup_draws'][-1]
-    assert popup._editing and not popup.advanced
-    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'morph-playback.png'))
-    for text in ['From: Model 1', 'To: Model 8', 'Apply', 'Play', 'Advanced']:
-        assert text in layout
-    popup.end_frame = 40
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.morph_action(action='APPLY') == {'FINISHED'}
-    obj = conformation.find(bpy.context.scene, state['unified_saved_id'])
-    assert obj['pb_end_frame'] == 40
-    assert len(conformation.transitions(bpy.context.scene)) == 1
-    popup.progress = .5
-    assert bpy.context.scene.frame_current == 25
-    popup.end_frame = 45  # Discard this pending field; keep the previous Apply.
-    with protein_workspace_override():
-        assert bpy.ops.proteinblender.conformation_preview(transition_id=obj[conformation.TAG], action='PLAY') == {'FINISHED'}
-    cancel_mixed_swatch_picker()
+def edit_add_morph_dialog(second=False):
+    from proteinblender.operators.morphset_operators import PROTEINBLENDER_OT_add_morph
+    dialog = PROTEINBLENDER_OT_add_morph._active_instance
+    assert dialog is not None, 'The editor’s Add Morph button did not open a dialog'
+    expected = state['morphset_second_mid'] if second else state['morphset_mid']
+    assert dialog.source == expected, f'New row reused an assigned source: {dialog.source}; expected {expected}'
+    assert dialog.member_ids == dialog.end_member_ids == ''
+    assert dialog.end_source == 'SAME'
+    assert dialog.model == dialog.end_model == 'CURRENT', 'New row retained the prior row’s model choices'
+    dialog.name = 'Bending' if second else 'Closing'
+    library = H.sm().molecules[expected].object.pb_conformations
+    dialog.model = library.states[1 if second else 0].uid
+    dialog.end_model = library.states[8 if second else 6].uid
+    dialog.start_name, dialog.end_name = ('Straight', 'Bent') if second else ('Open', 'Closed')
+    return 'Fresh defaults and named model endpoints set for ' + dialog.name
 
 
-def library_restore_observers():
-    from proteinblender.operators import conformation_operators as operators
-    from proteinblender.core import conformation
-    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_PT_outliner as cls
-    from proteinblender.panels.protein_outliner_panel import PROTEINBLENDER_UL_outliner as rows
-    try:
-        assert operators._creation_dialog is None and operators._playing is None
-        assert bpy.context.scene.frame_current == 60
-        obj = conformation.find(bpy.context.scene, state['unified_saved_id'])
-        assert obj['pb_end_frame'] == 40
-        assert not any(o.get('pb_state_preview_owner') for o in bpy.context.scene.objects)
-    finally:
-        cls.draw = state['library_draw_original']
-        rows.draw_item = state['library_row_original']
-        popup_cls, draw, cancel = state['library_popup_original']
-        popup_cls.draw, popup_cls.cancel = draw, cancel
+def confirm_add_morph_dialog(second=False):
+    filename = 'add-second-morph-dialog.png' if second else 'add-morph-dialog.png'
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / filename))
+    active_window().event_simulate(type='RET', value='PRESS')
+    active_window().event_simulate(type='RET', value='RELEASE')
+    return 'Confirmed the morph through the window event loop'
+
+
+def verify_stacked_morph_editor():
+    from proteinblender.core import morphsets
+    root = morphsets.find(bpy.context.scene, state['morphset_id'])
+    a, b = morphsets.morphs(bpy.context.scene, root)
+    assert a.name == 'Closing' and b.name == 'Bending'
+    assert [v['name'] for v in morphsets.states(a)] == ['Open', 'Closed']
+    assert [v['name'] for v in morphsets.states(b)] == ['Straight', 'Bent']
+    assert morphsets.records(a)[0]['source'] == H.sm().molecules[state['morphset_mid']].object
+    assert morphsets.records(b)[0]['source'] == H.sm().molecules[state['morphset_second_mid']].object
+    layout = str(state['morph_draws']['PROTEINBLENDER_OT_edit_morphset'])
+    assert 'Closing' in layout and 'Bending' in layout
+    assert layout.count('proteinblender.remove_morph(') == 2
+    state['morph_ids'] = [a[morphsets.MORPH], b[morphsets.MORPH]]
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'two-morphs-editor.png'))
+    for cls, original in state.pop('morph_draw_originals'):
+        cls.draw = original
+    active_window().event_simulate(type='RET', value='PRESS')
+    active_window().event_simulate(type='RET', value='RELEASE')
+    return 'Two different proteins added through two actual Add Morph clicks; both editable rows remain'
+
+
+def prepare_morphset_keyframe_dialog():
+    from proteinblender.core import morphsets
+    root = morphsets.find(bpy.context.scene, state['morphset_id'])
+    a, b = morphsets.morphs(bpy.context.scene, root)
+    assert bpy.ops.proteinblender.create_keyframe(frame_number=1, morph_items=[dict(
+        visible=True, show_visibility=False, name=m.name, set_name=root.name, morph_id=m[morphsets.MORPH], use_morph=True,
+        state=morphsets.states(m)[0]['uid'], members=[]) for m in (a,b)]) == {'FINISHED'}
+    bpy.context.scene.frame_set(21)
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.create_keyframe('INVOKE_DEFAULT') == {'RUNNING_MODAL'}
+    return 'Both UI-created morphs are independently selectable in Keyframes'
+
+
+def edit_morphset_keyframe_dialog():
+    from proteinblender.core import morphsets
+    from proteinblender.operators.keyframe_operators import PROTEINBLENDER_OT_create_keyframe
+    dialog = PROTEINBLENDER_OT_create_keyframe._active_instance
+    assert dialog is not None and len(dialog.morph_items) == 2
+    row = dialog.morph_items[0]
+    row.use_morph = True
+    row.state = morphsets.states(morphsets.find(bpy.context.scene, row.morph_id))[-1]['uid']
+    row.visible = False
+    row.show_visibility = True
+    assert not dialog.morph_items[1].use_morph
+    for area in active_window().screen.areas:
+        area.tag_redraw()
+    return 'Keying End for Closing, hiding it, and leaving Bending unchecked'
+
+
+def confirm_morphset_keyframe_dialog():
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'morphset-keyframe-dialog.png'))
+    active_window().event_simulate(type='RET', value='PRESS')
+    active_window().event_simulate(type='RET', value='RELEASE')
+    return 'Set destination and member visibility in the live dialog'
+
+
+def verify_morphset_dialog_keyframe():
+    from proteinblender.core import morphsets
+    keys = morphsets.keyframes(bpy.context.scene)
+    a, b = state['morph_ids']
+    assert keys['21'][a]['state'] == morphsets.states(morphsets.find(bpy.context.scene, a))[-1]['uid']
+    assert keys['21'][a]['visible'] == [False]
+    assert b not in keys['21']
+    bpy.context.scene.frame_set(21)
+    assert morphsets.outputs(bpy.context.scene, a)[0].hide_render
+    assert not morphsets.outputs(bpy.context.scene, b)[0].hide_render
+    bpy.context.scene.frame_set(1)
+    assert not morphsets.outputs(bpy.context.scene, a)[0].hide_render
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'morphsets.png'))
+    return 'Native playback switches visibility at the authored frame'
+
+
+def invoke_morphset_editor():
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.edit_morphset('INVOKE_DEFAULT', morphset_id=state['morphset_id']) == {'RUNNING_MODAL'}
+    return 'Opened the Morphset editor with its stacked morph rows'
+
+
+def dismiss_morphset_editor():
+    bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent / 'morphset-editor.png'))
+    active_window().event_simulate(type='ESC', value='PRESS')
+    active_window().event_simulate(type='ESC', value='RELEASE')
+    return 'Morph rows expose edit and minus controls'
+
+
+def remove_morph_and_prepare_undo():
+    from proteinblender.core import morphsets
+    with ui_override('VIEW_3D'):
+        bpy.ops.ed.undo_push(message='Before removing a morph')
+    assert bpy.ops.proteinblender.remove_morph(morph_id=state['morph_ids'][1]) == {'FINISHED'}
+    assert len(morphsets.morphs(bpy.context.scene)) == 1
+    assert morphsets.keyframes(bpy.context.scene)['21'][state['morph_ids'][0]]['visible'] == [False]
+    with ui_override('VIEW_3D'):
+        bpy.ops.ed.undo_push(message='Removed one morph')
+    return 'Minus removed only Bending and preserved Closing’s keys'
+
+
+def undo_morph_removal():
+    with ui_override('VIEW_3D'):
+        assert bpy.ops.ed.undo() == {'FINISHED'}
+    return 'Undo requested through Blender’s event-driven operator'
+
+
+def verify_morph_removal_undo():
+    from proteinblender.core import morphsets
+    assert len(morphsets.morphs(bpy.context.scene)) == 2
+    assert len(morphsets.outputs(bpy.context.scene)) == 2
+    assert set(morphsets.keyframes(bpy.context.scene)['1']) == set(state['morph_ids'])
+    assert len([r for r in bpy.context.scene.outliner_items if r.item_type == 'MORPH_MEMBER']) == 2
+    return 'Undo restored both the removed morph definition and its animation'
+
+
+def invoke_motion_style_dialog(morphing):
+    mid = state['morphset_mid'] if morphing else H.import_local('1ubq.pdb', 'Style UI')
+    state['style_mid'], state['style_morphing'] = mid, morphing
+    with ui_override('PROPERTIES'):
+        assert bpy.ops.proteinblender.edit_protein_visuals(
+            'INVOKE_DEFAULT', item_id=mid) == {'RUNNING_MODAL'}
+    return 'Opened Edit Protein for ' + mid
+
+
+def edit_motion_style(motion, style):
+    from proteinblender.operators.visual_edit import active_dialog
+    dialog = active_dialog()
+    assert dialog is not None
+    # These assignments drive the real live property callbacks, before OK.
+    dialog.bfactor_motion = motion
+    dialog.vs_style = style
+    for area in active_window().screen.areas:
+        area.tag_redraw()
+    return f'B-factor={motion}, style={style}'
+
+
+def verify_motion_style(motion, label):
+    from proteinblender.core import morphsets
+    from proteinblender.core.thermal_motion import NAME
+    molecule = H.sm().molecules[state['style_mid']]
+    objects = [d.object for d in molecule.domains.values() if d.object]
+    visible = objects
+    if state['style_morphing']:
+        visible = morphsets.outputs(bpy.context.scene, state['morph_ids'][0])
+        objects += visible
+    for obj in objects:
+        names = [node.node_tree.name for mod in obj.modifiers
+                 if mod.type == 'NODES' and mod.node_group
+                 for node in mod.node_group.nodes if node.type == 'GROUP' and node.node_tree]
+        assert any(f'Style {label}' in name for name in names), (obj.name, names)
+        assert bool(obj.modifiers.get(NAME)) == motion
+    count = sum(len(H.eval_positions(obj)) for obj in visible)
+    assert count > 0, 'The selected representation must draw geometry'
+    if label == 'Surface':
+        state['surface_vertices'] = count
+    else:
+        assert count != state['surface_vertices'], 'The viewport geometry did not change'
+        bpy.ops.screen.screenshot(filepath=str(Path(report_path).parent /
+            f"style-motion-{'morphset' if state['style_morphing'] else 'protein'}.png"))
+        cancel_mixed_swatch_picker()
+    return f'{label} visible with {count} vertices; B-factor={motion}'
 
 
 steps = [
@@ -1820,15 +1727,7 @@ steps = [
     ("settle redo event 1", lambda: f"redo settle: {domain_state_snapshot()}"),
     ("settle redo event 2", lambda: f"redo settle: {domain_state_snapshot()}"),
     ("assert redo", assert_redo),
-    ("morph region dialog", invoke_morph_regions_dialog),
-    ("morph region preview", preview_morph_regions_and_cancel),
-    ("morph preview cancellation", assert_morph_preview_cancelled),
-    ("breathing morph dialog keeps frame", open_breathing_morph_at_return_frame),
-    ("settle breathing dialog", lambda: "modal cancellation processed"),
-    ("morph dialog for confirmation", invoke_morph_regions_dialog),
-    ("confirm morph region preview", confirm_morph_region_preview),
-    ("assert morph preview committed once", assert_morph_preview_committed_once),
-    ("settle accepted morph playback", lambda: "modal cancellation processed"),
+
 ]
 
 steps.extend([
@@ -1839,28 +1738,58 @@ steps.extend([
     ('verify force-field height', membrane_force_field_assert_far),
     ('dismiss previous playback popup', cancel_mixed_swatch_picker),
     ('settle previous popup dismissal', lambda: 'event loop'),
-    ('prepare conformation Outliner rows', open_conformation_browser),
-    ('settle conformation browser', lambda: 'redraw'),
-    ('verify browser controls and switch', observe_conformation_browser_and_switch),
-    ('undo conformation switch', library_undo),
-    ('settle conformation undo', lambda: 'undo event loop'),
-    ('verify conformation undo and redo', library_assert_undo_and_redo),
-    ('settle conformation redo', lambda: 'redo event loop'),
-    ('open contextual conformation popup', library_open_popup),
-    ('settle conformation popup', lambda: 'redraw'),
-    ('show conformation and preview in the same popup', library_show_state_and_preview),
-    ('reject invalid Apply and cancel preview', library_invalid_apply_and_cancel),
-    ('settle unified preview cancellation', lambda: 'event loop'),
-    ('open optional Morph tools', library_open_optional_tools),
-    ('settle optional tools', lambda: 'redraw'),
-    ('compare states and confirm the preview', library_compare_and_create_preview),
-    ('settle Morph confirmation', lambda: 'event loop'),
-    ('verify single Morph and edit without sources', library_verify_creation_and_open_edit),
-    ('settle Morph edit', lambda: 'redraw'),
-    ('apply existing Morph settings and cancel pending fields', library_edit_apply_and_cancel),
-    ('settle Morph edit cancellation', lambda: 'event loop'),
-    ('verify unified popup cleanup', library_restore_observers),
+    ('prepare Morphset builder', prepare_morphset_builder),
+    ('redraw Morphset builder', lambda: 'redraw'),
+    ('open Morphset dialog', invoke_morphset_dialog),
+    ('settle Morphset dialog', lambda: 'redraw'),
+    ('confirm Morphset creation', confirm_create_morphset_dialog),
+    ('settle new Morphset editor', lambda: 'redraw'),
+    ('click first Add Morph', click_add_morph_button),
+    ('settle first Add Morph', lambda: 'redraw'),
+    ('choose first morph endpoints', edit_add_morph_dialog),
+    ('confirm first morph', confirm_add_morph_dialog),
+    ('redraw first morph row', lambda: 'redraw'),
+    ('click second Add Morph', click_add_morph_button),
+    ('settle second Add Morph', lambda: 'redraw'),
+    ('choose second morph endpoints', lambda: edit_add_morph_dialog(True)),
+    ('confirm second morph', lambda: confirm_add_morph_dialog(True)),
+    ('redraw second morph row', lambda: 'redraw'),
+    ('verify stacked morph rows', verify_stacked_morph_editor),
+    ('settle Morphset editor confirmation', lambda: 'event loop'),
+    ('open Morphset keyframe dialog', prepare_morphset_keyframe_dialog),
+    ('settle Morphset keyframe dialog', lambda: 'redraw'),
+    ('edit Morphset keyframe', edit_morphset_keyframe_dialog),
+    ('redraw Morphset destination', lambda: 'redraw'),
+    ('confirm Morphset keyframe', confirm_morphset_keyframe_dialog),
+    ('settle Morphset keyframe', lambda: 'event loop'),
+    ('verify Morphset keyframe and visibility', verify_morphset_dialog_keyframe),
+    ('open Morphset editor', invoke_morphset_editor),
+    ('redraw Morphset editor', lambda: 'redraw'),
+    ('dismiss Morphset editor', dismiss_morphset_editor),
+    ('settle Morphset editor', lambda: 'event loop'),
+    ('remove one morph', remove_morph_and_prepare_undo),
+    ('undo morph removal', undo_morph_removal),
+    ('settle morph undo', lambda: 'event loop'),
+    ('verify morph undo', verify_morph_removal_undo),
 ])
+
+for morphing in (False, True):
+    prefix = 'Morphset' if morphing else 'Protein'
+    steps.extend([
+        (prefix + ' style dialog', lambda morphing=morphing: invoke_motion_style_dialog(morphing)),
+        (prefix + ' style dialog redraw', lambda: 'redraw'),
+        (prefix + ' B-factor on and Surface', lambda: edit_motion_style(True, 'surface')),
+        (prefix + ' verify live Surface', lambda: verify_motion_style(True, 'Surface')),
+        (prefix + ' B-factor off and Cartoon', lambda: edit_motion_style(False, 'cartoon')),
+        (prefix + ' verify live Cartoon', lambda: verify_motion_style(False, 'Cartoon')),
+        (prefix + ' style dialog dismissal', lambda: 'event loop'),
+    ])
+
+
+if '--morphsets-only' in driver_options:
+    begin = next(i for i, (name, _) in enumerate(steps) if name == 'prepare Morphset builder')
+    steps = [('setup Morphset workspace', setup_morphset_workspace),
+             ('settle workspace', lambda: 'event loop')] + steps[begin:]
 
 
 def advance():

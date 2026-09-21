@@ -34,6 +34,9 @@ python tests/run_ui_tests.py
 # (run deployment first; this process does not save its test scene/preferences)
 python tests/run_ui_tests.py --normal-profile --blender "<path-to-blender>"
 
+# Two Add Morph clicks on one 1D3Z protein, with shared animation and Undo
+python tests/run_ui_tests.py --normal-profile --scenario shared-morphs --blender "<path-to-blender>"
+
 # a Blender you already have open, observed through its viewport
 python tests/run_live_tests.py --preflight
 python tests/run_live_tests.py -v

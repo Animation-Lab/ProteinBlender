@@ -3,8 +3,10 @@
 import bpy
 import json
 from bpy.types import Operator, PropertyGroup
-from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty
+from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringProperty, EnumProperty
 from ..utils.scene_manager import ProteinBlenderScene
+from .morphset_operators import PBMorphKeyframeRow, populate_keyframe_rows
+from ..core import morphsets
 from ..utils.chain_utils import get_puppet_member_objects as _resolve_puppet_member_objects
 from ..utils.animation import (
     keyframe_transforms,
@@ -217,6 +219,8 @@ def get_keyframe_targets(context):
             if obj and obj.name not in seen and obj.get("pb_is_membrane", False):
                 seen.add(obj.name)
                 targets.append((item.name, obj, 'MEMBRANE', item.item_id))
+    for morph in morphsets.morphs(scene):
+        targets.append((morph.name, morph, 'MORPHSET', morph[morphsets.MORPH]))
     return targets
 
 
@@ -318,6 +322,11 @@ def _target_owned_object_names(context, obj, kind, item_id):
     ``get_filtered_keyframe_targets`` to decide whether the current selection
     matches a given target."""
     names = {obj.name}
+    if kind == 'MORPHSET':
+        names.update(o.name for o in morphsets.outputs(context.scene, obj[morphsets.MORPH]))
+        if obj.parent:
+            names.add(obj.parent.name)
+        names.update(m['object'].name for m in morphsets.records(obj) if m.get('object'))
     if kind == 'PUPPET':
         # Use the local wrapper (context, item_id), NOT the raw chain_utils
         # function — that one has signature (scene, scene_manager, puppet_item)
@@ -557,6 +566,8 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         min=1
     )
 
+    morph_items: CollectionProperty(type=PBMorphKeyframeRow)
+
     puppet_items: CollectionProperty(
         type=PuppetKeyframeSettings,
         name="Puppet Items",
@@ -700,12 +711,18 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mem_item.keyframe_color = False
             mem_item.brownian_enabled = False
 
+        populate_keyframe_rows(self, context)
+
         # Publish self so the in-dialog Select All / Select None buttons
         # can mutate puppet_items on this live instance.
         type(self)._active_instance = self
 
         # Show popup dialog
         return context.window_manager.invoke_props_dialog(self, width=500)
+
+    def check(self, context):
+        # Rebuild enabled state / expanded member rows after widget changes.
+        return True
 
     def draw(self, context):
         layout = self.layout
@@ -717,12 +734,40 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         
         layout.separator()
         
+        previous_set = None
+        for item in self.morph_items:
+            if item.set_name != previous_set:
+                morph_box = layout.box()
+                morph_box.label(text=item.set_name, icon='IPO_EASE_IN_OUT')
+                previous_set = item.set_name
+            row = morph_box.row(align=True)
+            row.prop(item, 'use_morph', text='')
+            row.label(text=item.name)
+            controls = row.row(align=True)
+            controls.enabled = item.use_morph
+            controls.prop(item, 'state', text='')
+            controls.prop(item, 'visible', text='', icon='HIDE_OFF' if item.visible else 'HIDE_ON')
+            controls.prop(item, 'show_visibility', text='', icon='TRIA_DOWN' if item.show_visibility else 'TRIA_RIGHT', emboss=False)
+            if str(self.frame_number) in morphsets.morph_keys(context.scene, item.morph_id):
+                op = row.operator('proteinblender.remove_morph_key', text='', icon='KEYFRAME_HLT')
+                op.morph_id, op.frame = item.morph_id, self.frame_number
+            if item.show_visibility:
+                members = morph_box.column()
+                members.enabled = item.use_morph and item.visible
+                members.label(text='Visible members at this frame:')
+                for member in item.members:
+                    members.prop(member, 'visible', text=member.name)
+        if morphsets.sets(context.scene) and not self.morph_items:
+            layout.label(text='Add a morph using the Morphset’s edit pencil.', icon='INFO')
+
         # Puppet rows
-        box = layout.box()
-        
+        has_morphsets = bool(morphsets.sets(context.scene))
+        box = layout.box() if self.puppet_items or not has_morphsets else layout
+
         if not self.puppet_items:
-            box.label(text="Nothing to keyframe", icon='INFO')
-            box.label(text="Create a puppet (Puppet Maker) or a DNA/RNA strand (DNA Builder) first")
+            if not has_morphsets:
+                box.label(text="Nothing to keyframe", icon='INFO')
+                box.label(text="Create a Morphset, puppet, DNA/RNA strand, or membrane first")
         else:
             # Create a subtle header with icons
             header_row = box.row(align=False)
@@ -822,9 +867,10 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         layout.separator()
 
         # Select all/none buttons
-        row = layout.row(align=True)
-        row.operator("proteinblender.keyframe_select_all_puppets", text="Select All")
-        row.operator("proteinblender.keyframe_select_none_puppets", text="Select None")
+        if self.puppet_items:
+            row = layout.row(align=True)
+            row.operator("proteinblender.keyframe_select_all_puppets", text="Select All")
+            row.operator("proteinblender.keyframe_select_none_puppets", text="Select None")
 
     def cancel(self, context):
         """Esc-dismiss path: drop the live-instance handle so the next
@@ -842,10 +888,29 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         # Get selected items (puppets and/or DNA/RNA molecules)
         selected_puppets = [item for item in self.puppet_items if item.use_puppet]
 
-        if not selected_puppets:
+        selected_morphs = [item for item in self.morph_items if item.use_morph]
+        if not selected_puppets and not selected_morphs:
             self.report({'WARNING'}, "Nothing selected to keyframe")
             return {'CANCELLED'}
-        
+
+        if selected_morphs:
+            try:
+                rows = {}
+                for item in selected_morphs:
+                    morph = morphsets.find(scene, item.morph_id)
+                    count = len(morphsets.records(morph)) if morph else 0
+                    visible = [m.visible and item.visible for m in item.members] if item.members else [item.visible] * count
+                    rows[item.morph_id] = dict(state=item.state, visible=visible)
+                pending_keys = morphsets.keyframes(scene)
+                pending_keys.setdefault(str(self.frame_number), {}).update(rows)
+                morphsets.validate(scene, pending_keys)
+            except ValueError as exc:
+                self.report({'WARNING'}, str(exc))
+                return {'CANCELLED'}
+            if not selected_puppets:
+                morphsets.compile_animation(context, pending_keys)
+                return {'FINISHED'}
+
         # Store current frame
         original_frame = scene.frame_current
 
@@ -1079,6 +1144,9 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         # Restore original frame
         if original_frame != self.frame_number:
             scene.frame_set(original_frame)
+
+        if selected_morphs:
+            morphsets.compile_animation(context, pending_keys)
 
         if keyframed_puppets:
             puppet_names = ", ".join(keyframed_puppets)

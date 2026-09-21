@@ -149,9 +149,9 @@ def _stable_style():
 
 def stabilize(obj):
     """Prepare new or saved transitions, and restore the renderer after style swaps."""
-    tree = next(m.node_group for m in obj.modifiers if m.type == 'NODES' and m.node_group)
-    style = next((n for n in tree.nodes if n.type == 'GROUP' and 'Style Cartoon' in n.node_tree.name), None)
-    if style is None:
+    from .visual_style import find_style_node
+    style = find_style_node(obj)
+    if style is None or 'Style Cartoon' not in style.node_tree.name:
         return
     needs_reference = obj.data.get(VERSION) != REVISION or any(
         name not in obj.data.attributes for name in (TURN, HELIX_TURN))

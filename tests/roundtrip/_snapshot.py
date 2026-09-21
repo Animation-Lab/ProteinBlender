@@ -795,6 +795,11 @@ def scene_snapshot(include_registry=True):
             "end": scene.frame_end,
         },
         "objects": objects,
+        "morphset_coordinates": {
+            m['mesh'].name: _digest(tuple(v.co) for v in m['mesh'].vertices)
+            for obj in bpy.data.objects if obj.get('pb_morph')
+            for state in obj.get('pb_states', ())
+            for m in state['members'] if m.get('mesh')},
         "conformation_coordinates": {
             s.mesh.name: _digest(tuple(vertex.co) for vertex in s.mesh.vertices)
             for obj in bpy.data.objects for s in obj.pb_conformations.states if s.mesh},

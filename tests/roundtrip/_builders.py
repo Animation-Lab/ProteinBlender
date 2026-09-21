@@ -760,99 +760,59 @@ def build_lighting():
     assert scene['pb_lighting_muted'][0]['object'] == light
 
 
-def build_conformation(style='cartoon'):
-    import json
-    first = H.import_local('1ake.pdb', 'closed')
-    second = H.import_local('4ake.pdb', 'open')
-    assert bpy.ops.proteinblender.create_conformation(
-        source_id=first, target_id=second, source_chain='A', target_chain='A',
-        start_frame=10, duration=2, smooth=False) == {'FINISHED'}
-    scene = bpy.context.scene
-    obj = next(o for o in scene.objects if o.get('pb_conformation'))
-    if style != 'cartoon':
-        assert bpy.ops.proteinblender.edit_conformation(
-            transition_id=obj['pb_conformation'], style=style,
-            start_frame=10, duration=2, smooth=False) == {'FINISHED'}
-    assert obj['pb_transition_style'] == style
-    assert any(v.value for v in obj.data.attributes['pb_cartoon_reference_turn'].data)
-    assert any(v.value for v in obj.data.attributes['pb_cartoon_helix_turn'].data)
-    assert json.loads(obj['pb_match'])['residues'] == 214
-    assert len(obj.data.shape_keys.key_blocks) == 2
-    assert obj.data.shape_keys.animation_data.action is not None
-    assert any(r.item_type == 'TRANSITION' for r in scene.outliner_items)
-    assert obj['pb_start_object'].hide_get()
-    scene.frame_set((obj['pb_start_frame'] + obj['pb_end_frame']) // 2)
-    assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < 1e-5
-
-
-def build_breathing_conformation():
-    build_conformation()
-    scene = bpy.context.scene
-    obj = next(o for o in scene.objects if o.get('pb_conformation'))
-    assert bpy.ops.proteinblender.edit_conformation(
-        transition_id=obj['pb_conformation'], start_frame=10, end_frame=30,
-        return_to_start=True, return_frame=50, repeat=True,
-        smooth=False, show_context=True, context_opacity=.25) == {'FINISHED'}
-    scene.frame_set(60)
-    assert abs(obj.data.shape_keys.key_blocks[1].value - .5) < 1e-5
-    assert obj.parent is None and not obj.children
-    assert obj.get('pb_context_object') is not None
-    assert next(r for r in scene.outliner_items if r.item_id == obj['pb_conformation']).parent_id == ''
-
-
-def build_captured_conformation():
-    mid = H.import_local('1ubq.pdb', 'capture_source')
-    molecule = H.sm().molecules[mid]
-    domain = next(iter(molecule.domains.values())).object
-    domain.rotation_euler.z = .4
-    domain.location.x += .5
-    bpy.context.view_layer.update()
-    before = set(H.sm().molecules)
-    assert bpy.ops.proteinblender.capture_conformation(source_id=mid, name='Captured State') == {'FINISHED'}
-    captured = H.sm().molecules[(set(H.sm().molecules)-before).pop()]
-    assert captured.object.get('pb_captured_conformation')
-    assert captured.object.data.get('pb_alignment_identity')
-    assert any(r.name == 'Captured State' for r in bpy.context.scene.outliner_items)
-
-
-def build_illustration_conformation():
-    build_breathing_conformation()
-    assert bpy.ops.proteinblender.setup_lighting(
-        preset='ILLUSTRATION', preview=False) == {'FINISHED'}
-    obj = next(o for o in bpy.context.scene.objects if o.get('pb_conformation'))
-    material = obj['pb_context_material']
-    assert material.node_tree.nodes.get('PB Illustration Alpha')
-    assert material.node_tree.nodes['PB Illustration Alpha'].inputs[0].default_value == .25
-    scene = bpy.context.scene
-    assert scene.compositing_node_group
-    assert scene.render.use_compositing and bpy.context.view_layer.use_pass_z
-    assert scene.view_settings.view_transform == 'Standard'
-
-
-def build_surface_conformation():
-    build_conformation(style='surface')
-
-
-def build_conformation_library():
+def build_morphsets():
+    from proteinblender.core import morphsets
     mid = H.import_local('1d3z.pdb.gz', 'saved_ensemble')
-    assert bpy.ops.proteinblender.browse_conformations(molecule_id=mid) == {'FINISHED'}
+    other = H.import_local('1d3z.pdb.gz', 'saved_partner')
+    assert bpy.ops.proteinblender.create_morphset(name='Activation') == {'FINISHED'}
+    root = morphsets.sets(bpy.context.scene)[0]
+    for source, label, start, end in [(mid, 'Closing', 0, 6), (other, 'Bending', 1, 8)]:
+        library = H.sm().molecules[source].object.pb_conformations
+        assert bpy.ops.proteinblender.add_morph(morphset_id=root[morphsets.TAG], name=label,
+            source=source, model=library.states[start].uid, end_model=library.states[end].uid,
+            start_name='Open', end_name='Closed') == {'FINISHED'}
+    a, b = morphsets.morphs(bpy.context.scene)
     library = H.sm().molecules[mid].object.pb_conformations
-    library.states[0].name = 'Rest'
-    library.states[6].name = 'Alternate'
-    library.fit = 'NONE'
-    assert bpy.ops.proteinblender.switch_conformation(molecule_id=mid, index=6) == {'FINISHED'}
-    assert bpy.ops.proteinblender.mark_conformation(molecule_id=mid, endpoint='END') == {'FINISHED'}
-    library.show_comparison = True
-    library.motion_threshold = .2
-    library.highlight_motion = True
-    assert not library.error
-    assert len(library.states) == 10 and all(s.mesh is not None for s in library.states)
-    assert library.active_index == 6
-    assert any(o.get('pb_state_preview_owner') == library.id_data for o in bpy.context.scene.objects)
+    assert bpy.ops.proteinblender.add_morph_state(morph_id=a[morphsets.MORPH], source=mid,
+        model=library.states[3].uid, name='Intermediate') == {'FINISHED'}
+    for morph, frame, index in [(a, 1, 0), (b, 1, 0), (a, 21, 1), (a, 41, -1), (b, 61, -1)]:
+        assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
+            show_visibility=False, members=[], set_name=morph.parent.name, name=morph.name, morph_id=morph[morphsets.MORPH], use_morph=True, state=morphsets.states(morph)[index]['uid'],
+            visible=frame != 61)]) == {'FINISHED'}
+    end_uid = morphsets.states(a)[-1]['uid']
+    before = morphsets.keyframes(bpy.context.scene)
+    assert bpy.ops.proteinblender.edit_morph_state(morph_id=a[morphsets.MORPH],
+        state_id=end_uid, model=library.states[7].uid, name='Final') == {'FINISHED'}
+    assert morphsets.keyframes(bpy.context.scene) == before
+    assert morphsets.state(a, end_uid)['model_name'] == 'Model 8'
+    assert bpy.ops.proteinblender.add_morph(morphset_id=root[morphsets.TAG], source=mid,
+        name='Later transition', model=library.states[7].uid, end_model=library.states[9].uid) == {'FINISHED'}
+    shared = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Later transition')
+    for frame, index in [(41, 0), (81, -1)]:
+        assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
+            name=shared.name, set_name=root.name, show_visibility=False,
+            morph_id=shared[morphsets.MORPH], use_morph=True, visible=True,
+            state=morphsets.states(shared)[index]['uid'], members=[])]) == {'FINISHED'}
+    assert morphsets.records(a)[0]['object'] == morphsets.records(shared)[0]['object']
+    assert len(morphsets.keyframes(bpy.context.scene)) == 5
+    assert len(morphsets.outputs(bpy.context.scene)) == 2
+    bpy.context.scene.frame_set(11)
+
+
+def build_thermal_morphsets():
+    build_morphsets()
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id='saved_ensemble', bfactor_motion=True) == {'FINISHED'}
+    # Editing after keyframing must persist both the display and playback style.
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id='saved_ensemble', vs_style='cartoon') == {'FINISHED'}
+    assert bpy.ops.proteinblender.setup_lighting(preset='ILLUSTRATION',
+        background_color=(.12, .24, .48), preview=False) == {'FINISHED'}
 
 
 BUILDERS = {
-    "conformation_library": build_conformation_library,
+    "morphsets": build_morphsets,
+    "thermal_morphsets": build_thermal_morphsets,
     "empty": build_empty,
     "single_protein": build_single_protein,
     "multi_chain": build_multi_chain,
@@ -874,11 +834,6 @@ BUILDERS = {
     "brownian": build_brownian,
     "visual_style": build_visual_style,
     "lighting": build_lighting,
-    "conformation": build_conformation,
-    "surface_conformation": build_surface_conformation,
-    "breathing_conformation": build_breathing_conformation,
-    "captured_conformation": build_captured_conformation,
-    "illustration_conformation": build_illustration_conformation,
     "kitchen_sink": build_kitchen_sink,
 }
 
@@ -886,7 +841,8 @@ BUILDERS = {
 # test_persistence_contract.py against the add-on's registered feature
 # packages, so adding a subsystem without adding a builder fails the suite.
 BUILDER_SUBSYSTEMS = {
-    "conformation_library": ("core", "operators", "panels"),
+    "morphsets": ("core", "operators", "panels"),
+    "thermal_morphsets": ("core", "operators", "panels"),
     "empty": (),
     "single_protein": ("core",),
     "multi_chain": ("core",),
@@ -908,11 +864,6 @@ BUILDER_SUBSYSTEMS = {
     "brownian": ("utils", "operators"),
     "visual_style": ("panels",),
     "lighting": ("core", "operators", "panels"),
-    "conformation": ("core", "operators", "panels"),
-    "surface_conformation": ("core", "operators", "panels"),
-    "breathing_conformation": ("core", "operators", "panels"),
-    "captured_conformation": ("core", "operators", "panels"),
-    "illustration_conformation": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
                      "operators", "properties", "panels"),
 }

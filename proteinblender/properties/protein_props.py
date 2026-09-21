@@ -43,7 +43,8 @@ class ProteinOutlinerItem(PropertyGroup):
             ('DNA_RNA', 'DNA/RNA', 'DNA or RNA molecule'),
             ('MEMBRANE', 'Membrane', 'Lipid bilayer membrane'),
             ('SYMMETRY', 'Assembly', 'Generated symmetry or deposited biological assembly'),
-            ('TRANSITION', 'Conformational transition', 'Aligned structural playback'),
+            ('MORPHSET', 'Morphset', 'A collection of independently keyframed morphs'),
+            ('MORPH_MEMBER', 'Morphset member', 'A chain or domain owned by a Morphset'),
         ],
         default='PROTEIN'
     )

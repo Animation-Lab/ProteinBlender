@@ -96,3 +96,14 @@ supplies depth in Eevee Material Preview; a Cycles *Rendered viewport* does not
 supply the same passes. Final Eevee and Cycles renders both support the effect.
 
 See [before/after images and demonstration notes](change-notes/chimerax-illustration.md).
+
+
+## Background and restoring default lighting
+
+In **Bright Illustration**, choose **Background Color** in the lighting dialog,
+then **Apply** or **OK**. This sets the world background in scene-lit preview and
+renders; transparent-film exports still have a transparent background.
+
+Choose **Remove Lighting** to remove the ProteinBlender rig and restore the world,
+other lights, viewport shading, color management, and compositor from before the
+preset was applied. In a new project this returns you to its default lighting.

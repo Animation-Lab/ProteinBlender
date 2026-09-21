@@ -20,7 +20,7 @@ ProteinBlender is a Blender addon designed for researchers, educators, and scien
 - [**Manage Poses**](poses.html) - Save and restore protein conformations
 - [**Keyframe Animation**](keyframes.html) - Animate your proteins
 - [**Scene Lighting**](lighting.html) - Fit soft lighting to your current scene
-- [**Conformational Transitions**](conformations.html) - Align structures and play their conformational change
+- [**Morphsets**](morphsets.html) - Keyframe pre-aligned chains, domains, and model states
 
 ## Tutorials
 

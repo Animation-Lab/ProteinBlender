@@ -1,7 +1,7 @@
 """One dialog for setting up and refreshing the scene's molecular light rig."""
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, FloatVectorProperty
 
 from ..core.lighting import setup_lighting
 
@@ -13,6 +13,7 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     preset: EnumProperty(name="Style", items=[
+        ('DEFAULT', "Remove Lighting", "Restore the lighting from before a ProteinBlender preset was applied"),
         ('STUDIO', "Soft Studio", "Balanced depth and gentle shadows for most molecular scenes"),
         ('SURFACE', "Surface Detail", "Stronger directional shading for pockets and molecular surfaces"),
         ('ILLUSTRATION', "Bright Illustration", "Flat colors and dark contours for a 2D illustration"),
@@ -32,20 +33,31 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
     outline_width: IntProperty(name="Width (px)", default=1, min=1, max=4,
         description="Silhouette thickness in viewport or output-image pixels")
 
+    background_color: FloatVectorProperty(name="Background Color", subtype='COLOR',
+        size=3, min=0, max=1, default=(1, 1, 1))
+
     def invoke(self, context, event):
+        settings = context.scene.get('pb_lighting_settings', {})
+        for name, value in settings.items():
+            if not self.properties.is_property_set(name):
+                setattr(self, name, value)
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, 'preset')
         hints = {
+            'DEFAULT': "Restore the scene's original lighting.",
             'STUDIO': "Balanced depth with soft shadows.",
             'SURFACE': "Emphasize pockets and surface shape.",
             'ILLUSTRATION': "Flat colors with optional dark contours.",
         }
         layout.label(text=hints[self.preset])
+        if self.preset == 'DEFAULT':
+            return
         layout.prop(self, 'brightness', slider=True)
         if self.preset == 'ILLUSTRATION':
+            layout.prop(self, 'background_color')
             layout.prop(self, 'outlines')
             if self.outlines:
                 layout.prop(self, 'outline_width')
@@ -56,7 +68,7 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
         row = layout.row()
         row.operator_context = 'EXEC_DEFAULT'
         apply = row.operator('proteinblender.apply_lighting', text='Apply', icon='CHECKMARK')
-        for name in ('preset', 'brightness', 'alignment', 'mute_existing', 'preview', 'outlines', 'outline_width'):
+        for name in ('preset', 'brightness', 'alignment', 'mute_existing', 'preview', 'outlines', 'outline_width', 'background_color'):
             setattr(apply, name, getattr(self, name))
         layout.separator()
         layout.label(text="Fits visible geometry at the current frame.", icon='INFO')
@@ -65,7 +77,7 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
     def execute(self, context):
         try:
             setup_lighting(context, self.preset, self.brightness, self.alignment,
-                           self.mute_existing, self.preview, self.outlines, self.outline_width)
+                           self.mute_existing, self.preview, self.outlines, self.outline_width, self.background_color)
         except ValueError as exc:
             self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}

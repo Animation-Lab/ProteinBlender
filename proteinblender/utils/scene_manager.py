@@ -625,6 +625,8 @@ def delete_molecule_cascade(context, molecule_id) -> bool:
     source = scene_manager.molecules.get(molecule_id)
     if source is not None:
         clear_for_source(context, source.object)
+        from ..core.morphsets import preserve_for_source
+        preserve_for_source(context, source.object)
 
     try:
         scene_manager.refresh_domain_refs_before_destructive_op(molecule_id)
@@ -2183,8 +2185,8 @@ def build_outliner_hierarchy(context=None):
                                 if r.item_id == parent_id)
             scene.outliner_items.move(len(scene.outliner_items) - 1, parent_index + 1)
 
-    from ..core.conformation import add_outliner_rows
-    add_outliner_rows(context, item_selection_states)
+    from ..core.morphsets import add_outliner_rows
+    add_outliner_rows(context, item_selection_states, item_expansion_states)
 
     # Add membrane items — top-level rows for each ``pb_is_membrane`` root,
     # placed after the molecules so the user gets a single combined list.

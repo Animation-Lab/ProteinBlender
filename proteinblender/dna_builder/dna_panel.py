@@ -64,6 +64,14 @@ class PROTEINBLENDER_PT_builders(Panel):
             icon="MOD_ARRAY",
         )
 
+        morph_row = main_box.row()
+        morph_row.scale_y = 1.4
+        morph_row.operator(
+            "proteinblender.create_morphset",
+            text="Create Morphset",
+            icon="IPO_EASE_IN_OUT",
+        )
+
 
 CLASSES = (PROTEINBLENDER_PT_builders,)
 

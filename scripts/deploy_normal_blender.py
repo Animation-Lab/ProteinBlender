@@ -43,6 +43,9 @@ def deploy(target: Path) -> None:
         SOURCE, target, dirs_exist_ok=True,
         ignore=shutil.ignore_patterns("wheels", "__pycache__", "*.pyc"),
     )
+    # Retired authoring workflows must not linger in installed development copies.
+    for name in ('conformation_operators.py', 'morph_dialog.py'):
+        (target / 'operators' / name).unlink(missing_ok=True)
     checked = 0
     for source_file in SOURCE.rglob("*.py"):
         relative = source_file.relative_to(SOURCE)

@@ -123,6 +123,30 @@ def test_protein_dialog_style_reaches_every_domain(scene, sm, multi_chain):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize('motion', [False, True])
+def test_style_changes_with_temperature_motion(scene, sm, single_chain, motion):
+    """The display modifier may follow the thermal modifier in the stack."""
+    molecule = sm.molecules[single_chain]
+    domains = [d.object for d in molecule.domains.values() if d.object]
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, bfactor_motion=motion) == {'FINISHED'}
+    counts = []
+    for style, label in [('surface', 'Surface'), ('cartoon', 'Cartoon')]:
+        assert bpy.ops.proteinblender.edit_protein_visuals(
+            item_id=single_chain, vs_style=style) == {'FINISHED'}
+        for obj in _protein_objects(molecule):
+            assert f'Style {label}' in _style_node_tree_name(obj), obj.name
+        counts.append([len(H.eval_positions(obj)) for obj in domains])
+        assert all(counts[-1]), 'The new representation must produce visible geometry'
+    assert counts[0] != counts[1], 'Changing style must change the rendered geometry'
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, bfactor_motion=False) == {'FINISHED'}
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=single_chain, vs_style='ribbon') == {'FINISHED'}
+    assert all('Style Ribbon' in _style_node_tree_name(obj) for obj in domains)
+
+
+@pytest.mark.integration
 def test_dialog_leaves_fields_the_caller_did_not_set_alone(scene, sm,
                                                            single_chain):
     """Setting only the style must not repaint the colour.
