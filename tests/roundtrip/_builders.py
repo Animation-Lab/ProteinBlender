@@ -777,7 +777,7 @@ def build_morphsets():
         model=library.states[3].uid, name='Intermediate') == {'FINISHED'}
     for morph, frame, index in [(a, 1, 0), (b, 1, 0), (a, 21, 1), (a, 41, -1), (b, 61, -1)]:
         assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
-            show_visibility=False, members=[], set_name=morph.parent.name, name=morph.name, morph_id=morph[morphsets.MORPH], use_morph=True, transition='MORPH', state=morphsets.states(morph)[index]['uid'],
+            show_visibility=False, members=[], set_name=morph.parent.name, name=morph.name, morph_id=morph[morphsets.MORPH], use_morph=True, state=morphsets.states(morph)[index]['uid'],
             visible=frame != 61)]) == {'FINISHED'}
     end_uid = morphsets.states(a)[-1]['uid']
     before = morphsets.keyframes(bpy.context.scene)
@@ -791,16 +791,10 @@ def build_morphsets():
     for frame, index in [(41, 0), (81, -1)]:
         assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
             name=shared.name, set_name=root.name, show_visibility=False,
-            morph_id=shared[morphsets.MORPH], use_morph=True, transition='MORPH', visible=True,
+            morph_id=shared[morphsets.MORPH], use_morph=True, visible=True,
             state=morphsets.states(shared)[index]['uid'], members=[])]) == {'FINISHED'}
     assert morphsets.records(a)[0]['object'] == morphsets.records(shared)[0]['object']
-    from proteinblender.core.conformation_sets import upgrade
-    upgrade(bpy.context)
-    assert len(morphsets.morphs(bpy.context.scene)) == 2
-    keys = morphsets.keyframes(bpy.context.scene)
-    keys['21'][a[morphsets.MORPH]]['transition'] = 'HOLD'
-    morphsets.compile_animation(bpy.context, keys)
-    assert len(keys) == 5
+    assert len(morphsets.keyframes(bpy.context.scene)) == 5
     assert len(morphsets.outputs(bpy.context.scene)) == 2
     bpy.context.scene.frame_set(11)
 

@@ -707,7 +707,7 @@ class PROTEINBLENDER_PT_pose_library(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 6  # Position after Group Maker
+    bl_order = 5  # Position after Group Maker
     
     # NO POLL METHOD - ALWAYS SHOW THE PANEL
     

@@ -102,11 +102,9 @@ from .brownian_operators import (
 
 from .conformation_library import CLASSES as CONFORMATION_LIBRARY_CLASSES
 from .morphset_operators import CLASSES as MORPHSET_CLASSES
-from .conformation_browser import CLASSES as STATE_BROWSER_CLASSES
 
 CLASSES = (
     *MORPHSET_CLASSES,
-    *STATE_BROWSER_CLASSES,
     # PropertyGroups must be registered before operators that use them
     PuppetKeyframeSettings,
     # Operators

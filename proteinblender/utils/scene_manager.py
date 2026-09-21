@@ -1493,8 +1493,6 @@ def _deferred_reconstruct_on_load():
         if scene is not None:
             scene_manager = ProteinBlenderScene.get_instance()
             restored = _reconstruct_wrappers_from_properties(scene_manager, scene)
-            from ..core.conformation_sets import upgrade
-            upgrade(bpy.context)
             if restored:
                 build_outliner_hierarchy(bpy.context)
             # Membrane targets are stable protein/chain/domain IDs. Their

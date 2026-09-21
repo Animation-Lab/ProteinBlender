@@ -329,7 +329,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.membrane_name = item.object_name
         elif item.item_type == 'MORPHSET':
-            action('proteinblender.open_conformation_library', text='', icon='GREASEPENCIL',
+            action('proteinblender.edit_morphset', text='', icon='GREASEPENCIL',
                    emboss=False).morphset_id = item.item_id
             action('proteinblender.delete_morphset', text='', icon='TRASH',
                    emboss=False).morphset_id = item.item_id
@@ -970,7 +970,7 @@ class PROTEINBLENDER_PT_outliner(Panel):
             "PROTEINBLENDER_UL_outliner", "",
             scene, "outliner_items",
             scene, "outliner_index",
-            rows=min(10, max(3, len(scene.outliner_items))),
+            rows=10,
             maxrows=20,
             type='DEFAULT',
             columns=1

@@ -1929,14 +1929,3 @@ shutdown; the Morphset checks and Blender process completed successfully.
 Deployment byte-verified all 150 Python files in each installed copy. The new
 local example is `tmp_tests/shared-morphs/1d3z-two-morphs.blend`; the earlier
 single-morph example remains available. The full unrelated suite was not rerun.
-
-### Conformation library redesign
-
-- `tests/integration/test_conformation_sets.py`: all imported models, direct
-  state keys, bridge interpolation, hold/cut, visibility, independent subjects,
-  state edit/removal, viewport preview cleanup, atomic compatibility errors,
-  and legacy shared/independent definition migration.
-- `tests/ui/run_conformation_library_scenarios.py`: real modal creation, browsing,
-  preview, keyframes, state editing, Undo, saving, and B-factor/style changes.
-- Existing Morphset save/reopen cases now cover migrated state libraries and
-  per-key Hold settings as well as source/style preservation.

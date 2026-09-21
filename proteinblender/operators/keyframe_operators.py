@@ -220,7 +220,7 @@ def get_keyframe_targets(context):
                 seen.add(obj.name)
                 targets.append((item.name, obj, 'MEMBRANE', item.item_id))
     for morph in morphsets.morphs(scene):
-        targets.append((morph.parent.name if morph.parent.get('pb_schema', 2) >= 3 else morph.name, morph, 'MORPHSET', morph[morphsets.MORPH]))
+        targets.append((morph.name, morph, 'MORPHSET', morph[morphsets.MORPH]))
     return targets
 
 
@@ -567,8 +567,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
     )
 
     morph_items: CollectionProperty(type=PBMorphKeyframeRow)
-    focus_morph: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
-    focus_state: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     puppet_items: CollectionProperty(
         type=PuppetKeyframeSettings,
@@ -713,24 +711,14 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mem_item.keyframe_color = False
             mem_item.brownian_enabled = False
 
-        from ..core import conformation_sets
-        preview = dict(scene.get('pb_conformation_preview', {}))
-        conformation_sets.clear_preview(scene, remove=True)
-        conformation_sets.upgrade(context)
         populate_keyframe_rows(self, context)
-        chosen_morph = self.focus_morph or preview.get('morph', '')
-        chosen_state = self.focus_state or preview.get('state', '')
-        for item in self.morph_items:
-            if item.morph_id == chosen_morph and morphsets.state(morphsets.find(scene, chosen_morph), chosen_state):
-                item.use_morph = True
-                item.state = chosen_state
 
         # Publish self so the in-dialog Select All / Select None buttons
         # can mutate puppet_items on this live instance.
         type(self)._active_instance = self
 
         # Show popup dialog
-        return context.window_manager.invoke_props_dialog(self, width=580)
+        return context.window_manager.invoke_props_dialog(self, width=500)
 
     def check(self, context):
         # Rebuild enabled state / expanded member rows after widget changes.
@@ -746,44 +734,31 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         
         layout.separator()
         
-        from ..core.conformation_sets import timeline_context
+        previous_set = None
         for item in self.morph_items:
-            box = layout.box()
-            header = box.row(align=True)
-            header.prop(item, 'use_morph', text=item.set_name)
-            if str(self.frame_number) in morphsets.morph_keys(context.scene, item.morph_id):
-                op = header.operator('proteinblender.remove_morph_key', text='', icon='X')
-                op.morph_id, op.frame = item.morph_id, self.frame_number
-            controls = box.column(align=True)
+            if item.set_name != previous_set:
+                morph_box = layout.box()
+                morph_box.label(text=item.set_name, icon='IPO_EASE_IN_OUT')
+                previous_set = item.set_name
+            row = morph_box.row(align=True)
+            row.prop(item, 'use_morph', text='')
+            row.label(text=item.name)
+            controls = row.row(align=True)
             controls.enabled = item.use_morph
-            controls.prop(item, 'state', text='State')
-            controls.prop(item, 'transition')
-            visible = controls.row(align=True)
-            visible.prop(item, 'visible', text='Visible', icon='HIDE_OFF' if item.visible else 'HIDE_ON')
-            if len(item.members) > 1:
-                visible.prop(item, 'show_visibility', text='Members', icon='TRIA_DOWN' if item.show_visibility else 'TRIA_RIGHT', emboss=False)
+            controls.prop(item, 'state', text='')
+            controls.prop(item, 'visible', text='', icon='HIDE_OFF' if item.visible else 'HIDE_ON')
+            controls.prop(item, 'show_visibility', text='', icon='TRIA_DOWN' if item.show_visibility else 'TRIA_RIGHT', emboss=False)
+            if str(self.frame_number) in morphsets.morph_keys(context.scene, item.morph_id):
+                op = row.operator('proteinblender.remove_morph_key', text='', icon='KEYFRAME_HLT')
+                op.morph_id, op.frame = item.morph_id, self.frame_number
             if item.show_visibility:
-                members = controls.column()
-                members.enabled = item.visible
+                members = morph_box.column()
+                members.enabled = item.use_morph and item.visible
+                members.label(text='Visible members at this frame:')
                 for member in item.members:
                     members.prop(member, 'visible', text=member.name)
-            morph = morphsets.find(context.scene, item.morph_id)
-            if morph:
-                before, after = timeline_context(context.scene, morph, self.frame_number)
-                info = box.column(align=True)
-                info.enabled = False
-                if before:
-                    verb = 'Morph from' if before[2] == 'MORPH' else 'Switch from'
-                    info.label(text=f'{verb} frame {before[0]} · {before[1]}')
-                else:
-                    info.label(text='First key: this state is also shown before it.')
-                if after:
-                    verb = 'Morph to' if item.transition == 'MORPH' else 'Hold until'
-                    info.label(text=f'{verb} frame {after[0]} · {after[1]}')
-                else:
-                    info.label(text='Last key: this state stays until you add another key.')
         if morphsets.sets(context.scene) and not self.morph_items:
-            layout.label(text='Create a Morphset with protein chains/domains first.', icon='INFO')
+            layout.label(text='Add a morph using the Morphset’s edit pencil.', icon='INFO')
 
         # Puppet rows
         has_morphsets = bool(morphsets.sets(context.scene))
@@ -925,7 +900,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     morph = morphsets.find(scene, item.morph_id)
                     count = len(morphsets.records(morph)) if morph else 0
                     visible = [m.visible and item.visible for m in item.members] if item.members else [item.visible] * count
-                    rows[item.morph_id] = dict(state=item.state, visible=visible, transition=item.transition)
+                    rows[item.morph_id] = dict(state=item.state, visible=visible)
                 pending_keys = morphsets.keyframes(scene)
                 pending_keys.setdefault(str(self.frame_number), {}).update(rows)
                 morphsets.validate(scene, pending_keys)

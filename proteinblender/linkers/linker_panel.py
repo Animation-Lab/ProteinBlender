@@ -81,7 +81,7 @@ class PB2_PT_linkers(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 7
+    bl_order = 6
 
     def draw(self, context):
         layout = self.layout

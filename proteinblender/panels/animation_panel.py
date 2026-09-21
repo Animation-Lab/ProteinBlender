@@ -143,7 +143,7 @@ class PROTEINBLENDER_PT_animation(Panel):
     bl_region_type = 'WINDOW'
     bl_context = "scene"
     bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 4  # Keep state choices and movie timing next to Builders
+    bl_order = 10  # Last of the addon's panels
 
     def draw(self, context):
         layout = self.layout
@@ -170,17 +170,6 @@ class PROTEINBLENDER_PT_animation(Panel):
         lighting.scale_y = 1.2
         lighting.operator("proteinblender.setup_lighting", icon='LIGHT_AREA')
         col.separator()
-
-        from ..core import morphsets
-        if morphsets.sets(scene):
-            from ..operators.conformation_browser import draw_library
-            library = col.box()
-            browser = scene.pb_morph_browser
-            library.prop(browser, 'expanded', text='Conformations',
-                         icon='TRIA_DOWN' if browser.expanded else 'TRIA_RIGHT', emboss=False)
-            if browser.expanded:
-                draw_library(library, context)
-            col.separator()
 
         # --- Keyframe tools:  |< prev  |  Create/Edit  |  next >|  ---
         tools = col.box().column(align=True)

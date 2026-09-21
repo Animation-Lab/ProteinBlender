@@ -34,8 +34,8 @@ python tests/run_ui_tests.py
 # (run deployment first; this process does not save its test scene/preferences)
 python tests/run_ui_tests.py --normal-profile --blender "<path-to-blender>"
 
-# One 1D3Z library: preview, model keys, hold/cut, state editing, Undo and styles
-python tests/run_ui_tests.py --normal-profile --scenario state-library --blender "<path-to-blender>"
+# Two Add Morph clicks on one 1D3Z protein, with shared animation and Undo
+python tests/run_ui_tests.py --normal-profile --scenario shared-morphs --blender "<path-to-blender>"
 
 # a Blender you already have open, observed through its viewport
 python tests/run_live_tests.py --preflight
@@ -284,19 +284,3 @@ code-review the `.ambr` diff.
 
 See [COVERAGE.md](COVERAGE.md) for the operator/panel → test-module map and the
 list of known gaps / xfails.
-
-## Conformation libraries
-
-`test_conformation_sets.py` verifies imported models, direct state keys, explicit
-holds/cuts, independent subjects, preview cleanup, editable endpoint states, and
-legacy-pair migration with sampled coordinate comparisons. `test_morphsets.py`
-retains the legacy engine/correspondence regressions. The roundtrip Morphset
-cases save upgraded libraries and verify their keys, coordinates, styles, and
-B-factor motion in a fresh process.
-
-The `state-library` UI scenario exercises creation, a ten-state scrollable
-library, preview, the shared keyframe editor, state edits, Undo, save, and live
-Surface/Cartoon style changes with B-factor on/off. The former `morphsets`,
-`morph-states`, and `shared-morphs` scenario flags are aliases for this workflow.
-Use `-s` for Windows Blender integration tests to avoid native stdout-capture
-interference; the UI harness retains its process log separately.
