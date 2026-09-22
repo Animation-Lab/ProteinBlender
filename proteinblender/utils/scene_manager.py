@@ -1717,6 +1717,9 @@ def build_outliner_hierarchy(context=None):
             for chain_id in chain_ids:
                 valid_item_ids.add(f"{molecule_id}_chain_{chain_id}")
 
+    from ..core.morphsets import sets as morphsets, TAG as morphset_tag
+    valid_item_ids.update(root[morphset_tag] for root in morphsets(scene))
+
     for item in scene.outliner_items:
         # Store selection and expansion states for all items
         if item.item_id and item.item_id != "puppets_separator":
@@ -2219,14 +2222,13 @@ def build_outliner_hierarchy(context=None):
             mem_item.is_expanded = item_expansion_states[mem_item.item_id]
         mem_item.tooltip = f"Membrane: {obj.name}"
 
-    # Restore group memberships to items
-    # IMPORTANT: Only restore memberships for chains and molecules, not domains
-    # Domains should only appear in groups as children of their parent chains
+    # Puppet rows are authoritative, including Morphsets and explicit domains.
+    memberships = {}
+    for group_id, info in existing_groups.items():
+        for member_id in info['members']:
+            memberships.setdefault(member_id, []).append(group_id)
     for item in scene.outliner_items:
-        if item.item_id in item_memberships:
-            # Only restore group memberships for non-domain items
-            if item.item_type != 'DOMAIN':
-                item.puppet_memberships = item_memberships[item.item_id]
+        item.puppet_memberships = ','.join(memberships.get(item.item_id, []))
     
     # Add existing groups at the end
     # First, create a mapping of item_id to item for easy lookup
@@ -2308,6 +2310,11 @@ def build_outliner_hierarchy(context=None):
             ref_item.has_domains = original_item.has_domains
             # Store the original item ID for reference (use dedicated field, not puppet_memberships)
             ref_item.reference_target_id = member_id
+
+            if original_item.item_type == 'MORPHSET':
+                for child in list(item_map.values()):
+                    if child.parent_id == member_id:
+                        add_reference_with_children(child.item_id, ref_item.item_id, indent_offset + 1)
 
             # If this is a chain, always add its domain children (UI will filter based on expansion)
             # ONLY add domains that are group members

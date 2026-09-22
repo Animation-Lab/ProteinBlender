@@ -4,7 +4,8 @@ import bpy
 from bpy.types import Panel, Operator
 from bpy.props import StringProperty, EnumProperty
 from mathutils import Vector
-from ..utils.scene_manager import build_outliner_hierarchy, ProteinBlenderScene
+from ..utils.scene_manager import build_outliner_hierarchy
+from ..core import puppets as puppet_core
 
 
 def _strip_puppet_from_pose_library(scene, puppet_id):
@@ -52,25 +53,8 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
     
     @staticmethod
     def _is_valid_puppet_item(item):
-        """Check if item can be added to a puppet.
-        
-        Only chains and domains (non-Empty objects) can be in puppets.
-        Excludes: puppets, proteins, separators, reference items, and Empty objects.
-        """
-        # Exclude puppets, proteins, separators, and reference items
-        if (item.item_type in ['PUPPET', 'PROTEIN'] or
-            item.item_id == "puppets_separator" or
-            "_ref_" in item.item_id):
-            return False
-        
-        # Exclude Empty objects (puppet controllers)
-        if item.object_name:
-            obj = bpy.data.objects.get(item.object_name)
-            if obj and obj.type == 'EMPTY':
-                return False
-        
-        return True
-    
+        return puppet_core.is_component(item)
+
     @classmethod
     def description(cls, context, properties):
         """Dynamic tooltip based on selection state"""
@@ -81,7 +65,7 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         valid_items = [item for item in selected_items if cls._is_valid_puppet_item(item)]
         
         if not valid_items:
-            return "Select chains or domains to create a puppet"
+            return "Select chains, domains, or Morphsets to create a puppet"
         
         # Check for conflicts
         puppet_names_dict = {}
@@ -122,34 +106,16 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             self.report({'WARNING'}, "Select items to create a puppet")
             return {'CANCELLED'}
         
-        # Filter out puppets, proteins, reference items, and check for items already in puppets
-        valid_items = [item for item in selected_items
-                      if item.item_type not in ['PUPPET', 'PROTEIN']
-                      and item.item_id != "puppets_separator"
-                      and "_ref_" not in item.item_id]
-        
-        # Check if any selected items are already in puppets
-        items_with_puppets = []
-        for item in valid_items:
-            if item.puppet_memberships:
-                items_with_puppets.append(item.name)
-        
-        if items_with_puppets:
-            # Build error message
-            if len(items_with_puppets) == 1:
-                self.report({'ERROR'}, f'Cannot create puppet: "{items_with_puppets[0]}" is already in a puppet')
-            elif len(items_with_puppets) <= 3:
-                items_str = ', '.join([f'"{name}"' for name in items_with_puppets])
-                self.report({'ERROR'}, f'Cannot create puppet: {items_str} are already in puppets')
-            else:
-                first_items = ', '.join([f'"{name}"' for name in items_with_puppets[:2]])
-                self.report({'ERROR'}, f'Cannot create puppet: {first_items} and {len(items_with_puppets)-2} more items are already in puppets')
+        try:
+            valid_items = puppet_core.validate_members(context.scene,
+                [item.item_id for item in selected_items if self._is_valid_puppet_item(item)])
+        except ValueError as exc:
+            self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
-        
         if not valid_items:
-            self.report({'WARNING'}, "No valid items selected to create a puppet")
+            self.report({'WARNING'}, 'Select chains, domains, or whole Morphsets to create a puppet')
             return {'CANCELLED'}
-        
+
         # Generate default name
         # Count only actual puppets, excluding the separator
         puppet_count = len([i for i in context.scene.outliner_items 
@@ -182,42 +148,17 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         import uuid
         puppet_id = f"puppet_{uuid.uuid4().hex[:8]}"
         
-        # Filter items that can be puppeted (exclude puppets themselves)
-        items_to_puppet = []
-        items_already_puppeted = []
-        domain_objects = []  # Collect actual Blender objects to parent
-        
-        for item in selected_items:
-            # Skip invalid items (puppets, proteins, Empty objects, etc.)
-            if not self._is_valid_puppet_item(item):
-                continue
-            
-            # Get the object for parenting (already validated as non-Empty)
-            obj = None
-            if item.object_name:
-                obj = bpy.data.objects.get(item.object_name)
-            
-            # Check if already in a puppet
-            if item.puppet_memberships:
-                items_already_puppeted.append(item.name)
-            else:
-                items_to_puppet.append(item)
-                # Collect the actual Blender objects for parenting
-                if obj:
-                    domain_objects.append(obj)
-        
-        # If any items are already in puppets, don't proceed
-        if items_already_puppeted:
-            if len(items_already_puppeted) == 1:
-                self.report({'ERROR'}, f'Cannot create puppet: "{items_already_puppeted[0]}" is already in a puppet')
-            else:
-                self.report({'ERROR'}, f'Cannot create puppet: {len(items_already_puppeted)} selected items are already in puppets')
+        try:
+            items_to_puppet = puppet_core.validate_members(scene,
+                [item.item_id for item in selected_items if self._is_valid_puppet_item(item)])
+        except ValueError as exc:
+            self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
-        
         if not items_to_puppet:
-            self.report({'WARNING'}, "No valid items to puppet")
+            self.report({'WARNING'}, 'Select chains, domains, or whole Morphsets to create a puppet')
             return {'CANCELLED'}
-        
+        domain_objects = [obj for item in items_to_puppet for obj in puppet_core.component_objects(item)]
+
         # Create Empty controller object for the puppet
         empty_name = f"{self.puppet_name}_Controller"
         
@@ -227,7 +168,12 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
             min_coord = [float('inf')] * 3
             max_coord = [float('-inf')] * 3
             
+            bounds = []
             for obj in domain_objects:
+                bounds.extend([child for child in obj.children_recursive
+                               if child.type == 'MESH' and not child.hide_get()
+                               and not child.hide_viewport] if obj.get('pb_morphset') else [obj])
+            for obj in bounds or domain_objects:
                 # Get world space bounding box
                 bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
                 for corner in bbox_corners:
@@ -253,48 +199,15 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         empty_obj.show_name = False  # Hide name in viewport to reduce clutter
         empty_obj.empty_display_size = 1.0  # Make it smaller and less intrusive
         
-        # Parent all domain objects to the Empty
-        if domain_objects:
-            # Deselect all first
-            bpy.ops.object.select_all(action='DESELECT')
-            
-            # Select all domain objects
-            for obj in domain_objects:
-                obj.select_set(True)
-            
-            # Set Empty as active (parent)
-            context.view_layer.objects.active = empty_obj
-            empty_obj.select_set(True)
-            
-            # Parent with keep transform
-            bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
+        for obj in domain_objects:
+            puppet_core.attach(obj, empty_obj)
+        context.view_layer.update()
+        bpy.ops.object.select_all(action='DESELECT')
+        empty_obj.select_set(True)
+        context.view_layer.objects.active = empty_obj
+        for obj in domain_objects:
+            obj.select_set(True)
 
-            # Keep the Empty controller selected and re-select domain objects
-            bpy.ops.object.select_all(action='DESELECT')
-
-            # Select the Empty controller
-            empty_obj.select_set(True)
-            context.view_layer.objects.active = empty_obj
-
-            # Also select all domain objects
-            for obj in domain_objects:
-                obj.select_set(True)
-        else:
-            # Even if no domain objects, ensure the Empty controller is selected
-            empty_obj.select_set(True)
-            context.view_layer.objects.active = empty_obj
-
-        # Add puppet membership to selected items
-        for item in items_to_puppet:
-            # Get current memberships
-            current_puppets = item.puppet_memberships.split(',') if item.puppet_memberships else []
-            # Add new puppet if not already a member
-            if puppet_id not in current_puppets:
-                current_puppets.append(puppet_id)
-                item.puppet_memberships = ','.join(filter(None, current_puppets))
-            # Keep items selected - don't deselect them automatically
-            # This prevents confusion where creating a puppet changes selection
-        
         # Create the puppet item
         puppet_item = scene.outliner_items.add()
         puppet_item.item_type = 'PUPPET'
@@ -305,8 +218,8 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         puppet_item.icon = 'ARMATURE_DATA'
         puppet_item.is_expanded = True
         puppet_item.is_selected = False  # Don't auto-select the new puppet
-        puppet_item.controller_object_name = empty_name  # Store the Empty's name
-        puppet_item.object_name = empty_name  # Also set object_name for selection sync (like domains)
+        puppet_item.controller_object_name = empty_obj.name  # Store the Empty's name
+        puppet_item.object_name = empty_obj.name  # Also set object_name for selection sync (like domains)
         
         # Store member IDs in the puppet's memberships field for easy access
         member_ids = [item.item_id for item in items_to_puppet]
@@ -380,12 +293,7 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
                 # First unparent all children (they'll remain in place)
                 children = [child for child in empty_obj.children]
                 for child in children:
-                    # Store current world matrix
-                    mat = child.matrix_world.copy()
-                    # Clear parent
-                    child.parent = None
-                    # Restore world position
-                    child.matrix_world = mat
+                    puppet_core.detach(child)
                 
                 # Now delete the Empty
                 bpy.data.objects.remove(empty_obj, do_unlink=True)
@@ -408,12 +316,13 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
         _strip_puppet_from_pose_library(scene, self.puppet_id)
 
         # Remove the puppet item
+        puppet_name = puppet_item.name
         scene.outliner_items.remove(puppet_index)
 
         # Rebuild outliner
         from ..utils.scene_manager import build_outliner_hierarchy
         build_outliner_hierarchy(context)
-        self.report({'INFO'}, f"Deleted puppet: {puppet_item.name}")
+        self.report({'INFO'}, f"Deleted puppet: {puppet_name}")
         
         # Update UI. context.area is None when called from a script/MCP
         # context — fall back to tagging every 3D view.
@@ -430,13 +339,13 @@ class PROTEINBLENDER_OT_delete_puppet(Operator):
 class PROTEINBLENDER_OT_edit_puppet(Operator):
     """Edit selected puppet"""
     bl_idname = "proteinblender.edit_puppet"
-    bl_label = "Delete Puppet"
+    bl_label = "Edit Puppet"
     bl_options = {'REGISTER', 'UNDO'}
     
     action: EnumProperty(
         name="Action",
         items=[
-            ('EDIT', "DeletePuppet", "Edit puppet name and members"),
+            ('EDIT', "Edit Puppet", "Edit puppet name and members"),
             ('ADD', "Add to Puppet", "Add selected items to puppet"),
             ('REMOVE', "Remove from Puppet", "Remove selected items from puppet"),
             ('RENAME', "Rename Puppet", "Rename the puppet"),
@@ -490,31 +399,22 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             # Get current puppet members
             current_members = set(puppet_item.puppet_memberships.split(',')) if puppet_item.puppet_memberships else set()
             
-            # Add all selectable items
-            scene_manager = ProteinBlenderScene.get_instance()
-            for mol_id, molecule in scene_manager.molecules.items():
-                # Add domains
-                for domain_id, domain in molecule.domains.items():
-                    if domain.object:
-                        item_sel = self.item_selections.add()
-                        item_sel.name = f"{domain.object.name}_{domain_id}"
-                        item_sel['item_id'] = f"{mol_id}_{domain_id}"
-                        item_sel['display_name'] = domain.name if hasattr(domain, 'name') else domain.object.name
-                        item_sel['is_selected'] = f"{mol_id}_{domain_id}" in current_members
-                        item_sel['item_type'] = 'DOMAIN'
-                        item_sel['parent_name'] = getattr(molecule, 'name', molecule.identifier)
-                
-                # Add chains
-                for chain_item in context.scene.outliner_items:
-                    if chain_item.item_type == 'CHAIN' and chain_item.parent_id == mol_id:
-                        item_sel = self.item_selections.add()
-                        item_sel.name = f"{chain_item.name}_{chain_item.item_id}"
-                        item_sel['item_id'] = chain_item.item_id
-                        item_sel['display_name'] = chain_item.name
-                        item_sel['is_selected'] = chain_item.item_id in current_members
-                        item_sel['item_type'] = 'CHAIN'
-                        item_sel['parent_name'] = getattr(molecule, 'name', molecule.identifier)
-            
+            by_id = {r.item_id: r for r in context.scene.outliner_items}
+            for item in puppet_core.components(context.scene):
+                item_sel = self.item_selections.add()
+                item_sel.name = item.item_id
+                item_sel['item_id'] = item.item_id
+                item_sel['display_name'] = item.name
+                item_sel['is_selected'] = item.item_id in current_members
+                item_sel['item_type'] = item.item_type
+                parent = by_id.get(item.parent_id)
+                item_sel['parent_name'] = parent.name if parent else 'Morphsets'
+                try:
+                    puppet_core.validate_members(context.scene, [item.item_id], self.puppet_id)
+                    item_sel['reason'] = ''
+                except ValueError as exc:
+                    item_sel['reason'] = str(exc)
+
             return context.window_manager.invoke_props_dialog(self, width=400)
             
         elif self.action == 'RENAME':
@@ -566,7 +466,11 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
                 
                 for item in items:
                     row = col.row(align=True)
-                    row.prop(item, '["is_selected"]', text=item.get('display_name', item.name))
+                    row.enabled = not item.get('reason', '')
+                    row.prop(item, '["is_selected"]', text=item.get('display_name', item.name),
+                             icon='IPO_EASE_IN_OUT' if item.get('item_type') == 'MORPHSET' else 'GROUP_VERTEX')
+                    if item.get('reason'):
+                        col.label(text=item['reason'], icon='INFO')
                     
                 col.separator()
                 
@@ -588,9 +492,6 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
                 self.report({'ERROR'}, "Puppet not found")
                 return {'CANCELLED'}
             
-            # Update puppet name
-            puppet_item.name = self.new_name
-            
             # Update puppet members. The modal dialog fills item_selections;
             # a scripted/headless call (no dialog) passes member_ids instead.
             if len(self.item_selections) > 0:
@@ -600,28 +501,14 @@ class PROTEINBLENDER_OT_edit_puppet(Operator):
             else:
                 new_members = [m for m in self.member_ids.split(',') if m]
             
-            # Update puppet membership
-            puppet_item.puppet_memberships = ','.join(filter(None, new_members))
-            
-            # Update item memberships
-            # First, remove this puppet from all items
-            for item in scene.outliner_items:
-                if item.puppet_memberships:
-                    puppets = item.puppet_memberships.split(',')
-                    if self.puppet_id in puppets:
-                        puppets.remove(self.puppet_id)
-                        item.puppet_memberships = ','.join(puppets)
-            
-            # Then add puppet to selected items
-            for member_id in new_members:
-                for item in scene.outliner_items:
-                    if item.item_id == member_id:
-                        puppets = item.puppet_memberships.split(',') if item.puppet_memberships else []
-                        if self.puppet_id not in puppets:
-                            puppets.append(self.puppet_id)
-                            item.puppet_memberships = ','.join(filter(None, puppets))
-                        break
-            
+            try:
+                members = puppet_core.validate_members(scene, new_members, self.puppet_id)
+            except ValueError as exc:
+                self.report({'ERROR'}, str(exc))
+                return {'CANCELLED'}
+            puppet_core.set_members(scene, puppet_item, members)
+            puppet_item.name = self.new_name.strip() or puppet_item.name
+
             # Rebuild outliner
             build_outliner_hierarchy(context)
             self.report({'INFO'}, f"Updated puppet: {self.new_name}")
@@ -694,11 +581,8 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         # Get selected items and check their puppet memberships
         selected_items = [item for item in scene.outliner_items if item.is_selected]
         # Filter out puppets, separator, and reference items from selection count
-        unpuppeted_items = [item for item in selected_items 
-                           if item.item_type not in ['PUPPET'] 
-                           and item.item_id != "puppets_separator"
-                           and "_ref_" not in item.item_id]
-        
+        unpuppeted_items = [item for item in selected_items if puppet_core.is_component(item)]
+
         # Check if any selected items are already in puppets
         items_already_puppeted = []
         puppet_names_dict = {}  # Map puppet IDs to names
@@ -726,4 +610,3 @@ class PROTEINBLENDER_PT_puppet_maker(Panel):
         
         # Create the button
         row.operator("proteinblender.create_puppet", text="Create New Puppet", icon='ARMATURE_DATA')
-

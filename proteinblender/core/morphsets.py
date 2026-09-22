@@ -703,8 +703,29 @@ def remove_morph(context, morph):
 
 
 def remove(context, root):
+    uid = root[TAG]
+    puppet_ids = [r.item_id for r in context.scene.outliner_items
+                  if r.item_type == 'PUPPET' and uid in r.puppet_memberships.split(',')]
+    members = {m['object'] for morph in morphs(context.scene, root)
+               for m in records(morph) if m.get('object') and not m.get('generated')}
     for morph in morphs(context.scene, root):
         remove_morph(context, morph)
+    # Removing shape control releases the surviving chains into their puppet.
+    # Keep the controller (and its pose/transform keys), not an empty group.
+    from .puppets import attach
+    rows = context.scene.outliner_items
+    released = [r for r in rows if r.item_type in {'CHAIN', 'DOMAIN'}
+                and not r.reference_target_id and bpy.data.objects.get(r.object_name) in members]
+    for pid in puppet_ids:
+        puppet = next((r for r in rows if r.item_id == pid), None)
+        if puppet:
+            controller = bpy.data.objects.get(puppet.controller_object_name)
+            puppet.puppet_memberships = ','.join(dict.fromkeys(
+                [m for m in puppet.puppet_memberships.split(',') if m != uid]
+                + [r.item_id for r in released]))
+            if controller:
+                for row in released:
+                    attach(bpy.data.objects[row.object_name], controller)
     bpy.data.objects.remove(root, do_unlink=True)
     if not sets(context.scene):
         controller = track(context.scene)

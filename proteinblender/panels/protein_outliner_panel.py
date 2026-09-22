@@ -109,7 +109,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Expand/collapse for proteins, groups, and chains with domains
         show_expand = False
 
-        if item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA', 'MORPHSET'] and not is_reference:
+        if item.item_type == 'MORPHSET' or (item.item_type in ['PROTEIN', 'PUPPET', 'DNA_RNA'] and not is_reference):
             show_expand = True
         elif item.item_type in {'CHAIN', 'DOMAIN'}:
             # Show expand arrow for chains with domains (both original and reference items)
@@ -158,6 +158,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
     @staticmethod
     def draw_actions(context, row, item, *, menu=False):
         """Use identical targets and operators in the icon row and its menu."""
+        if item.reference_target_id and item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+            item = next((r for r in context.scene.outliner_items
+                         if r.item_id == item.reference_target_id), item)
         def action(identifier, **kwargs):
             if menu:
                 # With text omitted Blender uses the operator's readable label.
@@ -360,6 +363,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
             if delete_op:
                 delete_op.molecule_id = molecule_id
         elif item.item_type == 'PUPPET':
+            edit = action('proteinblender.edit_puppet', text='Edit' if menu else '',
+                          icon='GREASEPENCIL', emboss=False)
+            edit.puppet_id, edit.action = item.item_id, 'EDIT'
             # Delete button (trash can) — route through the dedicated delete
             # operator, NOT edit_puppet's DELETE branch. The latter is a fallback
             # that doesn't remove the controller Empty, unparent its children, or
@@ -441,6 +447,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
     @staticmethod
     def _get_item_visibility(context, item):
         """Get visibility state directly from the Blender object."""
+        if item.reference_target_id:
+            item = next((r for r in context.scene.outliner_items
+                         if r.item_id == item.reference_target_id), item)
         if item.item_type == 'MORPH_MEMBER':
             from ..core.morphsets import member_visible
             return member_visible(context.scene, item.item_id)
@@ -886,7 +895,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         scene = context.scene
         
         for item in scene.outliner_items:
-            if item.parent_id == parent_id:
+            if item.parent_id == parent_id and not item.reference_target_id:
                 self._set_visibility_for_item(context, item, visibility)
                 self._update_children_visibility(context, item.item_id, visibility)
         
@@ -903,6 +912,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                 for item in scene.outliner_items:
                     if item.item_id == member_id:
                         self._set_visibility_for_item(context, item, visibility)
+                        self._update_children_visibility(context, item.item_id, visibility)
                         break
     
     def _update_puppet_visibility_for_protein(self, context, protein_id, visibility):
@@ -1018,6 +1028,8 @@ def draw_outliner_context_menu(self, context):
         item = rows[index]
     if item.item_id == 'puppets_separator':
         return
+    if item.reference_target_id and item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+        item = next((r for r in rows if r.item_id == item.reference_target_id), item)
     layout = self.layout
     layout.operator_context = 'INVOKE_DEFAULT'
     if item.item_type == 'MORPHSET':

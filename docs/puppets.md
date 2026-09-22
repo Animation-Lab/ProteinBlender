@@ -15,7 +15,7 @@ Watch the full tutorial:
 
 ## What is a Puppet?
 
-A **puppet** is a collection of protein chains and/or domains grouped together. Puppets allow you to:
+A **puppet** groups protein chains, domains, and Morphsets. Puppets allow you to:
 - Move multiple parts as a single unit
 - Apply transformations to groups
 - Create coordinated animations
@@ -28,7 +28,7 @@ Think of puppets as "handles" for controlling multiple protein parts at once.
 ### Step-by-Step
 
 1. **Select items** in the Protein Outliner
-   - Click checkboxes next to chains or domains you want to group
+   - Click checkboxes next to chains, domains, or whole Morphsets you want to group
    - You can select multiple items from the same or different proteins
 
 2. **Open Protein Puppet Maker** panel
@@ -43,8 +43,9 @@ The puppet will now appear in the outliner with all selected items as members.
 
 ## Puppet Membership Rules
 
-- **Exclusive membership**: Each chain/domain can only belong to ONE puppet
-- **Cannot puppet proteins**: Only chains and domains can be puppeted
+- **Exclusive membership**: Each chain, domain, or Morphset can belong to only one puppet
+- **Morphsets stay together**: Add the Morphset itself. Its children remain controlled by that Morphset. For a partially morphed split chain, select its remaining individual domains separately.
+- **Cannot puppet proteins**: Choose their chains, domains, or Morphsets
 - **Cannot puppet other puppets**: Puppets cannot contain other puppets
 
 If you try to create a puppet with items already in another puppet, you'll see an error message.
@@ -64,12 +65,22 @@ If you try to create a puppet with items already in another puppet, you'll see a
 
 ### Adding Members to a Puppet
 
-Currently, you must:
-1. Delete the existing puppet
-2. Select all desired items (including new ones)
-3. Create a new puppet
+1. Click the puppet's **Edit** pencil in the PB Outliner.
+2. Check or uncheck chains, domains, and Morphsets in **Puppet Members**.
+3. Click **OK**. Members keep their current positions when joining or leaving.
 
-(Future versions will support editing puppet membership)
+Items already assigned to another puppet are disabled with an explanation.
+
+### Animate a Morphset inside a Puppet
+
+1. Create a [Morphset](morphsets.html) from a protein with imported models, such as **1D3Z**.
+2. Add that Morphset to a new or existing puppet. Other chains, domains, and Morphsets can share the puppet.
+3. In **Create/Edit Keyframe**, check the puppet to capture its movement and pose. Check the Morphset separately to choose its model at that frame.
+4. At a later frame, move the puppet and choose another model. Both animations play together; each Morphset can use its own timing.
+
+The Morphset remains under its protein and also appears as an expandable reference under the puppet, with its chains/domains beneath it. The reference controls edit the same Morphset and members.
+
+The puppet's eye hides or shows its Morphset members too. Deleting the puppet keeps the Morphset and its model keys. Removing the Morphset releases its chains/domains into the puppet, keeping the puppet's movement keys.
 
 ### Removing a Puppet
 
@@ -77,7 +88,7 @@ Currently, you must:
 2. Click the **delete (trash)** icon next to the puppet name
 3. Confirm deletion
 
-**Note**: Deleting a puppet removes the grouping but keeps all member chains/domains.
+**Note**: Deleting a puppet removes the grouping but keeps all member chains, domains, and Morphsets at their current positions.
 
 ## Puppet Hierarchy in Outliner
 
@@ -153,7 +164,7 @@ Use descriptive puppet names:
 ### Cannot Create Puppet
 
 - **Items already in puppet**: Remove from existing puppet first
-- **Nothing selected**: Select at least one chain or domain
+- **Nothing selected**: Select at least one chain, domain, or whole Morphset
 - **Protein selected**: Cannot puppet entire proteins, select chains/domains
 
 ### Puppet Doesn't Move Members
@@ -175,5 +186,4 @@ Now that you understand puppets, learn how to:
 ---
 
 [Back to Home](index.html) | [Previous: Update Visuals](visuals.html) | [Next: Manage Poses](poses.html)
-
 

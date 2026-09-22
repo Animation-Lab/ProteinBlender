@@ -40,6 +40,9 @@ python tests/run_ui_tests.py --normal-profile --scenario model-morphsets --blend
 # Morphset menus, chain swatch/pivot clicks, edit/style, selection and visibility
 python tests/run_ui_tests.py --normal-profile --scenario morph-outliner --blender "<path-to-blender>"
 
+# Morphsets inside puppets: membership, model/pose keys, nested controls and undo
+python tests/run_ui_tests.py --normal-profile --scenario puppet-morphsets --blender "<path-to-blender>"
+
 # Reopen the example produced by the model-morphsets scenario and edit its keys
 python tests/run_ui_tests.py --normal-profile --scenario saved-model-morphsets --blend "<artifact-dir>/1d3z-model-keyframes.blend" --blender "<path-to-blender>"
 

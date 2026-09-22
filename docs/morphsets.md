@@ -82,9 +82,18 @@ protein. Models and keyed times retain their identities.
 
 Moving the parent protein moves the Morphset. Protein style and temperature-motion
 controls apply to its animated members. Removing the Morphset removes its shape
-animation and restores its members to the protein. Undo restores the Morphset and
+animation and restores its members to the protein, or releases them into their
+puppet when the Morphset belongs to one. Undo restores the Morphset and
 its keys. Membership, snapshots, hierarchy, and animation save in the `.blend`.
 
 Existing projects using the older morph-pair format retain their saved states
 and animation. Those states remain selectable in Create/Edit Keyframe. New
 Morphsets use the member-and-model workflow described here.
+
+## Use a Morphset in a puppet
+
+Select the whole Morphset in the PB Outliner and click **Create New Puppet**,
+or add it using an existing puppet's **Edit** pencil. You can combine several
+Morphsets with ordinary chains and domains. The puppet controls their placement;
+each Morphset's model is still chosen separately in **Create/Edit Keyframe**.
+See [Protein Puppets](puppets.html#animate-a-morphset-inside-a-puppet) for the workflow.

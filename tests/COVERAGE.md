@@ -1941,3 +1941,9 @@ format. Migration retained a borrowed color array after deleting its owner.
 The regression now checks both states' colors against explicit values: the
 pre-fix run lost the second color, and the corrected run passes on Blender
 5.0, 5.1, and 5.2. Migration copies nested properties before removing old roots.
+
+### Morphsets as puppet components
+
+- `test_puppet_morphsets.py`: model Morphsets before/after animation, creation and edit membership parenting, exclusivity and partial-chain protection, mixed chains/domains, two independent model tracks plus puppet transforms, geometry-preserving removal, pose keys surviving removal/reparenting and scrubbing, visibility across rebuilds, child selection/style/color/B-factor controls, and deletion of either controller.
+- `puppet_morphsets` roundtrip builder: keyed puppet with a Morphset and ordinary chain, saved member pivot/visibility/color, fresh-process reopen and model-key edit.
+- `--scenario puppet-morphsets`: real Create/Edit Puppet and keyframe dialogs, nested reference controls, Undo/Redo, model edits inside puppets, visibility, and pose capture/apply after rebuilding model output.

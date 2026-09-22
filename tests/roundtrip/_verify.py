@@ -272,7 +272,14 @@ def main():
             root = next(r for r in morphsets.sets(bpy.context.scene) if r.get(M.MANAGED))
             morph = M.subject(root)
             assert M.source_id(root) == 'saved_models'
-            assert root.parent == root['pb_model_source']
+            puppet = next((r for r in bpy.context.scene.outliner_items
+                           if r.item_type == 'PUPPET'
+                           and root[morphsets.TAG] in r.puppet_memberships.split(',')), None)
+            if puppet:
+                assert root.parent == bpy.data.objects[puppet.controller_object_name]
+                assert root['pb_puppet_previous_parent'] == root['pb_model_source']
+            else:
+                assert root.parent == root['pb_model_source']
             assert len(morphsets.states(morph)) == 10
             row = next(r for r in bpy.context.scene.outliner_items if r.item_id == root[morphsets.TAG])
             assert row.parent_id == 'saved_models' and row.indent_level == 1
@@ -293,7 +300,9 @@ def main():
             assert not morphsets.member_visible(bpy.context.scene, member_id)
             assert bpy.ops.proteinblender.toggle_visibility(item_id=member_id) == {'FINISHED'}
             assert not output.hide_render and not output.hide_viewport
-            assert max(abs(a-b) for a,b in zip(output.matrix_world.translation, (.12,.24,.36))) < 1e-6, tuple(output.matrix_world.translation)
+            from mathutils import Vector
+            expected_pivot = root.matrix_world @ Vector((.12, .24, .36))
+            assert max(abs(a-b) for a,b in zip(output.matrix_world.translation, expected_pivot)) < 1e-6, tuple(output.matrix_world.translation)
             assert bpy.ops.proteinblender.toggle_visibility(item_id=member_id) == {'FINISHED'}
 
         if WANT_RENDER:

@@ -822,6 +822,34 @@ def build_model_morphsets():
     bpy.context.scene.frame_set(60)
 
 
+def build_puppet_morphsets():
+    """Keyed Morphset + ordinary chain, including a transformed puppet parent."""
+    from proteinblender.core import morphsets as C, model_morphsets as M
+    build_model_morphsets()
+    scene = bpy.context.scene
+    root = C.sets(scene)[0]
+    companion = H.import_local('1ubq.pdb', 'Companion')
+    chain = next(r.item_id for r in _chain_rows(companion))
+    _select_rows([root[C.TAG], chain])
+    assert bpy.ops.proteinblender.create_puppet(puppet_name='Saved model puppet') == {'FINISHED'}
+    puppet = next(r for r in scene.outliner_items if r.name == 'Saved model puppet')
+    controller = bpy.data.objects[puppet.controller_object_name]
+    assert root.parent == controller
+    settings = dict(name='', item_kind='PUPPET', brownian_enabled=False,
+                    puppet_id=puppet.item_id, puppet_name=puppet.name,
+                    controller_object_name=controller.name, use_puppet=True,
+                    keyframe_location=True, keyframe_rotation=True,
+                    keyframe_scale=True, keyframe_pose=True, keyframe_color=False)
+    for frame, location, angle in ((1, (1, 2, 3), .2), (100, (4, 3, 2), .8)):
+        scene.frame_set(frame)
+        controller.location, controller.rotation_euler.z = location, angle
+        bpy.context.view_layer.update()
+        assert bpy.ops.proteinblender.create_keyframe(frame_number=frame,
+            puppet_items=[settings]) == {'FINISHED'}
+    scene.frame_set(60)
+    assert len(C.keyframes(scene)) == 4 and len(C.states(M.subject(root))) == 10
+
+
 def build_thermal_morphsets():
     build_morphsets()
     assert bpy.ops.proteinblender.edit_protein_visuals(
@@ -834,6 +862,7 @@ def build_thermal_morphsets():
 
 
 BUILDERS = {
+    "puppet_morphsets": build_puppet_morphsets,
     "model_morphsets": build_model_morphsets,
     "morphsets": build_morphsets,
     "thermal_morphsets": build_thermal_morphsets,
@@ -865,6 +894,7 @@ BUILDERS = {
 # test_persistence_contract.py against the add-on's registered feature
 # packages, so adding a subsystem without adding a builder fails the suite.
 BUILDER_SUBSYSTEMS = {
+    "puppet_morphsets": ("core", "operators", "panels"),
     "model_morphsets": ("core", "operators", "panels"),
     "morphsets": ("core", "operators", "panels"),
     "thermal_morphsets": ("core", "operators", "panels"),
