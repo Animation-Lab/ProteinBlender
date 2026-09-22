@@ -55,7 +55,7 @@ SCENE_PROPS = (
     "molecule_list_items", "molecule_list_index", "selected_molecule_id",
     "edit_molecule_identifier", "molecule_style",
     # Outliner.
-    "outliner_items", "outliner_index",
+    "outliner_items", "outliner_index", "pb_outliner_menu_index",
     # Poses.
     "pose_library", "active_pose_index",
     # Linkers.
