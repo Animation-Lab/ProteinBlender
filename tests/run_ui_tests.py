@@ -32,19 +32,25 @@ def main():
     parser.add_argument("--keep-report", action="store_true")
     parser.add_argument("--normal-profile", action="store_true",
                         help="Test the enabled installed add-on in a fresh normal-profile process")
-    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs'), default='all',
+    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'model-morphsets', 'saved-model-morphsets', 'morph-outliner'), default='all',
                         help="Run a focused workflow in a fresh Blender process")
+    parser.add_argument("--blend", type=Path, help="Open a saved test scene before running UI checks")
     parser.add_argument("--artifact-dir", type=Path,
                         help="Keep the report and screenshots, including failed runs")
     args = parser.parse_args()
-    drivers = {'morph-states': ROOT / 'tests/ui/run_morph_state_scenarios.py',
-               'shared-morphs': ROOT / 'tests/ui/run_shared_morph_scenarios.py'}
+    if args.scenario == 'saved-model-morphsets' and not args.blend:
+        parser.error('--scenario saved-model-morphsets requires --blend')
+    drivers = {name: ROOT / 'tests/ui/run_model_morphset_scenarios.py'
+               for name in ('morph-states', 'shared-morphs', 'model-morphsets')}
+    drivers['saved-model-morphsets'] = ROOT / 'tests/ui/check_model_morphset_file.py'
+    drivers['morph-outliner'] = ROOT / 'tests/ui/run_morph_outliner_scenarios.py'
     driver = drivers.get(args.scenario, DRIVER)
 
     with tempfile.TemporaryDirectory(prefix="pb-ui-") as tmp:
         report = Path(tmp) / "ui-report.json"
         command = [
             args.blender,
+            *([_for_blender(args.blend.resolve(), args.blender)] if args.blend else []),
             *([] if args.normal_profile else ["--factory-startup"]),
             "--no-window-focus",
             "--enable-event-simulate",

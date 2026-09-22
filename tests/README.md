@@ -34,8 +34,14 @@ python tests/run_ui_tests.py
 # (run deployment first; this process does not save its test scene/preferences)
 python tests/run_ui_tests.py --normal-profile --blender "<path-to-blender>"
 
-# Two Add Morph clicks on one 1D3Z protein, with shared animation and Undo
-python tests/run_ui_tests.py --normal-profile --scenario shared-morphs --blender "<path-to-blender>"
+# Imported-model Morphset creation, keyframes, hierarchy, interpolation, and Undo
+python tests/run_ui_tests.py --normal-profile --scenario model-morphsets --blender "<path-to-blender>"
+
+# Morphset menus, chain swatch/pivot clicks, edit/style, selection and visibility
+python tests/run_ui_tests.py --normal-profile --scenario morph-outliner --blender "<path-to-blender>"
+
+# Reopen the example produced by the model-morphsets scenario and edit its keys
+python tests/run_ui_tests.py --normal-profile --scenario saved-model-morphsets --blend "<artifact-dir>/1d3z-model-keyframes.blend" --blender "<path-to-blender>"
 
 # a Blender you already have open, observed through its viewport
 python tests/run_live_tests.py --preflight

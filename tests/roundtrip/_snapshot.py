@@ -747,6 +747,25 @@ def scene_snapshot(include_registry=True):
 
     scene = bpy.context.scene
 
+    # Blender skips transform evaluation for globally hidden displays. They can
+    # reopen with an identity matrix_world cache despite unchanged transform
+    # channels and pivot inputs. Refresh that cache through Blender, restoring
+    # the exact visibility before sampling. The verifier separately shows the
+    # chain and checks its actual pivot after a key edit; nothing is excluded
+    # from the structural comparison to accommodate this cache normalization.
+    hidden_displays = [obj for obj in scene.objects
+                       if obj.get('pb_morphset_output') and obj.hide_viewport]
+    try:
+        for obj in hidden_displays:
+            obj.hide_viewport = False
+        if hidden_displays:
+            bpy.context.view_layer.update()
+    finally:
+        for obj in hidden_displays:
+            obj.hide_viewport = True
+        if hidden_displays:
+            bpy.context.view_layer.update()
+
     scene_state = {}
     for name in SCENE_PROPS:
         if not hasattr(scene, name):

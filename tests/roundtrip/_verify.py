@@ -244,7 +244,7 @@ def main():
         # Saved Morphsets must remain editable through the same Keyframes UI.
         from proteinblender.core import morphsets
         keys = morphsets.keyframes(bpy.context.scene)
-        if keys:
+        if keys and not any(r.get('pb_model_morphset') for r in morphsets.sets(bpy.context.scene)):
             edited = next(m for m in morphsets.morphs(bpy.context.scene) if m.name == 'Closing')
             end = morphsets.states(edited)[-1]
             assert end['name'] == 'Final' and end['model_name'] == 'Model 8'
@@ -266,6 +266,35 @@ def main():
             from proteinblender.core.visual_style import get_object_style
             for obj in morphsets.outputs(bpy.context.scene):
                 assert get_object_style(obj) == expected[(obj['pb_morph_uid'], obj['pb_slot'])]
+
+        if any(r.get('pb_model_morphset') for r in morphsets.sets(bpy.context.scene)):
+            from proteinblender.core import model_morphsets as M
+            root = next(r for r in morphsets.sets(bpy.context.scene) if r.get(M.MANAGED))
+            morph = M.subject(root)
+            assert M.source_id(root) == 'saved_models'
+            assert root.parent == root['pb_model_source']
+            assert len(morphsets.states(morph)) == 10
+            row = next(r for r in bpy.context.scene.outliner_items if r.item_id == root[morphsets.TAG])
+            assert row.parent_id == 'saved_models' and row.indent_level == 1
+            assert bpy.ops.proteinblender.create_keyframe(frame_number=75, morph_items=[dict(
+                visible=True, show_visibility=False, set_name=root.name, name=morph.name,
+                morph_id=morph[morphsets.MORPH], use_morph=True,
+                state=morphsets.states(morph)[7]['uid'], members=[])]) == {'FINISHED'}
+            assert len(morphsets.outputs(bpy.context.scene)) == 1
+
+            from proteinblender.core.visual_style import get_object_style, get_object_color
+            member_id = morph[morphsets.MORPH] + ':0'
+            member_row = next(r for r in bpy.context.scene.outliner_items if r.item_id == member_id)
+            assert member_row.name == 'Saved chain'
+            output = morphsets.outputs(bpy.context.scene)[0]
+            assert output.hide_render and output.hide_viewport
+            assert get_object_style(output) == 'cartoon'
+            assert max(abs(a-b) for a,b in zip(get_object_color(output), (.2,.6,.1,1))) < 1e-6
+            assert not morphsets.member_visible(bpy.context.scene, member_id)
+            assert bpy.ops.proteinblender.toggle_visibility(item_id=member_id) == {'FINISHED'}
+            assert not output.hide_render and not output.hide_viewport
+            assert max(abs(a-b) for a,b in zip(output.matrix_world.translation, (.12,.24,.36))) < 1e-6, tuple(output.matrix_world.translation)
+            assert bpy.ops.proteinblender.toggle_visibility(item_id=member_id) == {'FINISHED'}
 
         if WANT_RENDER:
             try:

@@ -764,8 +764,7 @@ def build_morphsets():
     from proteinblender.core import morphsets
     mid = H.import_local('1d3z.pdb.gz', 'saved_ensemble')
     other = H.import_local('1d3z.pdb.gz', 'saved_partner')
-    assert bpy.ops.proteinblender.create_morphset(name='Activation') == {'FINISHED'}
-    root = morphsets.sets(bpy.context.scene)[0]
+    root = morphsets.create(bpy.context, 'Activation')  # legacy project coverage
     for source, label, start, end in [(mid, 'Closing', 0, 6), (other, 'Bending', 1, 8)]:
         library = H.sm().molecules[source].object.pb_conformations
         assert bpy.ops.proteinblender.add_morph(morphset_id=root[morphsets.TAG], name=label,
@@ -799,6 +798,30 @@ def build_morphsets():
     bpy.context.scene.frame_set(11)
 
 
+def build_model_morphsets():
+    from proteinblender.core import morphsets as C, model_morphsets as M
+    mid = H.import_local('1d3z.pdb.gz', 'saved_models')
+    assert bpy.ops.proteinblender.create_morphset(source=mid, name='Ubiquitin models') == {'FINISHED'}
+    root = C.sets(bpy.context.scene)[0]
+    morph = M.subject(root)
+    for frame, index in [(1, 0), (50, 2), (75, 7), (100, 8)]:
+        assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
+            show_visibility=False, members=[], set_name=root.name, name=morph.name,
+            morph_id=morph[C.MORPH], use_morph=True, state=C.states(morph)[index]['uid'], visible=True)]) == {'FINISHED'}
+    assert len(C.states(morph)) == 10 and len(C.outputs(bpy.context.scene)) == 1
+    assert root.parent == H.sm().molecules[mid].object
+    row_id = morph[C.MORPH] + ':0'
+    assert bpy.ops.proteinblender.edit_morph_member(item_id=row_id, new_name='Saved chain',
+        vs_style='cartoon', vs_color=(.2, .6, .1, 1)) == {'FINISHED'}
+    from proteinblender.operators.pivot_operators import PIVOT_HELPER
+    assert bpy.ops.proteinblender.set_pivot_custom(item_id=row_id) == {'FINISHED'}
+    bpy.data.objects[PIVOT_HELPER].location = (.12, .24, .36)
+    bpy.context.view_layer.update()
+    assert bpy.ops.proteinblender.set_pivot_custom(item_id=row_id) == {'FINISHED'}
+    assert bpy.ops.proteinblender.toggle_visibility(item_id=row_id) == {'FINISHED'}
+    bpy.context.scene.frame_set(60)
+
+
 def build_thermal_morphsets():
     build_morphsets()
     assert bpy.ops.proteinblender.edit_protein_visuals(
@@ -811,6 +834,7 @@ def build_thermal_morphsets():
 
 
 BUILDERS = {
+    "model_morphsets": build_model_morphsets,
     "morphsets": build_morphsets,
     "thermal_morphsets": build_thermal_morphsets,
     "empty": build_empty,
@@ -841,6 +865,7 @@ BUILDERS = {
 # test_persistence_contract.py against the add-on's registered feature
 # packages, so adding a subsystem without adding a builder fails the suite.
 BUILDER_SUBSYSTEMS = {
+    "model_morphsets": ("core", "operators", "panels"),
     "morphsets": ("core", "operators", "panels"),
     "thermal_morphsets": ("core", "operators", "panels"),
     "empty": (),

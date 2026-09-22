@@ -307,7 +307,7 @@ def get_object_color(obj):
     return default_color
 
 
-def apply_color_to_object(obj, color):
+def apply_color_to_object(obj, color, *, sync_morphsets=True):
     """Apply color to a molecular object through its geometry nodes and set material transparency"""
     # Apply transparency to the Style node's Material input
     if len(color) >= 4:
@@ -420,6 +420,9 @@ def apply_color_to_object(obj, color):
     
     # Ensure object stays selected
     obj.select_set(True)
+    if sync_morphsets and obj.get('pb_morphset_owner'):
+        from .morphsets import sync_color
+        sync_color(bpy.context.scene, obj, color)
 
 
 def update_color(self, context):

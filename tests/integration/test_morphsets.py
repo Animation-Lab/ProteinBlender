@@ -13,8 +13,8 @@ pytestmark = pytest.mark.integration
 
 
 def _set(name='Activation'):
-    assert bpy.ops.proteinblender.create_morphset(name=name) == {'FINISHED'}
-    return next(s for s in morphsets.sets(bpy.context.scene) if s.name == name)
+    # Legacy saved-pair engine coverage; new authoring uses test_model_morphsets.
+    return morphsets.create(bpy.context, name)
 
 
 def _morph(root, mid, name='Closing', **kwargs):
@@ -271,7 +271,9 @@ def test_same_protein_can_have_two_morphs_with_one_animation(scene, sm):
         row_id = morph[morphsets.MORPH] + ':0'
         assert bpy.ops.proteinblender.outliner_select(item_id=row_id) == {'FINISHED'}
         assert morphsets.outputs(scene)[0].select_get()
-        assert bpy.ops.proteinblender.toggle_visibility(item_id=row_id) == {'CANCELLED'}
+        assert bpy.ops.proteinblender.toggle_visibility(item_id=row_id) == {'FINISHED'}
+        assert morphsets.outputs(scene)[0].hide_render
+        assert bpy.ops.proteinblender.toggle_visibility(item_id=row_id) == {'FINISHED'}
     assert bpy.ops.proteinblender.edit_protein_visuals(item_id=mid, vs_style='cartoon',
         bfactor_motion=True) == {'FINISHED'}
     assert all(morphsets.records(m)[0]['style'] == 'cartoon' for m in (a, b))
@@ -515,4 +517,5 @@ def test_unkeyed_morph_keeps_its_outliner_visibility_control(scene):
     assert _key(a, 1) == {'FINISHED'}
     assert bpy.ops.proteinblender.toggle_visibility(item_id=b[morphsets.MORPH] + ':0') == {'FINISHED'}
     assert morphsets.records(b)[0]['object'].hide_get()
-    assert bpy.ops.proteinblender.toggle_visibility(item_id=a[morphsets.MORPH] + ':0') == {'CANCELLED'}
+    assert bpy.ops.proteinblender.toggle_visibility(item_id=a[morphsets.MORPH] + ':0') == {'FINISHED'}
+    assert morphsets.outputs(scene, a[morphsets.MORPH])[0].hide_render

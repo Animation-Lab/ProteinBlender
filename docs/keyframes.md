@@ -23,7 +23,7 @@ Watch the full tutorial:
 **Keyframing** is the process of defining specific values at specific points in time. Blender automatically interpolates between keyframes to create smooth animation.
 
 In ProteinBlender, you can keyframe:
-- **Morph states and member visibility** (independently for each morph in a Morphset)
+- **Models and member visibility** (independently for each Morphset)
 - **Puppet positions** (location, rotation, scale)
 - **Poses** (apply different conformations)
 - **Colors** (change appearance over time)
@@ -268,10 +268,8 @@ For more advanced topics:
 
 [Back to Home](index.html) | [Previous: Manage Poses](poses.html)
 
-For structural transitions, define the available states in
-[Morphsets](morphsets.html), then check each morph and choose its state in
-**Create Keyframe**. Two keyed states determine the timing of the transition.
-Several morph rows can use the same protein: for example, key a Model 1 → 4
-row at frames 1 and 45, then a Model 4 → 8 row at frames 45 and 90. Shared
-members follow one combined animation. Rows keyed at the same frame must agree
-on that member's shape and visibility.
+For structural transitions, create a [Morphset](morphsets.html) from the protein's
+chains/domains. In **Create/Edit Keyframe**, check its row and choose an imported
+model. For example, key Model 1 at frame 1, Model 4 at frame 45, and Model 8 at
+frame 90. ProteinBlender interpolates directly between consecutive keyed models;
+the dialog shows neighboring keys to explain each transition.

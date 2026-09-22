@@ -1929,3 +1929,7 @@ shutdown; the Morphset checks and Blender process completed successfully.
 Deployment byte-verified all 150 Python files in each installed copy. The new
 local example is `tmp_tests/shared-morphs/1d3z-two-morphs.blend`; the earlier
 single-morph example remains available. The full unrelated suite was not rerun.
+
+## Morphset child color and pivot controls (2026-09-22)
+
+`test_morph_member_controls.py` reproduces the missing child swatch and rejected pivot operation, then checks source/output colors, pivot placement without atom movement, current-frame presets, rotation, key edits, and member reordering. Four cases pass on Blender 5.0/5.1/5.2; 86 related integration checks pass on 5.2. Save/reopen covers the pivot, color, and hidden member on 5.1/5.2. The foreground `morph-outliner` scenario clicks the actual swatch and pivot button, places the helper, and verifies the rebuilt animation.

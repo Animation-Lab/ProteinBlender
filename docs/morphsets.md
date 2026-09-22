@@ -5,118 +5,86 @@ title: Morphsets
 
 # Morphsets
 
-A **Morphset** groups named morphs. Each **morph** defines the chains/domains that
-move together and their saved **Start**, **End**, and optional intermediate states.
-Each morph has its own keyframe entries. Different proteins can move together
-or at different times; morphs using the same chain contribute to one animation.
+A **Morphset** identifies the chains/domains that change shape together.
+**Keyframes** choose their model and the frame at which they reach it.
+The available models come from the imported protein; you do not define
+Start/End pairs or add individual morphs.
 
-## Define the shapes
+## Create a Morphset
 
-1. Align your structures before exporting the PDBs. ProteinBlender preserves
-   those coordinates and does not align structures in the UI.
-2. Import your proteins, including any multi-model PDBs.
-3. In **Builders**, choose **Create Morphset** below **Create New Assembly** and name it.
-4. In its editor, click **Add Morph**. Name the morph, select its members, and
-   choose the model and state name for **Start** and **End**.
-5. Add more morph rows for the same protein or for other proteins and chains.
-   Use **−** to remove a morph and its keys. Its members return to their proteins
-   once no other morph uses them. Undo is available.
+1. Import a protein containing multiple conformation models, such as **1D3Z**.
+2. Check its chains/domains in the PB Outliner, or choose them in the next dialog.
+3. In **Builders**, click **Create Morphset**, below **Create New Assembly**.
+4. Choose the protein, check the members, and give the Morphset a name.
+5. Click **OK**. The Morphset appears **under that protein**, with the selected
+   chains/domains beneath it. Its models are immediately available in keyframes.
 
-Each new row starts with checked members, or prefers an unassigned protein or
-chain if one is available. You can select a protein that is already used by
-another morph. When continuing with the same members, Start defaults to the
-previous morph's End model. You can also add intermediate shapes within one
-morph using **Edit → Add Model / State**.
+Members in one Morphset use the same model and timing. Use separate Morphsets
+for chains/domains that need independent timing. Each member can belong to one
+Morphset; selecting a chain and an overlapping domain is not allowed.
 
-Members can be an entire protein, one chain/domain, or several checked PB
-Outliner rows. For a separate destination structure, change the End **Members**
-selector. The number of members and atom identities must match between states;
-chain labels may differ. Multiple morphs can use the same chain/domain; their
-keyframes drive one animated member rather than creating overlapping copies.
+The dialog explains unavailable members. This workflow requires at least two
+imported models, matching atom identities, and valid coordinates for the selected
+members. Puppet-controlled members must be removed from their puppet first.
+ProteinBlender preserves the supplied coordinates; prepare alignment externally.
+Adding or authoring new states is outside this workflow.
 
-Participating source members move beneath the Morphset in the PB Outliner.
-The Morphset's pencil opens its list of morphs. A morph's pencil opens its named
-states: use **Add Model / State** to capture an intermediate model. It starts
-with the morph's existing members, so you can choose another PDB model without
-reselecting the protein. A state's pencil opens **Edit Model / State** to change
-its model, source members, or name. Start and End are editable too. Existing
-keyframes keep their times and use the updated state; Cancel leaves it unchanged.
-The state list and Keyframe menu show model names such as **Model 4**.
-Remove an intermediate state with **−** after removing or changing
-any keys that refer to it. Start and End remain the endpoints.
+## Choose a model at each keyframe
 
-### Example: 1D3Z models 1 → 4 → 8
+1. Go to a frame and click **Create/Edit Keyframe**.
+2. Check the Morphset's row and select its model.
+3. Confirm, then repeat at another frame.
 
-1. Create one Morphset and add a morph named **1 → 4** for **1D3Z**, with
-   **Model 1** as Start and **Model 4** as End.
-2. Click **Add Morph** again. Select the same **1D3Z** protein, name the row
-   **4 → 8**, and choose **Model 4** as Start and **Model 8** as End.
-3. Open **Create/Edit Keyframe** at each frame below and check the listed rows:
+For **1D3Z**, one Morphset can use:
 
-   | Frame | 1 → 4 | 4 → 8 |
-   | --- | --- | --- |
-   | 1 | Start — Model 1 | Unchecked |
-   | 45 | End — Model 4 | Start — Model 4 |
-   | 90 | Unchecked | End — Model 8 |
+| Frame | Model |
+| --- | --- |
+| 1 | Model 1 |
+| 50 | Model 3 |
+| 75 | Model 8 |
+| 100 | Model 9 |
 
-The shared endpoint at frame 45 is allowed because both rows specify the same
-shape and visibility. Different shapes or visibility for the same member at
-the same frame produce an error naming the conflicting rows; existing keys
-remain unchanged.
+The chain interpolates directly between these choices, including Model 3 to
+Model 8 between frames 50 and 75. Intermediate model numbers are not visited
+unless you key them. The dialog shows the previous and next keys for a checked
+Morphset. Creating keys in a different order produces the same animation.
 
-Alternatively, define one morph with Start Model 1, End Model 8, and an
-intermediate Model 4 through **Edit → Add Model / State**. Key those three
-states at frames 1, 45, and 90. Both workflows produce one animated protein.
+- Before the first key and after the last key, the endpoint model holds.
+- One key holds one model. Two different keyed models create a transition.
+- To pause, key the same model at two frames.
+- To reverse, choose an earlier model at a later frame.
+- Edit a key to change its model; remove it to interpolate between its neighbors.
+- An unchecked row leaves that Morphset's existing animation alone.
 
-Older Morphsets without saved model names show **Keep saved coordinates** when
-edited. Choose a model to replace that snapshot, or leave it unchanged to keep
-the saved shape. Internal identifiers are not editable fields.
+The eye controls visibility at that frame. Expand the arrow to control individual
+members. Visibility changes at the keyed frame and holds until its next key.
+The keyframe checkbox records animation; it does not hide or show the protein.
 
-## Choose a shape at each keyframe
+## Edit or remove a Morphset
 
-1. Open **Create Keyframe** at frame 1.
-2. Check the morphs to record, then select **Start — [state name]** for each.
-3. At frame 60, check the desired morphs and choose **End — [state name]**.
-4. Play or scrub: coordinates interpolate between the keyed states.
+Each child chain/domain keeps its **color swatch**, **Edit Pivot** control,
+**Edit** pencil, **Select** checkbox, and **eye**. The swatch recolors the chain
+directly. Edit Pivot places its rotation origin without moving the atoms; the
+pivot survives keyframe edits, membership changes, and save/reopen.
+Edit changes its name, color, and representation, including its animated
+geometry. Select targets that visible geometry. The Outliner eye hides the member
+in the viewport and render across the timeline; showing it again restores its
+keyframed visibility without changing the keys.
 
-An unchecked row leaves that morph's existing animation alone. Each checked row
-records its state and visibility at the selected frame. A state selector also
-lists any intermediate states you have defined; key those at the frames when
-you want to reach them.
+Right-click a Morphset for **Edit**, which opens its name and membership dialog.
+The menu omits Blender's property-editing commands (drivers, keyframes, and
+defaults); Blender still supplies its standard Online Manual link.
 
-- **Different timing:** key one morph's End at frame 30 and another's at frame 60.
-- **Hold:** repeat the same state at two frames.
-- **Reverse:** key End, then Start at a later frame.
-- **Remove one key:** use the key icon on that morph's row at an existing keyframe.
-- **Remove the whole frame:** use the Keyframes list's delete button.
+Its Outliner pencil edits the name and members. Membership changes apply to all
+its existing keyframes. Remaining members keep their visibility keys; newly added
+members follow the group's visible/hidden state. Removed members return to their
+protein. Models and keyed times retain their identities.
 
-The eye toggle controls the morph's visibility at that frame. Expand the arrow
-for individual member checkboxes. Visibility changes at the keyed frame and
-holds until the next key; the keyframe checkbox itself does not hide the protein.
+Moving the parent protein moves the Morphset. Protein style and temperature-motion
+controls apply to its animated members. Removing the Morphset removes its shape
+animation and restores its members to the protein. Undo restores the Morphset and
+its keys. Membership, snapshots, hierarchy, and animation save in the `.blend`.
 
-During playback, animated geometry replaces the participating originals.
-Removing a morph's last key restores its original members unless another morph
-still animates them. Removing one morph leaves the other morphs' keys intact.
-Definitions, snapshots, styles, member
-ownership, and animation save with the `.blend` file.
-
-Files using the previous snapshot-per-Morphset design are converted on load:
-compatible snapshots become named states in a morph and retain their keyframes.
-Older legacy Align & Morph animations are not automatically converted.
-
-## Style and temperature motion
-
-Change a participating protein's style through its edit pencil. Its animated
-members update immediately and retain their style when keys change or the file
-is reopened. Each animated member uses one representation throughout its morph.
-
-Enable **B-factor (Temperature) Motion** in the source protein's edit dialog to
-add smooth movement weighted by its imported B-factors. Disabling it restores
-the underlying geometry. The motion is deterministic when scrubbing/rendering
-and is applied before the molecular representation is built.
-
-This is an illustrative effect. B-factors describe displacement and disorder,
-not a measured trajectory; AlphaFold files often store confidence in that field.
-The amplitude uses the isotropic relation in the
-[wwPDB B-factor definition](https://mmcif.wwpdb.org/dictionaries/mmcif_rcsb_nmr.dic/Items/_atom_site.B_iso_or_equiv.html).
-Missing, negative, and nonfinite B-factors give zero displacement.
+Existing projects using the older morph-pair format retain their saved states
+and animation. Those states remain selectable in Create/Edit Keyframe. New
+Morphsets use the member-and-model workflow described here.

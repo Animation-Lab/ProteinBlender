@@ -36,7 +36,7 @@ _state = {
 
 # Row types that carry a colour swatch. DNA/RNA strands and membranes colour
 # through their own builders; puppets have no colour of their own.
-COLORABLE_TYPES = ('PROTEIN', 'CHAIN', 'DOMAIN')
+COLORABLE_TYPES = ('PROTEIN', 'CHAIN', 'DOMAIN', 'MORPH_MEMBER')
 
 
 class _Suspend:
@@ -107,6 +107,13 @@ def apply_row_color(item, context):
         apply_chain_color_direct(scene_manager, item, color)
     elif item.item_type == 'DOMAIN':
         apply_domain_color_direct(scene_manager, item, color)
+    elif item.item_type == 'MORPH_MEMBER':
+        from .morphsets import row_member
+        from .visual_style import apply_color_to_object
+        member = row_member(context.scene, item.item_id)
+        obj = member.get('object') if member is not None else None
+        if obj is not None:
+            apply_color_to_object(obj, color)
 
     # Recolouring one row moves what its relatives look like too: a domain
     # pick can turn its chain "mixed", a chain pick can un-mix its protein.

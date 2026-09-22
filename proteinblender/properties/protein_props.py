@@ -407,9 +407,15 @@ def register():
         name="Outliner Index",
         default=-1  # Default to -1 to indicate no row selection
     )
+    # A read-only list cursor prevents Blender's generic property-edit menu
+    # (drivers, keyframes, defaults) on PB rows. Selection uses our checkboxes.
+    bpy.types.Scene.pb_outliner_menu_index = IntProperty(
+        name="PB Outliner", get=lambda scene: scene.outliner_index, options=set())
 
 def unregister():
     from bpy.utils import unregister_class
+    if hasattr(bpy.types.Scene, 'pb_outliner_menu_index'):
+        del bpy.types.Scene.pb_outliner_menu_index
     
     # Safe unregistration with try/except blocks
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",

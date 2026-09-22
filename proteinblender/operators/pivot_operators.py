@@ -368,6 +368,9 @@ def _apply_origin_to_cursor(obj, world_pos):
         return False
     bpy.context.view_layer.update()
     obj["initial_matrix_local"] = [list(row) for row in obj.matrix_local]
+    if obj.get('pb_morphset_output') or obj.get('pb_morphset_owner'):
+        from ..core.morph_member_pivots import sync_pivot
+        sync_pivot(bpy.context, obj)
     return True
 
 
@@ -475,6 +478,17 @@ def _collect_chain_filtered_alphas(targets):
             positions = np.zeros(n * 3)
             mesh.vertices.foreach_get("co", positions)
             positions = positions.reshape(-1, 3)
+            if obj.get('pb_morphset_output') and mesh.shape_keys:
+                # Morphset keys animate atom positions before geometry nodes.
+                # Presets must use the current model/interpolation, not Basis.
+                keys = mesh.shape_keys.key_blocks
+                for key in list(keys)[1:]:
+                    if key.value:
+                        coords = np.empty(n * 3)
+                        key.data.foreach_get('co', coords)
+                        basis = np.empty(n * 3)
+                        key.relative_key.data.foreach_get('co', basis)
+                        positions += key.value * (coords-basis).reshape(-1, 3)
             alpha_positions = positions[mask]
             if len(alpha_positions) == 0:
                 continue
@@ -505,6 +519,11 @@ def _resolve_pivot_targets(scene, selected_items):
     """
     targets = []
     for item in selected_items:
+        if item.item_type == 'MORPH_MEMBER':
+            source = _row_alpha_source(bpy.context, item, row_pivot_objects(bpy.context, item))
+            if source is not None:
+                targets.append(source)
+            continue
         if item.item_type not in ('DOMAIN', 'CHAIN'):
             continue
         if not item.object_name:
@@ -566,7 +585,7 @@ def row_objects(context, row):
         molecule = scene_manager.molecules.get(row.parent_id)
         for obj in get_chain_objects(molecule, row):
             keep(obj)
-    elif row.item_type == 'DOMAIN':
+    elif row.item_type in ('DOMAIN', 'MORPH_MEMBER'):
         if row.object_name:
             keep(bpy.data.objects.get(row.object_name))
 
@@ -591,6 +610,10 @@ def row_pivot_objects(context, row):
     made the whole molecule slide across the scene. That part is fixed in
     ``domain_space.set_pivot_world``, which holds children still.)
     """
+    if row.item_type == 'MORPH_MEMBER':
+        from ..core.morphsets import row_object
+        obj = row_object(context.scene, row)
+        return [obj] if obj is not None else []
     if row.item_type in ('PROTEIN', 'DNA_RNA'):
         molecule = ProteinBlenderScene.get_instance().molecules.get(row.item_id)
         obj = getattr(molecule, 'object', None) if molecule is not None else None
@@ -613,6 +636,18 @@ def _row_alpha_source(context, row, objects):
     its residue span.
     """
     if not objects:
+        return None
+    if row.item_type == 'MORPH_MEMBER':
+        obj = objects[0]
+        if obj.get('pb_morphset_output'):
+            return (obj, None, None, None)  # Snapshots contain only this member.
+        for mol in ProteinBlenderScene.get_instance().molecules.values():
+            domain = next((d for d in mol.domains.values() if d.object == obj), None)
+            if domain:
+                label = mol._resolve_chain_socket_name(domain.chain_id)
+                index = next((i for i, value in mol.idx_to_label_asym_id_map.items()
+                              if value == label), None)
+                return (obj, index, domain.start, domain.end)
         return None
     if row.item_type in ('PROTEIN', 'DNA_RNA'):
         return (objects[0], None, None, None)
@@ -981,6 +1016,10 @@ def _selection_pivot_objects(scene):
     objects = {}
     for item in scene.outliner_items:
         if not item.is_selected:
+            continue
+        if item.item_type == 'MORPH_MEMBER':
+            for obj in row_pivot_objects(bpy.context, item):
+                objects[obj.name] = obj
             continue
         if item.item_type not in ('DOMAIN', 'CHAIN'):
             continue

@@ -96,6 +96,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
 
         # Visual hierarchy through indentation
         row = layout.row(align=True)
+        layout.context_pointer_set('pb_outliner_item', item)
         row.context_pointer_set('pb_outliner_item', item)
 
         # Indentation based on hierarchy level
@@ -334,7 +335,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
             action('proteinblender.delete_morphset', text='', icon='TRASH',
                    emboss=False).morphset_id = item.item_id
         elif item.item_type == 'MORPH_MEMBER':
-            row.label(text='Keyframe visibility', icon='KEYFRAME')
+            PROTEINBLENDER_UL_outliner._draw_custom_pivot_toggle(context, row, item, menu=menu)
+            action('proteinblender.edit_morph_member', text='Edit' if menu else '',
+                   icon='GREASEPENCIL', emboss=False).item_id = item.item_id
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
 
@@ -380,7 +383,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
                                icon=selection_icon, emboss=False)
         op.item_id = item.item_id
 
-        if item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+        if item.item_type == 'MORPHSET':
             from ..core.morphsets import row_has_keys
             if row_has_keys(context.scene, item):
                 row.label(text='', icon='KEYFRAME')
@@ -438,6 +441,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
     @staticmethod
     def _get_item_visibility(context, item):
         """Get visibility state directly from the Blender object."""
+        if item.item_type == 'MORPH_MEMBER':
+            from ..core.morphsets import member_visible
+            return member_visible(context.scene, item.item_id)
         if item.item_type == 'SYMMETRY':
             return _symmetry_is_visible(item, context.view_layer)
         if not item.object_name:
@@ -704,6 +710,15 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     item_id: StringProperty()
+
+    @classmethod
+    def description(cls, context, properties):
+        row = next((r for r in context.scene.outliner_items
+                    if r.item_id == properties.item_id), None)
+        if row and row.item_type == 'MORPH_MEMBER':
+            return ('Hide or show this member across the timeline in the viewport and render. '
+                    'Showing it restores the visibility set in keyframes')
+        return 'Toggle visibility in the viewport and render'
     
     def execute(self, context):
         scene = context.scene
@@ -731,7 +746,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         if not item:
             return {'CANCELLED'}
         
-        if item.item_type in {'MORPHSET', 'MORPH_MEMBER'}:
+        if item.item_type == 'MORPHSET':
             from ..core.morphsets import row_has_keys
             if row_has_keys(scene, item):
                 self.report({'INFO'}, 'Set Morphset member visibility in the Keyframes menu.')
@@ -766,6 +781,9 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
     
     def _get_object_visibility(self, item, view_layer):
         """Get visibility state from the Blender object."""
+        if item.item_type == 'MORPH_MEMBER':
+            from ..core.morphsets import member_visible
+            return member_visible(bpy.context.scene, item.item_id)
         if item.item_type == 'SYMMETRY':
             return _symmetry_is_visible(item, view_layer)
         if not item.object_name:
@@ -830,7 +848,11 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
                         if domain.object:
                             self._set_object_visibility(domain.object, visible, view_layer)
                             
-        elif item.item_type in ('DOMAIN', 'MORPHSET', 'MORPH_MEMBER'):
+        elif item.item_type == 'MORPH_MEMBER':
+            from ..core.morphsets import set_member_visible
+            set_member_visible(context, item.item_id, visible)
+
+        elif item.item_type in ('DOMAIN', 'MORPHSET'):
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:
@@ -969,7 +991,7 @@ class PROTEINBLENDER_PT_outliner(Panel):
         box.template_list(
             "PROTEINBLENDER_UL_outliner", "",
             scene, "outliner_items",
-            scene, "outliner_index",
+            scene, "pb_outliner_menu_index",
             rows=10,
             maxrows=20,
             type='DEFAULT',
@@ -998,6 +1020,10 @@ def draw_outliner_context_menu(self, context):
         return
     layout = self.layout
     layout.operator_context = 'INVOKE_DEFAULT'
+    if item.item_type == 'MORPHSET':
+        layout.operator('proteinblender.edit_morphset', text='Edit',
+                        icon='GREASEPENCIL').morphset_id = item.item_id
+        return
     layout.label(text=item.name, icon=item.icon)
     if row_has_swatch(item):
         op = layout.operator('proteinblender.outliner_color_picker', text='Set Color', icon='COLOR')

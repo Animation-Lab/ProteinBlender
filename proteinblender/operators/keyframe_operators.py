@@ -712,16 +712,20 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mem_item.brownian_enabled = False
 
         populate_keyframe_rows(self, context)
+        self._morph_frame = self.frame_number
 
         # Publish self so the in-dialog Select All / Select None buttons
         # can mutate puppet_items on this live instance.
         type(self)._active_instance = self
 
         # Show popup dialog
-        return context.window_manager.invoke_props_dialog(self, width=500)
+        return context.window_manager.invoke_props_dialog(self, width=660)
 
     def check(self, context):
         # Rebuild enabled state / expanded member rows after widget changes.
+        if getattr(self, '_morph_frame', self.frame_number) != self.frame_number:
+            populate_keyframe_rows(self, context)
+            self._morph_frame = self.frame_number
         return True
 
     def draw(self, context):
@@ -734,12 +738,11 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         
         layout.separator()
         
-        previous_set = None
+        from ..core.model_morphsets import neighbors
+        if self.morph_items:
+            layout.label(text='Morphsets', icon='IPO_EASE_IN_OUT')
         for item in self.morph_items:
-            if item.set_name != previous_set:
-                morph_box = layout.box()
-                morph_box.label(text=item.set_name, icon='IPO_EASE_IN_OUT')
-                previous_set = item.set_name
+            morph_box = layout.box()
             row = morph_box.row(align=True)
             row.prop(item, 'use_morph', text='')
             row.label(text=item.name)
@@ -757,8 +760,17 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 members.label(text='Visible members at this frame:')
                 for member in item.members:
                     members.prop(member, 'visible', text=member.name)
+            if item.use_morph:
+                morph = morphsets.find(context.scene, item.morph_id)
+                before, after = neighbors(context.scene, morph, self.frame_number)
+                if before:
+                    morph_box.label(text='Previous key: ' + before)
+                if after:
+                    morph_box.label(text='Next key: ' + after)
+                if not before and not after:
+                    morph_box.label(text='Add a key at another frame to create a transition.', icon='INFO')
         if morphsets.sets(context.scene) and not self.morph_items:
-            layout.label(text='Add a morph using the Morphset’s edit pencil.', icon='INFO')
+            layout.label(text='Create a Morphset with protein chains/domains in Builders.', icon='INFO')
 
         # Puppet rows
         has_morphsets = bool(morphsets.sets(context.scene))
