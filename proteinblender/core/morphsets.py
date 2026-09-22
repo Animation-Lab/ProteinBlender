@@ -852,8 +852,10 @@ def _migrate_v1(context):
         morph['pb_members'] = members
         values = []
         for old in group:
+            # Copy nested arrays while their owner still exists. dict(m) keeps
+            # borrowed IDPropertyArray views that removal of old invalidates.
             values.append(dict(uid=old[TAG], name=old.name, members=[
-                {k: v for k, v in dict(m).items() if k in
+                {k: v for k, v in m.to_dict().items() if k in
                  {'mesh', 'source', 'original', 'row_id', 'name', 'style', 'color'}}
                 for m in old['pb_members']]))
             mapping[old[TAG]] = (morph[MORPH], old[TAG])

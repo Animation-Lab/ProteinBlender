@@ -472,11 +472,13 @@ def test_previous_morphset_format_migrates_without_losing_states_or_keys(scene, 
     from mathutils import Matrix
     a, b = H.import_local('1ubq.pdb', 'old_a'), H.import_local('1ubq.pdb', 'old_b')
     roots, meshes = [], []
+    colors = [(.17, .41, .83, 1), (.73, .23, .37, 1)]
     for index, mid in enumerate([a, b]):
         mol = sm.molecules[mid]
         obj = next(iter(mol.domains.values())).object
         obj.location.x += index
         captured, _ = morphsets._capture(bpy.context, [mid])
+        captured[0]['color'] = colors[index]
         mesh = captured[0]['mesh']
         meshes.append(mesh)
         root = bpy.data.objects.new('Old state ' + str(index), None)
@@ -499,6 +501,10 @@ def test_previous_morphset_format_migrates_without_losing_states_or_keys(scene, 
     assert len(morphsets.sets(scene)) == len(morphsets.morphs(scene)) == 1
     morph = morphsets.morphs(scene)[0]
     assert [s['members'][0]['mesh'] for s in morphsets.states(morph)] == meshes
+    # Migration deletes the second old root. Its color array must have been
+    # copied before deletion, rather than retained as a freed IDPropertyArray.
+    for saved, expected in zip(morphsets.states(morph), colors):
+        assert list(saved['members'][0]['color']) == pytest.approx(expected)
     assert get_keyframe_frames(bpy.context) == [1, 21]
     scene.frame_set(11)
     obj = morphsets.outputs(scene)[0]
