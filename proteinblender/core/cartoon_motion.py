@@ -1,9 +1,10 @@
-"""Keep the cartoon's discrete ribbon orientation choices fixed during a morph.
+"""Keep cartoon ribbons continuous during morphing and B-factor motion.
 
 MolecularNodes corrects alternating peptide normals with a thresholded dot
 product. Repeating that decision on interpolated coordinates can flip a ribbon
 by 180 degrees in one frame. Evaluate those choices once on the start structure;
 the actual normals, backbone and arrow/helix geometry still follow the moving atoms.
+Distance-based gap tests use unjiggled positions when thermal motion is active.
 """
 import bpy
 import bmesh
@@ -13,7 +14,7 @@ TURN = 'pb_cartoon_reference_turn'
 HELIX_TURN = 'pb_cartoon_helix_turn'
 INDEX = 'pb_cartoon_reference_index'
 VERSION = 'pb_cartoon_motion_version'
-REVISION = 2
+REVISION = 3
 
 
 def _group(tree, name):
@@ -30,6 +31,16 @@ def _node(tree, kind, name, **properties):
 def _link(tree, source, output, target, input):
     # Node collections can reallocate when a node is added; resolve at use.
     tree.links.new(tree.nodes[source].outputs[output], tree.nodes[target].inputs[input])
+
+
+def _reference_positions(tree):
+    from .thermal_motion import REFERENCE_POSITION
+    _node(tree, 'GeometryNodeInputNamedAttribute', 'Unjiggled Positions', data_type='FLOAT_VECTOR')
+    tree.nodes['Unjiggled Positions'].inputs['Name'].default_value = REFERENCE_POSITION
+    _node(tree, 'GeometryNodeSwitch', 'Gap Positions', input_type='VECTOR')
+    _link(tree, 'Unjiggled Positions', 'Exists', 'Gap Positions', 'Switch')
+    _link(tree, 'Unjiggled Positions', 'Attribute', 'Gap Positions', 'True')
+    _link(tree, 'Position', 'Position', 'Gap Positions', 'False')
 
 
 def _bake_turns(obj, style):
@@ -52,7 +63,10 @@ def _bake_turns(obj, style):
     try:
         # Use the stored start conformation even when upgrading at a later frame.
         points = np.empty(len(mesh.vertices) * 3)
-        obj.data.shape_keys.key_blocks[0].data.foreach_get('co', points)
+        if obj.data.shape_keys:
+            obj.data.shape_keys.key_blocks[0].data.foreach_get('co', points)
+        else:
+            obj.data.vertices.foreach_get('co', points)
         mesh.vertices.foreach_set('co', points)
         index = mesh.attributes.new(INDEX, 'INT', 'POINT')
         index.data.foreach_set('value', np.arange(len(mesh.vertices), dtype=np.int32))
@@ -84,8 +98,12 @@ def _bake_turns(obj, style):
         evaluated = reference.evaluated_get(bpy.context.evaluated_depsgraph_get())
         result = evaluated.to_mesh()
         try:
-            indices = np.array([v.value for v in result.attributes[INDEX].data])
-            turns = {name: np.array([v.value for v in result.attributes[name].data])
+            # Nucleic-only PDBs (or a member with no peptide backbone) have no
+            # CA curve. There are no orientation decisions to bake for them.
+            indices = np.array([v.value for v in result.attributes[INDEX].data]
+                               if len(result.vertices) else [], dtype=np.int32)
+            turns = {name: np.array([v.value for v in result.attributes[name].data]
+                                   if len(result.vertices) else [], dtype=np.int32)
                      for name in (TURN, HELIX_TURN)}
         finally:
             evaluated.to_mesh_clear()
@@ -114,10 +132,45 @@ def _stable_style():
     sheet = bpy.data.node_groups['.CA to sheet'].copy()
     sheet.name = '.PB continuous sheet'
     _group(root, '.MN_utils_style_cartoon').node_tree = cartoon
+    # Detect genuine backbone gaps on the unjiggled atoms. The original
+    # distance cutoff otherwise repeatedly severs neighboring residues as
+    # thermal motion moves them across the threshold. Only the gap decision
+    # uses these positions; the spline still follows the animated atoms.
+    backbone = bpy.data.node_groups['.Atoms to CA Splines'].copy()
+    backbone.name = '.PB continuous backbone'
+    curves = bpy.data.node_groups['Atoms to Curves'].copy()
+    curves.name = '.PB continuous curves'
+    chains = bpy.data.node_groups['Chain Group ID'].copy()
+    chains.name = '.PB continuous chain groups'
+    _group(cartoon, '.Atoms to CA Splines').node_tree = backbone
+    _group(backbone, 'Atoms to Curves').node_tree = curves
+    _group(curves, 'Chain Group ID').node_tree = chains
+    destinations = [(l.to_node.name, l.to_socket.identifier) for l in chains.links
+                    if l.from_node.bl_idname == 'GeometryNodeInputPosition']
+    _reference_positions(chains)
+    for name, identifier in destinations:
+        socket = next(s for s in chains.nodes[name].inputs if s.identifier == identifier)
+        chains.links.new(chains.nodes['Gap Positions'].outputs['Output'], socket)
     _group(cartoon, '.CA to sheet').node_tree = sheet
     helix = bpy.data.node_groups['.CA to helix'].copy()
     helix.name = '.PB continuous helix'
     _group(cartoon, '.CA to helix').node_tree = helix
+    loops = bpy.data.node_groups['.CA to loops'].copy()
+    loops.name = '.PB continuous loops'
+    _group(cartoon, '.CA to loops').node_tree = loops
+    split = bpy.data.node_groups['Curve Split Splines'].copy()
+    split.name = '.PB continuous spline split'
+    # The sheet/helix/loop splitters have another distance test after selecting
+    # their residues. Keep both ends of that test in the same reference space.
+    _reference_positions(split)
+    for link in list(split.links):
+        if link.from_node.name == 'Position' and link.to_node.name == 'Vector Math':
+            split.links.new(split.nodes['Gap Positions'].outputs['Output'], link.to_socket)
+    _link(split, 'Gap Positions', 'Output', _group(split, 'Offset Vector').name, 'Vector')
+    for branch in (sheet, helix, loops):
+        for node in branch.nodes:
+            if node.type == 'GROUP' and node.node_tree.name == 'Curve Split Splines':
+                node.node_tree = split
     correction_name = _group(sheet, 'Curve Offset Dot').name
     destinations = [(l.to_node.name, l.to_socket.identifier) for l in sheet.links
                     if l.from_node.name == correction_name and l.from_socket.name == 'Leading']

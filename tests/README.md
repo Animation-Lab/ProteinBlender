@@ -43,6 +43,9 @@ python tests/run_ui_tests.py --normal-profile --scenario morph-outliner --blende
 # Morphsets inside puppets: membership, model/pose keys, nested controls and undo
 python tests/run_ui_tests.py --normal-profile --scenario puppet-morphsets --blender "<path-to-blender>"
 
+# B-factor checkbox, live intensity entry, cartoon playback and lighting label
+python tests/run_ui_tests.py --normal-profile --scenario thermal-motion --blender "<path-to-blender>"
+
 # Reopen the example produced by the model-morphsets scenario and edit its keys
 python tests/run_ui_tests.py --normal-profile --scenario saved-model-morphsets --blend "<artifact-dir>/1d3z-model-keyframes.blend" --blender "<path-to-blender>"
 

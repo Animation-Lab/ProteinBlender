@@ -3,6 +3,26 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
+### B-factor ribbon stability and intensity (2026-09-23)
+
+`test_thermal_motion.py` covers cartoon geometry across 48 frames, all four
+4HHB chains at 0.2x/5x, preservation of a real backbone gap, measured atom
+displacements at 0x/0.25x/1x/2x, toggles/style changes/domain splits, Morphset
+output updates without replacing animation, and migration of already-enabled
+motion. The original 1UBQ regression failed before the fix: its cartoon varied
+from 3,140 to 3,396 faces as it jiggled. The thermal Morphset roundtrip uses a
+non-default intensity. `--scenario thermal-motion` exercises a real checkbox
+click and typed slider values, playback, style switches, dialog reopening,
+the lighting label and saving the scene. Nucleic-only imports also keep working
+when there is no peptide backbone to stabilize.
+
+Final validation: **803 passed, 7 existing skips, 1 existing xfail** in the full
+Windows Blender 5.2 suite; **8 thermal cases passed** on 5.0, 5.1 and 5.2;
+**28 installed UI steps passed** on both 5.1 and 5.2, plus four fresh-process
+checks of current and previous-release saved scenes. See the
+[thermal-motion change notes](../docs/change-notes/thermal-motion.md) for
+environment details.
+
 Latest illustration validation: **777 passed, 7 skipped, 2 network tests
 deselected, 1 existing xfailed** in the full offline Blender 5.2 suite, exit 0,
 with no native crash diagnostics. Blender 5.1 passed **39** focused lighting,

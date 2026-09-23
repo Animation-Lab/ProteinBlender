@@ -853,7 +853,7 @@ def build_puppet_morphsets():
 def build_thermal_morphsets():
     build_morphsets()
     assert bpy.ops.proteinblender.edit_protein_visuals(
-        item_id='saved_ensemble', bfactor_motion=True) == {'FINISHED'}
+        item_id='saved_ensemble', bfactor_motion=True, bfactor_intensity=.35) == {'FINISHED'}
     # Editing after keyframing must persist both the display and playback style.
     assert bpy.ops.proteinblender.edit_protein_visuals(
         item_id='saved_ensemble', vs_style='cartoon') == {'FINISHED'}

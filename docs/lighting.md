@@ -30,7 +30,7 @@ restores the original surface shading, compositor, and color-management settings
 conversion supports directly connected Principled materials; custom shader graphs
 may retain their own shading.
 
-**Mute Other Lights** hides existing lights without deleting them. To restore
+**Turn Off Other Lights** hides existing lights without deleting them. To restore
 their previous visibility, uncheck it and apply the setup again. The original
 world is retained in the file; the setup uses its own neutral world. Molecular
 materials, colors, transparency, camera framing, and animation are preserved.

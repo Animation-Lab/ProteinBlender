@@ -524,12 +524,21 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
     bfactor_motion: BoolProperty(name='B-factor (Temperature) Motion',
         description='Animate gentle motion weighted by the imported temperature factors',
         default=False, update=_on_thermal_edited)
+    bfactor_intensity: FloatProperty(name='Motion Intensity',
+        description='Scale the jiggle amplitude: 0 is still, 1 is the imported B-factor strength, '
+                    '2 is twice as much motion. This is an illustrative effect, not a temperature in kelvin',
+        default=1.0, min=0.0, max=5.0, soft_max=2.0, precision=2,
+        update=_on_thermal_edited)
 
     def apply_thermal(self, context):
         from ..core.thermal_motion import set_enabled
         mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
         if mol:
-            set_enabled(mol, self.bfactor_motion)
+            enabled = (self.bfactor_motion if self.properties.is_property_set('bfactor_motion')
+                       else bool(mol.object.get('pb_bfactor_enabled')))
+            intensity = (self.bfactor_intensity if self.properties.is_property_set('bfactor_intensity')
+                         else None)
+            set_enabled(mol, enabled, intensity)
 
     def visual_row(self, context):
         return find_row(context.scene, self.item_id)
@@ -542,6 +551,7 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
         with _Suspend():
             self.bfactor_motion = bool(mol and mol.object.get('pb_bfactor_enabled'))
+            self.bfactor_intensity = float(mol.object.get('pb_bfactor_intensity', 1.0)) if mol else 1.0
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def check(self, context):
@@ -561,6 +571,7 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         layout.separator()
         layout.prop(self, 'bfactor_motion')
         if self.bfactor_motion:
+            layout.prop(self, 'bfactor_intensity', slider=True)
             layout.label(text='Play the timeline to see temperature motion.', icon='INFO')
 
     def execute(self, context):
@@ -570,7 +581,8 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}
         self.commit_visual_edit(context)
-        if self.properties.is_property_set('bfactor_motion'):
+        if (self.properties.is_property_set('bfactor_motion')
+                or self.properties.is_property_set('bfactor_intensity')):
             self.apply_thermal(context)
         self.end_visual_edit()
         return {'FINISHED'}

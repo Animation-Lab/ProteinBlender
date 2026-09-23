@@ -76,6 +76,24 @@ dropdown reads **Multiple**, and the colour swatch shows a neutral grey with a
 note saying so, since a swatch has no way to draw "mixed". Picking a real value
 resolves them all; leaving it alone changes nothing.
 
+## B-factor Motion
+
+Open the protein's **Edit Protein** dialog and enable **B-factor (Temperature)
+Motion**, then play the timeline. **Motion Intensity** adjusts how much the
+protein jiggles and updates the viewport immediately:
+
+- **0**: no jiggle.
+- **0.25**: one quarter of the usual movement.
+- **1**: the default movement based on the imported B-factors.
+- **2**: twice the movement. You can enter values up to **5**.
+
+This controls the amplitude of an illustrative animation, not a physical
+temperature in kelvin. Atoms with missing or zero B-factors remain still.
+Cartoon ribbons keep their connections during the motion, while gaps already
+present in the structure remain open. The setting applies to the protein's
+chains, domains and Morphset outputs, and is retained when you change styles,
+turn motion off and back on, or save and reopen the project.
+
 ## Independent Domain Styling
 
 One of ProteinBlender's powerful features is **independent domain styling**:

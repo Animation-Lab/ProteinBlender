@@ -118,6 +118,12 @@ def resync_domain_colors_on_load(dummy):
         traceback.print_exc()
 
 
+@persistent
+def restore_temperature_motion_on_load(dummy):
+    from ..core.thermal_motion import restore_saved_motion
+    restore_saved_motion()
+
+
 def _register_handler(handler_list, handler):
     """Helper to register a handler if not already registered."""
     if handler not in handler_list:
@@ -145,6 +151,7 @@ def register_load_handlers():
     # Re-sync chain colours from the RNA source-of-truth (runs last so
     # any rebuild the prior handlers do is overwritten)
     _register_handler(bpy.app.handlers.load_post, resync_domain_colors_on_load)
+    _register_handler(bpy.app.handlers.load_post, restore_temperature_motion_on_load)
 
 
 def unregister_load_handlers():
@@ -152,6 +159,7 @@ def unregister_load_handlers():
     _unregister_handler(bpy.app.handlers.load_post, reset_scene_manager_on_load)
     _unregister_handler(bpy.app.handlers.load_post, create_workspace_on_load)
     _unregister_handler(bpy.app.handlers.load_post, resync_domain_colors_on_load)
+    _unregister_handler(bpy.app.handlers.load_post, restore_temperature_motion_on_load)
 
 
 CLASSES = []

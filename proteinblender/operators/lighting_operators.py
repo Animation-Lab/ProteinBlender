@@ -24,7 +24,7 @@ class PROTEINBLENDER_OT_setup_lighting(bpy.types.Operator):
         ('AUTO', "Camera / View", "Use the render camera, or the current view when there is no camera"),
         ('VIEW', "Current View", "Use the current 3D viewport orientation"),
     ], default='AUTO')
-    mute_existing: BoolProperty(name="Mute Other Lights", default=True,
+    mute_existing: BoolProperty(name="Turn Off Other Lights", default=True,
         description="Hide other lights without deleting them; uncheck and apply again to restore them")
     preview: BoolProperty(name="Show Lighting in Viewport", default=True,
         description="Show Material Preview using the scene's lights and world")

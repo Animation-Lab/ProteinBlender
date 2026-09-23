@@ -596,9 +596,9 @@ def compile_animation(context, keys):
         stabilize(obj)
         restore_output(obj, member)
         if member.get('source') and member['source'].get('pb_bfactor_enabled'):
-            from .thermal_motion import prepare, install
+            from .thermal_motion import prepare, install, INTENSITY
             prepare(obj.data)
-            install(obj)
+            install(obj, member['source'].get(INTENSITY, 1.0))
         for frame, value in sorted(group['samples'].items()):
             for uid in group['shapes']:
                 key = obj.data.shape_keys.key_blocks[uid]
