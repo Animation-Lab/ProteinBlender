@@ -11,6 +11,7 @@ skips everything a user actually touches. This scenario goes through it:
 * the File > Import menu;
 * dragging a file onto the 3D viewport and onto the Properties editor.
 """
+import gzip
 import runpy
 import shutil
 import sys
@@ -24,7 +25,8 @@ H = g['H']
 data = {}
 
 STRUCTURES = {'4hhb.pdb': '4hhb.pdb', '4ins.cif': '4ins.cif',
-              'Upper.PDB': '1ubq.pdb', 'assembly.mmCIF': '5im3.cif'}
+              'Upper.PDB': '1ubq.pdb', 'assembly.mmCIF': '5im3.cif',
+              'ensemble.pdb': '1d3z.pdb.gz'}  # a 10-model NMR ensemble
 HIDDEN = ('notes.txt', 'ligand.sdf')
 
 
@@ -62,7 +64,10 @@ def prepare():
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir()
     for name, fixture in STRUCTURES.items():
-        shutil.copy(H.data_path(fixture), folder / name)
+        if fixture.endswith('.gz') and not name.endswith('.gz'):
+            (folder / name).write_bytes(gzip.open(H.data_path(fixture)).read())
+        else:
+            shutil.copy(H.data_path(fixture), folder / name)
     for name in HIDDEN:
         (folder / name).write_text('not a structure\n')
     data['folder'] = folder
@@ -118,11 +123,14 @@ def check_browser_listing():
     return 'lists ' + ', '.join(listed)
 
 
-def choose(name):
+def choose(name, interpretation=None):
     def step():
         window, area = browser()
         assert area is not None, 'file browser is not open'
         area.spaces.active.params.filename = name
+        if interpretation:
+            # The "Multiple models" option in the browser's side panel.
+            area.spaces.active.active_operator.model_interpretation = interpretation
         region = next(r for r in area.regions if r.type == 'EXECUTE')
         with bpy.context.temp_override(window=window, area=area, region=region):
             assert bpy.ops.file.execute() == {'FINISHED'}
@@ -154,6 +162,13 @@ def expect_first_import():
         [molecule.object, *(d.object for d in molecule.domains.values())])
     assert len(drawn) > 4000
     return f'{len(drawn)} atoms drawn in {len(chains)} chains'
+
+
+def expect_ensemble_read_as_assembly():
+    """The browser option is honoured: ten NMR models become ten copies."""
+    molecule = H.sm().molecules['ensemble']
+    assert len(molecule.domains) == 10, len(molecule.domains)
+    return 'Assembly copies -> 10 chain copies'
 
 
 def expect_second_copy():
@@ -198,12 +213,23 @@ def drop(area_type, name):
     return step
 
 
+def expect_drop_detects_models_itself():
+    """A drop has no options, so an earlier "Assembly copies" must not carry over."""
+    molecule = H.sm().molecules['ensemble_002']
+    assert len(molecule.domains) == 1, (
+        f'dropped NMR ensemble read as {len(molecule.domains)} copies; the '
+        'previous import\'s Multiple models choice leaked into the drop')
+    return 'dropped ensemble detected as conformations (1 chain)'
+
+
 def expect_everything():
     # 4hhb: button, button again, multi-select. 4ins and assembly: dropped, then
-    # multi-select. Upper: multi-select only.
+    # multi-select. ensemble: button (Assembly copies), dropped, multi-select.
+    # Upper: multi-select only.
     ids = molecules()
     assert ids == sorted(['4hhb', '4hhb_002', '4hhb_003', '4ins', '4ins_002',
-                          'Upper', 'assembly', 'assembly_002']), ids
+                          'Upper', 'assembly', 'assembly_002',
+                          'ensemble', 'ensemble_002', 'ensemble_003']), ids
     rows = [i.identifier for i in bpy.context.scene.molecule_list_items]
     assert sorted(rows) == ids, (rows, ids)
     capture('local-import-final.png')
@@ -231,11 +257,19 @@ g['steps'][:] = [
     ('point the file browser at the folder again', point_browser_at_folder), *settle(20, 'file list'),
     ('choose the same 4hhb.pdb and press Import', choose('4hhb.pdb')), *settle(8, 'import'),
     ('same file twice gives two independent proteins', expect_second_copy),
+    ('click Import Local File for an ensemble', click_import_local_file), *settle(3, 'browser open'),
+    ('point the file browser at the folder for the ensemble', point_browser_at_folder),
+    *settle(20, 'file list'),
+    ('choose ensemble.pdb, set Multiple models to Assembly copies, Import',
+     choose('ensemble.pdb', 'ASSEMBLY')), *settle(8, 'import'),
+    ('Assembly copies option is honoured', expect_ensemble_read_as_assembly),
     ('open File > Import', observe_import_menu), *settle(4, 'menu'),
     ('File > Import offers structure files', check_import_menu), *settle(2, 'menu close'),
     ('drop 4ins.cif on the 3D viewport', drop('VIEW_3D', '4ins.cif')), *settle(4, 'drop'),
     ('drop assembly.mmCIF on the Properties editor', drop('PROPERTIES', 'assembly.mmCIF')),
     *settle(4, 'drop'),
+    ('drop ensemble.pdb on the 3D viewport', drop('VIEW_3D', 'ensemble.pdb')), *settle(4, 'drop'),
+    ('a drop does not inherit the earlier Multiple models choice', expect_drop_detects_models_itself),
     ('click Import Local File for a multi-select', click_import_local_file), *settle(3, 'browser open'),
     ('point the file browser at the folder for multi-select', point_browser_at_folder),
     *settle(20, 'file list'),

@@ -75,7 +75,7 @@ Dropped files use automatic detection only.
 - **.pdb**, **.ent** - Protein Data Bank format
 - **.cif**, **.mmcif**, **.pdbx** - Macromolecular Crystallographic Information File
 - **.bcif** - Binary CIF
-- **.pdb1**, **.pdb2**, ... - biological assembly files from the RCSB
+- **.pdb1**, **.pdb2**, ... - biological assembly files from the RCSB (drag and drop covers up to **.pdb30**)
 - Any of these compressed as **.gz**
 
 ## Import from Online Database

@@ -19,9 +19,12 @@ from .conformation_library import MODEL_INTERPRETATIONS
 logger = logging.getLogger(__name__)
 
 # What the structure reader accepts (``molecularnodes...parse``). RCSB serves
-# biological assemblies as ``1abc.pdb1``, ``1abc.pdb2``, ...
+# biological assemblies as ``1abc.pdb1``, ``1abc.pdb2``, ... A handler matches
+# exact suffixes, so the numbered family is spelled out up to .pdb30. Blender
+# keeps only about 255 characters of ``bl_file_extensions`` (a longer list is
+# silently cut: .pdb99 stopped matching), so the whole list must stay under that.
 _FORMATS = ('.pdb', '.ent', '.cif', '.mmcif', '.bcif', '.pdbx')
-_ASSEMBLIES = tuple(f'.pdb{number}' for number in range(1, 10))
+_ASSEMBLIES = tuple(f'.pdb{number}' for number in range(1, 31))
 _STRUCTURE = (*_FORMATS, *_ASSEMBLIES)
 
 # The file browser lists these (a glob, so it also covers .pdb10 and up and
@@ -51,7 +54,10 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
     bl_label = "Import Local Structure File"
     bl_description = "Import a protein structure file (PDB, CIF, etc.) from your local filesystem"
     bl_options = {'REGISTER', 'UNDO'}
-    model_interpretation: EnumProperty(name='Multiple models', items=MODEL_INTERPRETATIONS)
+    # Not remembered between imports: a choice made for one file (say Assembly
+    # copies for an MD snapshot) must not silently apply to the next one.
+    model_interpretation: EnumProperty(
+        name='Multiple models', items=MODEL_INTERPRETATIONS, options={'SKIP_SAVE'})
 
     # File browser properties
     filename_ext = ".pdb"
@@ -84,10 +90,17 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
     def execute(self, context) -> Set[str]:
         """Import every selected file; one unreadable file does not stop the rest.
 
+        Every unreadable file is reported as an error, so a script (where Blender
+        raises on any error report) sees RuntimeError even when other files were
+        imported; check the scene for what landed.
+
         Returns:
             'FINISHED' if at least one file was imported, otherwise 'CANCELLED'.
         """
         paths = self._paths()
+        if self.identifier_override and len(paths) > 1:
+            self.report({'ERROR'}, "identifier_override names one protein, but several files were given")
+            return {'CANCELLED'}
         manager = ProteinBlenderScene.get_instance()
         imported: List[str] = []
         problems: List[str] = []

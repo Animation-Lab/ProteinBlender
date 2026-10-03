@@ -100,6 +100,39 @@ def test_an_explicit_identifier_never_replaces_a_loaded_protein(tmp_path, scene,
     assert [row.identifier for row in scene.molecule_list_items] == ["held"]
 
 
+@pytest.mark.integration
+def test_a_failed_import_leaves_nothing_behind_and_can_be_retried(tmp_path, scene, sm, monkeypatch):
+    """Registration happens before finalizing; a failure between must not leak."""
+    path = _copy(tmp_path, "1ubq.pdb")
+    manager_type = type(sm)
+
+    def explode(self, molecule):
+        raise RuntimeError("induced failure while finalizing")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager_type, "_finalize_imported_molecule", explode)
+        with pytest.raises(RuntimeError, match="Failed to import"):
+            _import(path)
+
+    assert not sm.molecules, f"failed import left {list(sm.molecules)} registered"
+    assert not scene.molecule_list_items
+    assert not [o for o in bpy.data.objects if o.name.startswith("1ubq")], "orphaned object"
+
+    assert _import(path) == {"FINISHED"}
+    assert list(sm.molecules) == ["1ubq"], "the retry was renamed around a stale entry"
+
+
+@pytest.mark.integration
+def test_an_explicit_identifier_with_several_files_is_rejected(tmp_path, scene, sm):
+    _copy(tmp_path, "1ubq.pdb")
+    _copy(tmp_path, "4ins.cif")
+    with pytest.raises(RuntimeError, match="identifier_override"):
+        bpy.ops.molecule.import_local(
+            "EXEC_DEFAULT", directory=str(tmp_path), identifier_override="one",
+            files=[{"name": "1ubq.pdb"}, {"name": "4ins.cif"}])
+    assert not sm.molecules
+
+
 # --------------------------------------------------------------------------
 # Several files at once (multi-select in the browser, or a multi-file drop)
 # --------------------------------------------------------------------------
@@ -140,6 +173,8 @@ DROPPED = [
     ("1d3z.pdb.gz", "1d3z.pdb"),      # NMR ensemble
     ("1d3z.cif.gz", "1d3z.cif"),
     ("1out.pdb1.gz", "1out.pdb1"),    # RCSB biological-assembly file
+    ("1out.pdb1.gz", "1out.pdb12"),   # large entries have assemblies past 9
+    ("1out.pdb1.gz", "1out.pdb30"),
 ]
 
 
@@ -171,6 +206,16 @@ def test_a_dropped_file_loads_every_chain_the_file_contains(tmp_path, scene, sm)
     drawn = H.evaluated_atom_positions(
         [molecule.object, *(d.object for d in molecule.domains.values())])
     assert len(drawn) > 4000, "a four-chain hemoglobin draws thousands of atoms"
+
+
+@pytest.mark.integration
+def test_the_last_claimed_extension_is_still_matched(tmp_path, scene, sm):
+    """Blender silently cuts a long ``bl_file_extensions``; the tail would stop matching."""
+    from proteinblender.operators.operator_import_local import DROP_EXTENSIONS
+    name = "1out" + DROP_EXTENSIONS[-1]
+    _copy(tmp_path, "1out.pdb1.gz", name)
+    assert _drop(tmp_path, name) == {"FINISHED"}, f"{DROP_EXTENSIONS[-1]} is claimed but never matched"
+    assert list(sm.molecules) == ["1out"]
 
 
 @pytest.mark.integration
@@ -206,12 +251,30 @@ def test_the_drop_handler_claims_every_extension_the_browser_lists():
     assert {".pdb", ".cif", ".mmcif", ".ent", ".pdb1"} <= claimed
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("area_type,expected", [
+    (None, True), ("VIEW_3D", True), ("PROPERTIES", True), ("FILE_BROWSER", False)])
+def test_drops_are_claimed_everywhere_except_inside_a_file_browser(area_type, expected):
+    from types import SimpleNamespace
+    from proteinblender.operators.operator_import_local import MOLECULE_FH_import_structure as handler
+    area = SimpleNamespace(type=area_type) if area_type else None
+    assert bool(handler.poll_drop(SimpleNamespace(area=area))) is expected
+
+
 # --------------------------------------------------------------------------
 # File > Import
 # --------------------------------------------------------------------------
 
-@pytest.mark.integration
-def test_file_import_menu_offers_structure_files():
+def _structure_menu_entries():
+    from proteinblender.operators import operator_import_local
     drawers = bpy.types.TOPBAR_MT_file_import._dyn_ui_initialize()
-    ours = [fn for fn in drawers if getattr(fn, "__module__", "").startswith("proteinblender")]
-    assert ours, "File > Import has no ProteinBlender entry"
+    return [fn for fn in drawers if fn is operator_import_local.menu_func_import]
+
+
+@pytest.mark.integration
+def test_file_import_menu_offers_structure_files_exactly_once_across_reloads():
+    import proteinblender
+    assert len(_structure_menu_entries()) == 1, "File > Import has no ProteinBlender entry"
+    proteinblender._test_register()
+    proteinblender._test_register()
+    assert len(_structure_menu_entries()) == 1, "re-registering duplicated the File > Import entry"

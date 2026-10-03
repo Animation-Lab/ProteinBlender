@@ -453,6 +453,9 @@ class ProteinBlenderScene:
     def import_molecule_from_file(self, filepath: str, identifier: str,
                                   model_interpretation='AUTO') -> bool:
         """Import a molecule from a local file"""
+        # Only an identifier this call registers may be rolled back; a caller
+        # that reused a loaded identifier must not lose the existing molecule.
+        was_loaded = identifier in self.molecules
         try:
             ensure_object_mode()
             # Import the molecule using MoleculeManager
@@ -463,11 +466,30 @@ class ProteinBlenderScene:
             self._finalize_imported_molecule(molecule)
             return True
         except ValueError:
+            if not was_loaded:
+                self._discard_failed_import(identifier)
             raise
         except Exception:
             import traceback
             traceback.print_exc()
-            return False 
+            if not was_loaded:
+                self._discard_failed_import(identifier)
+            return False
+
+    def _discard_failed_import(self, identifier: str) -> None:
+        """Remove a half-imported molecule so its identifier is free to retry.
+
+        The wrapper is registered before the import is finalized, so a failure in
+        between would otherwise leave a molecule with no list row that every
+        later import of the same file has to rename around.
+        """
+        if identifier not in self.molecules:
+            return
+        try:
+            self.delete_molecule(identifier)
+        except Exception:
+            logger.exception("Could not clean up failed import %s", identifier)
+            self.molecule_manager.molecules.pop(identifier, None)
 
     def _add_molecule_to_list(self, identifier):
         """Add a molecule to the UI list and set it as active"""
