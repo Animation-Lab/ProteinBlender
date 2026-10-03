@@ -134,18 +134,13 @@ def test_available_assemblies_match_the_file(scene, sm):
             f"{len(expected)}")
 
 
-def test_identity_only_assemblies_are_not_offered(scene, sm):
-    """An assembly that is purely the identity would build nothing visible.
-
-    Every deposited structure carries an assembly record; for a monomer it is
-    one identity transform. Offering it would be a button that does nothing.
-    """
+def test_identity_assemblies_remain_available_for_chain_subsets(scene, sm):
+    """An identity placement may select fewer chains than the deposited unit."""
     molecule = _import()
 
     buildable = {i.assembly_id for i in _assembly_core().buildable_assemblies(molecule)}
 
-    assert buildable == WITH_SYMMETRY
-    assert not (buildable & IDENTITY_ONLY)
+    assert buildable == WITH_SYMMETRY | IDENTITY_ONLY
 
 
 @pytest.mark.parametrize("fixture,ident,expected", [
@@ -161,44 +156,35 @@ def test_symmetry_is_detected_only_where_it_exists(scene, sm, fixture, ident, ex
 
 
 @pytest.mark.parametrize("source, assembly_id", [("BIOLOGICAL", "3"), ("GENERATED", "")])
-def test_assembly_controls_are_accessed_through_the_child(scene, sm, source, assembly_id):
-    from proteinblender.panels.symmetry_panel import PROTEINBLENDER_PT_symmetry
-
-    molecule = _import()
-    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context), (
-        "Import must not expose a separate deposited-assembly panel")
+def test_assembly_controls_target_the_row_without_selecting_it(scene, sm, source, assembly_id):
+    from proteinblender import panels
+    assert all(cls.__name__ != 'PROTEINBLENDER_PT_symmetry' for cls in panels.CLASSES)
+    first = _import()
     assert bpy.ops.molecule.symmetry_dialog(
-        target_id=molecule.identifier, source=source,
+        target_id=first.identifier, source=source,
         **({"assembly_id": assembly_id} if assembly_id else {})
     ) == {'FINISHED'}
-    # Selecting the protein can select all its descendants. That must not
-    # open assembly controls until the assembly child itself is clicked.
-    bpy.ops.proteinblender.outliner_select(item_id=molecule.identifier)
-    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context)
-    child_id = next(r.item_id for r in scene.outliner_items if r.item_type == 'SYMMETRY')
-    bpy.ops.proteinblender.outliner_select(item_id=child_id)
-    assert PROTEINBLENDER_PT_symmetry.poll(bpy.context)
-    bpy.ops.molecule.clear_assembly(molecule_id=molecule.identifier)
-    assert not PROTEINBLENDER_PT_symmetry.poll(bpy.context)
-    assert not any(r.item_type == 'SYMMETRY' for r in scene.outliner_items), (
-        "Deleting an assembly must immediately remove its child row")
-
-
-def test_assembly_controls_follow_the_clicked_child_not_the_last_import(scene, sm):
-    from proteinblender.panels.symmetry_panel import _active_molecule
-
-    first = _import()
-    bpy.ops.molecule.symmetry_dialog(target_id=first.identifier, source='BIOLOGICAL', assembly_id='3')
     second = _import("1ubq.pdb", "ubq")
-    scene.pb_symmetry_order = 5
-    bpy.ops.molecule.symmetry_dialog(target_id=second.identifier)
-    child_id = next(r.item_id for r in scene.outliner_items
-                    if r.item_type == 'SYMMETRY' and r.parent_id == first.identifier)
-    bpy.ops.proteinblender.outliner_select(item_id=child_id)
-    assert _active_molecule(bpy.context) == first
-    scene.pb_assembly_factor = 0.25
-    assert _assembly_core().get_assembly_factor(first) == pytest.approx(0.25)
-    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1.0)
+    bpy.ops.molecule.symmetry_dialog(target_id=second.identifier, source='GENERATED')
+    # Keep the last-imported protein selected throughout the popup's edit.
+    bpy.ops.proteinblender.outliner_select(item_id=second.identifier)
+    assert bpy.ops.molecule.assembly_controls(
+        molecule_id=first.identifier, progress=.25, copy_delay=.6) == {'FINISHED'}
+    assert _assembly_core().get_assembly_factor(first) == pytest.approx(.25)
+    assert _assembly_core().get_assembly_stagger(first) == pytest.approx(.6)
+    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1)
+    assert _assembly_core().get_assembly_stagger(second) == pytest.approx(0)
+    bpy.ops.molecule.clear_assembly(molecule_id=first.identifier)
+    assert bpy.ops.molecule.assembly_controls(
+        molecule_id=first.identifier, progress=.5) == {'CANCELLED'}
+    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1)
+
+
+def test_controls_require_an_explicit_target(scene, sm):
+    molecule = _import()
+    bpy.ops.molecule.symmetry_dialog(target_id=molecule.identifier, source='BIOLOGICAL', assembly_id='3')
+    assert bpy.ops.molecule.assembly_controls(progress=.25) == {'CANCELLED'}
+    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(1)
 
 
 def test_operators_find_the_active_protein_without_being_told(scene, sm):
@@ -426,15 +412,15 @@ def test_clear_operator_on_nothing_is_cancelled(scene, sm):
     assert result == {"CANCELLED"}
 
 
-def test_assembly_enum_offers_only_symmetric_assemblies(scene, sm):
-    """The picker must not list the identity-only assemblies either."""
+def test_assembly_enum_offers_all_deposited_assemblies(scene, sm):
+    """Chain subsets and equivalent deposited units remain explicit choices."""
     from proteinblender.core import assembly as assembly_core
     from proteinblender.operators.assembly_operators import assembly_enum_items
 
     _import()
     identifiers = {item[0] for item in assembly_enum_items(None, bpy.context)}
 
-    assert identifiers - {assembly_core.ASYMMETRIC_UNIT_ID} == WITH_SYMMETRY
+    assert identifiers - {assembly_core.ASYMMETRIC_UNIT_ID} == WITH_SYMMETRY | IDENTITY_ONLY
 
 
 # --------------------------------------------------------------------------
@@ -455,7 +441,7 @@ def test_the_asymmetric_unit_leads_the_picker(scene, sm):
 
     assert identifiers[0] == assembly_core.ASYMMETRIC_UNIT_ID
     assert identifiers.count(assembly_core.ASYMMETRIC_UNIT_ID) == 1
-    assert set(identifiers[1:]) == WITH_SYMMETRY, (
+    assert set(identifiers[1:]) == WITH_SYMMETRY | IDENTITY_ONLY, (
         "the asymmetric unit must be added to the real assemblies, not "
         "displace any of them")
 

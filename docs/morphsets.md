@@ -60,6 +60,25 @@ The eye controls visibility at that frame. Expand the arrow to control individua
 members. Visibility changes at the keyed frame and holds until its next key.
 The keyframe checkbox records animation; it does not hide or show the protein.
 
+## Cycle through conformations
+
+Click **Cycle through Conformations** in Animation, or beside a checked Morphset
+in **Create/Edit Keyframe**. Choose the Morphset, start and end frames, and the
+number of frames between keys. **In order, repeating** loops through the models;
+**Random** chooses a model at each position. The random seed makes a sequence
+repeatable.
+
+For example, frames 1–200 with a spacing of 5 create keys at 1, 6, 11, …, 196.
+The end frame is included only when the spacing lands on it. **Keep existing
+keys** preserves manually authored keys. **Replace keys in range** replaces only
+this Morphset's keys within the chosen interval. Keys outside it and other
+Morphsets are preserved.
+
+Generated keys are ordinary editable Morphset keys and the whole operation can
+be undone. You can move, scale, duplicate, or delete the timeline keys, then add
+another Morphset key without restoring their former frame numbers. Move the
+Morphset's control and geometry keys together when retiming the animation.
+
 ## Edit or remove a Morphset
 
 Each child chain/domain keeps its **color swatch**, **Edit Pivot** control,

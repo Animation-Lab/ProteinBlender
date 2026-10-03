@@ -762,6 +762,9 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     members.prop(member, 'visible', text=member.name)
             if item.use_morph:
                 morph = morphsets.find(context.scene, item.morph_id)
+                cycle = morph_box.operator('proteinblender.cycle_conformations',
+                                           text='Cycle through Conformations…', icon='TIME')
+                cycle.morph_id = item.morph_id
                 before, after = neighbors(context.scene, morph, self.frame_number)
                 if before:
                     morph_box.label(text='Previous key: ' + before)

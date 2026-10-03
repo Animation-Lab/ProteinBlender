@@ -600,3 +600,26 @@ def test_deleting_the_protein_takes_its_bend_with_it(scene, sm):
     assert curve_name not in bpy.data.objects, "the bend curve outlived its protein"
     for name in node_names:
         assert name not in bpy.data.objects, f"{name} outlived its protein"
+
+
+def test_bend_controls_use_the_target_build_after_another_builder_changes_defaults(scene, sm):
+    molecule = _import()
+    _build_filament(molecule)
+    from proteinblender.core import assembly
+    built = assembly.built_build_params(molecule)
+    scene.pb_symmetry_count = 2
+    scene.pb_symmetry_rise = 1
+    scene.pb_symmetry_twist = 0
+    scene.pb_symmetry_axis = (1, 0, 0)
+    scene.pb_bend_nodes = 3
+    assert bpy.ops.molecule.add_filament_bend(
+        molecule_id=molecule.identifier, n_points=5) == {'FINISHED'}
+    nodes = _bend().get_bend_nodes(molecule)
+    assert len(nodes) == 5
+    assert (nodes[-1].location - nodes[0].location).length == pytest.approx(
+        (built['count'] - 1) * built['rise'] * WORLD_SCALE, abs=1e-4)
+    assert bpy.ops.molecule.filament_bend_preset(
+        molecule_id=molecule.identifier, preset='ARC') == {'FINISHED'}
+    obj = next(iter(molecule.domains.values())).object
+    _drag(molecule, -1, (0.2, 0, 0))
+    assert len(_instance_positions(obj.name)) == built['count']

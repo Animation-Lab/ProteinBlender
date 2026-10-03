@@ -3,6 +3,36 @@
 What the suite exercises, per subsystem, and the known gaps. Regenerate the
 numbers by running `python tests/run_tests.py -q`.
 
+### Deposited assemblies and conformation timing (2026-09-25)
+
+`test_feedback_regressions.py` covers all six deposited 1STM assemblies, their
+chain membership, full/partial realization with per-chain pivots, maximum copy
+delay, metadata save/reopen, and unsplit protein geometry. Morphset cases cover
+moved/scaled/duplicated/deleted keys, repeated states with distinct visibility,
+legacy timing recovery, save/reopen, unrelated transform keys, and sequential
+or seeded random cycling with existing-key handling.
+
+The final Blender 5.2 combined assembly/Morphset run passed **160 tests**;
+the related symmetry dialog/builder/realization/cutaway/bend run passed **84**.
+The focused Blender 5.1 regressions passed as well.
+
+The foreground `--scenario assembly-conformations` passed **48 UI steps on each
+of Blender 5.1 and 5.2**, including real menu selection, Apply/confirm/reopen,
+Cancel restoration, assembly sliders, cycling, and undo/redo. The Blender 5.0
+dependency preflight is currently blocked by existing DLL import failures.
+After updating the installed 5.2 copies, the same **48 steps passed in a fresh
+normal 5.2 profile**, with the installed module path verified and preferences
+unchanged.
+See the [change notes](../docs/change-notes/assembly-and-conformation-timing.md).
+
+`test_assembly_switch.py` adds eight cases for generated-to-deposited switching
+with visible cartoon/surface/ball-and-stick geometry and two similarly named
+imports. It checks that switching, clearing, and updating one assembly leave
+the other's geometry intact, including older builds without owner properties.
+The related Blender 5.2 regression run passed **102 tests**.
+The expanded **51-step UI scenario passed against both the source and the normal
+installed Blender 5.2 add-on**.
+
 ### B-factor ribbon stability and intensity (2026-09-23)
 
 `test_thermal_motion.py` covers cartoon geometry across 48 frames, all four
@@ -1967,3 +1997,20 @@ pre-fix run lost the second color, and the corrected run passes on Blender
 - `test_puppet_morphsets.py`: model Morphsets before/after animation, creation and edit membership parenting, exclusivity and partial-chain protection, mixed chains/domains, two independent model tracks plus puppet transforms, geometry-preserving removal, pose keys surviving removal/reparenting and scrubbing, visibility across rebuilds, child selection/style/color/B-factor controls, and deletion of either controller.
 - `puppet_morphsets` roundtrip builder: keyed puppet with a Morphset and ordinary chain, saved member pivot/visibility/color, fresh-process reopen and model-key edit.
 - `--scenario puppet-morphsets`: real Create/Edit Puppet and keyframe dialogs, nested reference controls, Undo/Redo, model edits inside puppets, visibility, and pose capture/apply after rebuilding model output.
+
+## Assembly Controls popup (2026-09-25)
+
+Assembly rows now expose a sliders icon and **Assembly Controls** menu item.
+The selection-dependent panel is removed. The popup keeps an explicit protein
+ID; progress and delay update that assembly even with a different row selected.
+The assembly build, bend, and realization/cutaway integration coverage comprises
+86 passing cases, including explicit popup targets, saved per-assembly bend
+parameters, and cutaway arguments independent of the scene's builder defaults.
+
+`--scenario assembly-controls --normal-profile` passes **35 foreground steps**
+in the installed Blender 5.2 add-on (`/tmp/pb-controls-ui-installed`). It clicks
+the real icon, edits both sliders with keyboard events, dismisses and reopens
+the popup through the row menu, checks native Undo/Redo, and inspects helical
+bend controls. Clearing its target is safely rejected on subsequent edits.
+Both installed 5.2 copies were byte-verified against all 154 source Python files;
+the retired panel file was removed and preferences/startup files were unchanged.

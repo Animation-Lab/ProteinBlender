@@ -25,10 +25,6 @@ from .pose_library_panel import (
     PROTEINBLENDER_OT_capture_pose,
     PROTEINBLENDER_OT_delete_pose,
 )
-from .symmetry_panel import (
-    PROTEINBLENDER_PT_symmetry,
-    CLASSES as SYMMETRY_CLASSES,
-)
 from .animation_panel import (
     PROTEINBLENDER_KeyframeListItem,
     PROTEINBLENDER_UL_keyframes,
@@ -59,7 +55,6 @@ __all__ = [
     'PROTEINBLENDER_OT_capture_pose',
     'PROTEINBLENDER_OT_delete_pose',
     'PROTEINBLENDER_PT_animation',
-    'PROTEINBLENDER_PT_symmetry',
     'CLASSES',
     'register',
     'unregister'
@@ -93,7 +88,6 @@ CLASSES = [
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
-    *SYMMETRY_CLASSES,                 # 2: Symmetry (polls itself away)
     PROTEINBLENDER_PT_puppet_maker,    # 3: Puppet Maker
     PROTEINBLENDER_PT_pose_library,    # 4: Pose Library
     PROTEINBLENDER_PT_animation,       # 5: Animation

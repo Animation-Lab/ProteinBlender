@@ -31,22 +31,22 @@ win = bpy.context.window
 win.workspace = bpy.data.workspaces['Protein Blender']
 for row in scene.outliner_items:
     row.is_expanded = True
-panel = importlib.import_module(H.PKG + '.panels.symmetry_panel').PROTEINBLENDER_PT_symmetry
-assert not panel.poll(bpy.context), 'Plain import opened a separate assembly panel'
+controls = importlib.import_module(H.PKG + '.operators.assembly_controls').MOLECULE_PB_OT_assembly_controls
+assert not hasattr(bpy.types, 'PROTEINBLENDER_PT_symmetry')
 # Wrap the real draw functions and inspect Blender's resulting native layout.
 # This is not a mock layout: missing controls or a draw exception stay visible.
 classes = [
     importlib.import_module(H.PKG + '.operators.symmetry_dialog').MOLECULE_PB_OT_symmetry_dialog,
     importlib.import_module(H.PKG + '.dna_builder.dna_panel').PROTEINBLENDER_PT_builders,
-    panel,
+    controls,
     importlib.import_module(H.PKG + '.panels.protein_outliner_panel').PROTEINBLENDER_PT_outliner,
 ]
 records, originals = {}, []
 def observe(cls):
     method = 'draw'
     original = cls.draw
-    def draw(self, context, *args):
-        original(self, context, *args)
+    def draw(self, context):
+        original(self, context)
         key = cls.__name__
         records[key] = self.layout.introspect()
     originals.append((cls, method, original))
@@ -74,7 +74,7 @@ with R.view3d_override():
 records = bpy.app.driver_namespace['pb_assembly_ui_records']
 layout = records['MOLECULE_PB_OT_symmetry_dialog']
 assert 'Create New Assembly' in str(layout)
-assert ('Deposited Assembly (BMT)' if source == 'BIOLOGICAL' else 'Generated Symmetry') in str(layout)
+assert ('PDB-defined Assembly' if source == 'BIOLOGICAL' else 'Generated Symmetry') in str(layout)
 # Drive the Apply operator and arguments Blender actually drew.
 def flatten(items):
     for item in items:
@@ -144,9 +144,9 @@ with R.view3d_override():
         blender.call('''
 layout = str(bpy.app.driver_namespace['pb_assembly_ui_records']['MOLECULE_PB_OT_symmetry_dialog'])
 assert 'Edit Assembly' in layout
-assert ('Deposited Assembly (BMT)' if source == 'BIOLOGICAL' else 'Generated Symmetry') in layout
+assert ('PDB-defined Assembly' if source == 'BIOLOGICAL' else 'Generated Symmetry') in layout
 if source == 'BIOLOGICAL':
-    assert 'Assembly 1 - 2 copies' in layout
+    assert 'Assembly 1' in layout and '2 transformation applications' in layout
 win = bpy.context.window
 win.event_simulate(type='ESC', value='PRESS')
 win.event_simulate(type='ESC', value='RELEASE')
@@ -154,20 +154,23 @@ win.event_simulate(type='ESC', value='RELEASE')
         _settle()
         blender.call('''
 import importlib
-panel = importlib.import_module(H.PKG + '.panels.symmetry_panel').PROTEINBLENDER_PT_symmetry
+assert not hasattr(bpy.types, 'PROTEINBLENDER_PT_symmetry')
 bpy.ops.proteinblender.outliner_item_info(item_id=mid)
-assert not panel.poll(bpy.context)
-bpy.ops.proteinblender.outliner_item_info(item_id=child_id)
-assert panel.poll(bpy.context)
-for area in bpy.context.window.screen.areas:
-    area.tag_redraw()
+with R.view3d_override():
+    assert bpy.ops.molecule.assembly_controls('INVOKE_DEFAULT', molecule_id=mid) == {'RUNNING_MODAL'}
 ''', mid=mid, child_id=child_id)
         _settle()
         blender.call('''
-layout = str(bpy.app.driver_namespace['pb_assembly_ui_records']['PROTEINBLENDER_PT_symmetry'])
-assert 'Assembled' in layout and 'Keyframe' in layout
+layout = str(bpy.app.driver_namespace['pb_assembly_ui_records']['MOLECULE_PB_OT_assembly_controls'])
+assert 'Assembly progress' in layout and 'Keyframe' in layout
 assert 'molecule.build_assembly(' not in layout, 'A duplicate deposited builder remains in the panel'
 assert ('Add Bend' in layout) == (source == 'GENERATED' and kind == 'H'), layout
+win = bpy.context.window
+win.event_simulate(type='ESC', value='PRESS')
+win.event_simulate(type='ESC', value='RELEASE')
+''', source=source, kind=kind)
+        _settle()
+        blender.call('''
 with R.view3d_override():
     assert bpy.ops.molecule.clear_assembly('EXEC_DEFAULT', True, molecule_id=mid) == {'FINISHED'}
 assert not any(r.item_type == 'SYMMETRY' for r in bpy.context.scene.outliner_items)

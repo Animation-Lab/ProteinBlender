@@ -7,7 +7,7 @@ wrappers the panel drives.
 import logging
 
 import bpy
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, StringProperty
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
@@ -113,7 +113,7 @@ def build_generated_symmetry(molecule, settings: dict):
 #: Blender does not keep a reference to the strings an EnumProperty items
 #: callback returns, so anything built on the fly there must be held alive on
 #: the Python side or the UI shows garbage. Rebuilt on every call.
-_ASSEMBLY_ENUM_CACHE = []
+_ASSEMBLY_ENUM_CACHE = {}
 
 
 def _molecule(molecule_id):
@@ -132,9 +132,8 @@ def assembly_enum_items(self, context):
     anything is built and the one-step way back afterwards. Being first makes
     it the enum's default, which is the honest opening value.
 
-    After it come only the assemblies with a non-identity transform: one that
-    is purely the identity *is* the asymmetric unit under another name, so
-    listing it would offer the same state twice.
+    All deposited assemblies follow it. Identity transforms may select only
+    some chains, and even equivalent assemblies retain the depositor's names.
     """
     global _ASSEMBLY_ENUM_CACHE
 
@@ -150,11 +149,10 @@ def assembly_enum_items(self, context):
             items.append((
                 info.assembly_id,
                 info.label,
-                f"Build biological assembly {info.assembly_id}",
+                info.tooltip,
             ))
 
-    _ASSEMBLY_ENUM_CACHE = items
-    return _ASSEMBLY_ENUM_CACHE
+    return _ASSEMBLY_ENUM_CACHE.setdefault(tuple(items), items)
 
 
 def _set_picker(context, assembly_id: str) -> None:
@@ -414,6 +412,8 @@ class MOLECULE_PB_OT_cutaway(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty()
+    normal: FloatVectorProperty(name="Cut Direction", size=3, default=(0.0, -1.0, 0.0))
+    offset: FloatProperty(name="Cut Depth", default=0.0)
 
     def execute(self, context):
         molecule = _molecule(self.molecule_id or _active_molecule_id(context))
@@ -430,8 +430,10 @@ class MOLECULE_PB_OT_cutaway(Operator):
         operators = _operators_of_built(context, molecule, tag)
         kept = assembly_core.cutaway_operators(
             molecule, operators,
-            normal=tuple(getattr(scene, "pb_cutaway_normal", (0.0, -1.0, 0.0))),
-            offset=getattr(scene, "pb_cutaway_offset", 0.0))
+            normal=tuple(self.normal if self.properties.is_property_set('normal')
+                         else getattr(scene, "pb_cutaway_normal", (0.0, -1.0, 0.0))),
+            offset=(self.offset if self.properties.is_property_set('offset')
+                    else getattr(scene, "pb_cutaway_offset", 0.0)))
 
         if not kept:
             self.report({"WARNING"}, "That cut removes the whole assembly")
@@ -479,9 +481,8 @@ class MOLECULE_PB_OT_clear_assembly(Operator):
 def _operators_of_built(context, molecule, tag):
     """Rebuild the operator list behind whatever is currently built.
 
-    The tag on the node says which: a deposited assembly id, or
-    ``generated:<kind>``. The panel's current builder settings stand in for a
-    generated one, which is right as long as they have not been changed since.
+    The tag and recorded build parameters belong to this assembly. Scene
+    defaults are only a fallback for older builds with no saved parameters.
 
     Goes through ``symmetry_bend`` for the same reason the build does: a bent
     filament that was *built* one way and *measured* another would cut away
@@ -492,14 +493,15 @@ def _operators_of_built(context, molecule, tag):
     tag = str(tag)
     if tag.startswith("generated:"):
         scene = context.scene
+        built = assembly_core.built_build_params(molecule) or {}
         return symmetry_bend.build_operators(
             molecule,
             tag.split(":", 1)[1],
-            order=getattr(scene, "pb_symmetry_order", 3),
-            count=getattr(scene, "pb_symmetry_count", 10),
-            rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0),
-            axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
+            order=built.get("order", getattr(scene, "pb_symmetry_order", 3)),
+            count=built.get("count", getattr(scene, "pb_symmetry_count", 10)),
+            rise=built.get("rise", getattr(scene, "pb_symmetry_rise", 0.0)),
+            twist=built.get("twist", getattr(scene, "pb_symmetry_twist", 0.0)),
+            axis=tuple(built.get("axis", getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0)))),
         )
     return assembly_core._operators_for(molecule, tag)
 

@@ -761,6 +761,84 @@ class PROTEINBLENDER_OT_remove_morph_key(Operator):
         return {'FINISHED'}
 
 
+def cycle_morph_items(self, context):
+    return _stable('cycle_morphs', [
+        (m[morphsets.MORPH], m.name, 'Animate this Morphset', i)
+        for i, m in enumerate(morphsets.morphs(context.scene))
+        if len(morphsets.states(m)) > 1
+    ] or [('NONE', 'No Morphset available', '', 0)])
+
+
+class PROTEINBLENDER_OT_cycle_conformations(Operator):
+    bl_idname = 'proteinblender.cycle_conformations'
+    bl_label = 'Cycle through Conformations'
+    bl_description = 'Create editable keyframes that cycle through a Morphset’s conformations'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    morph_id: EnumProperty(name='Morphset', items=cycle_morph_items, options={'SKIP_SAVE'})
+    start_frame: IntProperty(name='Start frame', default=1, min=1)
+    end_frame: IntProperty(name='End frame', default=200, min=1)
+    frame_step: IntProperty(name='Every N frames', default=5, min=1)
+    order: EnumProperty(name='Order', items=[
+        ('SEQUENTIAL', 'In order, repeating', 'Go through each conformation, then start again'),
+        ('RANDOM', 'Random', 'Choose a conformation independently at each step')])
+    seed: IntProperty(name='Random seed', default=0, min=0,
+                      description='Use the same seed to reproduce the same sequence')
+    existing: EnumProperty(name='Existing keys', items=[
+        ('KEEP', 'Keep existing keys', 'Add keys only where this Morphset has no key'),
+        ('REPLACE', 'Replace keys in range', 'Replace this Morphset’s keys inside the chosen range only')])
+
+    @classmethod
+    def poll(cls, context):
+        return any(len(morphsets.states(m)) > 1 for m in morphsets.morphs(context.scene))
+
+    def invoke(self, context, event):
+        if not self.properties.is_property_set('morph_id'):
+            from .keyframe_operators import get_filtered_keyframe_targets
+            targets, _ = get_filtered_keyframe_targets(context)
+            uid = next((uid for _, _, kind, uid in targets if kind == 'MORPHSET'), None)
+            if uid:
+                self.morph_id = uid
+        if not self.properties.is_property_set('start_frame'):
+            self.start_frame = max(1, context.scene.frame_current)
+        if not self.properties.is_property_set('end_frame'):
+            self.end_frame = max(self.start_frame, context.scene.frame_end)
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def check(self, context):
+        return True  # Refresh the position count and Random seed field.
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, 'morph_id')
+        row = layout.row(align=True)
+        row.prop(self, 'start_frame')
+        row.prop(self, 'end_frame')
+        layout.prop(self, 'frame_step')
+        layout.prop(self, 'order')
+        if self.order == 'RANDOM':
+            layout.prop(self, 'seed')
+        layout.prop(self, 'existing')
+        if self.end_frame >= self.start_frame:
+            count = (self.end_frame - self.start_frame) // self.frame_step + 1
+            last = self.start_frame + (count - 1) * self.frame_step
+            layout.label(text=f'{count} positions, frames {self.start_frame}–{last}', icon='KEYFRAME')
+        else:
+            layout.label(text='End frame must follow the start frame.', icon='ERROR')
+        layout.label(text='Generated keys can be moved and edited normally.')
+
+    def execute(self, context):
+        try:
+            count = morphsets.cycle_conformations(context, self.morph_id, self.start_frame,
+                self.end_frame, self.frame_step, self.order, self.seed, self.existing)
+        except ValueError as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
+        morphsets.rebuild(context)
+        self.report({'INFO'}, f'Created {count} conformation keys')
+        return {'FINISHED'}
+
+
 CLASSES = [PBMorphMemberVisibility, PBMorphKeyframeRow, PBModelMember,
            PROTEINBLENDER_OT_edit_morph_member,
            PROTEINBLENDER_OT_create_morphset, PROTEINBLENDER_OT_edit_morphset,
@@ -768,4 +846,5 @@ CLASSES = [PBMorphMemberVisibility, PBMorphKeyframeRow, PBModelMember,
            PROTEINBLENDER_OT_add_morph_state, PROTEINBLENDER_OT_edit_morph_state,
            PROTEINBLENDER_OT_rename_morph_state,
            PROTEINBLENDER_OT_remove_morph_state, PROTEINBLENDER_OT_remove_morph,
-           PROTEINBLENDER_OT_delete_morphset, PROTEINBLENDER_OT_remove_morph_key]
+           PROTEINBLENDER_OT_delete_morphset, PROTEINBLENDER_OT_remove_morph_key,
+           PROTEINBLENDER_OT_cycle_conformations]

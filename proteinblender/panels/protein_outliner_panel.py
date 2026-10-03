@@ -344,15 +344,20 @@ class PROTEINBLENDER_UL_outliner(UIList):
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
 
-            # Match the protein row's duplicate and pivot columns.
-            row.label(text="", icon='BLANK1')
-            row.label(text="", icon='BLANK1')
+            # Sliders open the assembly's controls; the pencil edits its build.
+            if not menu:
+                row.label(text="", icon='BLANK1')
+            controls_op = action(
+                "molecule.assembly_controls", text="", icon='PREFERENCES', emboss=False,
+            )
+            if controls_op:
+                controls_op.molecule_id = molecule_id
 
             # Edit pencil — reopens the Symmetry dialog on the settings this
             # build was actually made with (recorded on the assembly node).
             edit_op = action(
                 "molecule.symmetry_dialog",
-                text="", icon='GREASEPENCIL', emboss=False,
+                text="Edit Assembly" if menu else "", icon='GREASEPENCIL', emboss=False,
             )
             if edit_op:
                 edit_op.molecule_id_to_update = molecule_id
@@ -550,13 +555,9 @@ class PROTEINBLENDER_OT_outliner_select(Operator):
         if not clicked_item:
             return {'CANCELLED'}
 
-        # Track the explicitly clicked row separately from cascading checkbox
-        # selection, so selecting a protein does not open its assembly controls.
+        # Track the clicked row separately from cascading checkbox selection.
         scene.outliner_index = next(i for i, r in enumerate(scene.outliner_items)
                                     if r.item_id == actual_item_id)
-        if clicked_item.item_type == 'SYMMETRY':
-            from ..properties.protein_props import sync_assembly_controls
-            sync_assembly_controls(context)
 
         # Remove this block - it's redundant and interferes with proper toggling
 
@@ -958,14 +959,10 @@ class PROTEINBLENDER_OT_outliner_item_info(Operator):
         return "Outliner item"
 
     def execute(self, context):
-        # Clicking a label also makes its child controls accessible without
-        # changing viewport selection. The pencil opens the assembly dialog.
+        # Label clicks track the row without changing viewport selection.
         for index, row in enumerate(context.scene.outliner_items):
             if row.item_id == self.item_id:
                 context.scene.outliner_index = index
-                if row.item_type == 'SYMMETRY':
-                    from ..properties.protein_props import sync_assembly_controls
-                    sync_assembly_controls(context)
                 break
         return {'FINISHED'}
 

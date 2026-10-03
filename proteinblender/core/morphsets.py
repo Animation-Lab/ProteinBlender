@@ -4,6 +4,7 @@ A Morphset groups morphs. Morphs can share members and contribute named states
 to one animation per member. No coordinates are fitted or aligned here.
 """
 import json
+import random
 import uuid
 
 import bmesh
@@ -19,6 +20,8 @@ TAG = 'pb_morphset'
 MORPH = 'pb_morph'
 TRACK = 'pb_morphset_track'
 OUTPUT = 'pb_morphset_output'
+SAMPLE = 'pb_morph_sample'
+SAMPLES = 'pb_morph_samples'
 
 
 def sets(scene):
@@ -93,8 +96,60 @@ def _refresh_owners(scene):
 
 
 def keyframes(scene):
+    """Read timing from Blender, with state/visibility attached to each key.
+
+    A sample number travels with its F-Curve point through moves, scaling,
+    duplication and deletion. Frame-indexed JSON alone cannot do that: it
+    used to restore the original times whenever an edit rebuilt the outputs.
+    This is a read-only projection, also safe to call while drawing a panel.
+    """
     obj = track(scene)
-    return json.loads(obj.get('pb_morph_keys', '{}')) if obj else {}
+    saved = json.loads(obj.get('pb_morph_keys', '{}')) if obj else {}
+    result = {}
+    for morph in morphs(scene):
+        uid = morph[MORPH]
+        curves = _curves(morph)
+        if SAMPLES in morph:
+            samples = json.loads(morph[SAMPLES])
+            curve = next((c for c in curves if c.data_path == f'["{SAMPLE}"]'), None)
+            for point in curve.keyframe_points if curve else ():
+                index = int(round(point.co.y))
+                if 0 <= index < len(samples):
+                    frame = str(int(round(point.co.x)))
+                    result.setdefault(frame, {})[uid] = samples[index]
+        else:
+            # Existing .blend files have state-index curves. Recover retimed
+            # keys before the next compile upgrades them to sample records.
+            previous = sorted(((int(f), rows[uid]) for f, rows in saved.items() if uid in rows))
+            curve = next((c for c in curves if c.data_path == '["active_state"]'), None)
+            if curve is None:
+                for frame, value in previous:
+                    result.setdefault(str(frame), {})[uid] = value
+                continue
+            values = states(morph)
+            for point in curve.keyframe_points:
+                index = int(round(point.co.y))
+                if not 0 <= index < len(values):
+                    continue
+                state_uid = values[index]['uid']
+                candidates = [(i, pair) for i, pair in enumerate(previous)
+                              if pair[1]['state'] == state_uid]
+                frame = int(round(point.co.x))
+                if candidates:
+                    # A large timeline move can put an early occurrence
+                    # nearer a later saved occurrence of the same state.
+                    # Match their order, not their obsolete frame distances.
+                    i, (_, value) = candidates[0]
+                    previous.pop(i)
+                else:
+                    value = dict(state=state_uid, visible=[True] * len(records(morph)))
+                result.setdefault(str(frame), {})[uid] = value
+    return result
+
+
+def _curves(obj):
+    ad = obj.animation_data
+    return get_fcurves_from_action(ad.action, ad) if ad and ad.action else ()
 
 
 def morph_keys(scene, uid, keys=None):
@@ -496,13 +551,14 @@ def _interpolation(data, kind):
                 point.interpolation = kind
 
 
-def _clear_curves(obj):
+def _clear_curves(obj, paths=None):
     """Keep surviving controllers' action/slot bindings stable across key edits."""
     ad = obj.animation_data
     if ad and ad.action:
         action = ad.action
         for curve in list(get_fcurves_from_action(action, ad)):
-            remove_fcurve_from_action(action, curve, ad)
+            if paths is None or curve.data_path in paths:
+                remove_fcurve_from_action(action, curve, ad)
         action.update_tag()
         obj.update_tag(refresh={'OBJECT'})
 
@@ -572,11 +628,17 @@ def compile_animation(context, keys):
     for morph in morphs(scene):
         uid = morph[MORPH]
         keyed = morph_keys(scene, uid, keys)
-        _clear_curves(morph)
-        for frame, value in keyed.items():
-            morph['active_state'] = next(i for i, s in enumerate(states(morph)) if s['uid'] == value['state'])
-            morph.keyframe_insert('["active_state"]', frame=int(frame))
-        _interpolation(morph, 'CONSTANT')
+        path = f'["{SAMPLE}"]'
+        _clear_curves(morph, {path, '["active_state"]'})
+        ordered = sorted(keyed.items(), key=lambda pair: int(pair[0]))
+        morph[SAMPLES] = json.dumps([value for _, value in ordered])
+        for index, (frame, value) in enumerate(ordered):
+            morph[SAMPLE] = index
+            morph.keyframe_insert(path, frame=int(frame), group='Conformations')
+        for curve in _curves(morph):
+            if curve.data_path == path:
+                for point in curve.keyframe_points:
+                    point.interpolation = 'CONSTANT'
     for group in groups:
         base = group['base']
         morph, member = base['morph'], base['member']
@@ -633,6 +695,41 @@ def delete_key(context, frame, uid=None):
         if not keys[str(frame)]:
             del keys[str(frame)]
     compile_animation(context, keys)
+
+
+def cycle_conformations(context, uid, start, end, step, order='SEQUENTIAL', seed=0,
+                        existing='KEEP'):
+    """Generate ordinary editable Morphset keys in one validated operation."""
+    morph = find(context.scene, uid)
+    values = states(morph) if morph and morph.get(MORPH) else []
+    if len(values) < 2:
+        raise ValueError('Choose a Morphset with at least two conformations.')
+    if start < 1 or end < start or step < 1:
+        raise ValueError('Use a positive frame spacing and an end frame at or after the start.')
+    if order not in {'SEQUENTIAL', 'RANDOM'} or existing not in {'KEEP', 'REPLACE'}:
+        raise ValueError('Choose a valid order and existing-key option.')
+    keys = keyframes(context.scene)
+    keyed = morph_keys(context.scene, uid, keys)
+    # Carry the selected set's member visibility into generated keys.
+    previous = max((int(f) for f in keyed if int(f) <= start), default=None)
+    visible = list(keyed[str(previous)]['visible']) if previous is not None else [True] * len(records(morph))
+    if existing == 'REPLACE':
+        for frame in list(keys):
+            if start <= int(frame) <= end:
+                keys[frame].pop(uid, None)
+                if not keys[frame]:
+                    del keys[frame]
+    rng = random.Random(seed)
+    count = 0
+    for i, frame in enumerate(range(start, end + 1, step)):
+        state = rng.choice(values) if order == 'RANDOM' else values[i % len(values)]
+        rows = keys.setdefault(str(frame), {})
+        if uid in rows:
+            continue
+        rows[uid] = dict(state=state['uid'], visible=list(visible))
+        count += 1
+    compile_animation(context, keys)
+    return count
 
 
 def sync_style(scene, source, style):
@@ -844,7 +941,7 @@ def _migrate_v1(context):
     if not legacy:
         return
     controller = track(scene)
-    old_keys = keyframes(scene)
+    old_keys = json.loads(controller.get('pb_morph_keys', '{}')) if controller else {}
     groups = []
     for root in legacy:
         for group in groups:

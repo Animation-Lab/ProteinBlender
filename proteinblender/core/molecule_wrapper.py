@@ -32,6 +32,8 @@ class MoleculeWrapper:
         self.domains: Dict[str, DomainDefinition] = {}  # Key: domain_id
         self.residue_assignments = {}  # Track which residues are assigned to domains
         self.object_name = self.molecule.object.name if self.molecule and self.molecule.object else ""
+        from .assembly_metadata import initialize as initialize_assembly_metadata
+        initialize_assembly_metadata(self)
         
         # Handle both AtomArrayStack (multi-model) and AtomArray (single model)
         import biotite.structure as struc

@@ -554,10 +554,10 @@ def _split_payload(chain_id, count):
 
 
 @pytest.mark.parametrize("filename, expected", [
-    ("4ins.pdb", {"3", "4", "5", "6"}),
-    ("1ubq.pdb", {""}),
+    ("4ins.pdb", {"1", "2", "3", "4", "5", "6", "7"}),
+    ("1ubq.pdb", {"1"}),
 ])
-def test_deposited_picker_offers_only_assemblies_that_change_the_structure(filename, expected):
+def test_deposited_picker_includes_identity_and_chain_subset_assemblies(filename, expected):
     from types import SimpleNamespace
 
     mid = H.import_local(filename, "picker")

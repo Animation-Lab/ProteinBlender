@@ -199,6 +199,8 @@ class PROTEINBLENDER_PT_animation(Panel):
 
         tools.separator()
         tools.label(text=f"Current Frame: {current}", icon='TIME')
+        if any(kind == 'MORPHSET' for _, _, kind, _ in targets):
+            tools.operator('proteinblender.cycle_conformations', icon='TIME')
 
         # --- Keyframe list: scrolling once past 10 entries ---
         tools.separator()

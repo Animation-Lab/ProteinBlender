@@ -69,6 +69,7 @@ from .symmetry_bend_operators import (
     MOLECULE_PB_OT_remove_filament_bend,
     CLASSES as SYMMETRY_BEND_CLASSES,
 )
+from .assembly_controls import CLASSES as ASSEMBLY_CONTROLS_CLASSES
 from .symmetry_dialog import (
     MOLECULE_PB_OT_symmetry_dialog,
     MOLECULE_PB_OT_symmetry_preview,
@@ -166,6 +167,7 @@ CLASSES = (
     *SYMMETRY_BEND_CLASSES,
     # The Symmetry Builder dialog and its in-dialog Apply
     *SYMMETRY_DIALOG_CLASSES,
+    *ASSEMBLY_CONTROLS_CLASSES,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)

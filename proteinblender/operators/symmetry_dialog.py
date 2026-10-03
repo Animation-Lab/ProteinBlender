@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 #: Blender does not keep the strings an EnumProperty items callback returns
 #: alive, so they must be held on the Python side or the picker draws garbage.
-_TARGET_ENUM_CACHE = []
+_TARGET_ENUM_CACHE = {}
 
 #: What Cancel has to put back, as {molecule id: pre-preview state}.
 #:
@@ -119,8 +119,7 @@ def target_enum_items(self, context):
     if not items:
         items = [("", "No protein loaded", "Import a structure first")]
 
-    _TARGET_ENUM_CACHE = items
-    return _TARGET_ENUM_CACHE
+    return _TARGET_ENUM_CACHE.setdefault(tuple(items), items)
 
 
 def resolve_target(context, requested: str = "") -> str:
@@ -178,17 +177,15 @@ def restore_state(molecule, state: dict) -> None:
     assembly_core.build_assembly(molecule, str(assembly_id))
 
 
-_BIOLOGICAL_ENUM_CACHE = []
+_BIOLOGICAL_ENUM_CACHE = {}
 
 
 def biological_enum_items(self, context):
-    global _BIOLOGICAL_ENUM_CACHE
     molecule = _molecule(getattr(self, 'target_id', ''))
     infos = assembly_core.buildable_assemblies(molecule) if molecule else []
-    _BIOLOGICAL_ENUM_CACHE = [(info.assembly_id, info.label,
-                              "Biological transformation matrices from the structure file")
-                             for info in infos] or [("", "No deposited assembly", "")]
-    return _BIOLOGICAL_ENUM_CACHE
+    values = [(info.assembly_id, info.label, info.tooltip, i)
+              for i, info in enumerate(infos)] or [("", "No deposited assembly", "", 0)]
+    return _BIOLOGICAL_ENUM_CACHE.setdefault(tuple(values), values)
 
 
 def _assembly_choice_changed(self, context):
@@ -233,9 +230,11 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
 
     source: EnumProperty(
         name="Source",
-        items=[('GENERATED', 'Generated Symmetry', 'Create a ring or filament'),
-               ('BIOLOGICAL', 'Deposited Assembly (BMT)',
-                'Use the biological transformation matrices deposited with the structure')],
+        items=[('BIOLOGICAL', 'PDB-defined Assembly',
+                'Use the biological assemblies deposited with the structure'),
+               ('GENERATED', 'Generated Symmetry', 'Create a ring or filament')],
+        # Scripted calls historically build generated symmetry. The actual
+        # Create window selects the deposited source in invoke below.
         default='GENERATED',
     )
     # The public id is a string: Blender 5.1 validates enum keyword arguments
@@ -277,12 +276,17 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         molecule_id = resolve_target(context, self.molecule_id_to_update)
         molecule = _molecule(molecule_id)
 
+        if molecule is None and not self.properties.is_property_set('source'):
+            self.source = 'BIOLOGICAL'
+
         if molecule is not None:
             params = assembly_core.built_build_params(molecule) or {}
             if self.molecule_id_to_update:
                 molecule_id = params.get('source_item_id', molecule_id)
                 built_id = assembly_core.built_assembly_id(molecule)
                 self.source = 'BIOLOGICAL' if built_id and not params else 'GENERATED'
+            elif not self.properties.is_property_set('source'):
+                self.source = 'BIOLOGICAL' if assembly_core.available_assemblies(molecule) else 'GENERATED'
         if molecule_id:
             try:
                 self.target_id = molecule_id
@@ -315,6 +319,11 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             title="Edit Assembly" if self.molecule_id_to_update else "Create New Assembly")
 
     def check(self, context):
+        # Blender calls check() before the enum update callback for a menu
+        # selection. Accept the picker value first or syncing the old public
+        # id here immediately resets the user's selection.
+        if self.source == 'BIOLOGICAL':
+            self.assembly_id = self.assembly_choice
         _sync_assembly_choice(self, context)
         return True
 
@@ -334,14 +343,17 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
                 message = "Import a protein to use its deposited assembly"
             elif self.target_id != molecule.identifier:
                 message = "Choose the whole protein in Build from"
-            elif not assembly_core.has_buildable_symmetry(molecule):
-                message = "No additional assembly deposited for this protein"
+            elif not assembly_core.available_assemblies(molecule):
+                message = "No assembly deposited for this protein"
             else:
                 message = ""
             if message:
                 layout.label(text=message, icon='INFO')
                 return
             layout.prop(self, 'assembly_choice')
+            info = assembly_core.get_assembly_info(molecule, self.assembly_id)
+            if info:
+                layout.label(text=f'{info.transform_count} transformation applications')
             self._draw_apply(layout)
             return
 

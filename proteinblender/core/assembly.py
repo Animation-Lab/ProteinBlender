@@ -57,6 +57,7 @@ _ASSEMBLY_ID_KEY = "pb_assembly_id"
 #: describe that one instead. Living on the node means the record is created,
 #: saved and destroyed with the build it describes.
 _ASSEMBLY_PARAMS_KEY = "pb_assembly_params"
+_ASSEMBLY_OWNER_KEY = "pb_assembly_owner"
 
 #: MolecularNodes stores structures at 1/100 scale, so an Angstrom of operator
 #: translation is 0.01 Blender units.
@@ -94,15 +95,32 @@ class AssemblyInfo:
     #: what the file's own BIOMT numbering counts.
     transform_count: int
     chain_ids: List[str]
-    #: False when every transform is the identity, i.e. the "assembly" is just
-    #: the asymmetric unit already on screen.
+    #: False when every transform is the identity. Chain membership can still
+    #: make such an assembly differ from the asymmetric unit.
     has_symmetry: bool
+    description: str = ''
 
     @property
     def label(self) -> str:
         chains = ", ".join(self.chain_ids)
-        copies = f"{self.transform_count} cop{'y' if self.transform_count == 1 else 'ies'}"
-        return f"Assembly {self.assembly_id} - {copies} of chain{'' if len(self.chain_ids) == 1 else 's'} {chains}"
+        if self.description and self.description not in {'?', '.'}:
+            return f"Assembly {self.assembly_id} — {self.description}"
+        return f"Assembly {self.assembly_id} — chains {chains}"
+
+    @property
+    def tooltip(self) -> str:
+        return (f'{self.transform_count} transformation applications; '
+                f'chains {", ".join(self.chain_ids)}. Counts refer to placements, not protein subunits.')
+
+
+@dataclass
+class AssemblyOperator:
+    rotation: np.ndarray
+    translation: np.ndarray
+    chain_ids: tuple
+
+    def __iter__(self):
+        return iter((self.rotation, self.translation))
 
 
 def _molecule_object(molecule) -> Optional[bpy.types.Object]:
@@ -146,6 +164,8 @@ def _is_identity(matrix) -> bool:
 def available_assemblies(molecule) -> List[AssemblyInfo]:
     """Every assembly the molecule's file described, in file order."""
     infos = []
+    from .assembly_metadata import read
+    descriptions = read(molecule).get('descriptions', {})
     for assembly_id, transforms in _raw_assemblies(molecule).items():
         if not transforms:
             continue
@@ -170,13 +190,14 @@ def available_assemblies(molecule) -> List[AssemblyInfo]:
             transform_count=len(transforms),
             chain_ids=chain_ids,
             has_symmetry=has_symmetry,
+            description=descriptions.get(str(assembly_id), ''),
         ))
     return infos
 
 
 def buildable_assemblies(molecule) -> List[AssemblyInfo]:
-    """Only the assemblies that would actually put something new on screen."""
-    return [info for info in available_assemblies(molecule) if info.has_symmetry]
+    """Include identity placements: their chain subsets can differ from the ASU."""
+    return available_assemblies(molecule)
 
 
 def has_buildable_symmetry(molecule) -> bool:
@@ -188,7 +209,7 @@ def has_buildable_symmetry(molecule) -> bool:
     Gating the UI on mere presence would put a symmetry panel on every
     monomer, where building it would visibly do nothing.
     """
-    return bool(buildable_assemblies(molecule))
+    return any(info.has_symmetry for info in available_assemblies(molecule))
 
 
 def get_assembly_info(molecule, assembly_id: str) -> Optional[AssemblyInfo]:
@@ -390,8 +411,8 @@ def update_operator_points(molecule, operators) -> bool:
     if not operators:
         return False
 
-    prefix = f".pb_assembly_{molecule.identifier}_"
-    targets = [o for o in bpy.data.objects if o.name.startswith(prefix)]
+    targets = {points for _, node in _assembly_nodes(molecule)
+               for points, _ in _point_clouds(node.node_tree)}
     if not targets:
         return False
 
@@ -426,29 +447,37 @@ def update_operator_points(molecule, operators) -> bool:
 
 
 def _operators_for(molecule, assembly_id: str):
-    """(rotation 3x3, translation 3) for each operator of this assembly.
-
-    Only the operators that apply to chains this molecule actually has; a
-    transform naming chains that were never imported would place an empty copy.
-    """
+    """Placements with chain membership expressed in the imported chain names."""
     operators = []
+    from .assembly_metadata import read
+    chain_map = read(molecule).get('chains', {})
     for transform in _raw_assemblies(molecule).get(str(assembly_id), []):
         if not isinstance(transform, dict):
             continue
         matrix = np.array(transform.get("matrix"), dtype=float)
         if matrix.shape != (4, 4):
             continue
-        operators.append((matrix[:3, :3], matrix[:3, 3]))
+        chains = tuple(dict.fromkeys(chain_map.get(c, c) for c in transform.get('chain_ids', [])))
+        operators.append(AssemblyOperator(matrix[:3, :3], matrix[:3, 3], chains))
     return operators
 
 
 def _wire_assembly_into(obj, group, molecule, assembly_id, operators) -> bool:
-    """Instance this object's whole geometry once per operator."""
-    points = _build_points_object(obj, molecule, assembly_id, operators)
-    if points is None:
-        return False
-
-    node = _add_assembly_node(group, points)
+    """Respect the deposited chain membership on each placement."""
+    domain = next((d for d in molecule.domains.values() if d.object == obj), None)
+    if domain is not None:
+        chain = molecule._resolve_chain_socket_name(domain.chain_id)
+        chosen = [op for op in operators if not isinstance(op, AssemblyOperator) or chain in op.chain_ids]
+        tree = _assembly_node_tree(_build_points_object(obj, molecule, assembly_id, chosen))
+    else:
+        chains = list(obj.get('chain_ids', []))
+        selections = [[op for op in operators if not isinstance(op, AssemblyOperator) or c in op.chain_ids]
+                      for c in chains]
+        if all(len(ops) == len(operators) for ops in selections):
+            tree = _assembly_node_tree(_build_points_object(obj, molecule, assembly_id, operators))
+        else:
+            tree = _chain_assembly_tree(obj, molecule, assembly_id, selections)
+    node = _add_assembly_node(group, tree)
     if node is None:
         return False
 
@@ -532,6 +561,7 @@ def _build_points_object(obj, molecule, assembly_id, operators):
                 attribute.data[i].vector = value
 
     points = bpy.data.objects.new(name, mesh)
+    points[_ASSEMBLY_OWNER_KEY] = molecule.object
     points.hide_viewport = True
     points.hide_render = True
     points.hide_select = True
@@ -544,9 +574,8 @@ def _build_points_object(obj, molecule, assembly_id, operators):
     return points
 
 
-def _add_assembly_node(group, points):
+def _add_assembly_node(group, tree):
     """Instance the incoming geometry onto the operator points."""
-    tree = _assembly_node_tree(points)
     if tree is None:
         return None
 
@@ -563,6 +592,56 @@ def _add_assembly_node(group, points):
                 None)
 
 
+def _chain_selection(tree, geometry, index):
+    """Separate a styled chain, including source geometry wrapped in instances."""
+    realize = tree.nodes.new('GeometryNodeRealizeInstances')
+    tree.links.new(geometry, realize.inputs[0])
+    attr = tree.nodes.new('GeometryNodeInputNamedAttribute')
+    attr.data_type = 'INT'
+    attr.inputs['Name'].default_value = 'chain_id'
+    compare = tree.nodes.new('FunctionNodeCompare')
+    compare.data_type = 'INT'
+    compare.operation = 'EQUAL'
+    # Blender 5.2 exposes only the active typed sockets; earlier versions keep
+    # the other socket types hidden in the collection.
+    inputs = [s for s in compare.inputs if s.type == 'INT' and s.enabled]
+    tree.links.new(attr.outputs['Attribute'], inputs[0])
+    inputs[1].default_value = index
+    separate = tree.nodes.new('GeometryNodeSeparateGeometry')
+    separate.domain = 'POINT'
+    tree.links.new(realize.outputs[0], separate.inputs['Geometry'])
+    tree.links.new(compare.outputs[0], separate.inputs['Selection'])
+    return separate.outputs['Selection']
+
+
+def _chain_assembly_tree(obj, molecule, assembly_id, selections):
+    name = f'Assembly pb_assembly_{molecule.identifier}_{assembly_id}_{obj.name}_chains'
+    tree = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    tree[_ASSEMBLY_OWNER_KEY] = molecule.object
+    tree.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+    for name, default in ((FACTOR_SOCKET, 1.0), (STAGGER_SOCKET, 0.0)):
+        socket = tree.interface.new_socket(name, in_out='INPUT', socket_type='NodeSocketFloat')
+        socket.min_value, socket.max_value, socket.default_value = 0.0, 1.0, default
+    tree.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    source = tree.nodes.new('NodeGroupInput')
+    output = tree.nodes.new('NodeGroupOutput')
+    join = tree.nodes.new('GeometryNodeJoinGeometry')
+    tree.links.new(join.outputs[0], output.inputs[0])
+    for index, operators in enumerate(selections):
+        if not operators:
+            continue
+        points = _build_points_object(obj, molecule, f'{assembly_id}_chain{index}', operators)
+        branch = _assembly_node_tree(points)
+        branch['pb_assembly_chain'] = index
+        node = tree.nodes.new('GeometryNodeGroup')
+        node.node_tree = branch
+        tree.links.new(_chain_selection(tree, source.outputs[0], index), node.inputs[0])
+        for name in (FACTOR_SOCKET, STAGGER_SOCKET):
+            tree.links.new(source.outputs[name], node.inputs[name])
+        tree.links.new(node.outputs[0], join.inputs[0])
+    return tree
+
+
 def _assembly_node_tree(points):
     """Geometry in, the same geometry placed at every operator out."""
     name = f"Assembly {points.name.lstrip('.')}"
@@ -571,6 +650,9 @@ def _assembly_node_tree(points):
         bpy.data.node_groups.remove(existing)
 
     tree = bpy.data.node_groups.new(name, "GeometryNodeTree")
+    tree['pb_assembly_points'] = points
+    if points.get(_ASSEMBLY_OWNER_KEY) is not None:
+        tree[_ASSEMBLY_OWNER_KEY] = points[_ASSEMBLY_OWNER_KEY]
     tree.interface.new_socket("Geometry", in_out="INPUT",
                               socket_type="NodeSocketGeometry")
     factor = tree.interface.new_socket(
@@ -625,6 +707,8 @@ def _assembly_node_tree(points):
     # With Stagger at 0 every copy shares the same factor and they assemble
     # together; at 1 the last copy only begins as the first one finishes.
     start = math("MULTIPLY", delay, group_in.outputs[STAGGER_SOCKET], loc=(-650, -700))
+    # Even maximum delay must finish at progress 1 (and start at 0).
+    start = math("MINIMUM", start, 0.9999, loc=(-580, -760))
     span = math("SUBTRACT", 1.0, start, loc=(-500, -700))
     safe_span = math("MAXIMUM", span, 1e-4, loc=(-350, -700))
     elapsed = math("SUBTRACT", group_in.outputs[FACTOR_SOCKET], start, loc=(-350, -560))
@@ -698,6 +782,7 @@ def clear_assembly(molecule) -> bool:
     Returns True if anything was removed.
     """
     removed = False
+    points, trees = _assembly_datablocks(molecule)
 
     for obj in _target_objects(molecule):
         group = _node_group_of(obj)
@@ -713,23 +798,51 @@ def clear_assembly(molecule) -> bool:
             _unlink_and_remove(group, nodes[0])
             removed = True
 
-    _purge_assembly_datablocks(molecule)
+    _purge_assembly_datablocks(points, trees)
     return removed
 
 
-def _purge_assembly_datablocks(molecule) -> None:
-    """Drop the per-object point clouds and node groups a build created."""
-    prefix = f".pb_assembly_{molecule.identifier}_"
+def _assembly_datablocks(molecule):
+    """Find this assembly's resources by references, including older files.
 
-    for obj in [o for o in bpy.data.objects if o.name.startswith(prefix)]:
+    Names are not ownership: `1stm` is a prefix of `1stm_001`. Removing by
+    prefix used to delete the second protein's placement data while rebuilding
+    the first. Explicit owner references also cover an interrupted half-build.
+    """
+    points, trees = set(), set()
+
+    def visit(tree):
+        if tree is None or tree in trees:
+            return
+        trees.add(tree)
+        points.update(obj for obj, _ in _point_clouds(tree))
+        for node in tree.nodes:
+            if node.type == 'GROUP' and node.node_tree:
+                visit(node.node_tree)
+
+    for _, node in _assembly_nodes(molecule):
+        visit(node.node_tree)
+    owner = _molecule_object(molecule)
+    if owner is not None:
+        points.update(obj for obj in bpy.data.objects if obj.get(_ASSEMBLY_OWNER_KEY) == owner)
+        trees.update(tree for tree in bpy.data.node_groups if tree.get(_ASSEMBLY_OWNER_KEY) == owner)
+    return points, trees
+
+
+def _purge_assembly_datablocks(points, trees) -> None:
+    """Drop the exact point clouds and node groups captured before unlinking."""
+    for obj in points:
         mesh = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
         if mesh is not None and mesh.users == 0:
             bpy.data.meshes.remove(mesh)
 
-    tree_prefix = f"Assembly pb_assembly_{molecule.identifier}_"
-    for tree in [t for t in bpy.data.node_groups if t.name.startswith(tree_prefix)]:
-        if tree.users == 0:
+    while True:
+        unused = [tree for tree in trees if not tree.users]
+        if not unused:
+            break
+        for tree in unused:
+            trees.remove(tree)
             bpy.data.node_groups.remove(tree)
 
 
@@ -889,11 +1002,12 @@ def filter_operators(molecule, operators, range_limit: Optional[float] = None,
         except Exception:
             logger.exception("scipy unavailable; skipping the contact filter")
 
-    for rotation, translation in operators:
+    for operator in operators:
+        rotation, translation = operator
         offset = np.asarray(translation, dtype=float) * WORLD_SCALE
 
         if _is_identity_operator(rotation, offset):
-            kept.append((rotation, translation))
+            kept.append(operator)
             continue
 
         if range_limit is not None:
@@ -909,7 +1023,7 @@ def filter_operators(molecule, operators, range_limit: Optional[float] = None,
             if not np.isfinite(nearest).any():
                 continue
 
-        kept.append((rotation, translation))
+        kept.append(operator)
 
     return kept
 
@@ -941,33 +1055,40 @@ def realize_copies(molecule, force: bool = False):
     Returns the objects created, or ``None`` when the copy count is over
     :data:`REALIZE_THRESHOLD` and ``force`` was not set.
     """
-    from mathutils import Matrix as BlenderMatrix
-
     tag = built_assembly_id(molecule)
     if tag is None:
         logger.warning("nothing is built, so there is nothing to realize")
         return []
 
-    sources = _target_objects(molecule)
-    operators = _operators_of_built_nodes(molecule)
-    if not operators:
-        logger.warning("could not recover the operators behind the build")
-        return []
-
-    if len(operators) > REALIZE_THRESHOLD and not force:
+    bpy.context.view_layer.update()
+    jobs = []
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        nodes = _existing_assembly_nodes(group) if group else []
+        if not nodes:
+            continue
+        placements = []
+        for node in nodes:
+            factor = float(node.inputs[FACTOR_SOCKET].default_value)
+            stagger = float(node.inputs[STAGGER_SOCKET].default_value)
+            for points, chain in _point_clouds(node.node_tree):
+                placements.extend((rotation, offset, chain) for rotation, offset in
+                                  _operators_from_points(points, factor, stagger))
+        jobs.append((obj, group, placements))
+    if max((len(placements) for _, _, placements in jobs), default=0) > REALIZE_THRESHOLD and not force:
         return None
 
     created = []
-    for obj in sources:
-        group = _node_group_of(obj)
-        if group is None or not _existing_assembly_nodes(group):
-            continue
-
-        for index, (rotation, offset) in enumerate(operators):
-            if index == 0 and _is_identity_operator(rotation, offset):
-                # The first copy is the structure already on screen.
+    hidden = []
+    for obj, group, placements in jobs:
+        retained = False
+        for index, (rotation, offset, chain) in enumerate(placements):
+            if not retained and chain is None and _is_identity_operator(rotation, offset):
+                retained = True
                 continue
-            created.append(_realized_copy(obj, group, rotation, offset, index))
+            created.append(_realized_copy(obj, group, rotation, offset, index, chain))
+        if not retained:
+            hidden.append(obj)
 
     # Only tear the instanced assembly down if something replaced it. An
     # assembly trimmed to the original alone has nothing to realize, and
@@ -975,17 +1096,23 @@ def realize_copies(molecule, force: bool = False):
     # from a UI step as ordinary as cutting away and then pressing Realize.
     if created:
         clear_assembly(molecule)
+        for obj in hidden:
+            obj.hide_render = True
+            obj.hide_set(True)
 
     return created
 
 
-def _realized_copy(obj, group, rotation, offset, index):
+def _realized_copy(obj, group, rotation, offset, index, chain=None):
     """One real object placed where its instance was."""
     from mathutils import Matrix as BlenderMatrix
 
     copy = obj.copy()
     copy.name = f"{obj.name}_copy_{index}"
     copy.data = obj.data                       # atoms stay shared
+    copy.animation_data_clear()                # freeze the evaluated placement
+    for constraint in list(copy.constraints):
+        copy.constraints.remove(constraint)
 
     # Its own node group, minus the assembly node: the copy is placed by its
     # object transform, so re-instancing inside it would multiply the copies.
@@ -994,6 +1121,10 @@ def _realized_copy(obj, group, rotation, offset, index):
     for node in [n for n in own_group.nodes
                  if n.name.startswith(ASSEMBLY_NODE_NAME)]:
         _unlink_and_remove(own_group, node)
+    if chain is not None:
+        output = next(n for n in own_group.nodes if n.type == 'GROUP_OUTPUT')
+        source = output.inputs[0].links[0].from_socket
+        own_group.links.new(_chain_selection(own_group, source, chain), output.inputs[0])
 
     modifier = next((m for m in copy.modifiers if m.type == "NODES"), None)
     if modifier is not None:
@@ -1005,18 +1136,40 @@ def _realized_copy(obj, group, rotation, offset, index):
             placement[r][c] = float(rotation[r][c])
         placement[r][3] = float(offset[r])
 
-    copy.matrix_world = obj.matrix_world @ placement
-
     for collection in obj.users_collection:
         collection.objects.link(copy)
         break
     else:
         bpy.context.scene.collection.objects.link(copy)
 
+    copy.matrix_world = obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world @ placement
+
     return copy
 
 
+def _point_clouds(tree):
+    points = tree.get('pb_assembly_points')
+    if points is None:  # Assemblies saved before explicit point-cloud references.
+        points = next((n.inputs['Object'].default_value for n in tree.nodes
+                       if n.bl_idname == 'GeometryNodeObjectInfo' and n.inputs['Object'].default_value), None)
+    if points is not None:
+        yield points, tree.get('pb_assembly_chain')
+    else:
+        for node in tree.nodes:
+            if node.type == 'GROUP' and node.node_tree:
+                yield from _point_clouds(node.node_tree)
+
+
 def _operators_of_built_nodes(molecule):
+    """Recover one source's current placements (legacy callers)."""
+    for _, node in _assembly_nodes(molecule):
+        for points, _ in _point_clouds(node.node_tree):
+            return _operators_from_points(points, float(node.inputs[FACTOR_SOCKET].default_value),
+                                          float(node.inputs[STAGGER_SOCKET].default_value))
+    return []
+
+
+def _operators_from_points(points, factor=1.0, stagger=0.0):
     """(rotation, offset-in-Blender-units) for each copy currently placed.
 
     Read back off the point cloud a build wrote, so it describes what is
@@ -1024,8 +1177,6 @@ def _operators_of_built_nodes(molecule):
     """
     from mathutils import Quaternion
 
-    prefix = f".pb_assembly_{molecule.identifier}_"
-    points = next((o for o in bpy.data.objects if o.name.startswith(prefix)), None)
     if points is None or points.data is None:
         return []
 
@@ -1044,14 +1195,17 @@ def _operators_of_built_nodes(molecule):
 
     axes, angles = read("axis", 3), read("angle", 1)
     translations, pivots = read("trans", 3), read("pivot", 3)
+    delays = read('delay', 1)
     if axes is None or angles is None or translations is None or pivots is None:
         return []
 
     operators = []
     for i in range(count):
+        start = min(float(delays[i]) * stagger, 0.9999) if delays is not None else 0.0
+        progress = float(np.clip((factor - start) / max(1.0 - start, 1e-4), 0.0, 1.0))
         rotation = np.array(
-            Quaternion(axes[i].tolist(), float(angles[i])).to_matrix())
-        offset = rotation @ pivots[i] - pivots[i] + translations[i]
+            Quaternion(axes[i].tolist(), float(angles[i]) * progress).to_matrix())
+        offset = rotation @ pivots[i] - pivots[i] + translations[i] * progress
         operators.append((rotation, offset))
     return operators
 
@@ -1095,10 +1249,11 @@ def cutaway_operators(molecule, operators, normal=(0.0, -1.0, 0.0),
     plane = offset * WORLD_SCALE
 
     kept = []
-    for rotation, translation in operators:
+    for operator in operators:
+        rotation, translation = operator
         placed = rotation @ centre + np.asarray(translation, dtype=float) * WORLD_SCALE
         if float(np.dot(placed - centre, direction)) > plane:
             continue          # this copy is on the side being removed
-        kept.append((rotation, translation))
+        kept.append(operator)
 
     return kept

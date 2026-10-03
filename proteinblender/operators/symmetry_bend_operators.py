@@ -28,13 +28,18 @@ def _active(context, molecule_id=""):
     return _molecule(molecule_id or resolve_active_molecule_id(context) or "")
 
 
-def _settings(context):
+def _settings(context, molecule):
     scene = context.scene
+    return _built_settings(scene, molecule)
+
+
+def _built_settings(scene, molecule):
+    built = assembly_core.built_build_params(molecule) or {}
     return dict(
-        count=getattr(scene, "pb_symmetry_count", 10),
-        rise=getattr(scene, "pb_symmetry_rise", 0.0),
-        twist=getattr(scene, "pb_symmetry_twist", 0.0),
-        axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
+        count=built.get("count", getattr(scene, "pb_symmetry_count", 10)),
+        rise=built.get("rise", getattr(scene, "pb_symmetry_rise", 0.0)),
+        twist=built.get("twist", getattr(scene, "pb_symmetry_twist", 0.0)),
+        axis=tuple(built.get("axis", getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0)))),
     )
 
 
@@ -53,7 +58,7 @@ def _rebuild_filament(context, molecule) -> bool:
     if tag is None or not str(tag).startswith("generated:H"):
         return False
 
-    operators = symmetry_bend.build_operators(molecule, "H", **_settings(context))
+    operators = symmetry_bend.build_operators(molecule, "H", **_settings(context, molecule))
     if not operators:
         return False
     if assembly_core.update_operator_points(molecule, operators):
@@ -89,6 +94,8 @@ class MOLECULE_PB_OT_add_filament_bend(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty()
+    n_points: IntProperty(name="Nodes", default=bend_rig.RES_DEFAULT,
+                          min=bend_rig.RES_MIN, max=bend_rig.RES_MAX)
 
     def execute(self, context):
         molecule = _active(context, self.molecule_id)
@@ -99,12 +106,13 @@ class MOLECULE_PB_OT_add_filament_bend(Operator):
             self.report({"INFO"}, "This filament already has a bend")
             return {"CANCELLED"}
 
-        settings = _settings(context)
+        settings = _settings(context, molecule)
         curve = symmetry_bend.add_bend(
             molecule,
             count=settings["count"], rise=settings["rise"],
             axis=settings["axis"],
-            n_points=getattr(context.scene, "pb_bend_nodes", bend_rig.RES_DEFAULT))
+            n_points=(self.n_points if self.properties.is_property_set('n_points')
+                      else getattr(context.scene, "pb_bend_nodes", bend_rig.RES_DEFAULT)))
         if curve is None:
             self.report({"WARNING"},
                         "This filament has no length to bend along")
@@ -205,7 +213,7 @@ class MOLECULE_PB_OT_filament_bend_preset(Operator):
             self.report({"WARNING"}, "This filament has no bend")
             return {"CANCELLED"}
 
-        settings = _settings(context)
+        settings = _settings(context, molecule)
         if not symmetry_bend.apply_preset(
                 molecule, self.preset,
                 count=settings["count"], rise=settings["rise"],
@@ -293,11 +301,7 @@ def filament_bend_follow_handler(scene, depsgraph):
                 continue
 
             operators = symmetry_bend.build_operators(
-                molecule, "H",
-                count=getattr(scene, "pb_symmetry_count", 10),
-                rise=getattr(scene, "pb_symmetry_rise", 0.0),
-                twist=getattr(scene, "pb_symmetry_twist", 0.0),
-                axis=tuple(getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0))),
+                molecule, "H", **_built_settings(scene, molecule),
             )
             if operators:
                 # In place only. A full rebuild from here would create and

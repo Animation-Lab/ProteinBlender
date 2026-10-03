@@ -340,3 +340,22 @@ def test_a_cutaway_then_realize_keeps_the_survivors(scene, sm):
     else:
         assert core.built_assembly_id(molecule) == "cut", (
             "nothing was realized, so the cutaway should still be on screen")
+
+
+def test_cutaway_popup_parameters_and_built_settings_override_scene_defaults(scene, sm):
+    molecule = _import()
+    scene.pb_symmetry_kind = "C"
+    scene.pb_symmetry_order = 8
+    bpy.ops.molecule.build_symmetry(molecule_id=molecule.identifier)
+    whole = _placed(molecule)
+    assert bpy.ops.molecule.cutaway(
+        molecule_id=molecule.identifier, normal=(0, -1, 0), offset=0) == {'FINISHED'}
+    expected = _placed(molecule)
+    assert 0 < expected < whole
+    bpy.ops.molecule.build_symmetry(molecule_id=molecule.identifier)
+    # Another builder's defaults must not alter this assembly's copies.
+    scene.pb_symmetry_order = 2
+    scene.pb_cutaway_offset = -1000.0
+    assert bpy.ops.molecule.cutaway(
+        molecule_id=molecule.identifier, normal=(0, -1, 0), offset=0) == {'FINISHED'}
+    assert _placed(molecule) == expected

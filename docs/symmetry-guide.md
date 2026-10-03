@@ -63,14 +63,16 @@ There is nothing to click on, and no way to colour one subunit differently.
 **Realizing** converts them into real objects, buying per-copy identity at the cost of many more objects.
 ChimeraX makes exactly this tradeoff, and switches its default at twelve copies; ProteinBlender uses the same threshold.
 
-## Why "is there symmetry" is subtler than it sounds
+## Assemblies with identity operators
 
 Nearly every deposited structure carries an assembly record.
 For a monomer that record is a single **identity** operator, which is the asymmetric unit under another name.
 
-So the deposited-assembly picker does not ask "does this file mention an assembly".
-It asks "does this file describe an operator that would put something new on screen".
-Structures failing that test show an explanatory message in the Assembly dialog, because building an identity-only assembly would visibly do nothing.
+The assembly picker includes these definitions too. An identity operator can
+select a subset of the deposited chains: for **1STM**, assembly 2 selects one
+protein chain and assembly 3 selects the five-chain pentamer. Neither requires
+moving the selected chains. Each transformation applies only to the chains
+specified by the deposited assembly.
 
 ---
 
@@ -82,14 +84,13 @@ Open **Builders → Create New Assembly** for either source:
 
 - **Generated Symmetry** repeats the protein, chain, or domain chosen in
   **Build from**. Other chains and domains remain as they were.
-- **Deposited Assembly (BMT)** uses a whole protein's biological transformation
-  matrices. The **Assembly** picker offers the file's assemblies that add
-  symmetry, including subassemblies when available. If the protein already
-  contains its complete assembly, the dialog explains that there is nothing
-  additional to build.
+- **PDB-defined Assembly** uses a whole protein's deposited biological
+  transformation matrices. This is the default when the protein contains
+  assembly definitions. The **Assembly** picker includes all definitions, with
+  their depositor descriptions when provided, including identity-only subsets.
 
-For example, import **5IM3**, choose its protein row, select **Deposited
-Assembly (BMT)**, then assembly **1**. Its two deposited protein chains become
+For example, import **5IM3**, choose its protein row, select **PDB-defined
+Assembly**, then assembly **1**. Its two deposited protein chains become
 the four-chain biological assembly. Both PDB BIOMT records and mmCIF biological
 assembly matrices are supported; offline tests compare the copies with the
 source coordinates in both formats.
@@ -143,12 +144,14 @@ settings; the trash removes its copies and leaves the source hierarchy intact.
 Biological assemblies appear beneath their protein as **Biological Assembly 1**
 (or the chosen assembly number), with the same edit and delete controls.
 
-Click the assembly child's name or checkbox to access **Assembly Controls**
-for animation, axes, cutaway, and realization. A helical child also offers
-bend controls. These live controls use the clicked child's protein, even when
-another protein was imported more recently. Selecting the parent protein does
-not open a separate assembly panel. Delete the assembly child to return to the
-asymmetric unit (the imported protein without its generated copies).
+Click the **sliders icon** immediately left of the assembly row's pencil to
+open **Assembly Controls**, or right-click that row and choose **Assembly
+Controls** from its menu. The tooltip identifies the sliders icon. This popup
+contains Assembly progress, Copy delay, keyframing, axes, cutaway, and realization;
+a helical assembly also offers bend controls. It always targets that row's
+assembly, regardless of selection. Slider edits update the viewport immediately,
+remain when the popup closes, and can be undone with Blender's Undo.
+Delete the assembly child to return to the asymmetric unit.
 
 The row is reconstructed from the built geometry nodes after undo and file
 loading. Each protein currently carries one assembly; a new build replaces its
@@ -157,8 +160,10 @@ or domain.
 
 ## Bend
 
-Appears in Assembly Controls when a built **helical** child is clicked, because it is the only kind with a path to run along - a ring has nowhere to bend to.
-It stays in the panel rather than moving into the builder's dialog because dragging the control nodes is a mode: a dialog that closed over it would end the drag at the moment it began.
+Open **Assembly Controls** for a built **helical** child to find Bend.
+A ring has no path to bend. After **Add Bend** or **Edit Bend**, close the popup
+and drag the selected control nodes in the viewport. Reopen the same popup to
+change node count, choose a preset, or remove the bend.
 
 Real filaments are not straight.
 Actin curves, microtubules flex, amyloid twists across a field of view.
@@ -201,8 +206,12 @@ This is what turns a 60-copy capsid into a legible patch.
 
 Appears once something is built.
 
-- **Assembled** - 0 puts every copy exactly back on the asymmetric unit, 1 is the full assembly, and anything between is a real intermediate.
-- **Stagger** - 0 moves every copy together; 1 has them arrive one after another.
+- **Assembly progress** - 0 overlaps each copy with its source, 1 places every
+  copy at its deposited or generated position. Intermediate values illustrate
+  assembly motion; they are not a simulation of a physical assembly pathway.
+- **Copy delay** - 0 moves copies together; higher values delay successive
+  copies. This changes motion between the endpoints, so adjust progress or
+  play a keyed animation to see its effect. At progress 1 every copy has arrived.
 - **Keyframe** - keys the current state at the playhead.
   Key 0 on one frame and 1 on another to animate the assembly forming.
 - **Clear** - removes the copies.
@@ -224,7 +233,9 @@ Whole copies are removed rather than atoms being sliced, which is what published
 ## Realize Copies
 
 Converts instances into real, separately selectable objects that still share their atom data.
-Refused above twelve copies unless forced.
+It preserves each chain's current position, including partial assembly progress
+and copy delay. The new copies freeze those placements. Refused above twelve
+placements per source unless forced.
 
 ---
 
@@ -237,7 +248,7 @@ The counts are what the panel will show you, and the timings are from a normal d
 
 | PDB | What it is | Operators | Shows off |
 |---|---|---|---|
-| **1ubq** | Ubiquitin, monomer | none | No additional deposited assembly offered |
+| **1ubq** | Ubiquitin, monomer | identity only | Assembly matches the imported monomer |
 | **4ins** | Insulin | assembly 3: **3** | The clean first build; a visible 3-fold from the top |
 | **1hho** | Haemoglobin | **2** | The smallest possible assembly: one operator makes the tetramer |
 | **1fha** | Ferritin | **24** | Octahedral. One chain becomes a 24-copy shell, and it loads in under a second |
@@ -246,7 +257,7 @@ The counts are what the panel will show you, and the timings are from a normal d
 | **1cd3** | Icosahedral capsid | **60** | The heavyweight: 14 chains x 60. Also carries pentamer and hexamer sub-assemblies |
 | **2btv** | Bluetongue virus core | **60** (and **2500**) | Cautionary: its assembly 6 is a 2500-operator crystal lattice |
 | **1atn** | Actin (bundled) | none useful | The generative helical demo: real actin parameters on a real actin |
-| **2gls** | Glutamine synthetase | identity only | Gating on a *big* structure: 48 chains, already complete, nothing to build |
+| **2gls** | Glutamine synthetase | identity only | 48 chains, already complete in the imported structure |
 
 `1ubq`, `4ins`, `1atn`, `1aki` and `4hhb` are bundled in `tests/data/`; the rest download.
 

@@ -236,30 +236,6 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default='cif',
     )
 
-_assembly_slider_sync = False
-
-
-def sync_assembly_controls(context):
-    """Load the clicked child's live controls without changing either assembly."""
-    global _assembly_slider_sync
-    from ..core import assembly
-    from ..utils.scene_manager import resolve_active_assembly_molecule
-    from ..operators.assembly_operators import apply_symmetry_settings
-
-    molecule = resolve_active_assembly_molecule(context)
-    if molecule is None:
-        return
-    _assembly_slider_sync = True
-    try:
-        context.scene.pb_assembly_factor = assembly.get_assembly_factor(molecule)
-        context.scene.pb_assembly_stagger = assembly.get_assembly_stagger(molecule)
-        params = assembly.built_build_params(molecule)
-        if params:
-            apply_symmetry_settings(context.scene, params)
-    finally:
-        _assembly_slider_sync = False
-
-
 def _push_assembly_factor(self, context):
     """Send the sliders straight to the assembly nodes of the active protein.
 
@@ -269,8 +245,6 @@ def _push_assembly_factor(self, context):
     from ..core import assembly as assembly_core
     from ..utils.scene_manager import resolve_active_assembly_molecule, resolve_active_molecule
 
-    if _assembly_slider_sync:
-        return
     molecule = resolve_active_assembly_molecule(context) or resolve_active_molecule(context)
     if molecule is None:
         return
@@ -326,7 +300,7 @@ def register():
         items=_assembly_enum_items,
     )
     bpy.types.Scene.pb_assembly_factor = FloatProperty(
-        name="Assembled",
+        name="Assembly progress",
         description=("How far the copies have travelled from the asymmetric "
                      "unit to the full assembly. Keyframe this to animate the "
                      "assembly forming"),
@@ -394,7 +368,7 @@ def register():
         default=0.0, min=-1000.0, max=1000.0,
     )
     bpy.types.Scene.pb_assembly_stagger = FloatProperty(
-        name="Stagger",
+        name="Copy delay",
         description=("Spread the copies' arrivals across the animation "
                      "instead of moving them together"),
         min=0.0, max=1.0, default=0.0, subtype="FACTOR",

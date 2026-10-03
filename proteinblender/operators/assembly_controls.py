@@ -1,95 +1,112 @@
-"""Live controls for the assembly child selected in the PB Outliner.
+"""Assembly controls opened explicitly from an assembly's PB Outliner row."""
 
-Creation and editing share the Assembly dialog. Animation and bend controls
-stay beside the viewport while working with an existing assembly child.
-"""
-
-from bpy.types import Panel
+from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, StringProperty
+from bpy.types import Operator
 
 from ..core import assembly as assembly_core
-from ..core import symmetry_builder
-from ..utils.scene_manager import resolve_active_assembly_molecule
+from ..core import bend_rig, symmetry_builder, symmetry_bend
+from ..utils.scene_manager import ProteinBlenderScene
 
 
-def _active_molecule(context):
-    return resolve_active_assembly_molecule(context)
-
-
-class PROTEINBLENDER_PT_symmetry(Panel):
-    """Animation and bend controls for either kind of assembly child."""
-
+class MOLECULE_PB_OT_assembly_controls(Operator):
+    bl_idname = "molecule.assembly_controls"
     bl_label = "Assembly Controls"
-    bl_idname = "PROTEINBLENDER_PT_symmetry"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = "scene"
-    bl_options = {'HIDE_HEADER', 'HEADER_LAYOUT_EXPAND'}
-    bl_order = 2  # after the outliner
+    bl_description = (
+        "Assembly Controls: adjust assembly progress and copy delay, keyframe "
+        "the assembly, show axes, cut away copies, or bend a filament")
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
-    @classmethod
-    def poll(cls, context):
-        """Open through an assembly child, for both deposited and generated builds."""
-        try:
-            return _active_molecule(context) is not None
-        except Exception:
-            return False
+    molecule_id: StringProperty(options={'HIDDEN'})
+    progress: FloatProperty(
+        name="Assembly progress", min=0.0, max=1.0, default=1.0,
+        subtype='FACTOR',
+        description="0 overlaps the copies; 1 places them in the full assembly")
+    copy_delay: FloatProperty(
+        name="Copy delay", min=0.0, max=1.0, default=0.0,
+        subtype='FACTOR',
+        description="Delay successive copies during assembly progress; has no effect at 0 or 1")
+    cut_direction: FloatVectorProperty(
+        name="Cut Direction", default=(0.0, -1.0, 0.0), size=3, subtype='XYZ',
+        description="The side of the assembly to take away")
+    cut_depth: FloatProperty(
+        name="Cut Depth", default=0.0, min=-1000.0, max=1000.0,
+        description="Angstrom to move the cut plane; larger values take less away")
+    bend_nodes: IntProperty(
+        name="Nodes", default=bend_rig.RES_DEFAULT,
+        min=bend_rig.RES_MIN, max=bend_rig.RES_MAX,
+        description="How many control handles shape the filament's bend path")
+
+    def _molecule(self):
+        molecule = ProteinBlenderScene.get_instance().molecules.get(self.molecule_id)
+        if molecule is not None and assembly_core.built_assembly_id(molecule) is not None:
+            return molecule
+        return None
+
+    def invoke(self, context, event):
+        molecule = self._molecule()
+        if molecule is None:
+            self.report({'WARNING'}, "This assembly is no longer available")
+            return {'CANCELLED'}
+        self.progress = assembly_core.get_assembly_factor(molecule)
+        self.copy_delay = assembly_core.get_assembly_stagger(molecule)
+        self.bend_nodes = len(symmetry_bend.get_bend_nodes(molecule)) or bend_rig.RES_DEFAULT
+        # Auto-execution gives edits immediate viewport feedback and Blender
+        # undo, just like the outliner's color popup. Dismissing keeps edits.
+        return context.window_manager.invoke_props_popup(self, event)
+
+    def check(self, context):
+        return True
+
+    def execute(self, context):
+        molecule = self._molecule()
+        if molecule is None:
+            return {'CANCELLED'}
+        assembly_core.set_assembly_factor(molecule, self.progress, stagger=self.copy_delay)
+        for area in getattr(context.screen, 'areas', []):
+            area.tag_redraw()
+        return {'FINISHED'}
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        molecule = _active_molecule(context)
+        layout.operator_context = 'INVOKE_DEFAULT'
+        molecule = self._molecule()
         if molecule is None:
+            layout.label(text="This assembly is no longer available", icon='INFO')
             return
-
-        box = layout.box()
-        box.label(text=f"Assembly Controls - {molecule.identifier}", icon='MOD_ARRAY')
-
-        built_id = assembly_core.built_assembly_id(molecule)
-
-        # Bend follows what is *built*, not what the dialog's picker says: a
-        # path to bend exists once there is a filament on screen. It stays on
-        # the panel rather than moving into the dialog because dragging the
-        # control nodes is a mode, and a dialog that closes over it would end
-        # the drag at the moment it began.
-        if symmetry_builder.built_symmetry_kind(molecule) == "H":
-            box.separator()
-            self._draw_bend(box, scene, molecule)
-
-        if built_id is not None:
-            box.separator()
-            self._draw_animation(box, scene, molecule, built_id)
-
-        box.separator(factor=0.5)
+        layout.label(text=molecule.identifier, icon='MOD_ARRAY')
+        self._draw_animation(layout, molecule,
+                             assembly_core.built_assembly_id(molecule))
+        if symmetry_builder.built_symmetry_kind(molecule) == 'H':
+            layout.separator()
+            self._draw_bend(layout, context.scene, molecule)
 
     # -- bending a filament -------------------------------------------------
 
     def _draw_bend(self, box, scene, molecule):
         """Only for helical: a ring or a double ring has no path to follow."""
-        from ..core import bend_rig, symmetry_bend
-
         box.separator(factor=0.5)
         box.label(text="Bend")
 
         if not symmetry_bend.has_bend(molecule):
             note = box.row()
             note.enabled = False
-            note.label(text="Subunits stay rigid - the path bends, not them",
+            note.label(text="Subunits stay rigid as the path bends",
                        icon='INFO')
             add = box.row(align=True)
             add_op = add.operator("molecule.add_filament_bend",
                                   text="Add Bend", icon='CURVE_BEZCURVE')
             add_op.molecule_id = molecule.identifier
+            add_op.n_points = self.bend_nodes
             return
 
         nodes = symmetry_bend.get_bend_nodes(molecule)
 
         count = box.row(align=True)
-        count.prop(scene, "pb_bend_nodes")
+        count.prop(self, "bend_nodes")
         apply_count = count.operator("molecule.set_filament_bend_nodes",
                                      text="", icon='CHECKMARK')
         apply_count.molecule_id = molecule.identifier
-        apply_count.n_points = getattr(scene, "pb_bend_nodes",
-                                       bend_rig.RES_DEFAULT)
+        apply_count.n_points = self.bend_nodes
 
         presets = box.row(align=True)
         for identifier, label, _description in bend_rig.PRESETS:
@@ -105,6 +122,8 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         remove_op = actions.operator("molecule.remove_filament_bend",
                                      text="Remove", icon='X')
         remove_op.molecule_id = molecule.identifier
+
+        box.label(text="Close popup to drag the selected nodes", icon='INFO')
 
         # Say whether the rig is doing anything, not merely that it exists -
         # a freshly added bend is straight until a node is dragged. Measured
@@ -131,14 +150,18 @@ class PROTEINBLENDER_PT_symmetry(Panel):
 
     # -- animation ---------------------------------------------------------
 
-    def _draw_animation(self, box, scene, molecule, built_id):
+    def _draw_animation(self, box, molecule, built_id):
         kind = symmetry_builder.built_symmetry_kind(molecule)
         label = f"Generated {kind}" if kind else f"Assembly {built_id}"
         box.label(text=f"{label} built", icon='CHECKMARK')
 
         anim = box.column(align=True)
-        anim.prop(scene, "pb_assembly_factor", slider=True)
-        anim.prop(scene, "pb_assembly_stagger", slider=True)
+        anim.prop(self, "progress", slider=True)
+        anim.prop(self, "copy_delay", slider=True)
+        anim.label(text='0 = overlapping; 1 = assembled')
+        anim.label(text='Copy delay affects progress between 0 and 1')
+        edit = box.operator('molecule.symmetry_dialog', text='Change Assembly…', icon='GREASEPENCIL')
+        edit.molecule_id_to_update = molecule.identifier
 
         from ..core import symmetry_axes
         axes_row = box.row(align=True)
@@ -162,12 +185,14 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         cut = box.column(align=True)
         cut_row = cut.row(align=True)
         cut_row.label(text="Direction")
-        cut_row.prop(scene, "pb_cutaway_normal", text="")
-        cut.prop(scene, "pb_cutaway_offset")
+        cut_row.prop(self, "cut_direction", text="")
+        cut.prop(self, "cut_depth")
         cut_row = box.row(align=True)
         cut_op = cut_row.operator("molecule.cutaway", text="Cut Away",
                                   icon='MOD_BOOLEAN')
         cut_op.molecule_id = molecule.identifier
+        cut_op.normal = self.cut_direction
+        cut_op.offset = self.cut_depth
 
         box.separator(factor=0.5)
         real = box.row(align=True)
@@ -180,6 +205,4 @@ class PROTEINBLENDER_PT_symmetry(Panel):
         note.label(text="Copies are instances - one set of atoms", icon='INFO')
 
 
-CLASSES = (
-    PROTEINBLENDER_PT_symmetry,
-)
+CLASSES = (MOLECULE_PB_OT_assembly_controls,)
