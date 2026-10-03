@@ -409,7 +409,6 @@ def _ensure_material(name, color, roughness=0.4):
     mat = bpy.data.materials.get(name)
     if mat is None:
         mat = bpy.data.materials.new(name)
-        mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf is not None:
         bsdf.inputs["Base Color"].default_value = color

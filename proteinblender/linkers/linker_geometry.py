@@ -1151,7 +1151,6 @@ def setup_linker_material(obj: bpy.types.Object, linker_def) -> None:
     mat = bpy.data.materials.get(mat_name)
     if not mat:
         mat = bpy.data.materials.new(name=mat_name)
-        mat.use_nodes = True
         bsdf = mat.node_tree.nodes.get("Principled BSDF")
         if bsdf:
             bsdf.inputs["Roughness"].default_value = 0.6

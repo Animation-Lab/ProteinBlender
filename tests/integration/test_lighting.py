@@ -163,7 +163,6 @@ def test_illustration_is_flat_has_contours_and_restores_shader(scene, tmp_path):
     for face in sphere.data.polygons:
         face.use_smooth = True
     material = bpy.data.materials.new('Flat test blue')
-    material.use_nodes = True
     shader = material.node_tree.nodes.get('Principled BSDF')
     shader.inputs['Base Color'].default_value = (.04, .25, .8, 1)
     sphere.data.materials.append(material)

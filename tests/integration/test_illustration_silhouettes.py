@@ -54,7 +54,6 @@ def camera(scene, size=4, resolution=128):
 
 def color(obj, rgba):
     material = bpy.data.materials.new('Silhouette color')
-    material.use_nodes = True
     material.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = rgba
     obj.data.materials.append(material)
 

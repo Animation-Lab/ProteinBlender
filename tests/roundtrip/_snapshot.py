@@ -493,8 +493,11 @@ def _serialize_object_data(obj):
                 'relative_key': key.relative_key.name,
             }
     if obj.type == 'LIGHT':
+        # Skip deprecated properties (Light.use_nodes): reading one makes
+        # Blender warn that it is going away, and it carries no state of its own.
         entry['lighting'] = {p.identifier: _serialize_value(p, getattr(data, p.identifier), 0)
-                             for p in data.bl_rna.properties if not p.is_readonly}
+                             for p in data.bl_rna.properties
+                             if not p.is_readonly and not p.is_deprecated}
 
     vertices = getattr(data, "vertices", None)
     if vertices is not None:
@@ -600,8 +603,8 @@ def _serialize_object(obj, object_props):
 
 
 def _serialize_material(material):
-    entry = {"name": material.name, "use_nodes": bool(material.use_nodes)}
-    if not material.use_nodes or material.node_tree is None:
+    entry = {"name": material.name, "has_node_tree": material.node_tree is not None}
+    if material.node_tree is None:
         entry["diffuse_color"] = [_round(v) for v in material.diffuse_color]
         return entry
     entry["tree"] = _serialize_node_tree(material.node_tree)
@@ -641,7 +644,7 @@ def _reachable_node_groups():
         for mod in obj.modifiers:
             walk(getattr(mod, "node_group", None))
         for slot in (getattr(obj.data, "materials", None) or []):
-            if slot is not None and slot.use_nodes:
+            if slot is not None and slot.node_tree is not None:
                 walk(slot.node_tree)
     for scene in bpy.data.scenes:
         walk(scene.compositing_node_group)

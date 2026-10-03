@@ -368,7 +368,6 @@ def _ensure_material(name: str, color: Tuple[float, float, float, float],
     mat = bpy.data.materials.get(name)
     if mat is None:
         mat = bpy.data.materials.new(name)
-        mat.use_nodes = True
     # Re-color if it already exists.
     nt = mat.node_tree
     bsdf = nt.nodes.get("Principled BSDF")

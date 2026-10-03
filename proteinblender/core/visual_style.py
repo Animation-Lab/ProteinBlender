@@ -101,8 +101,8 @@ def get_or_create_transparent_material(obj_name=None):
     mat.use_backface_culling = False
     mat.show_transparent_back = True
 
-    # Set up node tree for principled BSDF
-    mat.use_nodes = True
+    # A new material already carries a node tree (Blender 5.0 made nodes
+    # always-on and deprecated Material.use_nodes, expected gone in 6.0).
     node_tree = mat.node_tree
 
     # Clear default nodes
@@ -190,7 +190,7 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
             material_input.default_value = mat
 
     # Now update the alpha value in the material's Principled BSDF node
-    if mat and mat.use_nodes and mat.node_tree:
+    if mat and mat.node_tree:
         for node in mat.node_tree.nodes:
             if node.type == 'BSDF_PRINCIPLED':
                 # Update the alpha value - this is what will be keyframed
@@ -282,7 +282,7 @@ def get_object_color(obj):
                 material_input = style_node.inputs.get("Material")
                 if material_input and material_input.default_value:
                     mat = material_input.default_value
-                    if mat.use_nodes and mat.node_tree:
+                    if mat.node_tree:
                         for mat_node in mat.node_tree.nodes:
                             if mat_node.type == 'BSDF_PRINCIPLED':
                                 alpha = mat_node.inputs['Alpha'].default_value

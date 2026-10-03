@@ -544,7 +544,7 @@ class MOLECULE_PB_OT_duplicate_protein(Operator):
                 return
 
             # Find Principled BSDF in both materials
-            if source_mat.use_nodes and target_mat.use_nodes:
+            if source_mat.node_tree and target_mat.node_tree:
                 source_bsdf = None
                 target_bsdf = None
 

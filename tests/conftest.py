@@ -15,6 +15,7 @@ Responsibilities:
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,39 @@ def _clean_scene(_addon_registered):
     yield
     helpers.reset_scene()
     HC.assert_clean_scene()
+
+
+# Blender announces API it is about to remove with a DeprecationWarning
+# ("'Material.use_nodes' is expected to be removed in Blender 6.0"). The warning
+# is emitted from C, so turning it into an error with a pytest filter leaves
+# Blender holding a half-handled exception and the test dies later with a
+# confusing SystemError - or a try/except in the code under test swallows it.
+# Recording the warnings and failing afterwards avoids both, and keeps the call
+# site that triggered each one.
+_BLENDER_REMOVAL_WARNING = "is expected to be removed in Blender"
+
+
+@pytest.fixture(autouse=True)
+def _fail_on_api_blender_is_removing():
+    """Fail any test that touches API Blender has announced it will remove."""
+    with warnings.catch_warnings(record=True) as caught:
+        # "always" so a call site is reported every time, not once per process.
+        warnings.simplefilter("always")
+        yield
+
+    removals = []
+    for item in caught:
+        if (issubclass(item.category, DeprecationWarning)
+                and _BLENDER_REMOVAL_WARNING in str(item.message)):
+            removals.append(f"{item.filename}:{item.lineno}: {item.message}")
+        else:
+            # Not ours to judge: hand it back so pytest still reports it.
+            warnings.warn_explicit(item.message, item.category, item.filename,
+                                   item.lineno, source=item.source)
+    if removals:
+        pytest.fail(
+            "uses API Blender is removing (fix it while it still works):\n  "
+            + "\n  ".join(sorted(set(removals))), pytrace=False)
 
 
 # --------------------------------------------------------------------------

@@ -146,7 +146,6 @@ def _world(scene, strength, color=(1, 1, 1)):
     if scene.world and scene.world != world and 'pb_lighting_previous_world' not in scene:
         scene["pb_lighting_previous_world"] = scene.world
     scene.world = world
-    world.use_nodes = True
     nodes = world.node_tree.nodes
     nodes.clear()
     nodes.new('ShaderNodeBackground').name = "PB Ambient"
@@ -238,7 +237,6 @@ def setup_lighting(context, preset='STUDIO', brightness=1.0, alignment='AUTO',
         light.type = 'AREA'
         light.shape = 'DISK'
         light.normalize = True
-        light.use_nodes = False
         light.color = (1, 1, 1)
         light.energy = power * radius ** 2 * brightness
         light.size = softness * radius

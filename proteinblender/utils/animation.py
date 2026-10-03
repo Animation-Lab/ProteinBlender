@@ -343,7 +343,7 @@ def keyframe_color_properties(obj, frame):
         material_input = style_node.inputs.get("Material")
         if material_input and material_input.default_value:
             mat = material_input.default_value
-            if mat.use_nodes and mat.node_tree:
+            if mat.node_tree:
                 for mat_node in mat.node_tree.nodes:
                     if mat_node.type == 'BSDF_PRINCIPLED':
                         try:
@@ -393,7 +393,7 @@ def remove_color_keyframes(obj, frame):
         material_input = style_node.inputs.get("Material")
         if material_input and material_input.default_value:
             mat = material_input.default_value
-            if mat.use_nodes and mat.node_tree:
+            if mat.node_tree:
                 for mat_node in mat.node_tree.nodes:
                     if mat_node.type == 'BSDF_PRINCIPLED':
                         try:
@@ -441,7 +441,7 @@ def has_color_keyframe(obj, frame):
         material_input = style_node.inputs.get("Material")
         if material_input and material_input.default_value:
             mat = material_input.default_value
-            if mat.use_nodes and mat.node_tree:
+            if mat.node_tree:
                 if mat.node_tree.animation_data and mat.node_tree.animation_data.action:
                     fcurves = get_fcurves_from_action(mat.node_tree.animation_data.action, mat.node_tree.animation_data)
                     for fcurve in fcurves:
