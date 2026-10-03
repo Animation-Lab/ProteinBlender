@@ -76,7 +76,7 @@ class PDBX(Molecule):
         array = self.set_extra_annotations(array, self.file)
 
         if not array.bonds and bonds:
-            array.bonds = struc.bonds.connect_via_residue_names(
+            array.bonds = struc.connect_via_residue_names(
                 array, inter_residue=True
             )
 

@@ -92,7 +92,8 @@ The MolecularNodes session is attached as `bpy.types.Scene.MNSession` and object
 - MolecularNodes is embedded under `utils/molecularnodes/`, not a pip dependency.
 - On first load, `__init__.py` verifies the dependencies and, if needed, installs them from `wheels/` (falling back to PyPI), with Windows DLL-locking handled gracefully and a daily cache to avoid re-checking every startup.
 - Versions must stay consistent with the wheels pinned in `blender_manifest.toml`.
-  The embedded MolecularNodes targets specific APIs (for example biotite 1.6.0; biotite 1.7 removed `structure.connect_via_residue_names`), so installing "latest" can break the add-on at runtime.
+  The embedded MolecularNodes targets specific APIs (for example biotite 1.6.0; biotite 1.7 moved `connect_via_residue_names` out of `structure.bonds`, which broke every mmCIF import until the readers switched to the top-level `struc.connect_via_residue_names`), so installing "latest" can break the add-on at runtime.
+  The biotite cap (`<1.7`) is now precautionary: the full suite passes on 1.7.1, but raising it changes what ships, so do it deliberately.
 
 ## Working with molecules
 

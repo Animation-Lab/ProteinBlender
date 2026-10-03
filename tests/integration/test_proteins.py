@@ -51,6 +51,45 @@ def _break_attribute(monkeypatch, attr):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("filename", ["4ins.cif", "5im3.cif"])
+def test_mmcif_import_survives_biotite_moving_the_bond_helper(
+        scene, sm, monkeypatch, filename):
+    """mmCIF import must not depend on where biotite keeps its bond helper.
+
+    ``connect_via_residue_names`` lived in ``biotite.structure.bonds`` until
+    biotite 1.7 moved it to ``biotite.structure.connect``. The mmCIF reader
+    called it as ``struc.bonds.connect_via_residue_names``, so on 1.7 every
+    mmCIF import - download or local file - died with ``AttributeError``,
+    while the PDB reader (which imports the top-level name) kept working.
+
+    The shipped wheels still carry biotite 1.6, where the old spelling exists,
+    so this test removes the name from ``biotite.structure.bonds`` to put the
+    1.7 layout in front of the reader. The bonds it must still produce are
+    counted by biotite's own top-level helper, not by the reader under test.
+    """
+    import biotite.structure as struc
+    import biotite.structure.bonds as biotite_bonds
+    import biotite.structure.io.pdbx as pdbx
+
+    monkeypatch.delattr(biotite_bonds, "connect_via_residue_names", raising=False)
+    assert not hasattr(struc.bonds, "connect_via_residue_names")
+    assert hasattr(struc, "connect_via_residue_names"), (
+        "the top-level name is the stable spelling the reader must use")
+
+    reference = pdbx.get_structure(
+        pdbx.CIFFile.read(H.data_path(filename)), model=1)
+    expected_bonds = len(
+        struc.connect_via_residue_names(reference, inter_residue=True).as_array())
+    assert expected_bonds > 100
+
+    mol_id = H.import_local(filename, "bonds_probe")
+    molecule = H.sm().molecules[mol_id]
+    assert molecule.molecule.array.bonds is not None
+    assert len(molecule.molecule.array.bonds.as_array()) > 0
+    assert len(molecule.molecule.array.bonds.as_array()) == expected_bonds
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("attr", ["chain_id", "res_id", "is_alpha_carbon"])
 def test_import_aborts_when_a_critical_attribute_cannot_be_written(
         scene, sm, monkeypatch, capsys, attr):

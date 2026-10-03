@@ -15,13 +15,17 @@ dependencies = [
     # 5.0/5.1/5.2 (it uses only pre-5.2 attribute types).
     "databpy>=0.0.18,<0.8",
     "MDAnalysis>=2.7.0",
-    # Capped below 1.7: the embedded MolecularNodes imports
-    # biotite.structure.connect_via_residue_names at module scope
-    # (utils/molecularnodes/entities/molecule/pdb.py), which biotite 1.7 removed.
-    # Uncapped, 1.0.6 shipped 1.7.1 to Blender 5.x on Windows and macOS-arm64,
-    # where importing the PDB reader raises ImportError. The cap (rather than an
-    # exact pin) keeps each platform on the newest biotite it has a wheel for -
-    # manylinux_2_17 only resolves as far as 1.4.0.
+    # Capped below 1.7. biotite 1.7 moved connect_via_residue_names out of
+    # biotite.structure.bonds (into biotite.structure.connect), so the embedded
+    # MolecularNodes' struc.bonds.connect_via_residue_names raised
+    # AttributeError and every mmCIF import failed. Uncapped, 1.0.6 shipped
+    # 1.7.1 to Blender 5.x on Windows and macOS-arm64 and hit exactly that.
+    # The readers now call the top-level struc.connect_via_residue_names, which
+    # exists on 1.6 and 1.7.1, and the full suite passed on 1.7.1 (Blender 5.2,
+    # 2026-10-03), so the cap is precautionary and no longer required. Raise it
+    # to <1.8 only as a deliberate decision to ship 1.7.x. The cap (rather than
+    # an exact pin) keeps each platform on the newest biotite it has a wheel
+    # for - manylinux_2_17 only resolves as far as 1.4.0.
     "biotite>=1.1,<1.7",
     "mrcfile",
     "starfile",

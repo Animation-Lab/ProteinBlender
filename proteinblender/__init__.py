@@ -456,10 +456,10 @@ REQUIRED_PACKAGES = {
     "scipy": ">=1.13",  # Required by biotite and MDAnalysis
 
     # Main dependencies
-    # biotite is capped below 1.7 for the same reason as pyproject.toml: 1.7
-    # removed structure.connect_via_residue_names, which the embedded
-    # MolecularNodes imports at module scope. Without the cap this fallback
-    # "repairs" a broken install by fetching the one version guaranteed to break.
+    # biotite is capped below 1.7 as in pyproject.toml, which explains why:
+    # 1.7 moved struc.bonds.connect_via_residue_names, and the cap is now
+    # precautionary because the embedded MolecularNodes uses the top-level name.
+    # Keep this spec identical to pyproject.toml's.
     "biotite": ">=1.1,<1.7",
     # Capped below 0.8: databpy 0.8.0 imports bpy.types.Float4Attribute at
     # module scope, which only exists in Blender 5.2+. 0.7.x works on 5.0-5.2.
