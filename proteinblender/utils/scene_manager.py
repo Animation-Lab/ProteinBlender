@@ -437,6 +437,19 @@ class ProteinBlenderScene:
         scene.display_settings = data['display_settings']
         return scene 
 
+    def free_identifier(self, base: str) -> str:
+        """``base`` if no loaded molecule uses it, else ``base_002``, ``base_003``...
+
+        The molecule dict is keyed by identifier, so reusing one replaces the
+        earlier wrapper while its list row and Blender object stay behind.
+        """
+        if base not in self.molecules:
+            return base
+        number = 2
+        while f"{base}_{number:03d}" in self.molecules:
+            number += 1
+        return f"{base}_{number:03d}"
+
     def import_molecule_from_file(self, filepath: str, identifier: str,
                                   model_interpretation='AUTO') -> bool:
         """Import a molecule from a local file"""

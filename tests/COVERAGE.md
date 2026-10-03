@@ -1513,6 +1513,17 @@ on a membrane whose typical gap was 0.28 nm.
   resolver unit tests; all verified red pre-fix (four split rows, "Deleted
   chain 1 and 2 domain(s)", and the 0.12 pivot offset).
 
+- **Opening local structure files** (GitHub #19, 2026-10-03).
+  Reported: "I can import PDB files from the internet, but I cannot open local files."
+  The Import Local File button itself worked on the stable 1.1.0 and on alpha (Blender 5.1 and 5.2, `.pdb`, `.cif`, `.mmcif`, `.mmCIF`, `.PDB`, `.ent`, `.pdbN`, `.gz`, CRLF, no element column, blank chain id), so the report could not be reproduced as a failing button.
+  Two real defects made local files look unopenable, both reproduced first.
+  Dragging a file onto Blender did nothing (`wm.drop_import_file` returned CANCELLED), because the only drop handler lived in MolecularNodes' own import classes, which ProteinBlender does not register, and File > Import had no entry.
+  Importing the same file twice replaced the first protein's wrapper in the manager (one wrapper, two list rows with one identifier, two objects), so the first copy could no longer be edited or deleted correctly.
+  `docs/import.md` also described controls that do not exist ("Import from File" section, "folder icon", "Fetch from PDB").
+  Fixed with a `MOLECULE_FH_import_structure` file handler, a File > Import entry, multi-file support (`directory` + `files`) on `molecule.import_local`, and `ProteinBlenderScene.free_identifier` (`1ubq`, then `1ubq_002`); an explicit `identifier_override` that is already loaded is now an error rather than a silent replace.
+  Blender matches a file handler by final extension only, so `.pdb.gz` drops are intentionally not claimed.
+  Guarded by `test_local_file_import.py` (18 cases: two imports keep two independent proteins and deleting one leaves the other, explicit-id collision, multi-file and bad-file-among-good, drops of every extension family, the chains of a dropped 4HHB read from the PDB text, unrelated drops left alone, handler/browser extension agreement, menu entry), verified red pre-fix, and by `--scenario local-import`, a foreground run through the drawn panel button, the real file browser (its listing, choosing a file, pressing Import, the same file again, multi-select), File > Import, and drops on the viewport and Properties editor.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

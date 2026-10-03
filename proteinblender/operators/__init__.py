@@ -14,7 +14,7 @@ from .molecule_operators import (
     MOLECULE_PB_OT_duplicate_protein,
 )
 from .operator_import_protein import MOLECULE_OT_import_protein
-from .operator_import_local import MOLECULE_OT_import_local
+from .operator_import_local import MOLECULE_OT_import_local, MOLECULE_FH_import_structure
 from .selection_operators import MOLECULE_PB_OT_select_object
 from .domain_operators import (
     MOLECULE_PB_OT_copy_domain,
@@ -114,6 +114,7 @@ CLASSES = (
     MOLECULE_PB_OT_update_identifier,
     MOLECULE_OT_import_protein,
     MOLECULE_OT_import_local,
+    MOLECULE_FH_import_structure,
     MOLECULE_PB_OT_snap_protein_pivot_center,
     MOLECULE_PB_OT_toggle_protein_pivot_edit,
     MOLECULE_PB_OT_toggle_visibility,

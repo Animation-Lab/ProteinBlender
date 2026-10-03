@@ -211,6 +211,11 @@ def register() -> None:
     from .operators import symmetry_bend_operators
     symmetry_bend_operators.register_handlers()
 
+    # File > Import entry for structure files (dropping them on the window is
+    # handled by the registered MOLECULE_FH_import_structure file handler).
+    from .operators import operator_import_local
+    operator_import_local.register_menu()
+
     # Register flexible linkers module
     register_linkers()
 
@@ -291,6 +296,13 @@ def unregister() -> None:
         symmetry_bend_operators.unregister_handlers()
     except Exception as e:
         logger.debug(f"Failed to unregister filament bend handler: {e}")
+
+    # Remove the File > Import entry
+    try:
+        from .operators import operator_import_local
+        operator_import_local.unregister_menu()
+    except Exception as e:
+        logger.debug(f"Failed to unregister File > Import entry: {e}")
 
     # Unregister Membrane builder module
     try:

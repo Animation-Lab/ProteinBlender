@@ -43,7 +43,8 @@ def prepare_import(parsed, interpretation='AUTO', *, deposited=False):
             interpretation = 'CONFORMATIONS'
         else:
             raise ValueError('This file has multiple models with no ensemble provenance. '
-                             'Choose Conformations or Assembly copies in the import options.')
+                             'Import it with Import Local File or File > Import and set '
+                             '"Multiple models" to Conformations or Assembly copies.')
     if interpretation == 'ASSEMBLY' and count > 1:
         # A legacy assembly file repeats chain labels in each MODEL. Distinct
         # labels keep the physical copies separate in domains and atom identity.
