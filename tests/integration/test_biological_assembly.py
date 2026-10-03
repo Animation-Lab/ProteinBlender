@@ -410,3 +410,227 @@ def test_5im3_bmt_builds_the_deposited_tetramer(filename, scene, sm):
     row = next(r for r in scene.outliner_items if r.item_type == 'SYMMETRY')
     assert row.parent_id == mid
     assert row.name == 'Biological Assembly 1'
+
+
+# --------------------------------------------------------------------------
+# Composite operator expressions: "(1-60)(61-88)"
+# --------------------------------------------------------------------------
+#
+# An mmCIF assembly can be built from the *product* of two operator groups, so
+# one deposited line like ``(1-60)(61-88)`` means 60 x 28 = 1680 placements,
+# each the composition of one operator from each group. The parser expanded the
+# product to the right number of tuples and then kept only ``operation[0]`` of
+# each, so the left-hand group was silently dropped: 1680 placements came out
+# stacked on just 28 distinct positions (each right-hand operator repeated 60
+# times) and the capsid showed as one patch of its surface. A mixed group like
+# ``(61,62,69-88)`` was worse: its comma-separated pieces were expanded as
+# separate factors of the product instead of one union, so even the count was
+# wrong (60 placements for a 66-operator assembly).
+#
+# 1M4X (PBCV-1 virus capsid) is the bundled fixture: it carries six composite
+# expressions in one real file, including a mixed group.
+#
+# Ground truth stays independent of the parser under test:
+#   * the raw operator matrices are read with biotite's CIF reader and
+#     composed with plain numpy, using group structure read by eye from the
+#     file (anchored by the first test below);
+#   * the *direction* of composition (right-hand group first) is checked
+#     against biotite's own ``get_assembly``, which applies the operators to
+#     real coordinates.
+
+FIXTURE_COMPOSITE = "1m4x.cif.gz"
+
+#: ``_pdbx_struct_assembly_gen.oper_expression`` of 1M4X, read by eye. The
+#: right-hand group is applied first; every assembly lists chains A, B, C.
+COMPOSITE_EXPRESSIONS = {
+    "1": "(1-60)(61-88)",
+    "2": "(61-88)",
+    "3": "(1-5)(61-88)",
+    "4": "(1,2,6,10,23,24)(61-88)",
+    "5": "(1-5)(63-68)",
+    "6": "(1,10,23)(61,62,69-88)",
+    "7": "(P)(61-88)",
+}
+
+#: (left group, right group) for each composite assembly, as operator ids.
+COMPOSITE_GROUPS = {
+    "1": (list(range(1, 61)), list(range(61, 89))),
+    "3": (list(range(1, 6)), list(range(61, 89))),
+    "5": (list(range(1, 6)), list(range(63, 69))),
+    "6": ([1, 10, 23], [61, 62, *range(69, 89)]),
+}
+
+#: Deposited operator count per composite assembly: |left| x |right|.
+COMPOSITE_COUNTS = {"1": 1680, "3": 140, "5": 30, "6": 66}
+
+
+def _gunzipped_fixture(tmp_path, filename):
+    """The bundled ``.gz`` fixture unpacked next to the test."""
+    import gzip
+    import shutil
+
+    target = tmp_path / filename[: -len(".gz")]
+    with gzip.open(H.data_path(filename), "rb") as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    return str(target)
+
+
+def _raw_operator_matrices(cif_path):
+    """``{operator id: 4x4}`` from ``_pdbx_struct_oper_list``, via biotite.
+
+    Built here, with plain numpy, rather than through anything under
+    ``utils.molecularnodes``.
+    """
+    import biotite.structure.io.pdbx as pdbx
+
+    oper = pdbx.CIFFile.read(cif_path).block["pdbx_struct_oper_list"]
+    ids = oper["id"].as_array(str)
+    columns = {
+        (i, j): oper[f"matrix[{i}][{j}]"].as_array(float)
+        for i in (1, 2, 3) for j in (1, 2, 3)
+    }
+    vectors = {i: oper[f"vector[{i}]"].as_array(float) for i in (1, 2, 3)}
+
+    matrices = {}
+    for k, op_id in enumerate(ids):
+        matrix = np.eye(4)
+        for i in (1, 2, 3):
+            for j in (1, 2, 3):
+                matrix[i - 1, j - 1] = columns[(i, j)][k]
+            matrix[i - 1, 3] = vectors[i][k]
+        matrices[str(op_id)] = matrix
+    return matrices
+
+
+def _expected_composites(matrices, assembly_id):
+    """Every ``left @ right`` for one composite assembly (right applied first)."""
+    left, right = COMPOSITE_GROUPS[assembly_id]
+    return [matrices[str(l)] @ matrices[str(r)] for l in left for r in right]
+
+
+def _matrix_key(matrix):
+    return tuple(np.round(np.array(matrix, dtype=float), 4).ravel().tolist())
+
+
+def _parsed_composite_assemblies(tmp_path):
+    from proteinblender.utils.molecularnodes.entities.molecule import pdbx as mn_pdbx
+
+    return mn_pdbx.CIF(_gunzipped_fixture(tmp_path, FIXTURE_COMPOSITE)).assemblies()
+
+
+def test_composite_ground_truth_matches_the_fixture(tmp_path):
+    """Anchor the hand-read expressions and group sizes against the file."""
+    import biotite.structure.io.pdbx as pdbx
+
+    path = _gunzipped_fixture(tmp_path, FIXTURE_COMPOSITE)
+    gen = pdbx.CIFFile.read(path).block["pdbx_struct_assembly_gen"]
+    read = dict(zip(gen["assembly_id"].as_array(str),
+                    gen["oper_expression"].as_array(str)))
+    assert read == COMPOSITE_EXPRESSIONS
+
+    for assembly_id, (left, right) in COMPOSITE_GROUPS.items():
+        assert len(left) * len(right) == COMPOSITE_COUNTS[assembly_id]
+
+    matrices = _raw_operator_matrices(path)
+    assert {str(i) for i in range(1, 89)} | {"P"} <= set(matrices)
+
+
+@pytest.mark.parametrize("assembly_id", sorted(COMPOSITE_COUNTS))
+def test_composite_expression_yields_every_product_operator(assembly_id, tmp_path):
+    """One placement per (left, right) pair, each the composed matrix.
+
+    The count alone would not catch a parser that kept the right number of
+    operators but composed the wrong ones, so the matrices themselves are
+    compared as a multiset against ``left @ right`` built from the raw file.
+    """
+    from collections import Counter
+
+    path = _gunzipped_fixture(tmp_path, FIXTURE_COMPOSITE)
+    expected = _expected_composites(_raw_operator_matrices(path), assembly_id)
+    assert len(expected) == COMPOSITE_COUNTS[assembly_id]
+
+    transforms = _parsed_composite_assemblies(tmp_path)[assembly_id]
+
+    assert len(transforms) == COMPOSITE_COUNTS[assembly_id], (
+        f"assembly {assembly_id} ({COMPOSITE_EXPRESSIONS[assembly_id]}) came "
+        f"back with {len(transforms)} placements, the file declares "
+        f"{COMPOSITE_COUNTS[assembly_id]}")
+    assert (Counter(_matrix_key(t["matrix"]) for t in transforms)
+            == Counter(_matrix_key(m) for m in expected))
+
+
+def test_composite_operators_apply_the_right_hand_group_first(tmp_path):
+    """Direction of composition, checked against biotite on real coordinates.
+
+    ``(1-5)(63-68)`` applies 63-68 first and 1-5 second, so the matrix is
+    ``M_left @ M_right``; composing the other way round gives different copies
+    because rotations do not commute. ``get_assembly`` applies the operators
+    to atoms, so the centroid of each of its copies is the ground truth.
+    """
+    import biotite.structure.io.pdbx as pdbx
+
+    path = _gunzipped_fixture(tmp_path, FIXTURE_COMPOSITE)
+    cif = pdbx.CIFFile.read(path)
+
+    base = pdbx.get_structure(cif, model=1, use_author_fields=False)
+    base = base[np.isin(base.chain_id, ["A", "B", "C"])]
+    assembled = pdbx.get_assembly(
+        cif, assembly_id="5", model=1, use_author_fields=False)
+
+    n_copies = COMPOSITE_COUNTS["5"]
+    assert assembled.array_length() == n_copies * base.array_length(), (
+        "oracle and base selection disagree about which atoms are copied")
+
+    truth = assembled.coord.reshape(n_copies, base.array_length(), 3).mean(axis=1)
+    centroid = base.coord.mean(axis=0)
+
+    transforms = _parsed_composite_assemblies(tmp_path)["5"]
+    placed = np.array([
+        np.array(t["matrix"], dtype=float)[:3, :3] @ centroid
+        + np.array(t["matrix"], dtype=float)[:3, 3]
+        for t in transforms
+    ])
+
+    # The copies must be genuinely different from one another, otherwise this
+    # comparison could not tell a right answer from a wrong one.
+    assert len({tuple(np.round(p, 2)) for p in truth}) == n_copies
+
+    assert placed.shape == truth.shape
+    order_placed = np.lexsort(np.round(placed, 2).T)
+    order_truth = np.lexsort(np.round(truth, 2).T)
+    assert np.allclose(placed[order_placed], truth[order_truth], atol=0.05)
+
+
+# --------------------------------------------------------------------------
+# The expression grammar itself (hand-written expected tuples)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("expression, expected", [
+    ("1", [("1",)]),
+    ("(1)", [("1",)]),
+    ("1,3,5", [("1",), ("3",), ("5",)]),
+    ("(1-3)", [("1",), ("2",), ("3",)]),
+    # A group mixing ranges and ids is ONE union, not factors of a product.
+    ("(1-3,7)", [("1",), ("2",), ("3",), ("7",)]),
+    ("(1,5-6,9)", [("1",), ("5",), ("6",), ("9",)]),
+    # Non-numeric operator ids appear in real files (X0, P).
+    ("(X0)(1-2)", [("1", "X0"), ("2", "X0")]),
+    # Right-hand group first: each tuple lists operators in application order.
+    ("(1-2)(5,7)", [("5", "1"), ("5", "2"), ("7", "1"), ("7", "2")]),
+])
+def test_operation_expression_expands_to_application_ordered_tuples(expression, expected):
+    from proteinblender.utils.molecularnodes.entities.molecule import pdbx as mn_pdbx
+
+    assert mn_pdbx._parse_operation_expression(expression) == expected
+
+
+def test_mixed_group_inside_a_product_is_one_union():
+    """``(1,10,23)(61,62,69-88)``: 3 x 22 operators, not 3 x 2 x 20."""
+    from proteinblender.utils.molecularnodes.entities.molecule import pdbx as mn_pdbx
+
+    operations = mn_pdbx._parse_operation_expression("(1,10,23)(61,62,69-88)")
+
+    assert len(operations) == 3 * 22
+    assert all(len(step) == 2 for step in operations)
+    assert {step[0] for step in operations} == {"61", "62", *map(str, range(69, 89))}
+    assert {step[1] for step in operations} == {"1", "10", "23"}

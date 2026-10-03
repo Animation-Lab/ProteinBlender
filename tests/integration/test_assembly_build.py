@@ -22,7 +22,14 @@ import pytest
 from mathutils import Vector
 
 import helpers as H
-from test_biological_assembly import _remark_350_transforms
+from test_biological_assembly import (
+    COMPOSITE_COUNTS,
+    FIXTURE_COMPOSITE,
+    _expected_composites,
+    _gunzipped_fixture,
+    _raw_operator_matrices,
+    _remark_350_transforms,
+)
 
 #: MolecularNodes stores structures at 1/100 scale, so an Angstrom in the file
 #: is 0.01 Blender units on screen.
@@ -314,6 +321,86 @@ def test_copies_land_where_the_operators_put_them(scene, sm):
             f"a copy's atoms land {got:.4f} from its neighbour but the "
             f"operators put them {want:.4f} apart - the copies are being "
             f"rotated about the wrong origin")
+
+
+def _chain_centroid_from_cif(cif_path, chain_letter):
+    """Centroid of one chain in Angstrom, read with biotite from the fixture."""
+    import biotite.structure.io.pdbx as pdbx
+
+    atoms = pdbx.get_structure(
+        pdbx.CIFFile.read(cif_path), model=1, use_author_fields=False)
+    return atoms.coord[atoms.chain_id == chain_letter].astype(float).mean(axis=0)
+
+
+@pytest.mark.parametrize("assembly_id", ["1", "5", "6"])
+def test_composite_operators_place_every_product_copy(scene, sm, tmp_path, assembly_id):
+    """A ``(1-60)(61-88)`` assembly must be placed 60 x 28 times, in the right spots.
+
+    1M4X is a capsid whose deposited assemblies are products of two operator
+    groups. The parser kept only the right-hand operator of every product, so
+    assembly 1 was built from 1680 copies stacked on just 28 distinct
+    positions (each right-hand operator repeated 60 times) and the capsid came
+    out as one patch of its surface. Assembly 6, which has a mixed group, was
+    wrong even in count: 60 copies for 66 operators.
+
+    The count alone cannot catch the stacking, so the positions are checked
+    too: every composed operator ``left @ right`` of the raw file, applied to
+    the chain's own centroid, must have its own copy landing on it. The
+    expected positions come from biotite reading ``_pdbx_struct_oper_list``
+    and plain numpy, never from the add-on's parser.
+    """
+    from proteinblender.core import domain_space
+
+    molecule = _import(FIXTURE_COMPOSITE, "1m4x")
+    path = _gunzipped_fixture(tmp_path, FIXTURE_COMPOSITE)
+    expected_count = COMPOSITE_COUNTS[assembly_id]
+
+    assert _assembly_core().build_assembly(molecule, assembly_id)
+
+    domains = [d for d in molecule.domains.values()
+               if str(d.chain_id) in ("A", "B", "C")]
+    assert {str(d.chain_id) for d in domains} == {"A", "B", "C"}
+
+    counts = _instances_by_object()
+    for domain in domains:
+        assert counts.get(domain.object.name, 0) == expected_count, (
+            f"chain {domain.chain_id} was placed "
+            f"{counts.get(domain.object.name, 0)} times, assembly "
+            f"{assembly_id} of the file declares {expected_count}")
+
+    # Where the copies of chain A land: push the chain's own centroid through
+    # every instance matrix, exactly as test_copies_land_where_the_operators_
+    # put_them does.
+    chain_a = next(d.object for d in domains if str(d.chain_id) == "A")
+    centroid = _chain_centroid_from_cif(path, "A")
+    pivot = np.array(domain_space.get_pivot(chain_a))
+    local = centroid * WORLD_SCALE - pivot
+
+    observed = np.array([
+        np.array(m @ Vector(local.tolist()))
+        for m in _instance_matrices()[chain_a.name]
+    ])
+    expected = np.array([
+        (m[:3, :3] @ centroid + m[:3, 3]) * WORLD_SCALE
+        for m in _expected_composites(_raw_operator_matrices(path), assembly_id)
+    ])
+    assert observed.shape == expected.shape
+
+    # The molecule lives in its own centred frame, so every absolute landing
+    # spot is shifted by one constant vector relative to the deposited
+    # coordinates. The pattern of copies is not, so compare with that shift
+    # removed.
+    observed = observed - observed.mean(axis=0)
+    expected = expected - expected.mean(axis=0)
+
+    # Every expected landing spot must be matched by a distinct copy.
+    gaps = np.linalg.norm(expected[:, None, :] - observed[None, :, :], axis=2)
+    nearest = gaps.argmin(axis=1)
+    assert len(set(nearest.tolist())) == expected_count, (
+        "two composed operators were matched to the same copy")
+    assert gaps.min(axis=1).max() < 1e-3, (
+        f"a composed operator has no copy within 1e-3 BU "
+        f"(worst gap {gaps.min(axis=1).max():.4f})")
 
 
 def test_building_puts_the_copies_on_screen(scene, sm, tmp_path):

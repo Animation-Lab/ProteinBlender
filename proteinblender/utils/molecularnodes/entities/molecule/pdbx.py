@@ -372,12 +372,13 @@ class CIFAssemblyParser:
 
             affected_chain_ids = asym_id_expr.split(",")
 
-            for i, operation in enumerate(operations):
-                # for op_step in operation:
+            for operation in operations:
                 matrices.append(
                     {
                         "chain_ids": affected_chain_ids,
-                        "matrix": transformation_dict[operation[0]].tolist(),
+                        "matrix": _compose_operation(
+                            transformation_dict, operation
+                        ).tolist(),
                         "pdb_model_num": pdb_model_num,
                     }
                 )
@@ -472,6 +473,44 @@ def _get_transformations(struct_oper):
     return transformation_dict
 
 
+def _compose_operation(transformation_dict, operation):
+    """
+    Collapse one operation tuple into a single 4x4 matrix.
+
+    ``operation`` lists operator IDs in application order, as returned by
+    :func:`_parse_operation_expression`: the first ID is applied to the
+    coordinates first, the next to that result, and so on. ``(1-5)(63-68)``
+    therefore yields ``M_left @ M_right`` for every pair, which is what
+    biotite's ``get_assembly`` computes on real coordinates.
+
+    A one-step operation returns its matrix untouched, so assemblies without a
+    product expression are bit-for-bit what they were before composition was
+    handled.
+    """
+    matrix = transformation_dict[operation[0]]
+    for op_step in operation[1:]:
+        matrix = transformation_dict[op_step] @ matrix
+    return matrix
+
+
+def _expand_operator_group(group):
+    """
+    Expand one parenthesised group such as ``1,3,5-8`` to its operator IDs.
+
+    A group is a single union: commas separate members and a member is either
+    an ID (numeric or not, e.g. ``X0`` or ``P``) or an integer range.
+    """
+    ids = []
+    for member in group.split(","):
+        member = member.strip()
+        if "-" in member:
+            first, last = member.split("-")
+            ids.extend(str(i) for i in range(int(first), int(last) + 1))
+        else:
+            ids.append(member)
+    return ids
+
+
 def _parse_operation_expression(expression):
     """
     Get successive operation steps (IDs) for the given
@@ -486,28 +525,7 @@ def _parse_operation_expression(expression):
     # Important: Operations are applied from right to left
     expressions_per_step.reverse()
 
-    operations = []
-    for expr in expressions_per_step:
-        if "-" in expr:
-            if "," in expr:
-                for gexpr in expr.split(","):
-                    if "-" in gexpr:
-                        first, last = gexpr.split("-")
-                        operations.append(
-                            [str(id) for id in range(int(first), int(last) + 1)]
-                        )
-                    else:
-                        operations.append([gexpr])
-            else:
-                # Range of operation IDs, they must be integers
-                first, last = expr.split("-")
-                operations.append([str(id) for id in range(int(first), int(last) + 1)])
-        elif "," in expr:
-            # List of operation IDs
-            operations.append(expr.split(","))
-        else:
-            # Single operation ID
-            operations.append([expr])
+    operations = [_expand_operator_group(expr) for expr in expressions_per_step]
 
     # Cartesian product of operations
     return list(itertools.product(*operations))
