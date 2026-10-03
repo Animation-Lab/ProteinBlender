@@ -93,6 +93,19 @@ def reset_scene():
         except Exception:
             pass
 
+    # Import settings (pdb_id, remote_format, ...) live on the scene and the
+    # import helpers set them. Restoring the defaults keeps one test's import
+    # from deciding what a later test sees, whatever order they run in.
+    import_props = getattr(scene, "protein_props", None)
+    if import_props is not None:
+        for prop in import_props.bl_rna.properties:
+            if prop.identifier == "rna_type" or prop.is_readonly:
+                continue
+            try:
+                import_props.property_unset(prop.identifier)
+            except Exception:
+                pass
+
     for coll_name in ("molecule_list_items", "outliner_items", "pb2_linkers",
                       "pose_library", "chain_selections"):
         coll = getattr(scene, coll_name, None)

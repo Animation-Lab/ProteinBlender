@@ -47,6 +47,25 @@ def assert_clean_scene() -> None:
         value = getattr(scene, name, None)
         if value is not None and len(value):
             problems.append(f"scene.{name}: {len(value)} row(s)")
+    props = getattr(scene, "protein_props", None)
+    if props is not None:
+        # Import settings live on the scene and the import helpers set them. A
+        # value left behind makes a later test depend on file order: a leaked
+        # remote_format of "pdb" fails the test asserting the "cif" default,
+        # but only when it happens to run after the test that set it.
+        for prop in props.bl_rna.properties:
+            if prop.identifier == "rna_type" or prop.is_readonly:
+                continue
+            if prop.type in {"POINTER", "COLLECTION"}:
+                continue
+            current = getattr(props, prop.identifier)
+            default = prop.default
+            if getattr(prop, "is_array", False):
+                current, default = tuple(current), tuple(prop.default_array)
+            if current != default:
+                problems.append(
+                    f"scene.protein_props.{prop.identifier}: {current!r} "
+                    f"(default {default!r})")
     leaked = addon_objects()
     if leaked:
         problems.append("addon objects: " + ", ".join(o.name for o in leaked))
