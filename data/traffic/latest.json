@@ -1,49 +1,49 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-10-07T05:51:55+00:00",
+  "generated_at": "2026-10-08T05:56:29+00:00",
   "summary": {
-    "views": 62,
-    "visitors": 29,
-    "clones": 406,
-    "cloners": 147
+    "views": 64,
+    "visitors": 27,
+    "clones": 368,
+    "cloners": 132
   },
   "all_time": {
-    "views": 1237,
-    "visitors": 615,
-    "clones": 5054,
-    "cloners": 2143,
-    "days_tracked": 203
+    "views": 1244,
+    "visitors": 617,
+    "clones": 5066,
+    "cloners": 2146,
+    "days_tracked": 204
   },
   "current_day": {
+    "date": "2026-10-06",
+    "views": 7,
+    "visitors": 2,
+    "clones": 12,
+    "cloners": 3
+  },
+  "previous_day": {
     "date": "2026-10-05",
     "views": 12,
     "visitors": 6,
     "clones": 26,
     "cloners": 12
   },
-  "previous_day": {
-    "date": "2026-10-04",
-    "views": 2,
-    "visitors": 2,
-    "clones": 41,
-    "cloners": 19
-  },
   "delta_since_previous_day": {
-    "views": 10,
-    "visitors": 4,
-    "clones": -15,
-    "cloners": -7
+    "views": -5,
+    "visitors": -4,
+    "clones": -14,
+    "cloners": -9
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 22,
-      "uniques": 16
+      "count": 20,
+      "uniques": 13
     },
     {
       "referrer": "github.com",
-      "count": 3,
-      "uniques": 3
+      "count": 4,
+      "uniques": 4
     },
     {
       "referrer": "Google",
@@ -55,20 +55,20 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 29,
-      "uniques": 22
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/issues/18",
-      "title": "/issues/18",
-      "count": 7,
-      "uniques": 4
+      "count": 26,
+      "uniques": 20
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
       "title": "/issues",
-      "count": 7,
-      "uniques": 3
+      "count": 10,
+      "uniques": 4
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/issues/18",
+      "title": "/issues/18",
+      "count": 8,
+      "uniques": 5
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
@@ -95,20 +95,20 @@
       "uniques": 1
     },
     {
+      "path": "/Animation-Lab/ProteinBlender/discussions",
+      "title": "/discussions",
+      "count": 1,
+      "uniques": 1
+    },
+    {
       "path": "/Animation-Lab/ProteinBlender/discussions/16",
       "title": "/discussions/16",
       "count": 1,
       "uniques": 1
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/issues/14",
-      "title": "/issues/14",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/projects",
-      "title": "/projects",
+      "path": "/Animation-Lab/ProteinBlender/graphs/commit-activity",
+      "title": "/graphs/commit-activity",
       "count": 1,
       "uniques": 1
     }
