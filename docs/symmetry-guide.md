@@ -60,7 +60,7 @@ A 60-copy capsid costs one copy's worth of memory.
 The tradeoff is that instances are anonymous.
 There is nothing to click on, and no way to colour one subunit differently.
 
-**Realizing** converts them into real objects, buying per-copy identity at the cost of many more objects.
+**Realizing** converts them into proteins of their own in the PB Outliner, buying per-copy identity at the cost of a full protein per copy.
 ChimeraX makes exactly this tradeoff, and switches its default at twelve copies; ProteinBlender uses the same threshold.
 
 ## Assemblies with identity operators
@@ -77,6 +77,24 @@ specified by the deposited assembly.
 ---
 
 # Part II - The controls
+
+## Create New Filament
+
+**Builders → Create New Filament** builds an actin filament or a microtubule without a structure or a single helical parameter from you.
+
+- **Filament** - Actin filament or Microtubule.
+  Each brings its own subunit, cut from a deposited filament (PDB 8A2T for actin, PDB 7SJ7 for a 13-protofilament microtubule) and already standing on the filament's axis, so the radius comes out right.
+- **Length (nm)** - how long to make it.
+  The line underneath says how many subunits that is; a length is rounded to a whole number of them.
+- **Start As** - Straight, Arc, S-curve or Coil.
+  The filament always gets a bend path, so its control nodes are there to drag as soon as it is built.
+
+What it builds is an ordinary helical assembly.
+It appears in the PB Outliner as a protein with a symmetry row beneath it, and that row's pencil opens **Edit Assembly** on it: change the length, the strands or the bend there, exactly as for an assembly you built by hand.
+Every copy is an instance, so a micron of microtubule - about 1,600 tubulin dimers - builds at once.
+
+To build a filament from your own structure instead, use **Create New Assembly** and choose Helical.
+The structure has to be in the filament's own frame for the radius to be right: the helix turns about the axis through the origin of the file's coordinates.
 
 ## Create New Assembly
 
@@ -108,6 +126,12 @@ Everything that shapes a build lives in the same dialog:
 - **Cyclic (Cn)** - Order sets n.
 - **Dihedral (Dn)** - Order sets n, giving 2n copies.
 - **Helical** - Subunits, Rise (Angstrom along the axis), Twist (degrees about it).
+  **Length (nm)** is the same number as Subunits, for when you know how long the filament should be rather than how many it holds: the length divided by the rise.
+  Typing into either one moves the other.
+- **Strands** - how many copies of that helix run side by side round the axis.
+  One is a plain helix.
+  More than one shows **Stagger** (Angstrom each strand sits further along the axis than the one before) and **Strand Twist** (degrees round the axis from one strand to the next; 0 spaces them evenly), and Subunits becomes **Subunits per Strand**.
+  This is what a tube needs and a single helix cannot give: a microtubule is 13 straight strands (Twist 0, Rise 81.5), each 27.7 degrees round from the last (Strand Twist -27.69) and 9.4 Angstrom further up (Stagger 9.4).
 - **Axis** - the direction the symmetry turns about. Z by default.
 - **Trim Copies** - Range and Contact, described below.
 
@@ -139,18 +163,22 @@ A symmetry is a child of its source in the PB Outliner:
 ```
 
 A protein or domain source places the symmetry beneath that row instead.
-Collapsing the source hides its symmetry row. The pencil reopens the build's
-settings; the trash removes its copies and leaves the source hierarchy intact.
+Collapsing the source hides its symmetry row. The pencil opens **Edit Assembly**;
+the trash removes its copies and leaves the source hierarchy intact.
 Biological assemblies appear beneath their protein as **Biological Assembly 1**
 (or the chosen assembly number), with the same edit and delete controls.
 
-Click the **sliders icon** immediately left of the assembly row's pencil to
-open **Assembly Controls**, or right-click that row and choose **Assembly
-Controls** from its menu. The tooltip identifies the sliders icon. This popup
-contains Assembly progress, Copy delay, keyframing, axes, cutaway, and realization;
-a helical assembly also offers bend controls. It always targets that row's
-assembly, regardless of selection. Slider edits update the viewport immediately,
-remain when the popup closes, and can be undone with Blender's Undo.
+**Edit Assembly** is the one place an assembly is worked on.
+Click the row's pencil, or right-click the row and choose **Edit Assembly**.
+It always targets that row's assembly, regardless of selection.
+The top of the dialog is the build's own settings, exactly as Create New Assembly offered them.
+Beneath Apply sit **Show Symmetry Axes** and **Realize Copies**, then **Cutaway** and, for a helical assembly, **Bend**.
+Cutaway and Bend are folded shut until you click their names.
+
+Those four act on the assembly as it is built.
+Change a setting above them and they grey out until the change is kept with **OK**, because a cut or a realization made in between would be thrown away by the rebuild.
+**OK** with no setting changed closes the dialog and builds nothing, so what you did from here stays as you left it.
+Each button is one step for Blender's Undo.
 Delete the assembly child to return to the asymmetric unit.
 
 The row is reconstructed from the built geometry nodes after undo and file
@@ -160,22 +188,27 @@ or domain.
 
 ## Bend
 
-Open **Assembly Controls** for a built **helical** child to find Bend.
-A ring has no path to bend. After **Add Bend** or **Edit Bend**, close the popup
-and drag the selected control nodes in the viewport. Reopen the same popup to
-change node count, choose a preset, or remove the bend.
+Open **Edit Assembly** on a built **helical** child and unfold **Bend**.
+A ring has no path to bend. After **Add Bend** or **Edit Bend**, press **OK**
+and drag the selected control nodes in the viewport. Reopen the dialog to
+change node count, choose a preset, or remove the bend; a filament that is
+already bent opens with Bend unfolded.
 
 Real filaments are not straight.
 Actin curves, microtubules flex, amyloid twists across a field of view.
 **Add Bend** puts a Bezier curve along the filament with draggable control nodes, the same rig the DNA builder uses, and lays the subunits along it.
 
-- **Nodes** - how many handles shape the path, applied with the tick beside it.
+- **Nodes** - how many handles shape the path.
+  The path takes the new count as soon as the field changes; there is nothing else to press.
   Changing the count resamples the path you already made rather than resetting it.
+  A path with keyframes on its nodes keeps the count it has, and the field greys out and says so, because new nodes would leave those keys behind.
 - **Straight / Arc / S-curve / Coil** - starting shapes. A starting point, not a constraint; the nodes still move afterwards.
+  Every shape sets off along the filament's axis and is sized so the path ends where the filament does.
+  An S-curve needs five handles and a Coil seven to be the shape at all, so choosing one raises Nodes to that if it was lower.
 - **Edit Bend** - selects the control nodes so you can grab them with the usual transform gizmo. The copies follow as you drag.
 - **Remove** - deletes the rig; the filament runs straight along its axis again.
 
-The line underneath reports whether the bend is actually doing anything - "drag one to bend" until it is, then how far the far end has moved off straight.
+The line underneath reports whether the bend is actually doing anything - "drag a node to bend" until it is, then how far the far end has moved off straight.
 
 ### The subunits stay rigid
 
@@ -188,7 +221,9 @@ Same rig, opposite use.
 Two consequences worth knowing:
 
 - **The first subunit never moves.** The filament is anchored on the structure you imported and bends away from it, so bending the middle can swing the far end. That is what holding one end of a rope does.
-- **A filament longer than its curve carries straight on** past the end rather than piling up on the last point, so raising Subunits after shaping a bend extends the filament rather than crowding it.
+- **The path grows and shrinks with the filament.** Change Subunits or Length on a bent filament and the path is scaled by the same amount about its first node, so the shape you made is kept at the new size and the filament still ends at the last node.
+  The exception is a path with keyframes on its nodes, which is left as it is; a filament longer than its path then carries straight on past the end rather than piling up on the last point.
+- **The path is the filament's axis.** For a microtubule that is the middle of the tube, not its wall.
 
 ## Trim Copies
 
@@ -202,40 +237,43 @@ Both values are in Angstrom; **0 means no limit**.
 
 This is what turns a 60-copy capsid into a legible patch.
 
-## Animation
+## Clear
 
-Appears once something is built.
-
-- **Assembly progress** - 0 overlaps each copy with its source, 1 places every
-  copy at its deposited or generated position. Intermediate values illustrate
-  assembly motion; they are not a simulation of a physical assembly pathway.
-- **Copy delay** - 0 moves copies together; higher values delay successive
-  copies. This changes motion between the endpoints, so adjust progress or
-  play a keyed animation to see its effect. At progress 1 every copy has arrived.
-- **Keyframe** - keys the current state at the playhead.
-  Key 0 on one frame and 1 on another to animate the assembly forming.
-- **Clear** - removes the copies.
-  This has the same effect as deleting the assembly child in the PB Outliner.
+The trash on the assembly's row removes the copies and returns the asymmetric unit.
+Any symmetry axes being shown go with them.
 
 ## Show Symmetry Axes
 
+In **Edit Assembly**.
 Draws the rotation axes as real, renderable cylinders, labelled by fold.
 A C7 gives one axis; a D4 gives five (one four-fold and four two-folds).
+Axes that are showing are redrawn when the assembly is rebuilt with different settings.
 
 ## Cutaway
+
+In **Edit Assembly**, folded under its name.
 
 - **Direction** - the side to take away.
 - **Cut Depth** - moves the plane in Angstrom. 0 cuts through the centre; larger values take less away.
 - **Cut Away** - applies it.
 
 Whole copies are removed rather than atoms being sliced, which is what published capsid figures do and leaves intact subunits around the opening.
+A cut assembly keeps the settings it was built with, so its dialog reopens on them and **Apply** brings the whole assembly back.
 
 ## Realize Copies
 
-Converts instances into real, separately selectable objects that still share their atom data.
-It preserves each chain's current position, including partial assembly progress
-and copy delay. The new copies freeze those placements. Refused above twelve
-placements per source unless forced.
+In **Edit Assembly**.
+Replaces the assembly with real copies that the PB Outliner lists, so each one can be selected, coloured, hidden, moved and deleted with the same row buttons as anything else.
+
+- An assembly of the **whole protein** becomes that many proteins: the original, plus one new protein row per extra copy, each with its own chains beneath it.
+- An assembly made from **one chain or domain** becomes copies of that chain or domain inside the same protein, exactly as the chain row's Copy button makes them.
+  A deposited assembly that places its chains differently from one another is realized the same way, chain by chain.
+
+Every copy stands where its instance was drawn, in the style and colour of what it copies.
+If the original itself was not among the copies on screen - cut away, say - it becomes the first of the copies that were, rather than being left behind hidden.
+The assembly row, any bend and any symmetry axes go, since there is no longer an assembly for them to belong to.
+Each new protein carries its own atom data, so this costs memory in proportion to the number of copies.
+Refused above twelve copies.
 
 ---
 
@@ -296,7 +334,7 @@ Useful for making the asymmetric-unit-vs-biological-assembly point in one senten
 Ferritin's 24-fold octahedral shell, built from a **single chain**, in well under a second.
 The most shell for the least waiting of anything here, and the clearest demonstration that the atoms are stored once.
 
-At 24 copies it is also over the twelve-copy threshold, so it doubles as the **Realize Copies** refusal and force-override demo.
+At 24 copies it is also over the twelve-copy threshold, so it doubles as the **Realize Copies** refusal demo.
 
 ### 2tmv - helical, from the file
 Forty-nine operators of a real helical virus.
@@ -343,19 +381,18 @@ Shows why an identity-only assembly is not offered as an additional build.
 
 1. **1ubq** - no deposited section. Explain the gate.
 2. **4ins** - build deposited assembly 3: a three-fold you can read at a glance. Delete its child row to return to the asymmetric unit.
-3. Drag **Assembled** to 0 and back. Keyframe 0 and 1, scrub.
-4. **1fha** - build the 24-copy ferritin shell.
-5. **Cut Away** on the ferritin. Interior revealed, subunits intact.
+3. **1fha** - build the 24-copy ferritin shell.
+4. **Cut Away** on the ferritin. Interior revealed, subunits intact.
 
 ## Fifteen minutes
 
 Add:
 
-6. **1cd3** - pentamer (assembly 3), then hexamer (4), then the whole capsid (1).
-7. **Trim Copies** with a Contact limit, reducing the capsid to one subunit's neighbours.
-8. **Show Symmetry Axes** on the capsid.
-9. **1atn** with the helical builder at actin's real rise and twist, then **Add Bend** and drag a node to curve the filament.
-10. **Realize Copies** on something small, then click a single subunit to show per-copy identity.
+5. **1cd3** - pentamer (assembly 3), then hexamer (4), then the whole capsid (1).
+6. **Trim Copies** with a Contact limit, reducing the capsid to one subunit's neighbours.
+7. **Show Symmetry Axes** on the capsid.
+8. **1atn** with the helical builder at actin's real rise and twist, then **Add Bend** and drag a node to curve the filament.
+9. **Realize Copies** on something small, then click a single subunit to show per-copy identity.
 
 ---
 
@@ -375,6 +412,11 @@ Worth stating before a demo rather than during one.
 - **The panel is one long strip** of always-expanded sections.
   Collapsible sub-panels are the fix and are not built yet.
 - **Only helical symmetry can be bent.** Cyclic and dihedral have no path to run along, so the Bend section does not appear for them.
+- **Moving a bend's first node does not move the filament.**
+  The filament is anchored on the structure it was built from, so dragging or turning the first node takes the start of the path away from the start of the filament, which then follows the same shape from where it stands.
+  Shape the bend with the other nodes; move the filament itself by moving its protein.
+- **Only actin and a 13-protofilament microtubule ship as filaments.**
+  Any other filament is built with Create New Assembly from a structure that is already in the filament's frame; there is no control yet for placing the axis somewhere else.
 - **A keyframed bend cannot change its node count.**
   Rebuilding the handles orphans the F-curves keyed against the old ones, so the operator refuses rather than silently losing an animation you cannot see has gone.
   Remove the keys, change the count, key it again.

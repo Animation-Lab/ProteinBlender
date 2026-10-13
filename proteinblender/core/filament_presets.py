@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+from . import symmetry_builder
+
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "filaments"
 
 
@@ -68,13 +70,11 @@ class FilamentPreset:
         Along *each* strand: a micron of microtubule is a micron of every one
         of its thirteen protofilaments, not a micron shared between them.
         """
-        if not self.rise:
-            return 1
-        return max(1, round(float(angstrom) / abs(self.rise)))
+        return symmetry_builder.count_for_length(angstrom, self.rise) or 1
 
     def length(self, count: int) -> float:
         """How long a filament of ``count`` units a strand is, in Angstrom."""
-        return max(int(count), 1) * abs(self.rise)
+        return symmetry_builder.length_for_count(count, self.rise)
 
     def subunit_total(self, count: int) -> int:
         """How many copies of the unit a build of ``count`` a strand draws."""

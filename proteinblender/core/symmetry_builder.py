@@ -54,6 +54,11 @@ SYMMETRY_KINDS = (
 
 DEFAULT_AXIS = (0.0, 0.0, 1.0)
 
+#: The most subunits a filament can have along one strand. A micron of actin
+#: is 364 and five of microtubule 613; they are instances, so a long filament
+#: costs little, but a slip of the finger should not ask for a million.
+MAX_COUNT = 2000
+
 
 def _unit(axis: Sequence[float]) -> np.ndarray:
     vector = np.array(axis, dtype=float)
@@ -126,6 +131,24 @@ def strand_twist_or_default(strands: int, strand_twist: Optional[float]) -> floa
     return 360.0 / max(int(strands), 1)
 
 
+def lattice_settings(settings) -> dict:
+    """The strand half of a settings dict: ``strands``, ``stagger``, ``strand_twist``.
+
+    A key that is missing means one strand, no stagger and strands spread
+    evenly - never "whatever is set elsewhere". Every filament built before
+    strands existed is recorded without them, and it has exactly one.
+    """
+    settings = settings or {}
+    return {
+        "strands": max(int(settings.get("strands") or 1), 1),
+        "stagger": float(settings.get("stagger") or 0.0),
+        # 0 is how a control says "evenly": strands 0 degrees apart would all
+        # be the same strand.
+        "strand_twist": (float(settings["strand_twist"])
+                         if settings.get("strand_twist") else None),
+    }
+
+
 def lattice_sites(count: int, rise: float, twist: float, strands: int = 1,
                   stagger: float = 0.0,
                   strand_twist: Optional[float] = None) -> List[Tuple[float, float]]:
@@ -152,6 +175,29 @@ def lattice_sites(count: int, rise: float, twist: float, strands: int = 1,
     around = strand_twist_or_default(strands, strand_twist)
     return [(rise * k + stagger * j, twist * k + around * j)
             for k in range(count) for j in range(strands)]
+
+
+def length_for_count(count: int, rise: float) -> float:
+    """How long a filament of ``count`` subunits a strand is, in Angstrom.
+
+    Each subunit accounts for one rise of it, so that a length and a count
+    are two names for the same thing: ten subunits 27.5 A apart are 275 A of
+    filament, and 275 A of filament is ten subunits.
+    """
+    return max(int(count), 1) * abs(float(rise))
+
+
+def count_for_length(angstrom: float, rise: float) -> Optional[int]:
+    """Subunits along each strand for a filament about ``angstrom`` long.
+
+    Along *each* strand: a micron of microtubule is a micron of every one of
+    its thirteen protofilaments, not a micron shared between them. ``None``
+    when there is no rise, because copies that do not advance have no length
+    to be counted by.
+    """
+    if not rise:
+        return None
+    return max(1, round(float(angstrom) / abs(float(rise))))
 
 
 def helical(count: int, rise: float, twist: float, axis=DEFAULT_AXIS,

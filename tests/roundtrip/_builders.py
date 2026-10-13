@@ -203,6 +203,11 @@ def build_bent_filament():
     scene.pb_symmetry_rise = 40.0
     scene.pb_symmetry_twist = 30.0
     scene.pb_symmetry_axis = (0.0, 0.0, 1.0)
+    # Two strands, and nothing about them at its default, so that a reload
+    # which dropped the strand settings could not pass for one that kept them.
+    scene.pb_symmetry_strands = 2
+    scene.pb_symmetry_stagger = 5.0
+    scene.pb_symmetry_strand_twist = 170.0
     # Deliberately not bend_rig.RES_DEFAULT: a builder that sets a property to
     # its default proves nothing on reload, because a value that was dropped
     # entirely comes back looking identical to one that persisted.
@@ -224,7 +229,8 @@ def build_bent_filament():
     middle.location = middle.location + Vector((0.4, 0.0, 0.0))
     bpy.context.view_layer.update()
 
-    departure = symmetry_bend.bend_departure(molecule, 6, 40.0, 30.0)
+    departure = symmetry_bend.bend_departure(
+        molecule, 6, 40.0, 30.0, strands=2, stagger=5.0, strand_twist=170.0)
     assert departure > 10.0, (
         f"the filament is only {departure:.1f} A off straight - nothing to "
         "round-trip")

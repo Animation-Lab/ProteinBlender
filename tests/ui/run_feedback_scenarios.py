@@ -66,13 +66,53 @@ def prepare():
         bpy.ops.molecule.symmetry_dialog('INVOKE_DEFAULT', molecule_id_to_update=data['mid'])
 
 
+def seek(where, wanted):
+    """Walk the cursor down the dialog until Ctrl+C reports ``wanted``.
+
+    Blender copies what is under the cursor, and for a dropdown that is the
+    identifier it is showing. That finds a control wherever the dialog has
+    put it, which a fixed coordinate stops doing the day a row is added.
+    """
+    def run():
+        wm = bpy.context.window_manager
+        popup = data['popup']
+        window = g['active_window']()
+        step = 6 * bpy.context.preferences.system.ui_scale
+        text = wanted() if callable(wanted) else wanted
+        at = data.get('seek')
+        if at is None:
+            at = (round(popup.x + popup.width * .75), round(popup.y + popup.height - step))
+        elif wm.clipboard == text:
+            data.pop('seek')
+            # One step further in than the edge the probe has just crossed.
+            data[where] = (at[0], round(at[1] - step))
+            return f'{text} at {data[where]}'
+        else:
+            at = (at[0], round(at[1] - step))
+        assert at[1] > popup.y, f'No control showing {text} in the dialog'
+        data['seek'] = at
+        wm.clipboard = ''
+        window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=at[0], y=at[1])
+        def copy():
+            for value in ('PRESS', 'RELEASE'):
+                window.event_simulate(type='C', value=value, ctrl=True, x=at[0], y=at[1])
+        g['steps'][:0] = [('hover', lambda: None), ('copy hovered control', copy),
+                          ('settle', lambda: None), (f'seek {text}', run)]
+    return run
+
+
+def click(where):
+    x, y = data[where]
+    window = g['active_window']()
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    for value in ('PRESS', 'RELEASE'):
+        window.event_simulate(type='LEFTMOUSE', value=value, x=x, y=y)
+
+
 def switch_to_deposited():
     bpy.ops.screen.screenshot(filepath=str(Path(g['report_path']).parent / 'generated-dialog.png'))
     assert data[S.__name__].source == 'GENERATED'
-    window = g['active_window']()
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=200, y=328)
-    for value in ('PRESS', 'RELEASE'):
-        window.event_simulate(type='LEFTMOUSE', value=value, x=200, y=328)
+    click('source_xy')
 
 
 def choose_pdb_source():
@@ -85,25 +125,10 @@ def choose_assembly(aid):
     assert dialog.source == 'BIOLOGICAL'
     from proteinblender.operators.symmetry_dialog import biological_enum_items
     assert [item[0] for item in biological_enum_items(dialog, bpy.context)] == ['1','2','3','4','5','6']
-    path = str(Path(g['report_path']).parent / 'assembly-dialog.png')
-    bpy.ops.screen.screenshot(filepath=path)
-    picture = bpy.data.images.load(path, check_existing=False)
-    width, height = picture.size
-    pixels = np.array(picture.pixels[:]).reshape(height, width, 4)
-    bpy.data.images.remove(picture)
-    scale = bpy.context.preferences.system.ui_scale
-    pixels = pixels[:round(500 * scale), :round(700 * scale), :3]
-    ys, xs = np.where((pixels[:, :, 2] > .25) & (pixels[:, :, 2] > pixels[:, :, 0] * 1.6)
-                      & (pixels[:, :, 1] > pixels[:, :, 0] * 1.2))
-    assert len(xs) > 100, 'Dialog confirmation button was not visible'
-    x, y = round(float(xs.min()) + 200 * scale), round(float(np.median(ys)) + 116 * scale)
-    window = g['active_window']()
-    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
-    for value in ('PRESS', 'RELEASE'):
-        window.event_simulate(type='LEFTMOUSE', value=value, x=x, y=y)
+    bpy.ops.screen.screenshot(filepath=str(Path(g['report_path']).parent / 'assembly-dialog.png'))
+    click('assembly_xy')
     data['desired_assembly'] = aid
-    data['dropdown_xy'] = x, y
-    return f'Assembly dropdown click ({x}, {y}), scale={scale}'
+    return f"Assembly dropdown click {data['assembly_xy']}"
 
 
 def select_menu():
@@ -151,16 +176,6 @@ def verify_and_edit(aid):
 
 def verify_reopened(aid):
     assert data[S.__name__].assembly_choice == aid
-
-
-def progress():
-    assert bpy.ops.molecule.assembly_controls(
-        molecule_id=data['mid'], progress=.4, copy_delay=.5) == {'FINISHED'}
-    mol = H.sm().molecules[data['mid']]
-    assert abs(A.get_assembly_factor(mol) - .4) < 1e-5
-    assert abs(A.get_assembly_stagger(mol) - .5) < 1e-5
-    verify_other_assembly()
-    return 'Controls update the explicitly targeted assembly'
 
 
 def verify_cancel():
@@ -227,6 +242,7 @@ def verify_cycle_entry_and_cancel():
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', lambda: None),
     ('open assembly dialog', prepare), ('settle', lambda: None),
+    ('find the source dropdown', seek('source_xy', 'GENERATED')), ('settle', lambda: None),
     ('switch generated to PDB-defined', switch_to_deposited), ('settle', choose_pdb_source),
     ('settle', lambda: None),
     ('choose assembly 4', lambda: choose_assembly('4')), ('settle', lambda: None),
@@ -242,7 +258,6 @@ g['steps'][:] = [
     ('apply assembly 1 preview', lambda: apply_from_layout('1')), ('settle', lambda: None),
     ('cancel preview', lambda: event('ESC')), ('settle', lambda: None),
     ('verify cancel restores 5', verify_cancel),
-    ('assembly sliders', progress),
     ('open cycling dialog', prepare_cycle), ('settle', lambda: None),
     ('configure cycling', configure_cycle), ('settle', lambda: None),
     ('inspect and confirm cycling', inspect_cycle), ('settle', lambda: None),
@@ -252,6 +267,11 @@ g['steps'][:] = [
     ('enable Morphset keyframe row', inspect_key_dialog), ('settle', lambda: None),
     ('verify cycling entry', verify_cycle_entry_and_cancel), ('settle', lambda: None),
 ]
-for index, (name, function) in enumerate(g['steps']):
+for index, (name, function) in reversed(list(enumerate(g['steps']))):
     if name.startswith('choose assembly'):
         g['steps'].insert(index + 1, ('select dropdown entry', select_menu))
+        # The dropdown shows the assembly currently chosen, whichever that is.
+        g['steps'][index:index] = [
+            ('find the assembly dropdown',
+             seek('assembly_xy', lambda: data[S.__name__].assembly_choice)),
+            ('settle', lambda: None)]

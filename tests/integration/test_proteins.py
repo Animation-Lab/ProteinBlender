@@ -223,6 +223,36 @@ def test_duplicate_protein_adds_one_molecule(scene, sm, single_chain):
     assert sm.molecules[new_id].object is not None
 
 
+def _style_node_trees(obj):
+    """Which MolecularNodes style group an object is really drawn through."""
+    return sorted(
+        node.node_tree.name.split('.')[0]
+        for modifier in obj.modifiers if modifier.type == 'NODES' and modifier.node_group
+        for node in modifier.node_group.nodes
+        if node.type == 'GROUP' and node.node_tree and 'Style ' in node.node_tree.name)
+
+
+@pytest.mark.integration
+def test_duplicate_is_drawn_in_the_style_its_source_is_drawn_in(scene, sm, single_chain):
+    """A copy looks like what it was copied from.
+
+    The style a wrapper remembers and the style its chains are drawn in can
+    differ - a local file comes in as spheres under a wrapper that says
+    surface - and the copy used to take the remembered one, so duplicating a
+    sphere model produced a surface.
+    """
+    source = sm.molecules[single_chain]
+    drawn = [_style_node_trees(d.object) for d in source.get_sorted_domains().values()]
+    assert drawn and all(drawn)
+
+    before = set(sm.molecules)
+    assert bpy.ops.molecule.duplicate_protein(molecule_id=single_chain) == {'FINISHED'}
+    copy = sm.molecules[(set(sm.molecules) - before).pop()]
+
+    assert [_style_node_trees(d.object)
+            for d in copy.get_sorted_domains().values()] == drawn
+
+
 # --------------------------------------------------------------------------
 # Visibility
 # --------------------------------------------------------------------------

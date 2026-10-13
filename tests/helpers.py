@@ -87,7 +87,15 @@ def reset_scene():
     # A value left behind by the previous test is meaningless against the next
     # one's structure, and now that pb_assembly_id names the *state* on screen
     # rather than only the next build, a stale one is order-dependent noise.
-    for prop_name in ("pb_assembly_id",):
+    # The assembly builder's controls live on the scene as well. A test that
+    # builds a filament down -Y must not leave the next one's ring lying on
+    # its side, where a cutaway along Y has nothing to take away.
+    for prop_name in ("pb_assembly_id", "pb_symmetry_kind", "pb_symmetry_order",
+                      "pb_symmetry_count", "pb_symmetry_rise", "pb_symmetry_twist",
+                      "pb_symmetry_axis", "pb_symmetry_range", "pb_symmetry_contact",
+                      "pb_symmetry_strands", "pb_symmetry_stagger",
+                      "pb_symmetry_strand_twist",
+                      "pb_cutaway_normal", "pb_cutaway_offset", "pb_bend_nodes"):
         try:
             scene.property_unset(prop_name)
         except Exception:

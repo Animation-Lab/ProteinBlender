@@ -73,6 +73,6 @@ class MOLECULE_OT_import_protein(Operator):
             'ALPHAFOLD': (props.uniprot_id, 'ALPHAFOLD', props.remote_format),
             'MMCIF': (props.pdb_id, 'PDB', 'cif')
         }
-        
+
         return import_configs.get(props.import_method)
 

@@ -285,6 +285,102 @@ def test_every_advertised_preset_can_be_built(scene):
         assert len(points) == 4, f"{identifier} produced {len(points)} points"
 
 
+def test_a_shape_can_be_made_to_set_off_along_the_axis(scene):
+    """Turned about its start until its first step is along the axis.
+
+    For whatever is held at its start and cannot turn to follow the path. The
+    shape itself must come through untouched - the same distances between the
+    same points - or it would be a different arc, not the same one turned.
+    """
+    rig = _rig()
+    axis = Vector((0, 0, 1))
+    for identifier in ("ARC", "S", "COIL"):
+        plain = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 9)]
+        turned = [co for co, _l, _r in rig.preset_points(
+            identifier, 4.0, 9, leave_along_axis=True)]
+
+        first_step = (turned[1] - turned[0]).normalized()
+        assert (first_step - axis).length == pytest.approx(0, abs=1e-6), (
+            f"{identifier} sets off towards {tuple(first_step)}")
+        assert (plain[1] - plain[0]).normalized().dot(axis) < 0.99, (
+            f"{identifier} already set off along the axis, so this proves nothing")
+        for i in range(len(plain)):
+            for j in range(i):
+                assert (turned[i] - turned[j]).length == pytest.approx(
+                    (plain[i] - plain[j]).length, abs=1e-5)
+
+
+def test_a_shape_starts_where_it_is_told_to(scene):
+    rig = _rig()
+    origin = Vector((1.0, -2.0, 0.5))
+    for identifier, _label, _description in rig.PRESETS:
+        at_zero = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 5)]
+        moved = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 5,
+                                                         origin=origin)]
+        for a, b in zip(at_zero, moved):
+            assert (b - a - origin).length == pytest.approx(0, abs=1e-6)
+
+    straight = [co for co, _l, _r in rig.straight_points(4.0, n=3, origin=origin)]
+    assert (straight[0] - origin).length == pytest.approx(0, abs=1e-6)
+    assert (straight[-1] - origin - Vector((0, 0, 4.0))).length == pytest.approx(
+        0, abs=1e-6)
+
+
+@pytest.mark.parametrize("identifier", ["S", "COIL"])
+def test_no_shape_is_offered_with_too_few_handles_to_draw_it(identifier):
+    """Three handles on an S-curve are its start, its crossing and its end.
+
+    All three are on the axis: a straight line. A coil's three are its start,
+    its far side and its start again: a line out and back. Whatever number of
+    handles a shape says it needs, that many must actually make the shape,
+    which at the least means its points do not all lie on one line.
+    """
+    rig = _rig()
+
+    def on_one_line(points):
+        direction = next(((p - points[0]).normalized() for p in points[1:]
+                          if (p - points[0]).length > 1e-6), None)
+        return direction is None or all(
+            (p - points[0]).cross(direction).length < 1e-6 for p in points)
+
+    three = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 3)]
+    assert on_one_line(three), "three points do draw it, so the floor is wrong"
+
+    fewest = rig.PRESET_MIN_POINTS[identifier]
+    assert fewest > 3
+    enough = [co for co, _l, _r in rig.preset_points(identifier, 4.0, fewest)]
+    assert not on_one_line(enough)
+
+
+# --------------------------------------------------------------------------
+# Reading a curved path: where it starts off to
+# --------------------------------------------------------------------------
+
+def test_a_curved_path_is_read_as_leaving_along_its_first_handle(scene):
+    """A Bezier leaves its first point exactly along that point's handle.
+
+    That is what a Bezier is, not something the sampler decides. Reading the
+    direction off the first step of a flattened copy instead is off by half
+    the turn the path makes in that step - under a degree, and enough to
+    swing the far end of a long filament several Angstrom off its path once
+    everything is expressed relative to the first subunit.
+    """
+    curve = _bezier_curve([(0, 0, 0), (0, 3, 4), (0, 8, 4)])
+    first = curve.data.splines[0].bezier_points[0]
+    leaving = (first.handle_right - first.co).normalized()
+    last = curve.data.splines[0].bezier_points[-1]
+    arriving = (last.co - last.handle_left).normalized()
+
+    rig = _rig()
+    (_p, tangent, _n), = rig.sample_along(curve, [0.0])
+    assert tangent.angle(leaving) < math.radians(0.001), (
+        f"read as leaving {math.degrees(tangent.angle(leaving)):.3f} degrees "
+        f"off its handle")
+
+    (_p, tangent, _n), = rig.sample_along(curve, [rig.curve_length(curve)])
+    assert tangent.angle(arriving) < math.radians(0.001)
+
+
 # --------------------------------------------------------------------------
 # Reshaping a path: arc-length resampling
 # --------------------------------------------------------------------------

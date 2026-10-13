@@ -554,23 +554,24 @@ def test_a_bent_filament_still_realizes_where_its_copies_are_drawn(scene, sm):
     Each realized object has to land on the instance it replaced, or the
     bend would silently straighten the moment anyone made the copies real.
     """
-    from proteinblender.core import assembly as assembly_core
-
     molecule = _import()
     _build_filament(molecule)
     domain = _first_domain(molecule)
     _add_bend(molecule, nodes=3)
     _drag(molecule, 1, (0.4, 0.0, 0.0))
 
+    from proteinblender.operators.assembly_realize import realize_assembly
+
     drawn = _instance_positions(domain.name)
-    created = assembly_core.realize_copies(molecule, force=True)
+    created = realize_assembly(bpy.context, molecule, force=True)
     assert created, "nothing was realized"
 
     bpy.context.view_layer.update()
-    realized = [np.array(obj.matrix_world.translation)
-                for obj in created if obj.name.startswith(domain.name)]
+    realized = [
+        np.array(next(iter(sm.molecules[copy].domains.values())).object.matrix_world.translation)
+        for copy in created.proteins]
 
-    # Copy 0 is the original and is not duplicated, so the realized objects
+    # Copy 0 is the original and is not duplicated, so the realized proteins
     # correspond to drawn[1:].
     assert len(realized) == len(drawn) - 1
     for k, (real, instance) in enumerate(zip(realized, drawn[1:]), start=1):

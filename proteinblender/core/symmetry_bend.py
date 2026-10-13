@@ -170,14 +170,36 @@ def filament_length(count: int, rise: float, strands: int = 1,
     return span * WORLD_SCALE
 
 
+def _axis_origin(owner):
+    """Where the filament's axis passes, in the bend curve's own space.
+
+    Not the owner's origin. The operators turn copies about a line through
+    the origin of the structure's own coordinates, and a molecule is drawn
+    about its pivot instead: the atom at ``co`` appears at ``co - pivot`` in
+    the owner's space (``core.domain_space``), so the axis appears at
+    ``-pivot``. The pivot sits in the middle of the subunit, which for a
+    microtubule is out in the wall of the tube - a path started there runs
+    along one protofilament while the tube bends about a line 112 A away.
+
+    The curve copies the owner's location and rotation but not its scale, so
+    the scale is applied here.
+    """
+    from mathutils import Vector
+
+    from . import domain_space
+
+    pivot = domain_space.get_pivot(owner)
+    return Vector(-p * s for p, s in zip(pivot, owner.scale))
+
+
 def add_bend(molecule, count: int, rise: float, axis=(0.0, 0.0, 1.0),
              n_points: int = bend_rig.RES_DEFAULT, strands: int = 1,
              stagger: float = 0.0):
     """Build the curve and its control nodes along the filament's own axis.
 
-    The curve starts at the molecule's origin and runs the length the current
-    subunit count and rise describe, so adding a bend changes nothing until a
-    node is actually dragged.
+    The curve starts where the axis does (:func:`_axis_origin`) and runs the
+    length the current subunit count and rise describe, so adding a bend
+    changes nothing until a node is actually dragged.
     """
     owner = owner_object(molecule)
     if owner is None:
@@ -194,7 +216,8 @@ def add_bend(molecule, count: int, rise: float, axis=(0.0, 0.0, 1.0),
 
     curve_obj = bend_rig.create_curve(
         SPEC, owner, f"{owner.name}{CURVE_SUFFIX}",
-        bend_rig.straight_points(length, n=n_points, direction=axis))
+        bend_rig.straight_points(length, n=n_points, direction=axis,
+                                 origin=_axis_origin(owner)))
     bend_rig.create_nodes(SPEC, owner, curve_obj, n_points)
     _scale_node_handles(molecule, length)
     return curve_obj
@@ -214,17 +237,70 @@ def set_node_count(molecule, n_points: int) -> bool:
 def apply_preset(molecule, preset: str, count: int, rise: float,
                  axis=(0.0, 0.0, 1.0), strands: int = 1,
                  stagger: float = 0.0) -> bool:
-    """Overwrite the path with a starting shape, keeping the handle count."""
+    """Overwrite the path with a starting shape.
+
+    The handle count is kept unless the shape needs more
+    (``bend_rig.PRESET_MIN_POINTS``). Every shape sets off along the
+    filament's axis: the first subunit is the imported structure and stays
+    put (:func:`_anchored_on_the_original`), so a path that left at an angle
+    would have the filament swing away from its own control curve. And every
+    shape is sized so the path is as long as the filament, which then ends at
+    the last control node rather than short of it or beyond it.
+    """
     owner = owner_object(molecule)
     if owner is None:
         return False
     length = filament_length(count, rise, strands, stagger)
     if length <= 0:
         return False
-    ok = bend_rig.apply_preset(SPEC, owner, preset, length, direction=axis)
+    ok = bend_rig.apply_preset(SPEC, owner, preset, length, direction=axis,
+                               origin=_axis_origin(owner),
+                               leave_along_axis=True, fit_length=True)
     if ok:
         _scale_node_handles(molecule, length)
     return ok
+
+
+def follow_length(molecule, was: dict, now: dict) -> bool:
+    """Resize the path for a filament whose length has just been changed.
+
+    ``was`` and ``now`` are the settings the filament was built from and is
+    about to be built from. A path made for twenty subunits and handed forty
+    would have the second twenty run straight on off its end; made for forty
+    and handed twenty, it would leave control nodes out in empty space. So
+    the path is scaled by how much longer the filament got, about its start,
+    and keeps whatever shape it had been dragged into.
+
+    By the *change*, not to the new length: a path the user has pulled about
+    is no longer exactly as long as its filament, and that is theirs to keep.
+
+    A keyframed path is left alone. Resizing rebuilds its control nodes, and
+    the animation is keyed against the ones it has.
+    """
+    from . import symmetry_builder
+
+    owner = owner_object(molecule)
+    if owner is None or not was or not has_bend(molecule):
+        return False
+
+    def span(settings):
+        lattice = symmetry_builder.lattice_settings(settings)
+        return filament_length(settings.get("count", 10),
+                               settings.get("rise", 0.0),
+                               lattice["strands"], lattice["stagger"])
+
+    before, after = span(was), span(now)
+    if before <= 0.0 or after <= 0.0 or abs(after - before) < 1e-9:
+        return False
+    if bend_rig.has_keyframes(SPEC, owner):
+        logger.info("the bend of %s is keyframed; its path keeps its length",
+                    getattr(molecule, "identifier", "?"))
+        return False
+
+    if not bend_rig.resize_path(SPEC, owner, after / before):
+        return False
+    _scale_node_handles(molecule, bend_rig.curve_length(get_bend_curve(molecule)))
+    return True
 
 
 def remove_bend(molecule) -> bool:

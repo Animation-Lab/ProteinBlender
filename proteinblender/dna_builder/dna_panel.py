@@ -64,6 +64,17 @@ class PROTEINBLENDER_PT_builders(Panel):
             icon="MOD_ARRAY",
         )
 
+        # Named filaments - actin, microtubules - by length. What it builds is
+        # an assembly, edited from its row like one; this is the short way in
+        # for someone who has no structure and no helical parameters to hand.
+        filament_row = main_box.row()
+        filament_row.scale_y = 1.4
+        filament_row.operator(
+            "molecule.build_filament",
+            text="Create New Filament",
+            icon="CURVE_PATH",
+        )
+
         morph_row = main_box.row()
         morph_row.scale_y = 1.4
         morph_row.operator(

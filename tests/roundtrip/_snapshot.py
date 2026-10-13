@@ -78,6 +78,8 @@ SCENE_PROPS = (
     "pb_symmetry_kind", "pb_symmetry_order", "pb_symmetry_count",
     "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
     "pb_symmetry_range", "pb_symmetry_contact",
+    # A filament's strands, on the same footing as its rise and twist.
+    "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
     "pb_cutaway_normal", "pb_cutaway_offset",
     # Bend node count. Snapshotted for the same reason as the symmetry
     # settings, plus one of its own: the panel puts this field beside an apply
@@ -112,16 +114,11 @@ EXCLUSIONS = {
         "Embedded MolecularNodes' own object properties. Upstream-owned; the "
         "ProteinBlender state that matters (domain_*, pb_*) is captured "
         "separately, as are the custom ID properties MN writes."),
-    "Scene.pb_assembly_factor": (
-        "Live handle on the assembly nodes, not the state itself. How far "
-        "assembled a protein is lives on its geometry-nodes assembly node - "
-        "that is what keyframe_assembly keys and what the .blend carries - so "
-        "this resets on load without losing anything. It is also a single "
-        "scene-level slider standing in for whichever protein is active, so a "
-        "stored value would be meaningless against a different selection."),
-    "Scene.pb_assembly_stagger": (
-        "Same as pb_assembly_factor: a live handle on the assembly nodes, "
-        "where the value actually lives and persists."),
+    "Scene.pb_symmetry_length": (
+        "Not stored at all: it is worked out from pb_symmetry_count and "
+        "pb_symmetry_rise by a getter, and setting it only sets the count. "
+        "Both of those are snapshotted, so there is nothing of its own to "
+        "lose on reload."),
     "Scene.pb_assembly_id": (
         "Transient UI choice - which deposited assembly the Symmetry panel "
         "would build next. The assembly actually *built* persists as the "

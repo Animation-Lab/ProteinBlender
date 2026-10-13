@@ -162,36 +162,21 @@ def test_symmetry_is_detected_only_where_it_exists(scene, sm, fixture, ident, ex
     assert _assembly_core().has_buildable_symmetry(molecule) is expected
 
 
-@pytest.mark.parametrize("source, assembly_id", [("BIOLOGICAL", "3"), ("GENERATED", "")])
-def test_assembly_controls_target_the_row_without_selecting_it(scene, sm, source, assembly_id):
+def test_assembly_animation_controls_stay_retired(scene, sm):
+    """Assembly animation was pulled from the UI: nothing may still offer it.
+
+    The Assembly Controls popup that held it went too - an assembly is worked
+    on from its Edit Assembly dialog - and with it the handles that used to
+    move or key the copies.
+    """
     from proteinblender import panels
     assert all(cls.__name__ != 'PROTEINBLENDER_PT_symmetry' for cls in panels.CLASSES)
-    first = _import()
-    assert bpy.ops.molecule.symmetry_dialog(
-        target_id=first.identifier, source=source,
-        **({"assembly_id": assembly_id} if assembly_id else {})
-    ) == {'FINISHED'}
-    second = _import("1ubq.pdb", "ubq")
-    bpy.ops.molecule.symmetry_dialog(target_id=second.identifier, source='GENERATED')
-    # Keep the last-imported protein selected throughout the popup's edit.
-    bpy.ops.proteinblender.outliner_select(item_id=second.identifier)
-    assert bpy.ops.molecule.assembly_controls(
-        molecule_id=first.identifier, progress=.25, copy_delay=.6) == {'FINISHED'}
-    assert _assembly_core().get_assembly_factor(first) == pytest.approx(.25)
-    assert _assembly_core().get_assembly_stagger(first) == pytest.approx(.6)
-    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1)
-    assert _assembly_core().get_assembly_stagger(second) == pytest.approx(0)
-    bpy.ops.molecule.clear_assembly(molecule_id=first.identifier)
-    assert bpy.ops.molecule.assembly_controls(
-        molecule_id=first.identifier, progress=.5) == {'CANCELLED'}
-    assert _assembly_core().get_assembly_factor(second) == pytest.approx(1)
-
-
-def test_controls_require_an_explicit_target(scene, sm):
-    molecule = _import()
-    bpy.ops.molecule.symmetry_dialog(target_id=molecule.identifier, source='BIOLOGICAL', assembly_id='3')
-    assert bpy.ops.molecule.assembly_controls(progress=.25) == {'CANCELLED'}
-    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(1)
+    for retired in ('MOLECULE_OT_keyframe_assembly', 'MOLECULE_OT_assembly_controls',
+                    'PROTEINBLENDER_PT_assembly_controls'):
+        assert not hasattr(bpy.types, retired), retired
+    for owner, names in ((bpy.types.Scene, ('pb_assembly_factor', 'pb_assembly_stagger')),
+                         (bpy.types.Object, ('pb_assembly_progress', 'pb_assembly_copy_delay'))):
+        assert not [name for name in names if hasattr(owner, name)]
 
 
 def test_operators_find_the_active_protein_without_being_told(scene, sm):
@@ -807,50 +792,6 @@ def test_the_factor_can_be_keyframed(scene, sm):
     scene.frame_set(25)
     midway = _observed_spread(molecule)
     assert 0.0 < midway < _expected_spread(1.0)
-
-
-def test_keyframe_operator_keys_the_assembly(scene, sm):
-    molecule = _import()
-    bpy.ops.molecule.build_assembly(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="3")
-
-    scene.frame_set(1)
-    _assembly_core().set_assembly_factor(molecule, 0.0)
-    assert bpy.ops.molecule.keyframe_assembly(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
-
-    scene.frame_set(40)
-    _assembly_core().set_assembly_factor(molecule, 1.0)
-    assert bpy.ops.molecule.keyframe_assembly(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
-
-    scene.frame_set(1)
-    assert _observed_spread(molecule) == pytest.approx(0.0, abs=1e-5)
-    scene.frame_set(40)
-    assert _observed_spread(molecule) > 0.1
-
-
-def test_keyframing_without_an_assembly_is_refused(scene, sm):
-    molecule = _import()
-    assert bpy.ops.molecule.keyframe_assembly(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"CANCELLED"}
-
-
-def test_the_panel_sliders_reach_the_nodes(scene, sm):
-    """The scene sliders are only a handle - they must drive the real value."""
-    molecule = _import()
-    bpy.ops.molecule.build_assembly(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier, assembly_id="3")
-
-    scene.pb_assembly_factor = 0.0
-    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(0.0)
-    assert _observed_spread(molecule) == pytest.approx(0.0, abs=1e-6)
-
-    scene.pb_assembly_factor = 1.0
-    assert _assembly_core().get_assembly_factor(molecule) == pytest.approx(1.0)
-
-    scene.pb_assembly_stagger = 1.0
-    assert _assembly_core().get_assembly_stagger(molecule) == pytest.approx(1.0)
 
 
 def test_clearing_removes_the_animation_too(scene, sm):

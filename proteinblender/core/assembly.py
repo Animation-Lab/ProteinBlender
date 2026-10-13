@@ -388,6 +388,33 @@ def apply_operators(molecule, operators, tag: str, targets=None) -> bool:
     return wired > 0
 
 
+def replace_operators(molecule, operators) -> bool:
+    """Put the current build's copies somewhere else, or keep fewer of them.
+
+    For a change *to* a build - a cutaway, a filament laid along a new path -
+    where :func:`apply_operators` is for making one. It starts from nothing,
+    so on its own it spreads a build made from one chain across the whole
+    protein and drops the settings recorded with it: the build then reopens in
+    its dialog as something it is not.
+    """
+    tag = built_assembly_id(molecule)
+    if tag is None:
+        return False
+
+    params = built_build_params(molecule)
+    reached = []
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is not None and _existing_assembly_nodes(group):
+            reached.append(obj)
+
+    if not apply_operators(molecule, operators, tag, targets=reached):
+        return False
+    if params is not None:
+        record_build_params(molecule, params)
+    return True
+
+
 def update_operator_points(molecule, operators) -> bool:
     """Re-place an existing build's copies without rebuilding anything.
 
@@ -1044,20 +1071,17 @@ def _is_identity_operator(rotation, offset) -> bool:
 REALIZE_THRESHOLD = 12
 
 
-def realize_copies(molecule, force: bool = False):
-    """Turn the instanced copies into real, separately selectable objects.
+def copy_placements(molecule):
+    """Where every copy of every object is drawn right now.
 
-    Instances are cheap but anonymous: one set of atoms drawn many times, so
-    there is nothing to click on and nothing to colour differently. Realizing
-    trades that memory saving for per-copy identity, which is what you need to
-    hide one subunit, colour a pentamer, or export a single copy.
-
-    Returns the objects created, or ``None`` when the copy count is over
-    :data:`REALIZE_THRESHOLD` and ``force`` was not set.
+    One ``(object, node group, placements)`` per object the assembly reaches,
+    each placement a ``(rotation, offset, chain)`` read back off the point
+    cloud the build wrote - so it describes what is on screen, including a
+    cutaway, a bend and an assembly caught part-way through assembling, rather
+    than what the build was asked for. ``chain`` is set where a placement draws
+    one chain of the object and not all of it.
     """
-    tag = built_assembly_id(molecule)
-    if tag is None:
-        logger.warning("nothing is built, so there is nothing to realize")
+    if built_assembly_id(molecule) is None:
         return []
 
     bpy.context.view_layer.update()
@@ -1075,38 +1099,32 @@ def realize_copies(molecule, force: bool = False):
                 placements.extend((rotation, offset, chain) for rotation, offset in
                                   _operators_from_points(points, factor, stagger))
         jobs.append((obj, group, placements))
-    if max((len(placements) for _, _, placements in jobs), default=0) > REALIZE_THRESHOLD and not force:
-        return None
-
-    created = []
-    hidden = []
-    for obj, group, placements in jobs:
-        retained = False
-        for index, (rotation, offset, chain) in enumerate(placements):
-            if not retained and chain is None and _is_identity_operator(rotation, offset):
-                retained = True
-                continue
-            created.append(_realized_copy(obj, group, rotation, offset, index, chain))
-        if not retained:
-            hidden.append(obj)
-
-    # Only tear the instanced assembly down if something replaced it. An
-    # assembly trimmed to the original alone has nothing to realize, and
-    # clearing it here would silently throw away the build still on screen -
-    # from a UI step as ordinary as cutting away and then pressing Realize.
-    if created:
-        clear_assembly(molecule)
-        for obj in hidden:
-            obj.hide_render = True
-            obj.hide_set(True)
-
-    return created
+    return jobs
 
 
-def _realized_copy(obj, group, rotation, offset, index, chain=None):
-    """One real object placed where its instance was."""
+def is_identity_placement(rotation, offset) -> bool:
+    """True for the placement that leaves a copy where its original is."""
+    return _is_identity_operator(rotation, offset)
+
+
+def placement_matrix(rotation, offset):
+    """A placement as the 4x4 that goes after an object's own world matrix."""
     from mathutils import Matrix as BlenderMatrix
 
+    placement = BlenderMatrix.Identity(4)
+    for r in range(3):
+        for c in range(3):
+            placement[r][c] = float(rotation[r][c])
+        placement[r][3] = float(offset[r])
+    return placement
+
+
+def realize_object_copy(obj, group, matrix_world, index, chain=None):
+    """One plain object standing at ``matrix_world``, where an instance was.
+
+    For what has no row of its own to copy: the atoms a protein draws itself
+    because no chain or domain covers them.
+    """
     copy = obj.copy()
     copy.name = f"{obj.name}_copy_{index}"
     copy.data = obj.data                       # atoms stay shared
@@ -1130,19 +1148,13 @@ def _realized_copy(obj, group, rotation, offset, index, chain=None):
     if modifier is not None:
         modifier.node_group = own_group
 
-    placement = BlenderMatrix.Identity(4)
-    for r in range(3):
-        for c in range(3):
-            placement[r][c] = float(rotation[r][c])
-        placement[r][3] = float(offset[r])
-
     for collection in obj.users_collection:
         collection.objects.link(copy)
         break
     else:
         bpy.context.scene.collection.objects.link(copy)
 
-    copy.matrix_world = obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world @ placement
+    copy.matrix_world = matrix_world
 
     return copy
 

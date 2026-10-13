@@ -11,6 +11,7 @@ from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, StringPr
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
+from ..core import symmetry_builder
 from ..utils.scene_manager import ProteinBlenderScene, resolve_active_molecule_id
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,12 @@ SYMMETRY_SETTINGS = (
     ("rise", "pb_symmetry_rise", 0.0),
     ("twist", "pb_symmetry_twist", 0.0),
     ("axis", "pb_symmetry_axis", (0.0, 0.0, 1.0)),
+    # How many strands a filament has and how each stands to the last. The
+    # twist between strands is 0 on its control for "evenly round the axis",
+    # and None in a settings dict - see symmetry_builder.lattice_settings.
+    ("strands", "pb_symmetry_strands", 1),
+    ("stagger", "pb_symmetry_stagger", 0.0),
+    ("strand_twist", "pb_symmetry_strand_twist", 0.0),
     ("range_limit", "pb_symmetry_range", 0.0),
     ("contact", "pb_symmetry_contact", 0.0),
 )
@@ -39,6 +46,7 @@ def symmetry_settings(scene) -> dict:
         # The axis is a FloatVectorProperty, whose bpy_prop_array does not
         # survive being stored or JSON-encoded.
         values[key] = tuple(float(v) for v in value) if key == "axis" else value
+    values.update(symmetry_builder.lattice_settings(values))
     return values
 
 
@@ -49,14 +57,36 @@ def apply_symmetry_settings(scene, values: dict) -> None:
     - an enum identifier since renamed, a count past a new maximum - should
     leave the rest of the dialog correctly seeded rather than abort the seed.
     """
-    for key, prop, _default in SYMMETRY_SETTINGS:
+    # Settings that say nothing about strands describe a filament of one. The
+    # controls are one set standing in for whichever assembly was last worked
+    # on, so leaving them alone would show an older helix the thirteen strands
+    # of the microtubule built after it.
+    values = {**values, **symmetry_builder.lattice_settings(values)}
+    for key, prop, default in SYMMETRY_SETTINGS:
         if key not in values:
             continue
+        value = default if values[key] is None else values[key]
         try:
-            setattr(scene, prop, values[key])
+            setattr(scene, prop, value)
         except (TypeError, ValueError, AttributeError):
             logger.warning("could not seed %s from stored value %r",
-                           prop, values[key])
+                           prop, value)
+
+
+def built_symmetry_settings(scene, molecule) -> dict:
+    """The settings the assembly on screen was built from.
+
+    Its own record, wherever it has one. The scene's controls only stand in
+    for a build too old to carry a record at all - they describe whatever was
+    set up last, which need not be this assembly.
+    """
+    settings = symmetry_settings(scene)
+    built = assembly_core.built_build_params(molecule)
+    if built:
+        settings.update(built)
+        settings.update(symmetry_builder.lattice_settings(built))
+    settings["axis"] = tuple(settings["axis"])
+    return settings
 
 
 def build_generated_symmetry(molecule, settings: dict):
@@ -66,7 +96,7 @@ def build_generated_symmetry(molecule, settings: dict):
     what the viewport previews and what the dialog commits cannot be built by
     two different pieces of code.
     """
-    from ..core import symmetry_bend, symmetry_builder
+    from ..core import symmetry_bend
 
     kind = settings.get("kind", "C") or "C"
     shape = {
@@ -74,7 +104,22 @@ def build_generated_symmetry(molecule, settings: dict):
         "count": settings.get("count", 10),
         "rise": settings.get("rise", 0.0),
         "twist": settings.get("twist", 0.0),
+        **symmetry_builder.lattice_settings(settings),
     }
+
+    # A filament that is being rebuilt at another length takes its path with
+    # it, before anything is laid along that path - and gives it back if the
+    # build then comes to nothing, or the next attempt would resize it twice.
+    previous = None
+    if kind.upper() == "H" and symmetry_builder.built_symmetry_kind(molecule) == "H":
+        previous = assembly_core.built_build_params(molecule)
+    resized = bool(previous) and symmetry_bend.follow_length(
+        molecule, previous, settings)
+
+    def failed(message):
+        if resized:
+            symmetry_bend.follow_length(molecule, settings, previous)
+        return False, message
 
     # Through symmetry_bend, not symmetry_builder: a helical filament with a
     # bend curve is laid along it, and everything else falls straight through
@@ -92,7 +137,7 @@ def build_generated_symmetry(molecule, settings: dict):
             range_limit=range_limit, contact_distance=contact)
 
     if not operators:
-        return False, "The range or contact limit removed every copy"
+        return failed("The range or contact limit removed every copy")
 
     targets = None
     source_id = settings.get("source_item_id", molecule.identifier)
@@ -100,10 +145,10 @@ def build_generated_symmetry(molecule, settings: dict):
         from ..core.outliner_targets import resolve_target
         source_molecule, targets = resolve_target(source_id)
         if source_molecule != molecule or not targets:
-            return False, "The symmetry source no longer exists"
+            return failed("The symmetry source no longer exists")
     if not assembly_core.apply_operators(
             molecule, operators, f"generated:{kind.upper()}", targets=targets):
-        return False, "Could not build that symmetry"
+        return failed("Could not build that symmetry")
 
     # Leave the settings with the build, so the dialog can reopen on what was
     # actually built rather than on whatever the scene sliders now say.
@@ -250,39 +295,6 @@ class MOLECULE_PB_OT_build_assembly(Operator):
         return {"FINISHED"}
 
 
-class MOLECULE_PB_OT_keyframe_assembly(Operator):
-    """Key the current assembly state at the playhead"""
-
-    bl_idname = "molecule.keyframe_assembly"
-    bl_label = "Keyframe Assembly"
-    bl_description = (
-        "Key how far assembled the copies are at the current frame. Key 0 on "
-        "one frame and 1 on another to animate the assembly forming")
-    bl_options = {"REGISTER", "UNDO"}
-
-    molecule_id: StringProperty()
-
-    def execute(self, context):
-        molecule = _molecule(self.molecule_id or _active_molecule_id(context))
-        if molecule is None:
-            self.report({"ERROR"}, "No protein selected")
-            return {"CANCELLED"}
-
-        if assembly_core.built_assembly_id(molecule) is None:
-            self.report({"WARNING"}, "Build an assembly before keyframing it")
-            return {"CANCELLED"}
-
-        keyed = assembly_core.keyframe_assembly(molecule)
-        if not keyed:
-            self.report({"ERROR"}, "Could not key the assembly")
-            return {"CANCELLED"}
-
-        self.report({"INFO"},
-                    f"Keyed the assembly at frame {context.scene.frame_current}")
-        _refresh(context)
-        return {"FINISHED"}
-
-
 class MOLECULE_PB_OT_build_symmetry(Operator):
     """Generate symmetry copies from parameters, not from the file"""
 
@@ -364,39 +376,50 @@ class MOLECULE_PB_OT_toggle_symmetry_axes(Operator):
 
 
 class MOLECULE_PB_OT_realize_copies(Operator):
-    """Turn the symmetry copies into real, separately selectable objects"""
+    """Turn each copy into a protein of its own in the PB Outliner"""
 
     bl_idname = "molecule.realize_copies"
     bl_label = "Realize Copies"
     bl_description = (
-        "Convert the instanced copies into real objects so each one can be "
-        "selected, coloured and hidden on its own. Their atoms stay shared")
+        "Replace the assembly with real copies listed in the PB Outliner, so "
+        "each one can be selected, coloured, hidden and moved on its own. An "
+        "assembly of the whole protein becomes that many proteins; one made "
+        "from a chain or domain becomes copies of it inside the protein")
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty()
     force: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
+        from .assembly_realize import realize_assembly
+
         molecule = _molecule(self.molecule_id or _active_molecule_id(context))
         if molecule is None:
             self.report({"ERROR"}, "No protein selected")
             return {"CANCELLED"}
 
-        created = assembly_core.realize_copies(molecule, force=self.force)
+        created = realize_assembly(context, molecule, force=self.force)
 
         if created is None:
             self.report(
                 {"WARNING"},
-                f"More than {assembly_core.REALIZE_THRESHOLD} copies - this "
-                "would make a great many objects. Hold the option or re-run "
-                "with force to do it anyway")
+                f"More than {assembly_core.REALIZE_THRESHOLD} copies would "
+                "make a great many proteins, so they are left as instances")
             return {"CANCELLED"}
 
         if not created:
             self.report({"INFO"}, "There were no copies to realize")
             return {"CANCELLED"}
 
-        self.report({"INFO"}, f"Realized {len(created)} copies")
+        if created.proteins:
+            made = f"{created.copies} copies as proteins"
+        elif created.domains:
+            made = f"{created.copies} copies as chain and domain copies"
+        elif created.objects:
+            made = f"{created.copies} copies as objects"
+        else:
+            made = "the assembly where it stood"
+        self.report({"INFO"}, f"Realized {made}")
         _refresh(context)
         return {"FINISHED"}
 
@@ -439,7 +462,7 @@ class MOLECULE_PB_OT_cutaway(Operator):
             self.report({"WARNING"}, "That cut removes the whole assembly")
             return {"CANCELLED"}
 
-        if not assembly_core.apply_operators(molecule, kept, str(tag)):
+        if not assembly_core.replace_operators(molecule, kept):
             self.report({"ERROR"}, "Could not apply the cutaway")
             return {"CANCELLED"}
 
@@ -472,6 +495,7 @@ class MOLECULE_PB_OT_clear_assembly(Operator):
             self.report({"INFO"}, "No assembly was built")
             return {"CANCELLED"}
 
+        refresh_symmetry_axes(context, molecule)
         self.report({"INFO"}, "Assembly cleared")
         _set_picker(context, assembly_core.ASYMMETRIC_UNIT_ID)
         _refresh(context)
@@ -492,18 +516,35 @@ def _operators_of_built(context, molecule, tag):
 
     tag = str(tag)
     if tag.startswith("generated:"):
-        scene = context.scene
-        built = assembly_core.built_build_params(molecule) or {}
+        built = built_symmetry_settings(context.scene, molecule)
         return symmetry_bend.build_operators(
             molecule,
             tag.split(":", 1)[1],
-            order=built.get("order", getattr(scene, "pb_symmetry_order", 3)),
-            count=built.get("count", getattr(scene, "pb_symmetry_count", 10)),
-            rise=built.get("rise", getattr(scene, "pb_symmetry_rise", 0.0)),
-            twist=built.get("twist", getattr(scene, "pb_symmetry_twist", 0.0)),
-            axis=tuple(built.get("axis", getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0)))),
+            order=built["order"], count=built["count"],
+            rise=built["rise"], twist=built["twist"], axis=built["axis"],
+            **symmetry_builder.lattice_settings(built),
         )
     return assembly_core._operators_for(molecule, tag)
+
+
+def refresh_symmetry_axes(context, molecule) -> None:
+    """Bring axes that are being shown back in line with what is built.
+
+    Axes are objects of their own, so a rebuild leaves them describing the
+    symmetry before it and a clear leaves them describing nothing - and they
+    are switched off from the assembly's own dialog, which a cleared assembly
+    no longer has.
+    """
+    from ..core import symmetry_axes
+
+    if not symmetry_axes.symmetry_axis_objects(molecule):
+        return
+    tag = assembly_core.built_assembly_id(molecule)
+    operators = _operators_of_built(context, molecule, tag) if tag else []
+    if operators:
+        symmetry_axes.show_symmetry_axes(molecule, operators)
+    else:
+        symmetry_axes.clear_symmetry_axes(molecule)
 
 
 def _filtered(context, molecule, operators):
@@ -530,6 +571,5 @@ CLASSES = (
     MOLECULE_PB_OT_toggle_symmetry_axes,
     MOLECULE_PB_OT_realize_copies,
     MOLECULE_PB_OT_cutaway,
-    MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
 )

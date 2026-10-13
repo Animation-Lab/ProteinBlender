@@ -382,3 +382,31 @@ def test_deleting_a_chain_copy_removes_all_of_it(scene, sm, multi_chain):
     assert set(_domains_of(mol, CHAIN_LETTER, copies=True)) == set()
     assert set(_domains_of(mol, CHAIN_LETTER)) == originals, \
         "deleting the copy disturbed the chain it was copied from"
+
+
+def _style_node_trees(obj):
+    """Which MolecularNodes style group an object is really drawn through."""
+    return sorted(
+        node.node_tree.name.split('.')[0]
+        for modifier in obj.modifiers if modifier.type == 'NODES' and modifier.node_group
+        for node in modifier.node_group.nodes
+        if node.type == 'GROUP' and node.node_tree and 'Style ' in node.node_tree.name)
+
+
+def test_a_chain_copy_is_drawn_in_the_style_of_the_chain_it_copies(scene, sm, single_chain):
+    """A copy looks like what it was copied from.
+
+    A local file comes in as spheres under a wrapper that remembers surface,
+    and the copy used to be given the remembered style: copying a sphere chain
+    produced a surface beside it.
+    """
+    molecule = sm.molecules[single_chain]
+    original = next(iter(molecule.domains.values()))
+    drawn = _style_node_trees(original.object)
+    assert drawn
+
+    new_ids = molecule.copy_chain(str(original.chain_id))
+    assert len(new_ids) == 1
+
+    assert _style_node_trees(molecule.domains[new_ids[0]].object) == drawn
+

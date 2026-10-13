@@ -205,6 +205,49 @@ def test_axes_can_be_cleared(scene, sm):
     assert module.symmetry_axis_objects(molecule) == []
 
 
+def test_clearing_the_assembly_takes_its_axes_with_it(scene, sm):
+    """Axes are switched off from the assembly's dialog, which goes with it.
+
+    Left behind, they are lines through a symmetry that is no longer there and
+    that nothing in the add-on can remove any more.
+    """
+    molecule = _import()
+    scene.pb_symmetry_kind = "D"
+    scene.pb_symmetry_order = 4
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+    before = set(bpy.data.objects.keys())
+
+    assert bpy.ops.molecule.toggle_symmetry_axes(
+        molecule_id=molecule.identifier) == {'FINISHED'}
+    # A D4 has its four-fold and four two-folds across it.
+    assert len(set(bpy.data.objects.keys()) - before) == 5
+
+    assert bpy.ops.molecule.clear_assembly(
+        molecule_id=molecule.identifier) == {'FINISHED'}
+    assert not set(bpy.data.objects.keys()) - before
+
+
+def test_shown_axes_follow_the_assembly_when_it_is_rebuilt(scene, sm):
+    """Axes on screen describe the symmetry on screen, not the one before it."""
+    molecule = _import()
+    scene.pb_symmetry_kind = "D"
+    scene.pb_symmetry_order = 4
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+    assert bpy.ops.molecule.toggle_symmetry_axes(
+        molecule_id=molecule.identifier) == {'FINISHED'}
+
+    scene.pb_symmetry_kind = "C"
+    scene.pb_symmetry_order = 3
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+
+    # A C3 has its three-fold and nothing else.
+    axes = [o.name for o in bpy.data.objects if 'symmetry_axis' in o.name]
+    assert len(axes) == 1 and 'C3' in axes[0], axes
+
+
 def test_axes_are_sized_to_the_structure(scene, sm):
     """An axis has to be long enough to read as an axis through the assembly."""
     from proteinblender.core import assembly as assembly_core

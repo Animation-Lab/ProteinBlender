@@ -17,21 +17,31 @@ things:
 Two modes, like the membrane builder's dialog and for the same reason:
 opened empty it configures a new build, and opened from the outliner's edit
 pencil it reopens on what that protein was actually built with.
+
+Opened on an existing assembly it is also the one place that assembly is
+worked on: below the build settings sit its axes, cutaway, realization and,
+for a filament, its bend. Those act on the assembly as it stands, so they are
+only live while the settings above still describe it - see
+:func:`dialog_signature`.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
-from bpy.props import EnumProperty, StringProperty
+import bpy
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
-from ..core import symmetry_builder
+from ..core import bend_rig, symmetry_axes, symmetry_bend, symmetry_builder
 from ..utils.scene_manager import ProteinBlenderScene, resolve_active_molecule_id
 from .assembly_operators import (
     apply_symmetry_settings,
     build_generated_symmetry,
+    built_symmetry_settings,
+    refresh_symmetry_axes,
     symmetry_settings,
 )
 
@@ -162,19 +172,17 @@ def snapshot_state(molecule) -> dict:
 def restore_state(molecule, state: dict) -> None:
     """Put back what :func:`snapshot_state` recorded."""
     assembly_id = state.get("assembly_id")
+    params = state.get("params")
     if not assembly_id:
         assembly_core.clear_assembly(molecule)
-        return
-
-    params = state.get("params")
-    if params and str(assembly_id).startswith("generated:"):
+    elif params and str(assembly_id).startswith("generated:"):
         ok, message = build_generated_symmetry(molecule, params)
         if not ok:
             logger.warning("could not restore the previous symmetry: %s",
                            message)
-        return
-
-    assembly_core.build_assembly(molecule, str(assembly_id))
+    else:
+        assembly_core.build_assembly(molecule, str(assembly_id))
+    refresh_symmetry_axes(bpy.context, molecule)
 
 
 _BIOLOGICAL_ENUM_CACHE = {}
@@ -203,7 +211,56 @@ def _sync_assembly_choice(self, context):
 
 
 
+def _get_bend_nodes(dialog) -> int:
+    """How many control nodes the edited filament's path has now."""
+    molecule = _molecule(dialog.molecule_id_to_update)
+    nodes = (len(symmetry_bend.get_bend_nodes(molecule))
+             if molecule is not None else 0)
+    return nodes or bend_rig.RES_DEFAULT
+
+
+def _set_bend_nodes(dialog, value) -> None:
+    """Give the edited filament's path this many control nodes, at once.
+
+    The field is the control: a number that had to be confirmed with a button
+    beside it read as a setting that did nothing. Run as the operator, with
+    an undo step of its own, so one change of the field is one Ctrl+Z.
+    """
+    molecule = _molecule(dialog.molecule_id_to_update)
+    if molecule is None or not symmetry_bend.has_bend(molecule):
+        return
+    value = min(max(int(value), bend_rig.RES_MIN), bend_rig.RES_MAX)
+    if value == len(symmetry_bend.get_bend_nodes(molecule)):
+        return
+    bpy.ops.molecule.set_filament_bend_nodes(
+        'EXEC_DEFAULT', True, molecule_id=molecule.identifier, n_points=value)
+
+
+def dialog_signature(dialog, scene) -> str:
+    """Everything OK would build from, as one comparable string.
+
+    Taken when the dialog opens on an existing assembly and compared from then
+    on, which answers "has the user asked for anything different?" without the
+    dialog having to know what each control means.
+    """
+    described = {"target": dialog.target_id, "source": dialog.source}
+    if dialog.source == 'BIOLOGICAL':
+        described["assembly"] = dialog.assembly_id
+    else:
+        described["settings"] = symmetry_settings(scene)
+    return json.dumps(described, sort_keys=True)
+
+
 def build_dialog_symmetry(molecule, context, target_id, source, assembly_id):
+    """Build what the dialog describes. Returns (ok, message)."""
+    ok, message = _build_dialog_symmetry(
+        molecule, context, target_id, source, assembly_id)
+    if ok:
+        refresh_symmetry_axes(context, molecule)
+    return ok, message
+
+
+def _build_dialog_symmetry(molecule, context, target_id, source, assembly_id):
     if source == 'BIOLOGICAL':
         if target_id != molecule.identifier:
             return False, "Choose the whole protein to build its biological assembly"
@@ -262,6 +319,36 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         options={'HIDDEN', 'SKIP_SAVE'},
     )
 
+    #: :func:`dialog_signature` as the dialog opened on an existing assembly.
+    #: Empty for a new build and for a scripted call, which always build.
+    opened_on: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    #: Which of the assembly's sections are unfolded. On the dialog rather
+    #: than left to Blender, which remembers a section's state between dialogs
+    #: in 5.1 and 5.2 and not in 5.0.
+    show_cutaway: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    show_bend: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    #: The edited filament's control node count. Read from its path and
+    #: written straight to it, so nothing is stored here to fall out of step
+    #: with a shape that brought more nodes of its own.
+    bend_nodes: IntProperty(
+        name="Nodes",
+        description=("How many control nodes shape the filament's path. The "
+                     "bend already made is kept and resampled onto them"),
+        min=bend_rig.RES_MIN, max=bend_rig.RES_MAX,
+        get=_get_bend_nodes, set=_set_bend_nodes,
+        options={'SKIP_SAVE'},
+    )
+
+    @classmethod
+    def description(cls, context, properties):
+        """One operator, two buttons: Create New Assembly and a row's pencil."""
+        if getattr(properties, "molecule_id_to_update", ""):
+            return ("Edit this assembly: change how it is built, show its "
+                    "axes, cut it away, realize its copies or bend a filament")
+        return cls.bl_description
+
     # -- opening -----------------------------------------------------------
 
     def invoke(self, context, event):
@@ -314,6 +401,18 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         # Anything left over from a dialog that was torn down without its
         # cancel() running would otherwise be restored on top of this one.
         _PREVIEWS.clear()
+
+        self.opened_on = ""
+        if (self.molecule_id_to_update and molecule is not None
+                and assembly_core.built_assembly_id(molecule) is not None):
+            self.opened_on = dialog_signature(self, context.scene)
+            # A bend added from here starts with as many nodes as this
+            # filament's last one had.
+            nodes = len(symmetry_bend.get_bend_nodes(molecule))
+            if nodes and context.scene.pb_bend_nodes != nodes:
+                context.scene.pb_bend_nodes = nodes
+            # A filament that is already bent opens on its bend.
+            self.show_bend = symmetry_bend.has_bend(molecule)
         return context.window_manager.invoke_props_dialog(
             self, width=380,
             title="Edit Assembly" if self.molecule_id_to_update else "Create New Assembly")
@@ -335,7 +434,10 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
 
         self._draw_protein_block(layout, scene)
         layout.separator(factor=0.5)
+        self._draw_build(layout, scene)
+        self._draw_tools(layout, scene)
 
+    def _draw_build(self, layout, scene):
         layout.prop(self, 'source', text="")
         if self.source == 'BIOLOGICAL':
             molecule = _molecule(self.target_id)
@@ -364,9 +466,18 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         if kind in {"C", "D"}:
             col.prop(scene, "pb_symmetry_order")
         else:
-            col.prop(scene, "pb_symmetry_count")
+            strands = getattr(scene, "pb_symmetry_strands", 1)
+            col.prop(scene, "pb_symmetry_count",
+                     text="Subunits per Strand" if strands > 1 else "Subunits")
+            # The same number as Subunits, for whoever arrives knowing how
+            # long the filament should be rather than how many it holds.
+            col.prop(scene, "pb_symmetry_length", text="Length (nm)")
             col.prop(scene, "pb_symmetry_rise")
             col.prop(scene, "pb_symmetry_twist")
+            col.prop(scene, "pb_symmetry_strands")
+            if strands > 1:
+                col.prop(scene, "pb_symmetry_stagger")
+                col.prop(scene, "pb_symmetry_strand_twist")
 
         axis_row = col.row(align=True)
         axis_row.label(text="Axis")
@@ -379,7 +490,8 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             order=getattr(scene, "pb_symmetry_order", 3),
             count=getattr(scene, "pb_symmetry_count", 10),
             rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0)))
+            twist=getattr(scene, "pb_symmetry_twist", 0.0),
+            strands=getattr(scene, "pb_symmetry_strands", 1)))
 
         layout.separator(factor=0.5)
         trim = layout.box()
@@ -406,6 +518,140 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         hint = layout.row()
         hint.enabled = False
         hint.label(text="Apply previews it - OK keeps it", icon='INFO')
+
+    # -- working on the assembly the dialog was opened on --------------------
+
+    def _edited_molecule(self):
+        """The built assembly this dialog was opened on, if it is still there.
+
+        It stops being there the moment Realize Copies turns it into objects.
+        """
+        if not self.opened_on:
+            return None
+        molecule = _molecule(self.molecule_id_to_update)
+        if molecule is None or assembly_core.built_assembly_id(molecule) is None:
+            return None
+        return molecule
+
+    def _shows_what_it_opened_on(self, scene) -> bool:
+        return (bool(self.opened_on) and not _PREVIEWS
+                and dialog_signature(self, scene) == self.opened_on)
+
+    def _draw_tools(self, layout, scene):
+        molecule = self._edited_molecule()
+        if molecule is None:
+            return
+
+        # These act on the assembly as it is built. Once a setting above has
+        # been changed or previewed, that is no longer what OK will leave
+        # behind, and a cut or a realization made now would be thrown away or
+        # doubled up by it.
+        current = self._shows_what_it_opened_on(scene)
+
+        layout.separator(factor=0.5)
+        tools = layout.column()
+        tools.enabled = current
+
+        actions = tools.row(align=True)
+        showing = bool(symmetry_axes.symmetry_axis_objects(molecule))
+        axes_op = actions.operator(
+            "molecule.toggle_symmetry_axes",
+            text="Hide Symmetry Axes" if showing else "Show Symmetry Axes",
+            icon='EMPTY_AXIS')
+        axes_op.molecule_id = molecule.identifier
+        real_op = actions.operator("molecule.realize_copies",
+                                   text="Realize Copies", icon='OUTLINER_OB_MESH')
+        real_op.molecule_id = molecule.identifier
+
+        # Folded away until asked for, so that opening the dialog to change a
+        # count does not mean reading past a cutaway and a bend to reach OK.
+        header, cut = tools.panel_prop(self, "show_cutaway")
+        header.label(text="Cutaway")
+        if cut is not None:
+            direction = cut.row(align=True)
+            direction.label(text="Direction")
+            direction.prop(scene, "pb_cutaway_normal", text="")
+            depth = cut.row(align=True)
+            depth.prop(scene, "pb_cutaway_offset")
+            cut_op = depth.operator("molecule.cutaway", text="Cut Away",
+                                    icon='MOD_BOOLEAN')
+            cut_op.molecule_id = molecule.identifier
+            cut_op.normal = scene.pb_cutaway_normal
+            cut_op.offset = scene.pb_cutaway_offset
+
+        # Only a filament: a ring or a double ring has no path to follow.
+        if symmetry_builder.built_symmetry_kind(molecule) == 'H':
+            header, bend = tools.panel_prop(self, "show_bend")
+            header.label(text="Bend")
+            if bend is not None:
+                self._draw_bend(bend, scene, molecule)
+
+        if not current:
+            hint = layout.row()
+            hint.enabled = False
+            hint.label(text="OK the new settings first to use these",
+                       icon='INFO')
+
+    def _draw_bend(self, box, scene, molecule):
+        if not symmetry_bend.has_bend(molecule):
+            add_op = box.operator("molecule.add_filament_bend",
+                                  text="Add Bend", icon='CURVE_BEZCURVE')
+            add_op.molecule_id = molecule.identifier
+            add_op.n_points = scene.pb_bend_nodes
+            note = box.row()
+            note.enabled = False
+            note.label(text="Subunits stay rigid as the path bends",
+                       icon='INFO')
+            return
+
+        # Changing the count recreates the nodes, which would orphan every
+        # key set on the old ones - so a keyframed path keeps the count it has.
+        keyed = bend_rig.has_keyframes(symmetry_bend.SPEC,
+                                       symmetry_bend.owner_object(molecule))
+        count = box.row(align=True)
+        count.enabled = not keyed
+        count.prop(self, "bend_nodes")
+        if keyed:
+            locked = box.row()
+            locked.enabled = False
+            locked.label(text="Keyframed - clear its keys to change the nodes",
+                         icon='INFO')
+
+        presets = box.row(align=True)
+        for identifier, label, _description in bend_rig.PRESETS:
+            preset_op = presets.operator("molecule.filament_bend_preset",
+                                         text=label)
+            preset_op.molecule_id = molecule.identifier
+            preset_op.preset = identifier
+
+        actions = box.row(align=True)
+        edit_op = actions.operator("molecule.edit_filament_bend",
+                                   text="Edit Bend", icon='EMPTY_DATA')
+        edit_op.molecule_id = molecule.identifier
+        remove_op = actions.operator("molecule.remove_filament_bend",
+                                     text="Remove", icon='X')
+        remove_op.molecule_id = molecule.identifier
+
+        # Say whether the rig is doing anything, not merely that it exists -
+        # a freshly added bend is straight until a node is dragged. Measured
+        # against the settings the filament was *built* from, which the
+        # scene sliders stop agreeing with as soon as one is moved.
+        built = built_symmetry_settings(scene, molecule)
+        departure = symmetry_bend.bend_departure(
+            molecule,
+            count=built["count"], rise=built["rise"], twist=built["twist"],
+            axis=built["axis"], **symmetry_builder.lattice_settings(built))
+
+        # The nodes cannot be reached through an open dialog.
+        status = box.row()
+        status.enabled = False
+        if departure < 1.0:
+            status.label(text="Press OK, then drag a node to bend",
+                         icon='INFO')
+        else:
+            status.label(text=f"Tip is {departure:.0f} A off straight - "
+                              "OK to drag the nodes",
+                         icon='CHECKMARK')
 
     def _draw_protein_block(self, layout, scene):
         """Getting hold of a protein, and choosing which one to repeat.
@@ -456,6 +702,16 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     # -- leaving -----------------------------------------------------------
 
     def execute(self, context):
+        if self._shows_what_it_opened_on(context.scene):
+            # Opened on an assembly and asked for nothing different, so there
+            # is nothing to build - and building anyway would undo whatever
+            # was done to it from here: a cutaway made whole again, realized
+            # copies given a second assembly on top of them. Cancelled rather
+            # than finished so that closing leaves no undo step of its own.
+            _rebuild_outliner(context)
+            _refresh(context)
+            return {"CANCELLED"}
+
         # The picker's choice wins; resolve_target only fills in when it is
         # empty, which is the no-protein case.
         molecule = _molecule(resolve_target(context, self.target_id))

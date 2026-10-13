@@ -31,14 +31,14 @@ win = bpy.context.window
 win.workspace = bpy.data.workspaces['Protein Blender']
 for row in scene.outliner_items:
     row.is_expanded = True
-controls = importlib.import_module(H.PKG + '.operators.assembly_controls').MOLECULE_PB_OT_assembly_controls
 assert not hasattr(bpy.types, 'PROTEINBLENDER_PT_symmetry')
+assert not hasattr(bpy.types, 'PROTEINBLENDER_PT_assembly_controls')
+assert not hasattr(bpy.types, 'MOLECULE_OT_assembly_controls')
 # Wrap the real draw functions and inspect Blender's resulting native layout.
 # This is not a mock layout: missing controls or a draw exception stay visible.
 classes = [
     importlib.import_module(H.PKG + '.operators.symmetry_dialog').MOLECULE_PB_OT_symmetry_dialog,
     importlib.import_module(H.PKG + '.dna_builder.dna_panel').PROTEINBLENDER_PT_builders,
-    controls,
     importlib.import_module(H.PKG + '.panels.protein_outliner_panel').PROTEINBLENDER_PT_outliner,
 ]
 records, originals = {}, []
@@ -147,24 +147,12 @@ assert 'Edit Assembly' in layout
 assert ('PDB-defined Assembly' if source == 'BIOLOGICAL' else 'Generated Symmetry') in layout
 if source == 'BIOLOGICAL':
     assert 'Assembly 1' in layout and '2 transformation applications' in layout
-win = bpy.context.window
-win.event_simulate(type='ESC', value='PRESS')
-win.event_simulate(type='ESC', value='RELEASE')
-''', source=source)
-        _settle()
-        blender.call('''
-import importlib
-assert not hasattr(bpy.types, 'PROTEINBLENDER_PT_symmetry')
-bpy.ops.proteinblender.outliner_item_info(item_id=mid)
-with R.view3d_override():
-    assert bpy.ops.molecule.assembly_controls('INVOKE_DEFAULT', molecule_id=mid) == {'RUNNING_MODAL'}
-''', mid=mid, child_id=child_id)
-        _settle()
-        blender.call('''
-layout = str(bpy.app.driver_namespace['pb_assembly_ui_records']['MOLECULE_PB_OT_assembly_controls'])
-assert 'Assembly progress' in layout and 'Keyframe' in layout
-assert 'molecule.build_assembly(' not in layout, 'A duplicate deposited builder remains in the panel'
-assert ('Add Bend' in layout) == (source == 'GENERATED' and kind == 'H'), layout
+# The one dialog also carries what is done to the assembly, with the cutaway
+# and the bend folded under their names until they are opened.
+assert 'Show Symmetry Axes' in layout and 'Realize Copies' in layout and 'Cutaway' in layout
+assert 'Assembly progress' not in layout and 'Keyframe' not in layout
+assert 'molecule.build_assembly(' not in layout, 'A duplicate deposited builder remains in the dialog'
+assert ("'Bend'" in layout) == (source == 'GENERATED' and kind == 'H'), layout
 win = bpy.context.window
 win.event_simulate(type='ESC', value='PRESS')
 win.event_simulate(type='ESC', value='RELEASE')

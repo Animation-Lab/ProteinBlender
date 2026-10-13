@@ -205,12 +205,16 @@ def set_bezier_points(spline, points, handle_type="ALIGNED") -> None:
 
 
 def straight_points(length: float, n: int = RES_DEFAULT,
-                    direction=(0.0, 0.0, 1.0)):
-    """``n`` evenly spaced points along a straight line of ``length``."""
+                    direction=(0.0, 0.0, 1.0), origin=(0.0, 0.0, 0.0)):
+    """``n`` evenly spaced points along a straight line of ``length``.
+
+    The line starts at ``origin``, in the curve's own space.
+    """
     axis = Vector(direction)
     if axis.length < 1e-9:
         axis = Vector((0.0, 0.0, 1.0))
     axis = axis.normalized()
+    start = Vector(origin)
 
     steps = max(n - 1, 1)
     handle = length / steps * 0.4
@@ -218,7 +222,7 @@ def straight_points(length: float, n: int = RES_DEFAULT,
     points = []
     for i in range(n):
         along = (i / steps) * length
-        centre = axis * along
+        centre = start + axis * along
         points.append((centre, centre - axis * handle, centre + axis * handle))
     return points
 
@@ -678,6 +682,46 @@ def rebuild_nodes(spec: BendRigSpec, owner, n_points: int) -> None:
     create_nodes(spec, owner, curve_obj, n_points)
 
 
+def resize_path(spec: BendRigSpec, owner, factor: float) -> bool:
+    """Grow or shrink the path about its first point, keeping its shape.
+
+    For when what the path carries has changed length: the bend the user made
+    is scaled with it rather than left behind, the same handles on the same
+    shape. Returns False, leaving the path alone, when there is nothing to
+    do - no path, or a factor that would not change it.
+    """
+    curve_obj = get_curve(spec, owner)
+    if (curve_obj is None or not curve_obj.data.splines
+            or factor <= 0.0 or abs(factor - 1.0) < 1e-6):
+        return False
+
+    # Bake first: the control points still describe the path as it was made,
+    # and the user's bend lives on the hooks.
+    bake_evaluated_curve_shape(curve_obj)
+    remove_nodes(spec, owner)
+
+    points = curve_obj.data.splines[0].bezier_points
+    start = points[0].co.copy()
+    for point in points:
+        # The handles go with their point, by the same factor, which is what
+        # makes this the same curve at another size rather than a new one
+        # through scaled points. All three are read before any is written,
+        # and written as free handles: Blender re-aims an aligned handle the
+        # moment its point or its partner is written, so a handle read after
+        # the point has moved is no longer where the curve had it.
+        types = point.handle_left_type, point.handle_right_type
+        point.handle_left_type = point.handle_right_type = "FREE"
+        co, left, right = (start + (vector.copy() - start) * factor
+                           for vector in (point.co, point.handle_left,
+                                          point.handle_right))
+        point.co, point.handle_left, point.handle_right = co, left, right
+        point.handle_left_type, point.handle_right_type = types
+    curve_obj.data.update_tag()
+
+    create_nodes(spec, owner, curve_obj, len(points))
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Starting shapes
 # ---------------------------------------------------------------------------
@@ -693,13 +737,27 @@ PRESETS = (
     ("COIL", "Coil", "A wide loop, curling back on itself"),
 )
 
+#: The fewest control points each shape can be drawn with. Points are spaced
+#: evenly along the shape, and three of them land on an S-curve's start, its
+#: crossing and its end - all on the axis, which is a straight line - and on
+#: a coil's start, its far side and its start again, which is a line out and
+#: back. A shape asked for with fewer handles than this gets this many.
+PRESET_MIN_POINTS = {"STRAIGHT": RES_MIN, "ARC": 3, "S": 5, "COIL": 7}
+
 
 def preset_points(preset: str, length: float, n_points: int,
-                  direction=(0.0, 0.0, 1.0), amplitude: Optional[float] = None):
+                  direction=(0.0, 0.0, 1.0), amplitude: Optional[float] = None,
+                  origin=(0.0, 0.0, 0.0), leave_along_axis: bool = False):
     """Control points for one of :data:`PRESETS`, in curve-local space.
 
     ``amplitude`` is how far the path departs from straight; it defaults to a
     quarter of the length, which reads as a clear bend at any scale.
+
+    The shape starts at ``origin``. As drawn, an arc's ends both sit on the
+    axis, so it sets off at an angle to it. ``leave_along_axis`` turns the
+    whole shape about its start until it sets off *along* the axis instead,
+    for anything that is held at its start and cannot turn to follow - a
+    filament's first subunit stays where it was imported.
     """
     import math
 
@@ -737,21 +795,45 @@ def preset_points(preset: str, length: float, n_points: int,
             offset = 0.0
         positions.append(axis * along + side * offset)
 
+    if leave_along_axis and len(positions) > 1:
+        # The path's first tangent runs from its first point to its second
+        # (set_aligned_handles_along_path), so that is the direction to bring
+        # onto the axis.
+        leaving = positions[1] - positions[0]
+        if leaving.length > 1e-9:
+            turn = leaving.rotation_difference(axis)
+            positions = [turn @ p for p in positions]
+
+    start = Vector(origin)
     # Handles are regenerated from the positions rather than guessed at, for
     # the same reason resampling does it: default handles sit at the origin.
-    return [(p, p, p) for p in positions]
+    return [(start + p, start + p, start + p) for p in positions]
 
 
 def apply_preset(spec: BendRigSpec, owner, preset: str, length: float,
                  n_points: Optional[int] = None,
-                 direction=(0.0, 0.0, 1.0)) -> bool:
-    """Overwrite the curve with a starting shape and rebuild the nodes on it."""
+                 direction=(0.0, 0.0, 1.0), origin=(0.0, 0.0, 0.0),
+                 leave_along_axis: bool = False,
+                 fit_length: bool = False) -> bool:
+    """Overwrite the curve with a starting shape and rebuild the nodes on it.
+
+    Keeps the handle count the curve has, unless the shape cannot be drawn
+    with so few - see :data:`PRESET_MIN_POINTS`.
+
+    A shape is laid out by how far it *reaches*: an arc spanning ``length``
+    is longer than that to travel along, and a coil of that circumference
+    drawn through a few points is a little shorter. ``fit_length`` resizes
+    the shape until the path itself is ``length`` long, for something of a
+    fixed length that should end where its path does.
+    """
     curve_obj = get_curve(spec, owner)
     if curve_obj is None or not curve_obj.data.splines:
         return False
 
     if n_points is None:
         n_points = len(curve_obj.data.splines[0].bezier_points)
+    n_points = max(n_points,
+                   PRESET_MIN_POINTS.get((preset or "").upper(), RES_MIN))
     n_points = max(RES_MIN, min(RES_MAX, int(n_points)))
 
     remove_nodes(spec, owner)
@@ -761,14 +843,35 @@ def apply_preset(spec: BendRigSpec, owner, preset: str, length: float,
         curve_data.splines.remove(spline)
     spline = curve_data.splines.new("BEZIER")
     spline.bezier_points.add(n_points - 1)
-    for i, (co, _l, _r) in enumerate(
-            preset_points(preset, length, n_points, direction)):
+    for i, (co, _l, _r) in enumerate(preset_points(
+            preset, length, n_points, direction, origin=origin,
+            leave_along_axis=leave_along_axis)):
         spline.bezier_points[i].co = Vector(co)
     set_aligned_handles_along_path(spline)
+    if fit_length:
+        _scale_to_length(spline, length)
     curve_data.update_tag()
 
     create_nodes(spec, owner, curve_obj, n_points)
     return True
+
+
+def _scale_to_length(spline, length: float) -> None:
+    """Resize a path about its first point until it is ``length`` long.
+
+    Exact in one step: the handles are a fixed fraction of the distances
+    between the points, so the whole path scales with them.
+    """
+    polyline = _flatten(spline)
+    measured = sum((b - a).length for a, b in zip(polyline, polyline[1:]))
+    if measured < 1e-9 or length <= 0:
+        return
+
+    factor = length / measured
+    start = spline.bezier_points[0].co.copy()
+    for point in spline.bezier_points:
+        point.co = start + (point.co - start) * factor
+    set_aligned_handles_along_path(spline)
 
 
 def _perpendicular(axis: Vector) -> Vector:
@@ -954,7 +1057,7 @@ def sample_along(curve_obj, arc_lengths: Sequence[float],
     if len(polyline) < 2:
         return []
 
-    frames = _rotation_minimising_frames(polyline)
+    frames = _rotation_minimising_frames(polyline, *_end_tangents(curve_obj))
     total = lengths[-1]
 
     out = []
@@ -1008,6 +1111,35 @@ def _world_polyline(curve_obj, samples_per_segment):
     return polyline, lengths
 
 
+def _end_tangents(curve_obj):
+    """Which way a Bezier path leaves its first point and reaches its last.
+
+    Exactly: a Bezier leaves a point along that point's handle. The flattened
+    polyline can only offer its first and last steps, which are chords - each
+    off by half the turn the path makes across it. That is well under a degree
+    and still matters, because a filament is expressed relative to its first
+    subunit (``symmetry_bend._anchored_on_the_original``): an error in the
+    first frame turns the *whole* filament about its start, and a degree at
+    one end is ten Angstrom at the other.
+
+    World-space unit vectors, or ``None`` for an end with nothing to read - a
+    POLY path, or a handle sitting on its own point.
+    """
+    effective = effective_bezier_points(curve_obj)
+    if len(effective) < 2:
+        return None, None
+
+    turn = curve_obj.matrix_world.to_3x3()
+    first_co, _left, first_right = effective[0]
+    last_co, last_left, _right = effective[-1]
+
+    def direction(vector):
+        vector = turn @ vector
+        return vector.normalized() if vector.length > 1e-9 else None
+
+    return direction(first_right - first_co), direction(last_co - last_left)
+
+
 def _flatten_triples(triples, samples_per_segment):
     """A dense polyline through ``(co, handle_left, handle_right)`` triples."""
     out = []
@@ -1019,20 +1151,24 @@ def _flatten_triples(triples, samples_per_segment):
     return out
 
 
-def _rotation_minimising_frames(polyline):
+def _rotation_minimising_frames(polyline, start_tangent=None, end_tangent=None):
     """A tangent and a normal at every polyline vertex, carried forward.
 
     The double-reflection method: each frame is the previous one transported
     onto the next tangent, which keeps the normal from spinning about the path
     and never flips it at an inflection.
+
+    A vertex in the middle takes its tangent from the vertices either side of
+    it. The two ends have only one neighbour, so they take the path's own end
+    directions when the caller knows them - see :func:`_end_tangents`.
     """
     count = len(polyline)
     tangents = []
     for i in range(count):
         if i == 0:
-            direction = polyline[1] - polyline[0]
+            direction = start_tangent or polyline[1] - polyline[0]
         elif i == count - 1:
-            direction = polyline[-1] - polyline[-2]
+            direction = end_tangent or polyline[-1] - polyline[-2]
         else:
             direction = polyline[i + 1] - polyline[i - 1]
         if direction.length < 1e-12:

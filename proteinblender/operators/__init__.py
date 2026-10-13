@@ -57,7 +57,6 @@ from .assembly_operators import (
     MOLECULE_PB_OT_toggle_symmetry_axes,
     MOLECULE_PB_OT_realize_copies,
     MOLECULE_PB_OT_cutaway,
-    MOLECULE_PB_OT_keyframe_assembly,
     MOLECULE_PB_OT_clear_assembly,
     CLASSES as ASSEMBLY_CLASSES,
 )
@@ -69,11 +68,14 @@ from .symmetry_bend_operators import (
     MOLECULE_PB_OT_remove_filament_bend,
     CLASSES as SYMMETRY_BEND_CLASSES,
 )
-from .assembly_controls import CLASSES as ASSEMBLY_CONTROLS_CLASSES
 from .symmetry_dialog import (
     MOLECULE_PB_OT_symmetry_dialog,
     MOLECULE_PB_OT_symmetry_preview,
     CLASSES as SYMMETRY_DIALOG_CLASSES,
+)
+from .filament_operators import (
+    MOLECULE_PB_OT_build_filament,
+    CLASSES as FILAMENT_CLASSES,
 )
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
 from .outliner_color_picker import CLASSES as OUTLINER_COLOR_CLASSES
@@ -168,7 +170,8 @@ CLASSES = (
     *SYMMETRY_BEND_CLASSES,
     # The Symmetry Builder dialog and its in-dialog Apply
     *SYMMETRY_DIALOG_CLASSES,
-    *ASSEMBLY_CONTROLS_CLASSES,
+    # The Filament builder: actin and microtubules, by length
+    *FILAMENT_CLASSES,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)

@@ -16,8 +16,9 @@ from bpy.props import IntProperty, StringProperty
 from bpy.types import Operator
 
 from ..core import assembly as assembly_core
-from ..core import bend_rig, symmetry_bend
+from ..core import bend_rig, symmetry_bend, symmetry_builder
 from ..utils.scene_manager import ProteinBlenderScene, resolve_active_molecule_id
+from .assembly_operators import built_symmetry_settings
 
 
 def _molecule(molecule_id):
@@ -34,13 +35,17 @@ def _settings(context, molecule):
 
 
 def _built_settings(scene, molecule):
-    built = assembly_core.built_build_params(molecule) or {}
+    """The filament's lattice, as the bend code takes it."""
+    built = built_symmetry_settings(scene, molecule)
     return dict(
-        count=built.get("count", getattr(scene, "pb_symmetry_count", 10)),
-        rise=built.get("rise", getattr(scene, "pb_symmetry_rise", 0.0)),
-        twist=built.get("twist", getattr(scene, "pb_symmetry_twist", 0.0)),
-        axis=tuple(built.get("axis", getattr(scene, "pb_symmetry_axis", (0.0, 0.0, 1.0)))),
-    )
+        count=built["count"], rise=built["rise"], twist=built["twist"],
+        axis=built["axis"], **symmetry_builder.lattice_settings(built))
+
+
+def _path_settings(settings):
+    """The part of the lattice that decides how long its path is."""
+    return {key: settings[key]
+            for key in ("count", "rise", "axis", "strands", "stagger")}
 
 
 def _refresh_ui(context):
@@ -63,7 +68,14 @@ def _rebuild_filament(context, molecule) -> bool:
         return False
     if assembly_core.update_operator_points(molecule, operators):
         return True
-    return assembly_core.apply_operators(molecule, operators, str(tag))
+    return assembly_core.replace_operators(molecule, operators)
+
+
+def _remember_node_count(context, molecule) -> None:
+    """Keep the scene's node count on what this filament's path has."""
+    nodes = len(symmetry_bend.get_bend_nodes(molecule))
+    if nodes and context.scene.pb_bend_nodes != nodes:
+        context.scene.pb_bend_nodes = nodes
 
 
 def _select_nodes(context, nodes):
@@ -109,10 +121,9 @@ class MOLECULE_PB_OT_add_filament_bend(Operator):
         settings = _settings(context, molecule)
         curve = symmetry_bend.add_bend(
             molecule,
-            count=settings["count"], rise=settings["rise"],
-            axis=settings["axis"],
             n_points=(self.n_points if self.properties.is_property_set('n_points')
-                      else getattr(context.scene, "pb_bend_nodes", bend_rig.RES_DEFAULT)))
+                      else getattr(context.scene, "pb_bend_nodes", bend_rig.RES_DEFAULT)),
+            **_path_settings(settings))
         if curve is None:
             self.report({"WARNING"},
                         "This filament has no length to bend along")
@@ -188,6 +199,8 @@ class MOLECULE_PB_OT_set_filament_bend_nodes(Operator):
             self.report({"ERROR"}, "Could not change the node count")
             return {"CANCELLED"}
 
+        # What a bend added after this one is removed will start with.
+        _remember_node_count(context, molecule)
         _rebuild_filament(context, molecule)
         _select_nodes(context, symmetry_bend.get_bend_nodes(molecule))
         _refresh_ui(context)
@@ -215,11 +228,12 @@ class MOLECULE_PB_OT_filament_bend_preset(Operator):
 
         settings = _settings(context, molecule)
         if not symmetry_bend.apply_preset(
-                molecule, self.preset,
-                count=settings["count"], rise=settings["rise"],
-                axis=settings["axis"]):
+                molecule, self.preset, **_path_settings(settings)):
             self.report({"ERROR"}, "Could not apply that shape")
             return {"CANCELLED"}
+
+        # A shape can need more handles than the path had.
+        _remember_node_count(context, molecule)
 
         _rebuild_filament(context, molecule)
         _select_nodes(context, symmetry_bend.get_bend_nodes(molecule))

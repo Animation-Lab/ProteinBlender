@@ -23,9 +23,13 @@ if normal_profile:
     # Resolve the enabled copy before adding the source tree to sys.path. Alias
     # its already-loaded modules so the shared scenario imports observe the
     # installed classes and singleton, including an extension namespace.
+    # Every copy that actually loaded, the alpha channel's included: copies
+    # share their operator ids, so a second one owns the operators the first
+    # thinks it is testing. An entry whose extension repository is gone never
+    # loads, and is not a copy.
     enabled = [name for name in bpy.context.preferences.addons.keys()
-               if name == 'proteinblender' or name.endswith('.proteinblender')]
-    assert len(enabled) == 1, f'Expected one enabled installed ProteinBlender: {enabled}'
+               if 'proteinblender' in name.lower() and name in sys.modules]
+    assert len(enabled) == 1, f'Expected one loaded installed ProteinBlender: {enabled}'
     installed_package = enabled[0]
     installed = sys.modules.get(installed_package)
     assert installed is not None, 'Enabled ProteinBlender did not load'

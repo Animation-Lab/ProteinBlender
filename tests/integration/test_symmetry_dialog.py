@@ -218,6 +218,113 @@ def test_symmetry_repeats_only_its_chosen_chain_or_domain(scope):
 
 
 # --------------------------------------------------------------------------
+# Edit - the dialog opened on an assembly is also where it is worked on
+# --------------------------------------------------------------------------
+
+def _filament(molecule):
+    """Five copies marching 20 A apart along -Y, a cutaway's default side."""
+    _set(kind="H", count=5, rise=20.0, twist=30.0, axis=(0.0, -1.0, 0.0))
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+    assert _copies(molecule) == 5
+
+
+def _opened_on(molecule, source='GENERATED', assembly_id=''):
+    """What the dialog notes down when a row's pencil opens it."""
+    from types import SimpleNamespace
+    return _dialog().dialog_signature(
+        SimpleNamespace(target_id=molecule.identifier, source=source,
+                        assembly_id=assembly_id),
+        bpy.context.scene)
+
+
+def _ok(molecule, opened_on):
+    return bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED', opened_on=opened_on)
+
+
+def test_ok_with_nothing_changed_keeps_a_cutaway():
+    """OK builds what was asked for, and nothing new was asked for.
+
+    The cutaway is made from inside the dialog, so the OK that closes it must
+    not be what puts the cut copies back.
+    """
+    molecule = _import()
+    _filament(molecule)
+    opened_on = _opened_on(molecule)
+
+    # Copies sit 0, 20, 40, 60 and 80 A out; a plane at 50 A takes the last two.
+    assert bpy.ops.molecule.cutaway(
+        molecule_id=molecule.identifier, normal=(0, -1, 0), offset=50) == {'FINISHED'}
+    assert _copies(molecule) == 3
+
+    assert _ok(molecule, opened_on) == {'CANCELLED'}
+    assert _copies(molecule) == 3
+
+
+def test_ok_with_a_changed_setting_rebuilds_the_assembly_whole():
+    molecule = _import()
+    _filament(molecule)
+    opened_on = _opened_on(molecule)
+    assert bpy.ops.molecule.cutaway(
+        molecule_id=molecule.identifier, normal=(0, -1, 0), offset=50) == {'FINISHED'}
+
+    bpy.context.scene.pb_symmetry_count = 4
+
+    assert _ok(molecule, opened_on) == {'FINISHED'}
+    assert _copies(molecule) == 4
+
+
+def test_ok_does_not_build_over_realized_copies():
+    """Realize Copies ends the assembly; OK must not start another on top."""
+    molecule = _import()
+    _filament(molecule)
+    opened_on = _opened_on(molecule)
+    before = set(bpy.data.objects.keys())
+
+    assert bpy.ops.molecule.realize_copies(
+        molecule_id=molecule.identifier) == {'FINISHED'}
+    realized = set(bpy.data.objects.keys()) - before
+    assert realized
+
+    assert _ok(molecule, opened_on) == {'CANCELLED'}
+    assert _copies(molecule) == UNBUILT
+    assert set(bpy.data.objects.keys()) - before == realized
+
+
+def test_ok_builds_when_a_preview_is_outstanding():
+    """Settings put back by hand are not the same as nothing having happened.
+
+    Apply has built something else in between, and OK is what replaces it.
+    """
+    molecule = _import()
+    _filament(molecule)
+    opened_on = _opened_on(molecule)
+
+    bpy.context.scene.pb_symmetry_count = 7
+    assert bpy.ops.molecule.symmetry_preview(
+        molecule_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+    assert _copies(molecule) == 7
+    bpy.context.scene.pb_symmetry_count = 5
+
+    assert _ok(molecule, opened_on) == {'FINISHED'}
+    assert _copies(molecule) == 5
+
+
+def test_a_scripted_call_builds_whatever_is_already_there():
+    """Only a dialog opened on an assembly has anything to leave alone."""
+    molecule = _import()
+    _filament(molecule)
+    assert bpy.ops.molecule.cutaway(
+        molecule_id=molecule.identifier, normal=(0, -1, 0), offset=50) == {'FINISHED'}
+    assert _copies(molecule) == 3
+
+    assert bpy.ops.molecule.symmetry_dialog(
+        target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
+    assert _copies(molecule) == 5
+
+
+# --------------------------------------------------------------------------
 # Apply - build without committing
 # --------------------------------------------------------------------------
 

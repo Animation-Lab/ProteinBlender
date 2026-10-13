@@ -560,23 +560,6 @@ def resolve_active_molecule(context=None):
     return ProteinBlenderScene.get_instance().molecules.get(identifier)
 
 
-def resolve_active_assembly_molecule(context=None):
-    """Resolve the explicitly clicked assembly child, independent of protein selection."""
-    from ..core import assembly
-
-    context = context or bpy.context
-    scene = context.scene
-    index = getattr(scene, 'outliner_index', -1)
-    if not 0 <= index < len(scene.outliner_items):
-        return None
-    row = scene.outliner_items[index]
-    if row.item_type != 'SYMMETRY':
-        return None
-    molecule = ProteinBlenderScene.get_instance().molecules.get(symmetry_molecule_id(row))
-    return molecule if molecule and assembly.built_assembly_id(molecule) else None
-
-
-
 def molecule_would_be_emptied(molecule, doomed_domain_ids) -> bool:
     """True if deleting exactly these domains leaves the protein with none.
 
@@ -1652,6 +1635,7 @@ def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
         "count": params.get("count", 10),
         "rise": params.get("rise", 0.0),
         "twist": params.get("twist", 0.0),
+        **symmetry_builder.lattice_settings(params),
     }
     try:
         label = symmetry_builder.short_label(kind, **shape) if kind else ""

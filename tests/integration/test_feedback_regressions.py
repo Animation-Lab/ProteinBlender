@@ -176,21 +176,24 @@ def test_realization_preserves_each_chains_world_placements(scene, aid, factor, 
     A.build_assembly(mol, aid)
     A.set_assembly_factor(mol, factor, delay)
     before = instances()
-    sources = [d.object for d in mol.domains.values()]
-    created = A.realize_copies(mol, force=True)
+    sources = {str(d.chain_id): d.object.name for d in mol.domains.values()}
+    from proteinblender.operators.assembly_realize import realize_assembly
+    created = realize_assembly(bpy.context, mol, force=True)
     assert created
     after = instances()
-    for source in sources:
-        expected = before.get(source.name, [])
-        names = [o.name for o in created if o.name.startswith(source.name + '_copy_')]
-        if not source.hide_get():
-            names.append(source.name)
+    # Every copy is now a chain the outliner lists: in a protein of its own,
+    # or beside the chain it copies. Nothing is left as an object on the side.
+    assert not created.objects
+    for chain, source in sources.items():
+        expected = before.get(source, [])
+        names = [d.object.name for m in H.sm().molecules.values() for d in m.domains.values()
+                 if str(d.chain_id) == chain and not d.object.hide_get()]
         actual = [m for name in names for m in after.get(name, [])]
-        assert len(actual) == len(expected), source.name
+        assert len(actual) == len(expected), source
         # Match each placement independently; instance order is not stable.
         for matrix in expected:
             error, index = min((np.max(np.abs(matrix - m)), i) for i, m in enumerate(actual))
-            assert error < 2e-5, (source.name, error)
+            assert error < 2e-5, (source, error)
             actual.pop(index)
 
 
@@ -250,6 +253,9 @@ def test_assembly_chain_subsets_without_domain_objects(scene, aid, expected):
             chains.extend(values)
             instance.object.to_mesh_clear()
     assert sorted(chains) == expected
-    created = A.realize_copies(mol, force=True)
-    assert len(created) == len(expected)
+    from proteinblender.operators.assembly_realize import realize_assembly
+    created = realize_assembly(bpy.context, mol, force=True)
+    # With no chain rows left to copy, these are the one case that still
+    # comes out as plain objects.
+    assert len(created.objects) == len(expected)
     assert mol.object.hide_get()

@@ -2623,12 +2623,16 @@ class MoleculeWrapper:
         new_domain.copy_group_id = group_id
         new_domain.copy_group_name = group_name
 
-        # Copy the colour and style from the original
+        # Copy the colour and style from the original - the style it is drawn
+        # in, which is not always the one it remembers: a local file comes in
+        # as spheres under a wrapper that says surface.
+        from .visual_style import get_object_style
+        style = get_object_style(original_domain.object) or original_domain.style
         new_domain.color = original_domain.color
-        new_domain.style = original_domain.style
+        new_domain.style = style
         if new_domain.object:
             new_domain.object.domain_color = original_domain.color
-            new_domain.object.domain_style = original_domain.style
+            new_domain.object.domain_style = style
 
         print(f"Created domain copy: {new_domain_id} "
               f"(copy #{copy_number} of {domain_id})")

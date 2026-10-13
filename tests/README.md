@@ -46,6 +46,12 @@ python tests/run_ui_tests.py --normal-profile --scenario puppet-morphsets --blen
 # B-factor checkbox, live intensity entry, cartoon playback and lighting label
 python tests/run_ui_tests.py --normal-profile --scenario thermal-motion --blender "<path-to-blender>"
 
+# Create New Filament: dialog, build, undo/redo, and lengthening it in Edit Assembly
+python tests/run_ui_tests.py --scenario filament --blender "<path-to-blender>"
+
+# Edit Assembly's Nodes field on actin and a microtubule: typed, stepped, undone, keyframed
+python tests/run_ui_tests.py --scenario filament-nodes --blender "<path-to-blender>"
+
 # Reopen the example produced by the model-morphsets scenario and edit its keys
 python tests/run_ui_tests.py --normal-profile --scenario saved-model-morphsets --blend "<artifact-dir>/1d3z-model-keyframes.blend" --blender "<path-to-blender>"
 
@@ -69,12 +75,11 @@ normal Blender installations before reporting completion:
 python scripts/deploy_normal_blender.py
 ```
 
-The deployer updates Blender 5.2 and 5.1 in both legacy `scripts/addons` and
-any installed `extensions/*/proteinblender` copy, preserves dependency wheels,
-and byte-verifies every copied Python file. Then fully close Blender,
-restart each applicable version without `--factory-startup`, and reproduce the
-changed user workflow through its public UI operator. Repository tests alone
-do not establish that a normal Blender profile is running the new code.
+The deployer updates Blender 5.2, 5.1 and 5.0 in both legacy `scripts/addons` and any installed `extensions/*/proteinblender` copy, preserves dependency wheels, and byte-verifies every copied Python file.
+It then starts each Blender once and asks which ProteinBlender copy it loaded.
+A `FAIL Blender X.Y` line means another enabled copy (an alpha-channel extension, a demo repository) owns the operators, so the deployed code does not run there however faithfully it was copied; disable that copy in Preferences > Add-ons and deploy again.
+Then fully close Blender, restart each applicable version without `--factory-startup`, and reproduce the changed user workflow through its public UI operator.
+Repository tests alone do not establish that a normal Blender profile is running the new code.
 
 `run_tests.py` finds Blender (via `--blender`, then `$BLENDER_PATH`, then the
 standard install dirs) and launches the suite headless. To run *directly*

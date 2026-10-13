@@ -344,17 +344,16 @@ class PROTEINBLENDER_UL_outliner(UIList):
         elif item.item_type == 'SYMMETRY':
             molecule_id = symmetry_molecule_id(item)
 
-            # Sliders open the assembly's controls; the pencil edits its build.
+            # Two blanks stand in for a protein row's Duplicate and Edit Pivot,
+            # so the pencil and the trash sit in the same columns on every row.
             if not menu:
                 row.label(text="", icon='BLANK1')
-            controls_op = action(
-                "molecule.assembly_controls", text="", icon='PREFERENCES', emboss=False,
-            )
-            if controls_op:
-                controls_op.molecule_id = molecule_id
+                row.label(text="", icon='BLANK1')
 
-            # Edit pencil — reopens the Symmetry dialog on the settings this
-            # build was actually made with (recorded on the assembly node).
+            # Edit pencil - the one way into an assembly. It reopens the
+            # Symmetry dialog on the settings this build was actually made with
+            # (recorded on the assembly node), with the assembly's axes,
+            # cutaway, realization and bend beneath them.
             edit_op = action(
                 "molecule.symmetry_dialog",
                 text="Edit Assembly" if menu else "", icon='GREASEPENCIL', emboss=False,

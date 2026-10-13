@@ -236,22 +236,6 @@ class ProteinProperties(bpy.types.PropertyGroup):
         default='cif',
     )
 
-def _push_assembly_factor(self, context):
-    """Send the sliders straight to the assembly nodes of the active protein.
-
-    The value lives on the nodes, not here: that is what a keyframe keys and
-    what a .blend carries, so this property is only ever a live handle on it.
-    """
-    from ..core import assembly as assembly_core
-    from ..utils.scene_manager import resolve_active_assembly_molecule, resolve_active_molecule
-
-    molecule = resolve_active_assembly_molecule(context) or resolve_active_molecule(context)
-    if molecule is None:
-        return
-    assembly_core.set_assembly_factor(
-        molecule, self.pb_assembly_factor, stagger=self.pb_assembly_stagger)
-
-
 def _symmetry_kind_items(self, context):
     from ..core.symmetry_builder import SYMMETRY_KINDS
     return list(SYMMETRY_KINDS)
@@ -261,6 +245,33 @@ def _bend_rig():
     """Imported lazily: ``core`` reaches back into this module at import time."""
     from ..core import bend_rig
     return bend_rig
+
+
+def _symmetry_builder():
+    """Imported lazily, for the same reason."""
+    from ..core import symmetry_builder
+    return symmetry_builder
+
+
+_ANGSTROM_PER_NM = 10.0
+
+
+def _get_symmetry_length(self):
+    """The filament's length in nanometres: its subunits times its rise.
+
+    Worked out rather than stored, so it cannot disagree with the two
+    controls it is made of.
+    """
+    return _symmetry_builder().length_for_count(
+        self.pb_symmetry_count, self.pb_symmetry_rise) / _ANGSTROM_PER_NM
+
+
+def _set_symmetry_length(self, nanometres):
+    builder = _symmetry_builder()
+    count = builder.count_for_length(nanometres * _ANGSTROM_PER_NM,
+                                     self.pb_symmetry_rise)
+    if count is not None:
+        self.pb_symmetry_count = min(count, builder.MAX_COUNT)
 
 
 def _assembly_enum_items(self, context):
@@ -299,14 +310,6 @@ def register():
                      "assemblies"),
         items=_assembly_enum_items,
     )
-    bpy.types.Scene.pb_assembly_factor = FloatProperty(
-        name="Assembly progress",
-        description=("How far the copies have travelled from the asymmetric "
-                     "unit to the full assembly. Keyframe this to animate the "
-                     "assembly forming"),
-        min=0.0, max=1.0, default=1.0, subtype="FACTOR",
-        update=_push_assembly_factor,
-    )
     bpy.types.Scene.pb_symmetry_kind = EnumProperty(
         name="Symmetry",
         description="What kind of symmetry to generate",
@@ -319,8 +322,34 @@ def register():
     )
     bpy.types.Scene.pb_symmetry_count = IntProperty(
         name="Subunits",
-        description="How many subunits to place along the helix",
-        default=10, min=1, max=200,
+        description=("How many subunits to place along the helix - along "
+                     "each strand, if it has more than one"),
+        default=10, min=1, soft_max=500, max=_symmetry_builder().MAX_COUNT,
+    )
+    bpy.types.Scene.pb_symmetry_length = FloatProperty(
+        name="Length",
+        description=("How long the filament is, in nanometres. Another way "
+                     "of setting Subunits: the length divided by the rise"),
+        min=0.0, soft_max=1000.0, precision=1,
+        get=_get_symmetry_length, set=_set_symmetry_length,
+    )
+    bpy.types.Scene.pb_symmetry_strands = IntProperty(
+        name="Strands",
+        description=("How many strands run side by side round the axis. 1 is "
+                     "a single helix; a microtubule has 13 protofilaments"),
+        default=1, min=1, max=64,
+    )
+    bpy.types.Scene.pb_symmetry_stagger = FloatProperty(
+        name="Stagger",
+        description=("Angstrom each strand sits further along the axis than "
+                     "the strand before it"),
+        default=0.0, min=-500.0, max=500.0,
+    )
+    bpy.types.Scene.pb_symmetry_strand_twist = FloatProperty(
+        name="Strand Twist",
+        description=("Degrees round the axis from one strand to the next. "
+                     "0 spaces the strands evenly"),
+        default=0.0, min=-360.0, max=360.0,
     )
     bpy.types.Scene.pb_symmetry_rise = FloatProperty(
         name="Rise",
@@ -339,8 +368,8 @@ def register():
     )
     bpy.types.Scene.pb_bend_nodes = IntProperty(
         name="Nodes",
-        description=("How many control handles shape the filament's bend "
-                     "path"),
+        description=("How many control nodes a bend added to a filament "
+                     "starts with"),
         default=_bend_rig().RES_DEFAULT,
         min=_bend_rig().RES_MIN, max=_bend_rig().RES_MAX,
     )
@@ -367,13 +396,6 @@ def register():
                      "0 cuts through the centre; larger values take less away"),
         default=0.0, min=-1000.0, max=1000.0,
     )
-    bpy.types.Scene.pb_assembly_stagger = FloatProperty(
-        name="Copy delay",
-        description=("Spread the copies' arrivals across the animation "
-                     "instead of moving them together"),
-        min=0.0, max=1.0, default=0.0, subtype="FACTOR",
-        update=_push_assembly_factor,
-    )
     bpy.types.Scene.outliner_items = CollectionProperty(type=ProteinOutlinerItem)
     # outliner_index is kept for UIList compatibility but has no update callback
     # We don't use row selection - only checkbox selection
@@ -393,8 +415,9 @@ def unregister():
     
     # Safe unregistration with try/except blocks
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+                 "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
-                 "pb_assembly_stagger", "pb_assembly_factor", "pb_assembly_id"):
+                 "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)
 
