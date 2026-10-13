@@ -24,7 +24,9 @@ zero vertices. Deforming would first mean realizing every copy into real
 geometry, which throws away the instancing that makes a long filament cheap.
 
 **How a bent operator is built.** For subunit *k*, at arc length ``rise·k``
-along the curve:
+along the curve (a filament of several strands gives each subunit its own
+distance and angle instead - ``symmetry_builder.lattice_sites`` - and the rest
+is unchanged):
 
 * ``p``, ``T``, ``N`` - the curve's position, tangent and normal there.
 * ``F`` - the rotation taking the filament's own axis onto ``T`` and its
@@ -122,16 +124,55 @@ def molecule_for_node(node_obj, scene_molecules):
     return None
 
 
-def filament_length(count: int, rise: float) -> float:
+def _lattice_arcs(count: int, rise: float, twist: float, strands: int = 1,
+                  stagger: float = 0.0, strand_twist: Optional[float] = None
+                  ) -> Tuple[List[float], List[float]]:
+    """How far along the path each subunit sits (Angstrom), and its angle.
+
+    The lattice's heights, turned into distances along a curve. Two things a
+    height can be that a distance along a path cannot: negative, and measured
+    downwards. A filament with a negative rise runs the same path as its
+    mirror image, so distances are taken in the direction the rise points.
+    And a stagger that runs against the rise asks for subunits *before* the
+    first one, where a curve has nothing - they would all land on its first
+    point - so the whole lattice is slid along until its lowest subunit is at
+    the start. :func:`_anchored_on_the_original` puts the first subunit back
+    on the original afterwards, so the slide costs nothing.
+    """
+    from . import symmetry_builder
+
+    sites = symmetry_builder.lattice_sites(count, rise, twist, strands, stagger,
+                                           strand_twist)
+    if float(rise) != 0.0:
+        direction = math.copysign(1.0, float(rise))
+    else:
+        direction = math.copysign(1.0, float(stagger)) if stagger else 1.0
+
+    along = [direction * height for height, _angle in sites]
+    lowest = min(along)
+    return [a - lowest for a in along], [angle for _height, angle in sites]
+
+
+def filament_length(count: int, rise: float, strands: int = 1,
+                    stagger: float = 0.0) -> float:
     """How long the straight filament would be, in Blender units.
 
     ``count - 1`` gaps, not ``count``: the first subunit sits at the start.
+    Staggered strands stand on top of that - the last strand of the last ring
+    is ``(strands - 1)`` staggers further along than the first - and the path
+    has to reach them, or the far end of a tube hangs off the end of its curve.
     """
-    return max(int(count) - 1, 1) * abs(float(rise)) * WORLD_SCALE
+    arcs, _angles = _lattice_arcs(count, rise, 0.0, strands, stagger)
+    span = max(arcs)
+    if span <= 0.0:
+        # A single subunit still wants a path with some length to it.
+        span = abs(float(rise))
+    return span * WORLD_SCALE
 
 
 def add_bend(molecule, count: int, rise: float, axis=(0.0, 0.0, 1.0),
-             n_points: int = bend_rig.RES_DEFAULT):
+             n_points: int = bend_rig.RES_DEFAULT, strands: int = 1,
+             stagger: float = 0.0):
     """Build the curve and its control nodes along the filament's own axis.
 
     The curve starts at the molecule's origin and runs the length the current
@@ -146,7 +187,7 @@ def add_bend(molecule, count: int, rise: float, axis=(0.0, 0.0, 1.0),
     # handler - see core.bend_rig.cleanup_orphans.
     bend_rig.cleanup_orphans(SPEC)
 
-    length = filament_length(count, rise)
+    length = filament_length(count, rise, strands, stagger)
     if length <= 0:
         logger.warning("filament has no length; nothing to bend along")
         return None
@@ -171,12 +212,13 @@ def set_node_count(molecule, n_points: int) -> bool:
 
 
 def apply_preset(molecule, preset: str, count: int, rise: float,
-                 axis=(0.0, 0.0, 1.0)) -> bool:
+                 axis=(0.0, 0.0, 1.0), strands: int = 1,
+                 stagger: float = 0.0) -> bool:
     """Overwrite the path with a starting shape, keeping the handle count."""
     owner = owner_object(molecule)
     if owner is None:
         return False
-    length = filament_length(count, rise)
+    length = filament_length(count, rise, strands, stagger)
     if length <= 0:
         return False
     ok = bend_rig.apply_preset(SPEC, owner, preset, length, direction=axis)
@@ -249,26 +291,37 @@ def _rotation_about(axis, angle: float) -> np.ndarray:
 
 def bent_helical_operators(molecule, count: int, rise: float, twist: float,
                            axis=(0.0, 0.0, 1.0),
-                           centre=(0.0, 0.0, 0.0)) -> List[Operator]:
-    """A helix of ``count`` subunits laid along the molecule's bend curve.
+                           centre=(0.0, 0.0, 0.0), strands: int = 1,
+                           stagger: float = 0.0,
+                           strand_twist: Optional[float] = None) -> List[Operator]:
+    """A filament laid along the molecule's bend curve.
 
-    Falls back to the straight helix whenever there is no curve to follow, so
-    callers never have to ask which they are getting.
+    ``count`` subunits along each of ``strands`` strands - see
+    ``symmetry_builder.lattice_sites``. Every subunit reads the path at its
+    *own* distance along it, so the staggered strands of a tube each turn a
+    corner when they reach it rather than a ring at a time.
+
+    Falls back to the straight filament whenever there is no curve to follow,
+    so callers never have to ask which they are getting.
     """
     from . import symmetry_builder
 
-    count = max(int(count), 1)
+    def straight():
+        return symmetry_builder.helical(count, rise, twist, axis, centre,
+                                        strands, stagger, strand_twist)
+
     owner = owner_object(molecule)
     curve_obj = bend_rig.get_curve(SPEC, owner)
     if owner is None or curve_obj is None:
-        return symmetry_builder.helical(count, rise, twist, axis, centre)
+        return straight()
 
-    arcs = [abs(float(rise)) * k * WORLD_SCALE for k in range(count)]
-    samples = bend_rig.sample_along(curve_obj, arcs)
-    if len(samples) != count:
+    arcs, angles = _lattice_arcs(count, rise, twist, strands, stagger,
+                                 strand_twist)
+    samples = bend_rig.sample_along(curve_obj, [a * WORLD_SCALE for a in arcs])
+    if len(samples) != len(arcs):
         logger.warning("bend curve gave %d of %d samples; using a straight helix",
-                       len(samples), count)
-        return symmetry_builder.helical(count, rise, twist, axis, centre)
+                       len(samples), len(arcs))
+        return straight()
 
     # Operators act on the molecule's mesh coordinates, upstream of its object
     # transform, so the curve has to be read in the same space rather than in
@@ -291,12 +344,11 @@ def bent_helical_operators(molecule, count: int, rise: float, twist: float,
     source = _basis(filament_axis, _orthogonalise(normals[0], filament_axis))
 
     reference = np.array(centre, dtype=float)
-    step = math.radians(float(twist))
 
     operators: List[Operator] = []
-    for k in range(count):
+    for k, angle in enumerate(angles):
         frame = _basis(tangents[k], normals[k]) @ source.T
-        rotation = frame @ _rotation_about(filament_axis, step * k)
+        rotation = frame @ _rotation_about(filament_axis, math.radians(angle))
         translation = positions[k] - rotation @ reference
         operators.append((rotation, translation))
 
@@ -359,11 +411,16 @@ def build_operators(molecule, kind: str, **settings) -> List[Operator]:
         twist=settings.get("twist", 0.0),
         axis=settings.get("axis", (0.0, 0.0, 1.0)),
         centre=settings.get("centre", (0.0, 0.0, 0.0)),
+        strands=settings.get("strands", 1),
+        stagger=settings.get("stagger", 0.0),
+        strand_twist=settings.get("strand_twist"),
     )
 
 
 def bend_departure(molecule, count: int, rise: float, twist: float,
-                   axis=(0.0, 0.0, 1.0)) -> float:
+                   axis=(0.0, 0.0, 1.0), strands: int = 1,
+                   stagger: float = 0.0,
+                   strand_twist: Optional[float] = None) -> float:
     """How far the bent filament's last subunit sits from where straight put it.
 
     In Angstrom. Used to tell "there is a bend rig" apart from "the rig is
@@ -373,8 +430,9 @@ def bend_departure(molecule, count: int, rise: float, twist: float,
 
     if not has_bend(molecule):
         return 0.0
-    bent = bent_helical_operators(molecule, count, rise, twist, axis)
-    straight = symmetry_builder.helical(count, rise, twist, axis)
+    lattice = dict(strands=strands, stagger=stagger, strand_twist=strand_twist)
+    bent = bent_helical_operators(molecule, count, rise, twist, axis, **lattice)
+    straight = symmetry_builder.helical(count, rise, twist, axis, **lattice)
     if not bent or not straight:
         return 0.0
     return float(np.linalg.norm(bent[-1][1] - straight[-1][1]))

@@ -13,7 +13,8 @@ implementation most structural biologists already have in their fingers:
 * **Dihedral (Dn)** - a Cn stacked with a perpendicular two-fold, giving 2n
   copies. Back-to-back rings.
 * **Helical (H)** - a rise along the axis and a twist about it, repeated.
-  Actin, microtubules, amyloid, pili.
+  Actin, amyloid, pili. Several such strands set round the axis make a tube,
+  which is how a microtubule is built - see :func:`lattice_sites`.
 
 An operator here is the same ``(3x3 rotation, 3-vector translation in
 Angstrom)`` pair a BIOMT record parses to, so generated symmetry goes through
@@ -118,30 +119,71 @@ def dihedral(order: int, axis=DEFAULT_AXIS, centre=(0.0, 0.0, 0.0)) -> List[Oper
     return operators
 
 
+def strand_twist_or_default(strands: int, strand_twist: Optional[float]) -> float:
+    """Degrees between neighbouring strands; evenly round the axis if unset."""
+    if strand_twist is not None:
+        return float(strand_twist)
+    return 360.0 / max(int(strands), 1)
+
+
+def lattice_sites(count: int, rise: float, twist: float, strands: int = 1,
+                  stagger: float = 0.0,
+                  strand_twist: Optional[float] = None) -> List[Tuple[float, float]]:
+    """Where each subunit of a filament sits: ``(height, angle)`` per subunit.
+
+    ``height`` is Angstrom along the axis and ``angle`` degrees about it. This
+    is the whole description of a filament's lattice, and the one place it is
+    worked out - the straight builder and the bent one both read it, so a
+    filament can never be laid out one way and bent another.
+
+    One strand is the plain helix: step ``k`` at ``rise*k`` and ``twist*k``.
+    More strands repeat that helix round the axis, strand ``j`` turned
+    ``strand_twist*j`` from the first and pushed ``stagger*j`` along. That
+    second level is what a microtubule needs and a single helix cannot give:
+    thirteen straight protofilaments (twist 0, rise one tubulin dimer), each
+    27.7 degrees round from its neighbour and a little further up the tube.
+
+    Listed ring by ring - every strand's step ``k`` before anyone's step
+    ``k + 1`` - so the first entry is always the original at ``(0, 0)`` and a
+    growing filament grows from one end.
+    """
+    count = max(int(count), 1)
+    strands = max(int(strands), 1)
+    around = strand_twist_or_default(strands, strand_twist)
+    return [(rise * k + stagger * j, twist * k + around * j)
+            for k in range(count) for j in range(strands)]
+
+
 def helical(count: int, rise: float, twist: float, axis=DEFAULT_AXIS,
-            centre=(0.0, 0.0, 0.0)) -> List[Operator]:
+            centre=(0.0, 0.0, 0.0), strands: int = 1, stagger: float = 0.0,
+            strand_twist: Optional[float] = None) -> List[Operator]:
     """A filament: ``count`` subunits, each ``rise`` A and ``twist`` deg on.
 
     ``rise`` is in Angstrom along the axis and ``twist`` in degrees about it,
     which is how helical parameters are quoted in the literature - actin is
     about 27.5 A and -166.7 degrees per subunit.
+
+    With ``strands`` above one, ``count`` is the number of subunits along
+    *each* strand and the filament holds ``count * strands`` of them. See
+    :func:`lattice_sites`.
     """
-    count = max(int(count), 1)
     direction = _unit(axis)
-    step = math.radians(twist)
 
     operators = []
-    for k in range(count):
-        rotation = rotation_about(direction, step * k)
+    for height, angle in lattice_sites(count, rise, twist, strands, stagger,
+                                       strand_twist):
+        rotation = rotation_about(direction, math.radians(angle))
         _r, translation = _with_centre(rotation, centre)
-        operators.append((rotation, translation + direction * (rise * k)))
+        operators.append((rotation, translation + direction * height))
     return operators
 
 
 def build_operators(kind: str, order: int = 3, count: int = 10,
                     rise: float = 0.0, twist: float = 0.0,
                     axis=DEFAULT_AXIS,
-                    centre=(0.0, 0.0, 0.0)) -> List[Operator]:
+                    centre=(0.0, 0.0, 0.0), strands: int = 1,
+                    stagger: float = 0.0,
+                    strand_twist: Optional[float] = None) -> List[Operator]:
     """Operators for one of :data:`SYMMETRY_KINDS`."""
     kind = (kind or "C").upper()
     if kind == "C":
@@ -149,13 +191,15 @@ def build_operators(kind: str, order: int = 3, count: int = 10,
     if kind == "D":
         return dihedral(order, axis, centre)
     if kind == "H":
-        return helical(count, rise, twist, axis, centre)
+        return helical(count, rise, twist, axis, centre, strands, stagger,
+                       strand_twist)
     logger.warning("unknown symmetry kind %r", kind)
     return []
 
 
 def describe(kind: str, order: int = 3, count: int = 10,
-             rise: float = 0.0, twist: float = 0.0) -> str:
+             rise: float = 0.0, twist: float = 0.0, strands: int = 1,
+             **_lattice) -> str:
     """A short human label for what a given setting will build."""
     kind = (kind or "C").upper()
     if kind == "C":
@@ -163,13 +207,17 @@ def describe(kind: str, order: int = 3, count: int = 10,
     if kind == "D":
         return f"D{int(order)} - {2 * int(order)} copies, two rings"
     if kind == "H":
+        if int(strands) > 1:
+            return (f"Tube - {int(strands)} strands of {int(count)}, "
+                    f"{rise:g} A rise, {twist:g}° twist")
         return (f"Helix - {int(count)} subunits, {rise:g} A rise, "
                 f"{twist:g}° twist")
     return kind
 
 
 def short_label(kind: str, order: int = 3, count: int = 10,
-                rise: float = 0.0, twist: float = 0.0) -> str:
+                rise: float = 0.0, twist: float = 0.0, strands: int = 1,
+                **_lattice) -> str:
     """A compact name for a built symmetry.
 
     :func:`describe` is written for a panel's summary line, where there is
@@ -181,6 +229,8 @@ def short_label(kind: str, order: int = 3, count: int = 10,
     if kind in {"C", "D"}:
         return f"{kind}{int(order)}"
     if kind == "H":
+        if int(strands) > 1:
+            return f"Tube ({int(strands)} x {int(count)})"
         return f"Helix ({int(count)})"
     return kind
 
