@@ -2093,3 +2093,11 @@ Those act on the assembly as built, so they grey out once a setting is changed o
   It then reopens from the row menu (which must not offer Assembly Controls), checks a cut filament reopens on its own settings, checks the tools grey out after a setting changes and that OK then rebuilds, checks a bent filament opens on its bend, clicks Realize Copies and checks the three copies arrive as protein rows with their chains and that OK builds nothing over them, and checks the deposited and nothing-built variants.
   The dialog is asserted to fit the window with every section open.
   Passes on Blender 5.0, 5.1 and 5.2.
+
+## Cycling lives only in Create/Edit Keyframe (2026-10-13)
+
+Reported: once a Morphset existed, Animate Scene grew a second **Cycle through Conformations** button under Keyframe Tools, beside Create/Edit Keyframe.
+Every keyframing action goes through Create/Edit Keyframe, so that button is gone; cycling remains beside a checked Morphset inside the dialog, and `proteinblender.cycle_conformations` is unchanged.
+
+- `--scenario model-morphsets` (`tests/ui/model_morphset_steps.py`, confirm keyframe steps): with a Morphset present, the drawn Animate Scene panel must not contain `proteinblender.cycle_conformations`, while the drawn Create/Edit Keyframe dialog with the Morphset checked must still offer Cycle through Conformations.
+  Red before the fix with exactly that panel assertion, green after, on Blender 5.2.

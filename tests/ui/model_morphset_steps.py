@@ -135,6 +135,13 @@ def build_steps(g):
         assert K._active_instance.morph_items[0].use_morph, 'Actual checkbox click must enable the Morphset'
         layout = str(data['draws'][K.__name__])
         assert 'Ubiquitin conformations' in layout
+        # Create/Edit Keyframe is the single keyframing entry point: cycling
+        # lives beside the checked Morphset here, never as a second button
+        # under Keyframe Tools in Animate Scene.
+        assert 'Cycle through Conformations' in layout, layout
+        animation = str(data['draws']['PROTEINBLENDER_PT_animation'])
+        assert 'proteinblender.cycle_conformations' not in animation, (
+            'Animate Scene must not draw a separate Cycle through Conformations button')
         capture(f'keyframe-{frame}.png')
         if frame == 75:
             assert 'Previous key: Model 3 at frame 50' in layout, (layout, C.keyframes(bpy.context.scene))

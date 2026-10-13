@@ -29,8 +29,8 @@ September 25, 2026. Implements the assembly and Morphset feedback from #mira.
   animation on the Morphset controller is preserved.
 - **Cycle through Conformations** creates editable keys using start/end frames,
   spacing, sequential repetition or seeded random selection. Existing keys can
-  be kept or replaced within the chosen range. It is available in Animation
-  and beside a checked Morphset in Create/Edit Keyframe, and supports undo/redo.
+  be kept or replaced within the chosen range. It is available beside a checked
+  Morphset in Create/Edit Keyframe, and supports undo/redo.
 
 ## Verification
 

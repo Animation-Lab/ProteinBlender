@@ -62,8 +62,8 @@ The keyframe checkbox records animation; it does not hide or show the protein.
 
 ## Cycle through conformations
 
-Click **Cycle through Conformations** in Animation, or beside a checked Morphset
-in **Create/Edit Keyframe**. Choose the Morphset, start and end frames, and the
+In **Create/Edit Keyframe**, check the Morphset and click **Cycle through
+Conformations** beside it. Choose the Morphset, start and end frames, and the
 number of frames between keys. **In order, repeating** loops through the models;
 **Random** chooses a model at each position. The random seed makes a sequence
 repeatable.
