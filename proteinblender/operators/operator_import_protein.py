@@ -10,6 +10,24 @@ from typing import Set
 
 logger = logging.getLogger(__name__)
 
+
+def import_request(props):
+    """What the import controls currently ask for.
+
+    ``(identifier, method, format)`` as ``create_molecule_from_id`` takes
+    them, or None for an import method nobody handles. Shared with the
+    Create New Assembly dialog, which carries the same controls.
+    """
+    if props is None:
+        return None
+    requests = {
+        'PDB': (props.pdb_id, 'PDB', props.remote_format),
+        'ALPHAFOLD': (props.uniprot_id, 'ALPHAFOLD', props.remote_format),
+        'MMCIF': (props.pdb_id, 'PDB', 'cif'),
+    }
+    return requests.get(props.import_method)
+
+
 class MOLECULE_OT_import_protein(Operator):
     """Import a protein from PDB, AlphaFold, or mmCIF."""
     bl_idname = "molecule.import_protein"
@@ -68,11 +86,5 @@ class MOLECULE_OT_import_protein(Operator):
         Returns:
             Tuple of (identifier, method, format) or None if invalid method.
         """
-        import_configs = {
-            'PDB': (props.pdb_id, 'PDB', props.remote_format),
-            'ALPHAFOLD': (props.uniprot_id, 'ALPHAFOLD', props.remote_format),
-            'MMCIF': (props.pdb_id, 'PDB', 'cif')
-        }
-
-        return import_configs.get(props.import_method)
+        return import_request(props)
 

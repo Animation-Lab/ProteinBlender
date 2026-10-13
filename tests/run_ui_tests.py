@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--keep-report", action="store_true")
     parser.add_argument("--normal-profile", action="store_true",
                         help="Test the enabled installed add-on in a fresh normal-profile process")
-    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'model-morphsets', 'saved-model-morphsets', 'morph-outliner', 'puppet-morphsets', 'thermal-motion', 'assembly-conformations', 'assembly-edit', 'filament', 'filament-nodes', 'local-import'), default='all',
+    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'model-morphsets', 'saved-model-morphsets', 'morph-outliner', 'puppet-morphsets', 'thermal-motion', 'assembly-conformations', 'assembly-edit', 'assembly-from-id', 'filament', 'filament-nodes', 'local-import'), default='all',
                         help="Run a focused workflow in a fresh Blender process")
     parser.add_argument("--blend", type=Path, help="Open a saved test scene before running UI checks")
     parser.add_argument("--artifact-dir", type=Path,
@@ -48,6 +48,7 @@ def main():
     drivers['thermal-motion'] = ROOT / 'tests/ui/run_thermal_motion_scenarios.py'
     drivers['assembly-conformations'] = ROOT / 'tests/ui/run_feedback_scenarios.py'
     drivers['assembly-edit'] = ROOT / 'tests/ui/run_assembly_edit_scenarios.py'
+    drivers['assembly-from-id'] = ROOT / 'tests/ui/run_assembly_import_scenarios.py'
     drivers['filament'] = ROOT / 'tests/ui/run_filament_scenarios.py'
     drivers['filament-nodes'] = ROOT / 'tests/ui/run_filament_nodes_scenarios.py'
     drivers['local-import'] = ROOT / 'tests/ui/run_local_import_scenarios.py'

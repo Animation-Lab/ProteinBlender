@@ -2101,3 +2101,13 @@ Every keyframing action goes through Create/Edit Keyframe, so that button is gon
 
 - `--scenario model-morphsets` (`tests/ui/model_morphset_steps.py`, confirm keyframe steps): with a Morphset present, the drawn Animate Scene panel must not contain `proteinblender.cycle_conformations`, while the drawn Create/Edit Keyframe dialog with the Morphset checked must still offer Cycle through Conformations.
   Red before the fix with exactly that panel assertion, green after, on Blender 5.2.
+
+## OK imports the id typed into Create New Assembly (2026-10-13)
+
+Reported: on an empty scene, typing `1atn` into the dialog's own PDB ID field and pressing OK answered "Import a protein first - a symmetry repeats one".
+The field is part of the form, so OK now does what Download would have done with it, then builds; a typed id that will not download is reported by name, and an empty field still gets the original message without touching the network.
+
+- `test_symmetry_dialog.py`: OK with `1atn` typed imports it as a download would (`1atn_001`, one request for the mmCIF, answered offline from the new `tests/data/1atn.cif.gz`) and builds deposited assembly 1; an id that 404s reports "Could not import xxxx"; the empty-field case now also asserts no download is attempted.
+  Both new cases were red before the fix with the reported message.
+- `--scenario assembly-from-id` (`tests/ui/run_assembly_import_scenarios.py`): the real dialog through invoke on an empty scene, the property write the Info log recorded, RET to confirm, then the import and the built assembly checked.
+  Red before the fix (OK made no request and imported nothing), green after, on Blender 5.2.

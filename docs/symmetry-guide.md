@@ -116,6 +116,7 @@ source coordinates in both formats.
 The dialog always opens, including on an empty file.
 It carries the same **Method / PDB ID / Download / Import Local File** controls the Protein Import panel has, so getting hold of a protein is part of the form rather than something to go and do first.
 Download lands without closing the dialog, and the **Build from** picker gains the protein you just imported.
+On an empty scene you can also just type the PDB ID and press **OK**: the dialog downloads it and builds its deposited assembly in one step.
 (Import Local File opens Blender's file browser, which cannot be nested inside a popup, so that one closes the dialog behind it; the import still lands and reopening finds the protein waiting.)
 
 Everything that shapes a build lives in the same dialog:

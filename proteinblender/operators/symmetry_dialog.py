@@ -716,9 +716,9 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         # empty, which is the no-protein case.
         molecule = _molecule(resolve_target(context, self.target_id))
         if molecule is None:
-            self.report({"ERROR"},
-                        "Import a protein first - a symmetry repeats one")
-            return {"CANCELLED"}
+            molecule = self._import_typed_structure(context)
+            if molecule is None:
+                return {"CANCELLED"}
 
         target_id = self.target_id or molecule.identifier
         ok, message = build_dialog_symmetry(
@@ -739,6 +739,41 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         self.report({"INFO"}, message)
         _refresh(context)
         return {"FINISHED"}
+
+    def _import_typed_structure(self, context):
+        """Import the id typed into the dialog's own Protein block, as Download would.
+
+        OK on an empty scene with an id in that field means "this one": the
+        field is part of the form, and a Download click first is a step the
+        form never asked for. Reported as "Import a protein first" when the
+        field is empty too, so people were typing 1atn, pressing OK and
+        being told to do what they had just done.
+
+        Returns the molecule to build from, or None after reporting why not.
+        """
+        from .operator_import_protein import import_request
+        request = import_request(getattr(context.scene, "protein_props", None))
+        identifier = (request[0] if request else "").strip()
+        if not identifier:
+            self.report({"ERROR"},
+                        "Import a protein first - a symmetry repeats one")
+            return None
+        _, method, fmt = request
+        if not ProteinBlenderScene.get_instance().create_molecule_from_id(
+                request[0], import_method=method, remote_format=fmt):
+            self.report({"ERROR"},
+                        f"Could not import {identifier} - check the ID, or try Download")
+            return None
+        molecule = _molecule(resolve_target(context))
+        if molecule is None:
+            self.report({"ERROR"},
+                        f"Imported {identifier}, but could not find it to build from")
+            return None
+        try:
+            self.target_id = molecule.identifier
+        except TypeError:
+            logger.warning("could not point the picker at %s", molecule.identifier)
+        return molecule
 
     def cancel(self, context):
         """Take every preview back down.

@@ -585,16 +585,96 @@ def test_only_an_empty_scene_leaves_the_dialog_with_nothing():
     assert _dialog().resolve_target(bpy.context) == ""
 
 
-def test_an_empty_scene_is_told_what_to_do_not_what_is_missing():
+def test_an_empty_scene_is_told_what_to_do_not_what_is_missing(monkeypatch):
     """The message a user meets on a fresh file.
 
     It used to read "No protein selected", which sent people looking for a
     selection that would not have helped. Nothing was selectable: a symmetry
-    repeats a protein, so there has to be one first.
+    repeats a protein, so there has to be one first. With nothing typed into
+    the dialog's Protein block there is nothing to fetch either.
     """
     assert not H.sm().molecules
+    _refuse_downloads(monkeypatch)
+    assert not bpy.context.scene.protein_props.pdb_id
     with pytest.raises(RuntimeError, match="Import a protein first"):
         bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT')
+
+
+# --------------------------------------------------------------------------
+# OK on an empty scene, with an id typed into the dialog's own Protein block
+# --------------------------------------------------------------------------
+
+def _serve_downloads_from(monkeypatch, fixture):
+    """Answer the add-on's structure download from a bundled file, offline.
+
+    Only the HTTP call is replaced. The text it returns goes through the real
+    stream, parser, import and finalisation, exactly as a Download does.
+    """
+    import gzip
+    from proteinblender.utils.molecularnodes import download
+    served = gzip.open(H.data_path(fixture), 'rt', encoding='utf-8').read()
+    requested = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self):
+            self.text = served
+            self.content = served.encode('utf-8')
+
+    def answer(url, *args, **kwargs):
+        requested.append(url)
+        return True, Response()
+
+    monkeypatch.setattr(download, '_download_with_retry', answer)
+    return requested
+
+
+def _refuse_downloads(monkeypatch):
+    from proteinblender.utils.molecularnodes import download
+
+    def refused(url, *args, **kwargs):
+        raise AssertionError(f'no download should be attempted, but {url} was')
+
+    monkeypatch.setattr(download, '_download_with_retry', refused)
+
+
+def test_ok_with_a_typed_id_imports_it_and_builds_its_deposited_assembly(scene, monkeypatch):
+    """Reported: Create New Assembly on an empty scene, type 1atn, OK, and the
+    answer was "Import a protein first - a symmetry repeats one".
+
+    The id was sitting in the dialog's own Protein block. OK has to do with it
+    what Download would have done, and then build - in the default format,
+    with the molecule named as a download names it.
+    """
+    assert not H.sm().molecules
+    requested = _serve_downloads_from(monkeypatch, '1atn.cif.gz')
+    props = scene.protein_props
+    props.pdb_id = '1atn'  # exactly the property write the Info log recorded
+    assert (props.import_method, props.remote_format) == ('PDB', 'cif')
+
+    assert bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', source='BIOLOGICAL') == {'FINISHED'}
+
+    assert len(requested) == 1, requested
+    assert '1atn' in requested[0].lower() and requested[0].endswith('.cif'), requested
+    molecules = H.sm().molecules
+    assert list(molecules) == ['1atn_001'], 'OK must import the typed structure'
+    molecule = molecules['1atn_001']
+    # 1ATN deposits one assembly, id 1 (the identity over every chain).
+    assert _assembly_core().built_assembly_id(molecule) == '1'
+    assert any(r.item_type == 'SYMMETRY' for r in scene.outliner_items), [
+        (r.item_type, r.name) for r in scene.outliner_items]
+
+
+def test_ok_with_an_id_that_will_not_download_says_which_id_failed(scene, monkeypatch):
+    """A typo or an offline machine must not fall back to the generic message."""
+    from proteinblender.utils.molecularnodes import download
+    monkeypatch.setattr(download, '_download_with_retry',
+                        lambda url, *args, **kwargs: (False, f'File not found (404): {url}'))
+    scene.protein_props.pdb_id = 'xxxx'
+    with pytest.raises(RuntimeError, match='Could not import xxxx'):
+        bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', source='BIOLOGICAL')
+    assert not H.sm().molecules
 
 
 # --------------------------------------------------------------------------

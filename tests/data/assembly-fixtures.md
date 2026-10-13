@@ -43,3 +43,14 @@ All assemblies list chains A, B and C.
 
 The right-hand group is applied first, so each placement is `M_left @ M_right`.
 Assembly 6 also has a mixed group (`61,62,69-88`) that must expand to one union of 22 operators.
+
+## Typed-id import fixture
+
+`1atn.cif.gz` contains the unmodified RCSB mmCIF for the actin:DNase I complex,
+downloaded from `https://files.rcsb.org/download/1ATN.cif` on 2026-10-13 and
+compressed with gzip.
+Uncompressed SHA-256: `9c331633d5f07cf7988054e73cbbd954cff8e24182984e23ec91616742577b94`.
+It answers the add-on's own download offline in the Create New Assembly tests,
+where a PDB ID typed into the dialog is imported on OK in the default mmCIF format.
+Its one deposited assembly (id 1) is the identity operation over every chain, so
+building it places each chain once.
