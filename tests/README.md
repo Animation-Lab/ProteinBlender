@@ -52,6 +52,9 @@ python tests/run_ui_tests.py --scenario filament --blender "<path-to-blender>"
 # Edit Assembly's Nodes field on actin and a microtubule: typed, stepped, undone, keyframed
 python tests/run_ui_tests.py --scenario filament-nodes --blender "<path-to-blender>"
 
+# Create New Membrane twice, a different shape each time; a cancelled one; then Edit Membrane resizing one
+python tests/run_ui_tests.py --scenario membrane --blender "<path-to-blender>"
+
 # Create New Assembly on an empty scene: type a PDB ID, press OK, get the import and its assembly
 python tests/run_ui_tests.py --scenario assembly-from-id --blender "<path-to-blender>"
 

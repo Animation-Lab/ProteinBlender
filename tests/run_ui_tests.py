@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--keep-report", action="store_true")
     parser.add_argument("--normal-profile", action="store_true",
                         help="Test the enabled installed add-on in a fresh normal-profile process")
-    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'model-morphsets', 'saved-model-morphsets', 'morph-outliner', 'puppet-morphsets', 'thermal-motion', 'assembly-conformations', 'assembly-edit', 'assembly-from-id', 'filament', 'filament-nodes', 'local-import'), default='all',
+    parser.add_argument("--scenario", choices=('all', 'morphsets', 'morph-states', 'shared-morphs', 'model-morphsets', 'saved-model-morphsets', 'morph-outliner', 'puppet-morphsets', 'thermal-motion', 'assembly-conformations', 'assembly-edit', 'assembly-from-id', 'filament', 'filament-nodes', 'local-import', 'membrane'), default='all',
                         help="Run a focused workflow in a fresh Blender process")
     parser.add_argument("--blend", type=Path, help="Open a saved test scene before running UI checks")
     parser.add_argument("--artifact-dir", type=Path,
@@ -52,6 +52,7 @@ def main():
     drivers['filament'] = ROOT / 'tests/ui/run_filament_scenarios.py'
     drivers['filament-nodes'] = ROOT / 'tests/ui/run_filament_nodes_scenarios.py'
     drivers['local-import'] = ROOT / 'tests/ui/run_local_import_scenarios.py'
+    drivers['membrane'] = ROOT / 'tests/ui/run_membrane_scenarios.py'
     driver = drivers.get(args.scenario, DRIVER)
 
     with tempfile.TemporaryDirectory(prefix="pb-ui-") as tmp:

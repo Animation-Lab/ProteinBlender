@@ -4,6 +4,10 @@ The scene-level properties feed the build dialog. When the active object is
 an existing membrane (``pb_is_membrane`` custom property set), the panel
 syncs the props from the object so the user is editing the selected membrane
 in-place.
+
+The same props also describe a membrane that does not exist yet, while the
+Create New Membrane dialog is open. That is a *draft*: see
+``begin_new_membrane_draft`` for why it must reach no existing membrane.
 """
 
 import bpy
@@ -26,7 +30,8 @@ MAX_HOLES = 8
 def _sync_to_active_membrane(self, context):
     """When a property changes, write it through to the relevant membrane.
 
-    Resolution order:
+    Nothing is written while the props are a draft for a new membrane (see
+    ``begin_new_membrane_draft``). Otherwise, resolution order:
       1. ``context.active_object`` if it is a membrane root or one of its
          children (lattice / hole), via ``_get_membrane_root``.
       2. If the active object isn't related to any membrane, fall back to
@@ -46,6 +51,8 @@ def _sync_to_active_membrane(self, context):
     if getattr(MembraneBuilderProperties, "_syncing_from_object", False):
         # Re-entrancy guard: this same prop change can be triggered by
         # the object→props sync path, and we don't want to loop.
+        return
+    if MembraneBuilderProperties._draft_restore is not None:
         return
     from .membrane_operators import _get_membrane_root, apply_props_to_membrane
 
@@ -74,6 +81,9 @@ class MembraneBuilderProperties(PropertyGroup):
     """Scene-level properties for the Membrane Builder UI."""
 
     _syncing_from_object = False  # class flag (see msgbus callback below)
+    # The fields as they stood when Create New Membrane opened, or None when
+    # no draft is open (see begin_new_membrane_draft).
+    _draft_restore = None
 
     # ------------------------------------------------------------------
     # Size
@@ -432,9 +442,68 @@ def unregister_msgbus():
         pass
 
 
+# ---------------------------------------------------------------------------
+# Drafting a new membrane
+# ---------------------------------------------------------------------------
+
+def begin_new_membrane_draft(props) -> None:
+    """Start describing a membrane that has not been built yet.
+
+    Create New Membrane and Edit Membrane draw the same props, and in Edit a
+    change is written through to the membrane at once. In Create there is no
+    membrane for it to land on, but the write-through looked for one anyway and
+    found the active membrane - which, straight after a build, is the one just
+    built. Tester report (alpha 1.2.3): asked for one sheet and one hemisphere,
+    got two sheets, because choosing Sheet for the second reshaped the first
+    before OK was pressed.
+
+    While a draft is open the props reach no membrane. It ends with
+    ``finish_new_membrane_draft`` (OK) or ``discard_new_membrane_draft``
+    (cancel).
+    """
+    MembraneBuilderProperties._draft_restore = {
+        key: _plain(getattr(props, key)) for key in _PROP_KEYS
+    }
+
+
+def finish_new_membrane_draft() -> None:
+    """The draft is being built, so the props describe a real membrane again."""
+    MembraneBuilderProperties._draft_restore = None
+
+
+def discard_new_membrane_draft(props) -> None:
+    """Drop the draft and put the props back as they were before it.
+
+    Putting them back matters as much as stopping the write-through. The
+    props outlive the dialog - Adjust Last Operation draws the same form - and
+    a change there applies every one of them to the active membrane. Left
+    holding the abandoned draft, the next field touched would deliver the
+    cancelled shape to a membrane the user never asked to change.
+    """
+    restore = MembraneBuilderProperties._draft_restore
+    if restore is None:
+        return
+    try:
+        # Still a draft while the values go back, so none of them write through.
+        for key, value in restore.items():
+            if _plain(getattr(props, key)) != value:
+                setattr(props, key, value)
+    finally:
+        MembraneBuilderProperties._draft_restore = None
+
+
+def _plain(value):
+    """A prop value detached from Blender: vectors come back as live arrays."""
+    if hasattr(value, "__iter__") and not isinstance(value, str):
+        return tuple(value)
+    return value
+
+
 @persistent
 def _load_post_handler(_dummy):
     register_msgbus()
+    # No dialog survives a file load, so neither does a draft.
+    finish_new_membrane_draft()
     # Upgrade any membranes built with an older GN tree so they pick up new
     # motion features. get_or_build rebuilds + re-applies when it sees a
     # stale version tag; skip the work entirely if there are no membranes.

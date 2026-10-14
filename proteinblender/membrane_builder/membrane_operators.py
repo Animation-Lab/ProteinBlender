@@ -175,14 +175,19 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props,
     if mod is None:
         return
 
-    # Shape change is destructive — rebuild the base mesh + lattice in
-    # place before pushing the other settings. The mesh and lattice
-    # datablocks themselves are kept so all the modifier references
+    # A shape or size change is destructive: rebuild the base mesh +
+    # lattice in place before pushing the other settings. The mesh and
+    # lattice datablocks themselves are kept so all the modifier references
     # remain valid.
+    #
+    # Size has to be rebuilt here, by the same call that records it below.
+    # It used to be left to the dialog's OK, which decided whether to resize
+    # by comparing the props against the recorded size - but every field
+    # writes through here as it is edited, so by OK the record already held
+    # the new size and a typed width never resized anything.
     new_shape = str(props.shape)
     old_shape = str(root_obj.get("pb_mem_shape", SHAPE_FLAT))
-    needs_shape_rebuild = (new_shape != old_shape)
-    if needs_shape_rebuild:
+    if new_shape != old_shape or _size_differs(root_obj, props):
         _rebuild_membrane_for_shape(root_obj, props)
 
     _set_mod_input(mod, "Shape Mode", int(SHAPE_MODE_INT[new_shape]))
@@ -236,12 +241,23 @@ def apply_props_to_membrane(root_obj: bpy.types.Object, props,
         _refresh_modifier(mod)
 
 
+def _size_differs(root_obj: bpy.types.Object, props) -> bool:
+    """True when the props ask for a size other than the one the membrane's
+    mesh was last built at. A membrane with no recorded size is one being
+    built right now, from these same props."""
+    return any(
+        abs(float(root_obj.get(f"pb_mem_{key}", getattr(props, key)))
+            - float(getattr(props, key))) > 1e-6
+        for key in ("width", "height", "radius")
+    )
+
+
 def _rebuild_membrane_for_shape(root_obj: bpy.types.Object, props) -> None:
-    """Destructively rebuild the base mesh and lattice for a new shape.
+    """Destructively rebuild the base mesh and lattice for a new shape or size.
 
     Keeps the mesh / lattice datablocks (modifier references stay valid)
     but discards any prior lattice deformation. Called from
-    ``apply_props_to_membrane`` when the shape prop changes.
+    ``apply_props_to_membrane`` when the shape or a size prop changes.
     """
     shape = str(props.shape)
     update_base_mesh(root_obj.data, shape,
@@ -489,40 +505,6 @@ def _build_new_membrane(context, props):
     return root
 
 
-def _update_existing_membrane(context, root, props):
-    """Apply scene props to an existing membrane root, rebuilding size if
-    width/height/radius changed. Used by build_membrane's update path."""
-    new_shape = str(props.shape)
-    old_w = float(root.get("pb_mem_width", props.width))
-    old_h = float(root.get("pb_mem_height", props.height))
-    old_r = float(root.get("pb_mem_radius", props.radius))
-    needs_resize = (
-        abs(old_w - float(props.width)) > 1e-6
-        or abs(old_h - float(props.height)) > 1e-6
-        or abs(old_r - float(props.radius)) > 1e-6
-    )
-
-    apply_props_to_membrane(root, props)
-
-    if needs_resize:
-        update_base_mesh(root.data, new_shape,
-                         float(props.width), float(props.height),
-                         float(props.radius))
-        for child in root.children:
-            if child.type == "LATTICE":
-                update_lattice_for_shape(child, new_shape,
-                                         float(props.width),
-                                         float(props.height),
-                                         float(props.radius))
-                break
-        root["pb_mem_width"] = float(props.width)
-        root["pb_mem_height"] = float(props.height)
-        root["pb_mem_radius"] = float(props.radius)
-        mod = _get_gn_modifier(root)
-        if mod is not None:
-            _refresh_modifier(mod)
-
-
 class PROTEINBLENDER_OT_build_membrane(Operator):
     """Open the Membrane Builder dialog.
 
@@ -530,12 +512,15 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
 
     * **Create (empty)** — opens the dialog seeded from
       ``scene.membrane_builder_props``. Clicking OK creates a new
-      membrane and adds it to the PB Outliner.
+      membrane and adds it to the PB Outliner. Until then the props are
+      a draft (``membrane_props.begin_new_membrane_draft``) and reach no
+      existing membrane.
     * **Update (set to a membrane root name)** — the PB Outliner's
       edit pencil invokes us with this set. ``invoke`` syncs the
       scene props from the target root's ``pb_mem_*`` custom props
-      so the dialog opens pre-populated; ``execute`` pushes the
-      props back, rebuilding mesh + lattice only if size changed.
+      so the dialog opens pre-populated; each change is applied to the
+      target as it is made, rebuilding mesh + lattice if shape or size
+      changed, and ``execute`` applies them once more.
 
     The dialog body (see ``_draw_membrane_form``) is identical for
     create and edit — only the Holes / Deformation sections are
@@ -558,11 +543,17 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
     )
 
     def invoke(self, context, event):
-        if self.membrane_root_to_update:
-            from .membrane_props import sync_props_from_object
+        from . import membrane_props
+        if not self.membrane_root_to_update:
+            # Nothing typed into this dialog may reach a membrane that
+            # already exists: there is not yet one for it to describe.
+            membrane_props.begin_new_membrane_draft(
+                context.scene.membrane_builder_props)
+        else:
+            membrane_props.finish_new_membrane_draft()
             root = bpy.data.objects.get(self.membrane_root_to_update)
             if root is not None and root.get("pb_is_membrane", False):
-                sync_props_from_object(
+                membrane_props.sync_props_from_object(
                     context.scene.membrane_builder_props, root,
                 )
                 # Set the membrane as active so in-dialog hole/deform
@@ -601,12 +592,22 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
                 return None
         return root
 
+    def cancel(self, context):
+        if not self.membrane_root_to_update:
+            from .membrane_props import discard_new_membrane_draft
+            discard_new_membrane_draft(context.scene.membrane_builder_props)
+
     def execute(self, context):
         from ..utils.blender_utils import ensure_object_mode
+        from .membrane_props import finish_new_membrane_draft
 
         # Building calls select_all, which doesn't poll in an edit mode - and
         # this operator's own Edit Deformation is what puts the user there.
         ensure_object_mode()
+
+        # From here on the props describe a membrane that exists (the one
+        # about to be built, or the one being updated), so they write through.
+        finish_new_membrane_draft()
 
         props = context.scene.membrane_builder_props
 
@@ -616,7 +617,7 @@ class PROTEINBLENDER_OT_build_membrane(Operator):
                 self.report({"ERROR"},
                             f"Membrane '{self.membrane_root_to_update}' not found.")
                 return {"CANCELLED"}
-            _update_existing_membrane(context, root, props)
+            apply_props_to_membrane(root, props)
             shape = str(props.shape)
             if shape == SHAPE_FLAT:
                 msg = f"Updated {root.name}: {props.width:.1f} × {props.height:.1f} nm"

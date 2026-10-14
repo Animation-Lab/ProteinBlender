@@ -1278,3 +1278,123 @@ def test_deform_toggle_is_per_membrane(scene):
         membrane_name=second.name) == {'FINISHED'}
     assert is_deforming_membrane(bpy.context, second.name)
     assert not is_deforming_membrane(bpy.context, first.name)
+
+
+# --------------------------------------------------------------------------
+# One set of dialog fields, two jobs
+#
+# Create New Membrane and Edit Membrane draw the same scene props. In Edit a
+# change lands on the membrane at once; in Create there is no membrane yet, so
+# it must land on nothing. Ground truth for shape and size below is the base
+# mesh's own vertices, never the pb_mem_* values the membrane code records
+# about itself - those said "40 nm wide" about a mesh that was still 20.
+# --------------------------------------------------------------------------
+
+def _depth_over_width(root):
+    """Z extent over X extent of the base mesh: 0 for a sheet, 0.5 for a
+    hemisphere (as deep as its radius, twice that across), 1 for a sphere."""
+    xs = [v.co.x for v in root.data.vertices]
+    zs = [v.co.z for v in root.data.vertices]
+    return (max(zs) - min(zs)) / (max(xs) - min(xs))
+
+
+@pytest.mark.integration
+def test_choosing_a_shape_for_a_new_membrane_leaves_the_built_one_alone(scene):
+    """A hemisphere, then a sheet, must leave one of each.
+
+    Regression (tester, alpha 1.2.3): "when I go to create the second
+    different one it changes my first one to whatever I am making in the
+    second one so I end up with two sheet membranes". Every field in the
+    Create dialog wrote straight through to the active membrane - the one
+    just built - so it had already become a sheet before OK was pressed.
+    """
+    from proteinblender.membrane_builder.membrane_props import (
+        begin_new_membrane_draft,
+    )
+
+    first = _membrane_root(H.build_membrane(shape=SHAPE_HEMISPHERE,
+                                            radius=15.0))
+    assert first is not None
+    assert _depth_over_width(first) == pytest.approx(0.5, abs=0.05)
+    # The build leaves it active, as it is when the user reopens the dialog.
+    assert bpy.context.active_object == first
+    props = scene.membrane_builder_props
+
+    begin_new_membrane_draft(props)         # what Create's invoke() does
+    props.shape = SHAPE_FLAT                # the user picks Sheet
+    props.width = props.height = 20.0
+    assert _depth_over_width(first) == pytest.approx(0.5, abs=0.05), (
+        "choosing a shape for a new membrane reshaped the one already built")
+
+    before = set(o.name for o in bpy.data.objects)
+    bpy.ops.proteinblender.build_membrane()                     # press OK
+    second = _membrane_root(set(o.name for o in bpy.data.objects) - before)
+    assert second is not None and second != first
+
+    assert _depth_over_width(first) == pytest.approx(0.5, abs=0.05), (
+        "building a sheet turned the hemisphere into a sheet as well")
+    assert _depth_over_width(second) == pytest.approx(0.0, abs=0.01)
+
+
+@pytest.mark.integration
+def test_cancelling_a_new_membrane_does_not_leak_into_the_built_one(scene):
+    """Fields typed into a Create dialog that was then cancelled must not
+    reach an existing membrane later.
+
+    The dialog's fields outlive it: Adjust Last Operation draws the same form,
+    and a change there applies *every* field to the active membrane. Left
+    holding a cancelled draft, the first slider touched would have delivered
+    the abandoned shape along with it.
+    """
+    from proteinblender.membrane_builder.membrane_props import (
+        begin_new_membrane_draft,
+        discard_new_membrane_draft,
+    )
+
+    root = _membrane_root(H.build_membrane(shape=SHAPE_FLAT, width=20.0,
+                                           height=20.0, density=1.5))
+    assert root is not None
+    props = scene.membrane_builder_props
+
+    begin_new_membrane_draft(props)         # open Create New Membrane
+    props.shape = SHAPE_SPHERE
+    props.density = 3.0
+    discard_new_membrane_draft(props)       # Esc
+
+    props.density = 2.0                     # Adjust Last Operation
+    assert _depth_over_width(root) == pytest.approx(0.0, abs=0.01), (
+        "the cancelled sphere arrived with the next field that was touched")
+    assert root["pb_mem_density"] == pytest.approx(2.0), (
+        "outside the Create dialog a field must still reach the membrane")
+
+
+@pytest.mark.integration
+def test_editing_a_membranes_width_resizes_it(scene):
+    """Edit Membrane, a new width, OK: the membrane must come out that wide.
+
+    Regression: the field's live write-through recorded the new width on the
+    membrane without rebuilding the mesh, so when OK then asked "did the size
+    change?" it compared the new width with itself, did nothing, and reported
+    "Updated Membrane_001: 40.0 x 20.0 nm" over a patch still 20 nm wide.
+    """
+    from proteinblender.membrane_builder.membrane_props import (
+        sync_props_from_object,
+    )
+
+    root = _membrane_root(H.build_membrane(shape=SHAPE_FLAT, width=20.0,
+                                           height=20.0))
+    assert root is not None
+    before_x = _base_x_extent(root)
+    props = scene.membrane_builder_props
+
+    sync_props_from_object(props, root)     # what Edit's invoke() does
+    props.width = 40.0                      # the user types a width
+    bpy.ops.proteinblender.build_membrane(
+        'EXEC_DEFAULT', membrane_root_to_update=root.name)       # press OK
+
+    assert _base_x_extent(root) == pytest.approx(2.0 * before_x, rel=0.01), (
+        f"asked for twice the width; the mesh went from {before_x} to "
+        f"{_base_x_extent(root)} BU")
+    ys = [v.co.y for v in root.data.vertices]
+    assert max(ys) - min(ys) == pytest.approx(before_x, rel=0.01), (
+        "the height was left alone but the mesh's Y extent moved")

@@ -229,7 +229,14 @@ def build_membrane(**overrides):
     the membrane surface / lipid objects regardless of naming).
     """
     import bpy
+    from proteinblender.membrane_builder.membrane_props import (
+        begin_new_membrane_draft,
+    )
     props = bpy.context.scene.membrane_builder_props
+    # As the Create New Membrane dialog does on opening. Without it the
+    # overrides below are edits to whichever membrane is active, so a second
+    # build would quietly reshape the first.
+    begin_new_membrane_draft(props)
     for key, val in overrides.items():
         setattr(props, key, val)
     before = set(o.name for o in bpy.data.objects)
