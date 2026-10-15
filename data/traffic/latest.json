@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-10-14T04:47:28+00:00",
+  "generated_at": "2026-10-15T04:31:27+00:00",
   "summary": {
-    "views": 58,
-    "visitors": 22,
-    "clones": 347,
-    "cloners": 119
+    "views": 57,
+    "visitors": 21,
+    "clones": 367,
+    "cloners": 128
   },
   "all_time": {
-    "views": 1254,
-    "visitors": 624,
-    "clones": 5205,
-    "cloners": 2202,
-    "days_tracked": 210
+    "views": 1256,
+    "visitors": 626,
+    "clones": 5238,
+    "cloners": 2216,
+    "days_tracked": 211
   },
   "current_day": {
+    "date": "2026-10-13",
+    "views": 2,
+    "visitors": 2,
+    "clones": 33,
+    "cloners": 14
+  },
+  "previous_day": {
     "date": "2026-10-12",
     "views": 0,
     "visitors": 0,
     "clones": 30,
     "cloners": 11
   },
-  "previous_day": {
-    "date": "2026-10-11",
-    "views": 0,
-    "visitors": 0,
-    "clones": 12,
-    "cloners": 3
-  },
   "delta_since_previous_day": {
-    "views": 0,
-    "visitors": 0,
-    "clones": 18,
-    "cloners": 8
+    "views": 2,
+    "visitors": 2,
+    "clones": 3,
+    "cloners": 3
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 21,
-      "uniques": 13
+      "count": 20,
+      "uniques": 12
     },
     {
       "referrer": "Google",
@@ -60,8 +60,8 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 24,
-      "uniques": 16
+      "count": 23,
+      "uniques": 15
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
@@ -70,16 +70,16 @@
       "uniques": 3
     },
     {
-      "path": "/Animation-Lab/ProteinBlender/issues/18",
-      "title": "/issues/18",
-      "count": 7,
-      "uniques": 4
-    },
-    {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 7,
-      "uniques": 4
+      "count": 8,
+      "uniques": 5
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/issues/18",
+      "title": "/issues/18",
+      "count": 6,
+      "uniques": 3
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues/19",
