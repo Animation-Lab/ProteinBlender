@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-10-17T04:18:53+00:00",
+  "generated_at": "2026-10-18T04:24:41+00:00",
   "summary": {
-    "views": 49,
-    "visitors": 18,
-    "clones": 385,
-    "cloners": 128
+    "views": 55,
+    "visitors": 21,
+    "clones": 362,
+    "cloners": 117
   },
   "all_time": {
-    "views": 1258,
-    "visitors": 628,
-    "clones": 5306,
-    "cloners": 2238,
-    "days_tracked": 213
+    "views": 1264,
+    "visitors": 631,
+    "clones": 5318,
+    "cloners": 2241,
+    "days_tracked": 214
   },
   "current_day": {
+    "date": "2026-10-16",
+    "views": 6,
+    "visitors": 3,
+    "clones": 12,
+    "cloners": 3
+  },
+  "previous_day": {
     "date": "2026-10-15",
     "views": 0,
     "visitors": 0,
     "clones": 33,
     "cloners": 11
   },
-  "previous_day": {
-    "date": "2026-10-14",
-    "views": 2,
-    "visitors": 2,
-    "clones": 35,
-    "cloners": 11
-  },
   "delta_since_previous_day": {
-    "views": -2,
-    "visitors": -2,
-    "clones": -2,
-    "cloners": 0
+    "views": 6,
+    "visitors": 3,
+    "clones": -21,
+    "cloners": -8
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 18,
-      "uniques": 12
+      "count": 21,
+      "uniques": 15
     },
     {
       "referrer": "Google",
@@ -60,14 +60,14 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 20,
-      "uniques": 14
+      "count": 22,
+      "uniques": 16
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 8,
-      "uniques": 5
+      "count": 10,
+      "uniques": 7
     },
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
@@ -86,6 +86,12 @@
       "title": "/issues/19",
       "count": 4,
       "uniques": 1
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
+      "title": "/releases/tag/1.1.0",
+      "count": 2,
+      "uniques": 2
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions",
