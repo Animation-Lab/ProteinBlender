@@ -339,6 +339,16 @@ def resample_curve_arc_length(curve_obj, n_points: int) -> None:
     # thing. Resampling is supposed to change how a path is controlled, never
     # where it goes.
     tangents = [_tangent_at_arc_length(polyline, lengths, t) for t in targets]
+    # The two ends exactly, from the handles. A tangent read off the first
+    # stretch of polyline is a chord, a degree or two off the true one, and a
+    # filament is laid out from its first subunit: that degree swings its far
+    # end by as many Angstrom as it is long.
+    old_points = old_spline.bezier_points
+    for index, (towards, away) in ((0, (old_points[0].handle_right, old_points[0].co)),
+                                   (-1, (old_points[-1].co, old_points[-1].handle_left))):
+        exact = Vector(towards) - Vector(away)
+        if exact.length > 1e-12:
+            tangents[index] = exact.normalized()
 
     # Replace the spline outright and set the coordinates explicitly. Adding a
     # Bezier point and only setting its handle *type* leaves the handle
@@ -350,40 +360,113 @@ def resample_curve_arc_length(curve_obj, n_points: int) -> None:
     for i, position in enumerate(positions):
         new_spline.bezier_points[i].co = Vector(position)
 
-    _set_handles_along(new_spline, tangents)
+    # How far each handle reaches is fitted to the old path rather than
+    # guessed from the spacing: a guess redraws the curve between the points
+    # differently, and everything laid along it by arc length slides.
+    reaches = [_fit_handle_reaches(polyline, lengths, targets[j], targets[j + 1],
+                                   positions[j], positions[j + 1],
+                                   tangents[j], tangents[j + 1])
+               for j in range(n_points - 1)]
+    _set_handles_along(new_spline, tangents, reaches)
     curve_data.update_tag()
 
 
-def _set_handles_along(spline, tangents, factor: float = 0.3) -> None:
-    """Handles pointing along given directions, scaled to the local spacing."""
+def _bernstein(u: float):
+    v = 1.0 - u
+    return v * v * v, 3.0 * u * v * v, 3.0 * u * u * v, u * u * u
+
+
+def _fit_handle_reaches(polyline, lengths, start: float, end: float,
+                        first: Vector, last: Vector,
+                        leaving: Vector, arriving: Vector):
+    """How far the two handles of one segment reach, fitted to the old path.
+
+    The ends and the directions of the segment are fixed - they are the new
+    control points and the old path's tangents there - which leaves two
+    numbers, and those have a least-squares answer (Schneider, "An Algorithm
+    for Automatically Fitting Digitized Curves", Graphics Gems 1990): the
+    reaches that put the cubic closest to the old path's points over the same
+    stretch of arc length. Falls back to a third of the chord, the reach of a
+    straight segment, when the fit is degenerate.
+    """
+    chord = (last - first).length
+    fallback = (chord / 3.0, chord / 3.0)
+    span = end - start
+    if span <= 1e-12 or chord <= 1e-12:
+        return fallback
+
+    leaving = leaving.normalized() if leaving.length > 1e-12 else None
+    arriving = arriving.normalized() if arriving.length > 1e-12 else None
+    if leaving is None or arriving is None:
+        return fallback
+
+    c11 = c12 = c22 = x1 = x2 = 0.0
+    for point, length in zip(polyline, lengths):
+        if length < start or length > end:
+            continue
+        u = (length - start) / span
+        b0, b1, b2, b3 = _bernstein(u)
+        a1 = leaving * b1
+        a2 = -arriving * b2
+        c11 += a1.dot(a1)
+        c12 += a1.dot(a2)
+        c22 += a2.dot(a2)
+        rest = point - (first * (b0 + b1) + last * (b2 + b3))
+        x1 += rest.dot(a1)
+        x2 += rest.dot(a2)
+
+    determinant = c11 * c22 - c12 * c12
+    if abs(determinant) < 1e-18:
+        return fallback
+    reach_out = (x1 * c22 - x2 * c12) / determinant
+    reach_in = (c11 * x2 - c12 * x1) / determinant
+    # A handle pointing backwards, or reaching past the whole chord, is a fit
+    # to noise rather than to a curve.
+    if not (1e-6 * chord < reach_out < 2.0 * chord
+            and 1e-6 * chord < reach_in < 2.0 * chord):
+        return fallback
+    return reach_out, reach_in
+
+
+def _set_handles_along(spline, tangents, reaches) -> None:
+    """Handles pointing along given directions, reaching as far as given.
+
+    ``reaches[j]`` is how far segment *j*'s two handles reach: out of point
+    *j* and into point *j + 1*. ALIGNED handles may differ in length, so each
+    point keeps both. Both handles are written while the point is FREE, so
+    setting one does not re-aim the other mid-way.
+    """
     points = spline.bezier_points
     for i, point in enumerate(points):
-        if i == 0:
-            spacing = (points[1].co - points[0].co).length
-        elif i == len(points) - 1:
-            spacing = (points[-1].co - points[-2].co).length
-        else:
-            spacing = ((points[i].co - points[i - 1].co).length
-                       + (points[i + 1].co - points[i].co).length) * 0.5
-
         direction = tangents[i]
         if direction.length < 1e-9:
             direction = Vector((0.0, 0.0, 1.0))
-        offset = direction.normalized() * (spacing * factor)
+        direction = direction.normalized()
+        reach_in = reaches[i - 1][1] if i > 0 else reaches[0][0]
+        reach_out = reaches[i][0] if i < len(reaches) else reaches[-1][1]
 
-        point.handle_left = point.co - offset
-        point.handle_right = point.co + offset
+        point.handle_left_type = "FREE"
+        point.handle_right_type = "FREE"
+        point.handle_left = point.co - direction * reach_in
+        point.handle_right = point.co + direction * reach_out
         point.handle_left_type = "ALIGNED"
         point.handle_right_type = "ALIGNED"
 
 
 def _tangent_at_arc_length(polyline, lengths, target: float) -> Vector:
-    """The polyline's direction of travel at *target*, from its own segments."""
+    """The polyline's direction of travel at *target*, from its own segments.
+
+    Across the two segments either side of the point rather than along the
+    one it falls in, which is centred on it and so true to the curve to
+    second order instead of first.
+    """
     index = 0
     while index < len(lengths) - 1 and lengths[index + 1] < target:
         index += 1
     index = min(index, len(polyline) - 2)
-    direction = polyline[index + 1] - polyline[index]
+    before = max(index - 1, 0)
+    after = min(index + 2, len(polyline) - 1)
+    direction = polyline[after] - polyline[before]
     if direction.length < 1e-12:
         return Vector((0.0, 0.0, 1.0))
     return direction.normalized()
@@ -723,156 +806,8 @@ def resize_path(spec: BendRigSpec, owner, factor: float) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Starting shapes
+# Geometry helpers
 # ---------------------------------------------------------------------------
-#
-# Offered as a starting point rather than a constraint: every preset is just a
-# set of control-point positions the user goes on to drag.
-
-#: (id, label, description) for the shapes :func:`preset_points` can make.
-PRESETS = (
-    ("STRAIGHT", "Straight", "No bend - the path the rig started from"),
-    ("ARC", "Arc", "A single smooth bow to one side"),
-    ("S", "S-curve", "Bowed one way then the other"),
-    ("COIL", "Coil", "A wide loop, curling back on itself"),
-)
-
-#: The fewest control points each shape can be drawn with. Points are spaced
-#: evenly along the shape, and three of them land on an S-curve's start, its
-#: crossing and its end - all on the axis, which is a straight line - and on
-#: a coil's start, its far side and its start again, which is a line out and
-#: back. A shape asked for with fewer handles than this gets this many.
-PRESET_MIN_POINTS = {"STRAIGHT": RES_MIN, "ARC": 3, "S": 5, "COIL": 7}
-
-
-def preset_points(preset: str, length: float, n_points: int,
-                  direction=(0.0, 0.0, 1.0), amplitude: Optional[float] = None,
-                  origin=(0.0, 0.0, 0.0), leave_along_axis: bool = False):
-    """Control points for one of :data:`PRESETS`, in curve-local space.
-
-    ``amplitude`` is how far the path departs from straight; it defaults to a
-    quarter of the length, which reads as a clear bend at any scale.
-
-    The shape starts at ``origin``. As drawn, an arc's ends both sit on the
-    axis, so it sets off at an angle to it. ``leave_along_axis`` turns the
-    whole shape about its start until it sets off *along* the axis instead,
-    for anything that is held at its start and cannot turn to follow - a
-    filament's first subunit stays where it was imported.
-    """
-    import math
-
-    axis = Vector(direction)
-    if axis.length < 1e-9:
-        axis = Vector((0.0, 0.0, 1.0))
-    axis = axis.normalized()
-    side = _perpendicular(axis)
-
-    n_points = max(RES_MIN, min(RES_MAX, int(n_points)))
-    if amplitude is None:
-        amplitude = length * 0.25
-
-    steps = max(n_points - 1, 1)
-    preset = (preset or "STRAIGHT").upper()
-
-    positions = []
-    for i in range(n_points):
-        t = i / steps
-        along = t * length
-        if preset == "ARC":
-            offset = amplitude * math.sin(math.pi * t)
-        elif preset == "S":
-            offset = amplitude * math.sin(2.0 * math.pi * t)
-        elif preset == "COIL":
-            # A planar loop: the path curls a full turn, so "along" stops being
-            # monotonic. Arc length still increases, which is all the samplers
-            # downstream require.
-            angle = 2.0 * math.pi * t
-            radius = length / (2.0 * math.pi)
-            positions.append(axis * (radius * math.sin(angle))
-                             + side * (radius * (1.0 - math.cos(angle))))
-            continue
-        else:
-            offset = 0.0
-        positions.append(axis * along + side * offset)
-
-    if leave_along_axis and len(positions) > 1:
-        # The path's first tangent runs from its first point to its second
-        # (set_aligned_handles_along_path), so that is the direction to bring
-        # onto the axis.
-        leaving = positions[1] - positions[0]
-        if leaving.length > 1e-9:
-            turn = leaving.rotation_difference(axis)
-            positions = [turn @ p for p in positions]
-
-    start = Vector(origin)
-    # Handles are regenerated from the positions rather than guessed at, for
-    # the same reason resampling does it: default handles sit at the origin.
-    return [(start + p, start + p, start + p) for p in positions]
-
-
-def apply_preset(spec: BendRigSpec, owner, preset: str, length: float,
-                 n_points: Optional[int] = None,
-                 direction=(0.0, 0.0, 1.0), origin=(0.0, 0.0, 0.0),
-                 leave_along_axis: bool = False,
-                 fit_length: bool = False) -> bool:
-    """Overwrite the curve with a starting shape and rebuild the nodes on it.
-
-    Keeps the handle count the curve has, unless the shape cannot be drawn
-    with so few - see :data:`PRESET_MIN_POINTS`.
-
-    A shape is laid out by how far it *reaches*: an arc spanning ``length``
-    is longer than that to travel along, and a coil of that circumference
-    drawn through a few points is a little shorter. ``fit_length`` resizes
-    the shape until the path itself is ``length`` long, for something of a
-    fixed length that should end where its path does.
-    """
-    curve_obj = get_curve(spec, owner)
-    if curve_obj is None or not curve_obj.data.splines:
-        return False
-
-    if n_points is None:
-        n_points = len(curve_obj.data.splines[0].bezier_points)
-    n_points = max(n_points,
-                   PRESET_MIN_POINTS.get((preset or "").upper(), RES_MIN))
-    n_points = max(RES_MIN, min(RES_MAX, int(n_points)))
-
-    remove_nodes(spec, owner)
-
-    curve_data = curve_obj.data
-    for spline in list(curve_data.splines):
-        curve_data.splines.remove(spline)
-    spline = curve_data.splines.new("BEZIER")
-    spline.bezier_points.add(n_points - 1)
-    for i, (co, _l, _r) in enumerate(preset_points(
-            preset, length, n_points, direction, origin=origin,
-            leave_along_axis=leave_along_axis)):
-        spline.bezier_points[i].co = Vector(co)
-    set_aligned_handles_along_path(spline)
-    if fit_length:
-        _scale_to_length(spline, length)
-    curve_data.update_tag()
-
-    create_nodes(spec, owner, curve_obj, n_points)
-    return True
-
-
-def _scale_to_length(spline, length: float) -> None:
-    """Resize a path about its first point until it is ``length`` long.
-
-    Exact in one step: the handles are a fixed fraction of the distances
-    between the points, so the whole path scales with them.
-    """
-    polyline = _flatten(spline)
-    measured = sum((b - a).length for a, b in zip(polyline, polyline[1:]))
-    if measured < 1e-9 or length <= 0:
-        return
-
-    factor = length / measured
-    start = spline.bezier_points[0].co.copy()
-    for point in spline.bezier_points:
-        point.co = start + (point.co - start) * factor
-    set_aligned_handles_along_path(spline)
-
 
 def _perpendicular(axis: Vector) -> Vector:
     """Any unit vector at right angles to *axis*, chosen so it never degenerates."""

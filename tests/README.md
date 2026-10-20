@@ -46,7 +46,7 @@ python tests/run_ui_tests.py --normal-profile --scenario puppet-morphsets --blen
 # B-factor checkbox, live intensity entry, cartoon playback and lighting label
 python tests/run_ui_tests.py --normal-profile --scenario thermal-motion --blender "<path-to-blender>"
 
-# Create New Filament: dialog, build, undo/redo, and lengthening it in Edit Assembly
+# Create New Cytoskeleton: dialog, build, undo/redo, and lengthening it in Edit Assembly
 python tests/run_ui_tests.py --scenario filament --blender "<path-to-blender>"
 
 # Edit Assembly's Nodes field on actin and a microtubule: typed, stepped, undone, keyframed

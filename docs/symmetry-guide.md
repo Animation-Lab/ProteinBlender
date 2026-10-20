@@ -78,16 +78,17 @@ specified by the deposited assembly.
 
 # Part II - The controls
 
-## Create New Filament
+## Create New Cytoskeleton
 
-**Builders → Create New Filament** builds an actin filament or a microtubule without a structure or a single helical parameter from you.
+**Builders → Create New Cytoskeleton** builds an actin filament or a microtubule without a structure or a single helical parameter from you.
 
-- **Filament** - Actin filament or Microtubule.
+- **Cytoskeleton** - Actin Filament or Microtubule.
   Each brings its own subunit, cut from a deposited filament (PDB 8A2T for actin, PDB 7SJ7 for a 13-protofilament microtubule) and already standing on the filament's axis, so the radius comes out right.
 - **Length (nm)** - how long to make it.
   The line underneath says how many subunits that is; a length is rounded to a whole number of them.
-- **Start As** - Straight, Arc, S-curve or Coil.
-  The filament always gets a bend path, so its control nodes are there to drag as soon as it is built.
+
+It starts straight and drawn as a surface.
+It always gets a bend path, so its control nodes are there to drag into any shape as soon as it is built.
 
 What it builds is an ordinary helical assembly.
 It appears in the PB Outliner as a protein with a symmetry row beneath it, and that row's pencil opens **Edit Assembly** on it: change the length, the strands or the bend there, exactly as for an assembly you built by hand.
@@ -192,20 +193,18 @@ or domain.
 Open **Edit Assembly** on a built **helical** child and unfold **Bend**.
 A ring has no path to bend. After **Add Bend** or **Edit Bend**, press **OK**
 and drag the selected control nodes in the viewport. Reopen the dialog to
-change node count, choose a preset, or remove the bend; a filament that is
-already bent opens with Bend unfolded.
+change node count or remove the bend; a filament that is already bent opens
+with Bend unfolded.
 
 Real filaments are not straight.
 Actin curves, microtubules flex, amyloid twists across a field of view.
-**Add Bend** puts a Bezier curve along the filament with draggable control nodes, the same rig the DNA builder uses, and lays the subunits along it.
+**Add Bend** puts a straight Bezier curve along the filament with draggable control nodes, the same rig the DNA builder uses, and lays the subunits along it.
+There are no ready-made shapes: drag the nodes into whatever shape the figure needs.
 
 - **Nodes** - how many handles shape the path.
   The path takes the new count as soon as the field changes; there is nothing else to press.
-  Changing the count resamples the path you already made rather than resetting it.
+  Changing the count resamples the path you already made rather than resetting it: the subunits stay within a few Angstrom of where they were.
   A path with keyframes on its nodes keeps the count it has, and the field greys out and says so, because new nodes would leave those keys behind.
-- **Straight / Arc / S-curve / Coil** - starting shapes. A starting point, not a constraint; the nodes still move afterwards.
-  Every shape sets off along the filament's axis and is sized so the path ends where the filament does.
-  An S-curve needs five handles and a Coil seven to be the shape at all, so choosing one raises Nodes to that if it was lower.
 - **Edit Bend** - selects the control nodes so you can grab them with the usual transform gizmo. The copies follow as you drag.
 - **Remove** - deletes the rig; the filament runs straight along its axis again.
 

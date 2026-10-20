@@ -530,22 +530,8 @@ def test_the_node_count_can_change_without_losing_the_bend(scene, sm):
 
     assert len(_bend().get_bend_nodes(molecule)) == 5
     after = _bend().bend_departure(molecule, COUNT, RISE, TWIST)
-    assert after == pytest.approx(before, rel=0.15), (
+    assert after == pytest.approx(before, rel=0.02), (
         f"resampling changed the bend from {before:.1f} A to {after:.1f} A")
-
-
-def test_a_preset_shapes_the_path(scene, sm):
-    molecule = _import()
-    _build_filament(molecule)
-    _add_bend(molecule, nodes=5)
-
-    assert _bend().bend_departure(molecule, COUNT, RISE, TWIST) < 1.0
-
-    assert bpy.ops.molecule.filament_bend_preset(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier,
-        preset="ARC") == {"FINISHED"}
-
-    assert _bend().bend_departure(molecule, COUNT, RISE, TWIST) > 10.0
 
 
 def test_a_bent_filament_still_realizes_where_its_copies_are_drawn(scene, sm):
@@ -619,8 +605,6 @@ def test_bend_controls_use_the_target_build_after_another_builder_changes_defaul
     assert len(nodes) == 5
     assert (nodes[-1].location - nodes[0].location).length == pytest.approx(
         (built['count'] - 1) * built['rise'] * WORLD_SCALE, abs=1e-4)
-    assert bpy.ops.molecule.filament_bend_preset(
-        molecule_id=molecule.identifier, preset='ARC') == {'FINISHED'}
     obj = next(iter(molecule.domains.values())).object
     _drag(molecule, -1, (0.2, 0, 0))
     assert len(_instance_positions(obj.name)) == built['count']

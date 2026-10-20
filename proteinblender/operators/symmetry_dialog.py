@@ -617,13 +617,6 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             locked.label(text="Keyframed - clear its keys to change the nodes",
                          icon='INFO')
 
-        presets = box.row(align=True)
-        for identifier, label, _description in bend_rig.PRESETS:
-            preset_op = presets.operator("molecule.filament_bend_preset",
-                                         text=label)
-            preset_op.molecule_id = molecule.identifier
-            preset_op.preset = identifier
-
         actions = box.row(align=True)
         edit_op = actions.operator("molecule.edit_filament_bend",
                                    text="Edit Bend", icon='EMPTY_DATA')

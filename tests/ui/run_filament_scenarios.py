@@ -1,4 +1,4 @@
-"""Build a microtubule from the Builders panel, undo it, and edit its length."""
+"""Build a microtubule with Create New Cytoskeleton, undo it, and edit its length."""
 import json
 import runpy
 import sys
@@ -148,15 +148,15 @@ def inspect_builders_panel():
     buttons = [i for i in flatten(layout) if i.get('operator')]
     offered = [i for i in buttons if 'molecule.build_filament' in i['operator']]
     assert len(offered) == 1, [i['operator'] for i in buttons]
-    assert offered[0]['draw_string'] == 'Create New Filament'
+    assert offered[0]['draw_string'] == 'Create New Cytoskeleton'
     return offered[0]['operator']
 
 
 def open_builder():
     with g['ui_override']('VIEW_3D'):
         assert bpy.ops.molecule.build_filament(
-            'INVOKE_DEFAULT', preset='MICROTUBULE', length=50.0,
-            shape='ARC') == {'RUNNING_MODAL'}
+            'INVOKE_DEFAULT', preset='MICROTUBULE',
+            length=50.0) == {'RUNNING_MODAL'}
 
 
 def inspect_builder():
@@ -164,7 +164,9 @@ def inspect_builder():
     shown = labels(Builder)
     (folder / 'filament-dialog-layout.json').write_text(
         json.dumps(data[Builder.__name__ + '_layout'], indent=2))
-    assert all(label in shown for label in ('Filament', 'Length (nm)', 'Start As'))
+    assert all(label in shown for label in ('Cytoskeleton', 'Length (nm)'))
+    # A filament starts straight; its nodes make any other shape.
+    assert 'Start As' not in shown, shown
     # 500 A at 81.5 A a dimer is 6.1: six up each of thirteen strands.
     assert '13 strands of 6 - 78 copies' in shown, shown
     return fits_the_window()
@@ -229,8 +231,9 @@ def inspect_edit_dialog():
     assert all(label in shown for label in (
         'Subunits per Strand', 'Length (nm)', 'Strands', 'Stagger', 'Strand Twist'))
     assert 'Tube - 13 strands of 6' in shown, shown
-    # A filament that is already bent opens on its bend.
-    assert all(label in shown for label in ('Nodes', 'Arc', 'Edit Bend'))
+    # A filament that is already bent opens on its bend, with no shapes to pick.
+    assert all(label in shown for label in ('Nodes', 'Edit Bend'))
+    assert not any(label in shown for label in ("'Arc'", 'S-curve', 'Coil')), shown
     assert STALE_HINT not in shown
     fits = fits_the_window()
     scene.pb_symmetry_length = 100.0
@@ -262,8 +265,8 @@ g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', idle),
     ('prepare an empty scene', prepare), ('settle', idle),
     ('inspect the Builders panel', inspect_builders_panel), ('settle', idle),
-    ('open Create New Filament', open_builder), ('settle', idle),
-    ('inspect Create New Filament', inspect_builder), ('settle', idle),
+    ('open Create New Cytoskeleton', open_builder), ('settle', idle),
+    ('inspect Create New Cytoskeleton', inspect_builder), ('settle', idle),
     *confirm('OK the filament'),
     ('verify the microtubule', verify_built), ('settle', idle),
     ('undo the build', undo_the_build), ('settle', idle),

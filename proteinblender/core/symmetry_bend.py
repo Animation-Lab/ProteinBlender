@@ -234,33 +234,6 @@ def set_node_count(molecule, n_points: int) -> bool:
     return True
 
 
-def apply_preset(molecule, preset: str, count: int, rise: float,
-                 axis=(0.0, 0.0, 1.0), strands: int = 1,
-                 stagger: float = 0.0) -> bool:
-    """Overwrite the path with a starting shape.
-
-    The handle count is kept unless the shape needs more
-    (``bend_rig.PRESET_MIN_POINTS``). Every shape sets off along the
-    filament's axis: the first subunit is the imported structure and stays
-    put (:func:`_anchored_on_the_original`), so a path that left at an angle
-    would have the filament swing away from its own control curve. And every
-    shape is sized so the path is as long as the filament, which then ends at
-    the last control node rather than short of it or beyond it.
-    """
-    owner = owner_object(molecule)
-    if owner is None:
-        return False
-    length = filament_length(count, rise, strands, stagger)
-    if length <= 0:
-        return False
-    ok = bend_rig.apply_preset(SPEC, owner, preset, length, direction=axis,
-                               origin=_axis_origin(owner),
-                               leave_along_axis=True, fit_length=True)
-    if ok:
-        _scale_node_handles(molecule, length)
-    return ok
-
-
 def follow_length(molecule, was: dict, now: dict) -> bool:
     """Resize the path for a filament whose length has just been changed.
 

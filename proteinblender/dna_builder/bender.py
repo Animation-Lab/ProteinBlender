@@ -29,9 +29,6 @@ Operators here:
   * `dna_remove_bend`      – removes the modifier, deletes the curve and
     all bend nodes, restores the (vertically) flat helix.
 
-Starting shapes (Straight / Arc / S-curve / Coil) are implemented generically
-in ``core.bend_rig.apply_preset``; the DNA dialog does not surface them yet.
-
 The DNA stores:
   * `pb_bend_curve_name`   – the bend Bezier curve object's name.
   * `pb_bend_node_names`   – JSON list of the control-node Empty names.

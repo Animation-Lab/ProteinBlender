@@ -207,41 +207,6 @@ class MOLECULE_PB_OT_set_filament_bend_nodes(Operator):
         return {"FINISHED"}
 
 
-class MOLECULE_PB_OT_filament_bend_preset(Operator):
-    """Start the bend from one of a few shapes"""
-
-    bl_idname = "molecule.filament_bend_preset"
-    bl_label = "Bend Preset"
-    bl_description = (
-        "Replace the path with a starting shape. It is a starting point, not "
-        "a constraint - the control nodes still move afterwards")
-    bl_options = {"REGISTER", "UNDO"}
-
-    molecule_id: StringProperty()
-    preset: StringProperty(default="STRAIGHT")
-
-    def execute(self, context):
-        molecule = _active(context, self.molecule_id)
-        if molecule is None or not symmetry_bend.has_bend(molecule):
-            self.report({"WARNING"}, "This filament has no bend")
-            return {"CANCELLED"}
-
-        settings = _settings(context, molecule)
-        if not symmetry_bend.apply_preset(
-                molecule, self.preset, **_path_settings(settings)):
-            self.report({"ERROR"}, "Could not apply that shape")
-            return {"CANCELLED"}
-
-        # A shape can need more handles than the path had.
-        _remember_node_count(context, molecule)
-
-        _rebuild_filament(context, molecule)
-        _select_nodes(context, symmetry_bend.get_bend_nodes(molecule))
-        self.report({"INFO"}, f"Bend set to {self.preset.title()}")
-        _refresh_ui(context)
-        return {"FINISHED"}
-
-
 class MOLECULE_PB_OT_remove_filament_bend(Operator):
     """Take the bend away, straightening the filament"""
 
@@ -354,6 +319,5 @@ CLASSES = (
     MOLECULE_PB_OT_add_filament_bend,
     MOLECULE_PB_OT_edit_filament_bend,
     MOLECULE_PB_OT_set_filament_bend_nodes,
-    MOLECULE_PB_OT_filament_bend_preset,
     MOLECULE_PB_OT_remove_filament_bend,
 )

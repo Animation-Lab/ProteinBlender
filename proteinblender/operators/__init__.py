@@ -64,7 +64,6 @@ from .symmetry_bend_operators import (
     MOLECULE_PB_OT_add_filament_bend,
     MOLECULE_PB_OT_edit_filament_bend,
     MOLECULE_PB_OT_set_filament_bend_nodes,
-    MOLECULE_PB_OT_filament_bend_preset,
     MOLECULE_PB_OT_remove_filament_bend,
     CLASSES as SYMMETRY_BEND_CLASSES,
 )

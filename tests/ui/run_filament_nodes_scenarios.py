@@ -154,7 +154,7 @@ def prepare(preset, copies):
         move(window.width * .45, window.height * .8)
         with g['ui_override']('VIEW_3D'):
             assert bpy.ops.molecule.build_filament(
-                preset=preset, length=50.0, shape='ARC') == {'FINISHED'}
+                preset=preset, length=50.0) == {'FINISHED'}
             # Scripted calls leave no undo steps of their own.
             bpy.ops.ed.undo_push(message='Built filament')
         for area in window.screen.areas:
@@ -172,10 +172,10 @@ def open_dialog():
 
 
 def note_field(rows_up=1):
-    # Nodes is the row above the shapes. A probe stops 6 to 12 px above the
+    # Nodes is the row above Edit Bend. A probe stops 6 to 12 px above the
     # bottom of the button it finds, so 25 px higher is inside the next row.
     def run():
-        x, y = data['shape_xy']
+        x, y = data['edit_xy']
         popup = data['popup']
         data['field_xy'] = (x, round(y + rows_up * 25 * scale()))
         # The field's own arrow, at its right-hand end: one more node a click.
@@ -283,7 +283,7 @@ def run_through(preset, copies):
     return [
         (f'{tag}: build', prepare(preset, copies)), ('settle', idle),
         (f'{tag}: open Edit Assembly', open_dialog), ('settle', idle),
-        (f'{tag}: find the shapes', seek('shape_xy', 'molecule.filament_bend_preset')),
+        (f'{tag}: find Edit Bend', seek('edit_xy', 'molecule.edit_filament_bend')),
         ('settle', idle),
         (f'{tag}: note Nodes', note_field()), ('settle', idle),
         *read_field(3),
@@ -303,7 +303,7 @@ def run_through(preset, copies):
         # Opening is not a change: the path it opens on is left as it was.
         (f'{tag}: reopened on seven', verify(7, 'reopened')), ('settle', idle),
         # A dialog opens where the cursor is, which is not where it was.
-        (f'{tag}: find the shapes again', seek('shape_xy', 'molecule.filament_bend_preset')),
+        (f'{tag}: find Edit Bend again', seek('edit_xy', 'molecule.edit_filament_bend')),
         ('settle', idle),
         (f'{tag}: note Nodes again', note_field()), ('settle', idle),
         *read_field(7),
@@ -318,9 +318,9 @@ def keyframed(preset, copies):
         (f'{tag}: build', prepare(preset, copies)), ('settle', idle),
         (f'{tag}: key a node', key_the_path), ('settle', idle),
         (f'{tag}: open Edit Assembly', open_dialog), ('settle', idle),
-        (f'{tag}: find the shapes', seek('shape_xy', 'molecule.filament_bend_preset')),
+        (f'{tag}: find Edit Bend', seek('edit_xy', 'molecule.edit_filament_bend')),
         ('settle', idle),
-        # The line saying why sits between Nodes and the shapes.
+        # The line saying why sits between Nodes and Edit Bend.
         (f'{tag}: note Nodes', note_field(rows_up=2)), ('settle', idle),
         (f'{tag}: opened locked', verify_locked(f'{tag.replace(" ", "-")}.png')),
         ('settle', idle),

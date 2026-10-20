@@ -4,7 +4,7 @@
 filament bender both stand on. The rig-building half (curves, hooks, control
 nodes) is exercised end to end by ``tests/integration/test_dna.py``; what is
 tested here is the *maths* those two features read out of a finished path, and
-the starting shapes they can put into one.
+the straight line a path starts as.
 
 Ground truth is hand-computed geometry on paths whose answers are known before
 the code runs - a straight line of a stated length, a right-angle bend whose
@@ -218,11 +218,11 @@ def test_sampling_nothing_is_not_an_error(scene):
 
 
 # --------------------------------------------------------------------------
-# Shaping a path: the starting presets
+# Making a path: the straight line a rig starts from
 # --------------------------------------------------------------------------
 
-def test_straight_preset_is_a_straight_line_of_the_length_asked_for(scene):
-    points = [co for co, _l, _r in _rig().preset_points("STRAIGHT", 4.0, 5)]
+def test_a_straight_path_is_a_straight_line_of_the_length_asked_for(scene):
+    points = [co for co, _l, _r in _rig().straight_points(4.0, n=5)]
 
     assert len(points) == 5
     assert (points[0] - Vector((0, 0, 0))).length == pytest.approx(0, abs=1e-6)
@@ -232,124 +232,12 @@ def test_straight_preset_is_a_straight_line_of_the_length_asked_for(scene):
         assert point.cross(Vector((0, 0, 1))).length == pytest.approx(0, abs=1e-6)
 
 
-def test_arc_leaves_the_axis_and_comes_back_to_it(scene):
-    """A bow: both ends on the axis, the middle furthest from it."""
-    points = [co for co, _l, _r in _rig().preset_points("ARC", 4.0, 5)]
-    axis = Vector((0, 0, 1))
-
-    def off_axis(point):
-        return (point - axis * point.dot(axis)).length
-
-    assert off_axis(points[0]) == pytest.approx(0, abs=1e-6)
-    assert off_axis(points[-1]) == pytest.approx(0, abs=1e-6)
-    assert off_axis(points[2]) > 0.5, "the middle of an arc must leave the axis"
-    assert off_axis(points[2]) == max(off_axis(p) for p in points)
-
-
-def test_the_s_curve_bends_both_ways(scene):
-    """An S is only an S if the two halves depart to opposite sides."""
-    points = [co for co, _l, _r in _rig().preset_points("S", 4.0, 9)]
-    axis = Vector((0, 0, 1))
-
-    def side(point):
-        offset = point - axis * point.dot(axis)
-        return offset.x + offset.y      # signed, since the side is one vector
-
-    first_half = side(points[2])
-    second_half = side(points[6])
-    assert first_half * second_half < 0, (
-        f"both halves went the same way ({first_half:.3f}, {second_half:.3f})")
-
-
-def test_the_coil_comes_back_round_to_where_it_started(scene):
-    """A full loop: the last point returns near the first, having gone away."""
-    points = [co for co, _l, _r in _rig().preset_points("COIL", 4.0, 9)]
-
-    span = max((p - points[0]).length for p in points)
-    assert span > 0.5, "the coil never left the start"
-    assert (points[-1] - points[0]).length < 0.1 * span, (
-        "the coil did not close back on itself")
-
-
-def test_an_unknown_preset_falls_back_to_straight(scene):
-    straight = _rig().preset_points("STRAIGHT", 3.0, 4)
-    unknown = _rig().preset_points("NOT_A_PRESET", 3.0, 4)
-    for (a, _l1, _r1), (b, _l2, _r2) in zip(straight, unknown):
-        assert (Vector(a) - Vector(b)).length == pytest.approx(0, abs=1e-9)
-
-
-def test_every_advertised_preset_can_be_built(scene):
-    rig = _rig()
-    for identifier, _label, _description in rig.PRESETS:
-        points = rig.preset_points(identifier, 2.0, 4)
-        assert len(points) == 4, f"{identifier} produced {len(points)} points"
-
-
-def test_a_shape_can_be_made_to_set_off_along_the_axis(scene):
-    """Turned about its start until its first step is along the axis.
-
-    For whatever is held at its start and cannot turn to follow the path. The
-    shape itself must come through untouched - the same distances between the
-    same points - or it would be a different arc, not the same one turned.
-    """
-    rig = _rig()
-    axis = Vector((0, 0, 1))
-    for identifier in ("ARC", "S", "COIL"):
-        plain = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 9)]
-        turned = [co for co, _l, _r in rig.preset_points(
-            identifier, 4.0, 9, leave_along_axis=True)]
-
-        first_step = (turned[1] - turned[0]).normalized()
-        assert (first_step - axis).length == pytest.approx(0, abs=1e-6), (
-            f"{identifier} sets off towards {tuple(first_step)}")
-        assert (plain[1] - plain[0]).normalized().dot(axis) < 0.99, (
-            f"{identifier} already set off along the axis, so this proves nothing")
-        for i in range(len(plain)):
-            for j in range(i):
-                assert (turned[i] - turned[j]).length == pytest.approx(
-                    (plain[i] - plain[j]).length, abs=1e-5)
-
-
-def test_a_shape_starts_where_it_is_told_to(scene):
-    rig = _rig()
+def test_a_straight_path_starts_where_it_is_told_to(scene):
     origin = Vector((1.0, -2.0, 0.5))
-    for identifier, _label, _description in rig.PRESETS:
-        at_zero = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 5)]
-        moved = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 5,
-                                                         origin=origin)]
-        for a, b in zip(at_zero, moved):
-            assert (b - a - origin).length == pytest.approx(0, abs=1e-6)
-
-    straight = [co for co, _l, _r in rig.straight_points(4.0, n=3, origin=origin)]
+    straight = [co for co, _l, _r in _rig().straight_points(4.0, n=3, origin=origin)]
     assert (straight[0] - origin).length == pytest.approx(0, abs=1e-6)
     assert (straight[-1] - origin - Vector((0, 0, 4.0))).length == pytest.approx(
         0, abs=1e-6)
-
-
-@pytest.mark.parametrize("identifier", ["S", "COIL"])
-def test_no_shape_is_offered_with_too_few_handles_to_draw_it(identifier):
-    """Three handles on an S-curve are its start, its crossing and its end.
-
-    All three are on the axis: a straight line. A coil's three are its start,
-    its far side and its start again: a line out and back. Whatever number of
-    handles a shape says it needs, that many must actually make the shape,
-    which at the least means its points do not all lie on one line.
-    """
-    rig = _rig()
-
-    def on_one_line(points):
-        direction = next(((p - points[0]).normalized() for p in points[1:]
-                          if (p - points[0]).length > 1e-6), None)
-        return direction is None or all(
-            (p - points[0]).cross(direction).length < 1e-6 for p in points)
-
-    three = [co for co, _l, _r in rig.preset_points(identifier, 4.0, 3)]
-    assert on_one_line(three), "three points do draw it, so the floor is wrong"
-
-    fewest = rig.PRESET_MIN_POINTS[identifier]
-    assert fewest > 3
-    enough = [co for co, _l, _r in rig.preset_points(identifier, 4.0, fewest)]
-    assert not on_one_line(enough)
 
 
 # --------------------------------------------------------------------------
@@ -427,9 +315,9 @@ def test_resampling_preserves_the_path_itself(scene):
     after = rig.sample_along(curve, [f * after_length for f in fractions])
 
     for i, ((p1, t1, _n1), (p2, t2, _n2)) in enumerate(zip(before, after)):
-        assert (p1 - p2).length < 0.05 * before_length, (
+        assert (p1 - p2).length < 0.005 * before_length, (
             f"sample {i} moved from {p1} to {p2}")
-        assert t1.dot(t2) > 0.98, (
+        assert t1.dot(t2) > 0.999, (
             f"the path turns differently at sample {i}: "
             f"{t1} became {t2} (dot {t1.dot(t2):.3f})")
 
@@ -444,8 +332,11 @@ def test_resampling_keeps_the_opening_tangent(scene):
     bpy.context.view_layer.update()
     (_p, after, _n), = rig.sample_along(curve, [0.0])
 
-    assert before.dot(after) > 0.995, (
-        f"the path now sets off in a different direction: {before} -> {after}")
+    # Exactly, not nearly: a filament is laid out from its first subunit, so
+    # a degree here is a degree of swing over its whole length.
+    assert before.angle(after) < math.radians(0.01), (
+        f"the path now sets off {math.degrees(before.angle(after)):.3f} "
+        f"degrees off where it did")
 
 
 def test_resampling_spaces_the_handles_evenly_along_the_path(scene):

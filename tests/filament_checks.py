@@ -51,9 +51,29 @@ def drawn_copies(molecule, chain_letter, residues):
     an atom is found by what it is rather than by where the add-on's own
     coordinate helpers say it should be. Returns one ``(n, 3)`` array per
     copy, in Angstrom, rows in the order of ``residues``.
+
+    A surface draws no atoms, so a chain drawn as one (as a new filament is)
+    is drawn as spheres for the reading and put back afterwards. Where a copy
+    stands does not depend on how it is drawn.
     """
     obj = next(d.object for d in molecule.domains.values()
                if str(d.chain_id) == chain_letter)
+    from proteinblender.core import visual_style
+
+    style = visual_style.find_style_node(obj)
+    surface = (style is not None and style.node_tree is not None
+               and style.node_tree.name.startswith("Style Surface"))
+    if not surface:
+        return _drawn_copies(obj, chain_letter, residues)
+    visual_style.apply_style_to_object(obj, "spheres", sync_morphsets=False)
+    try:
+        return _drawn_copies(obj, chain_letter, residues)
+    finally:
+        visual_style.apply_style_to_object(obj, "surface", sync_morphsets=False)
+        bpy.context.view_layer.update()
+
+
+def _drawn_copies(obj, chain_letter, residues):
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
     depsgraph.update()

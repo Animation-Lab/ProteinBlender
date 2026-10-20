@@ -1,4 +1,4 @@
-"""Building filaments from the UI: strands in the dialog, and the Filament builder.
+"""Building filaments from the UI: strands in the dialog, and the Cytoskeleton builder.
 
 ``test_symmetry_lattice.py`` settles what a lattice of strands *is*, against
 trigonometry, and ``test_filament_presets.py`` that the shipped actin and
@@ -23,7 +23,6 @@ import bpy
 import numpy as np
 import pytest
 from mathutils import Vector
-from mathutils.geometry import interpolate_bezier
 
 import filament_checks as F
 import helpers as H
@@ -109,30 +108,75 @@ def _nodes(molecule):
             for node in _bend().get_bend_nodes(molecule)]
 
 
-def _path(molecule, per_segment=400):
-    """Points along the bend path as Blender draws it, in Angstrom.
+def _distance_to_path(points, path):
+    """How far each point is from the polyline ``path``, segment by segment."""
+    starts, ends = path[:-1], path[1:]
+    spans = ends - starts
+    lengths = np.maximum((spans ** 2).sum(axis=1), 1e-12)
+    out = []
+    for point in points:
+        t = np.clip(((point - starts) * spans).sum(axis=1) / lengths, 0.0, 1.0)
+        nearest = starts + spans * t[:, None]
+        out.append(np.linalg.norm(nearest - point, axis=1).min())
+    return np.array(out)
 
-    Evaluated with Blender's own Bezier interpolation from the curve's
-    control points, so it shares nothing with the sampler that places the
-    subunits. Only valid while the nodes are where the rig put them, which is
-    the case in every test that calls it.
+
+def _drag(molecule, index, offset):
+    """Drag one control node by ``offset`` Angstrom, as a user would."""
+    node = _bend().get_bend_nodes(molecule)[index]
+    node.location = node.location + Vector(offset) * WORLD_SCALE
+    bpy.context.view_layer.update()
+    bpy.context.evaluated_depsgraph_get().update()
+
+
+def _drawn_path(molecule, resolution=256):
+    """The bend path as Blender draws it after any drag, in Angstrom.
+
+    Blender's own evaluation of the curve, hooks and all, flattened to a
+    polyline: nothing of the sampler that places the subunits is involved.
+    The curve's bevel is taken off for the measurement so the mesh is the
+    centre line itself.
     """
     curve = _bend().get_bend_curve(molecule)
     assert curve is not None, "the filament has no bend path"
-    bpy.context.view_layer.update()
-    world = curve.matrix_world
-    points = []
-    bezier = curve.data.splines[0].bezier_points
-    for first, second in zip(bezier[:-1], bezier[1:]):
-        points.extend(world @ p for p in interpolate_bezier(
-            first.co, first.handle_right, second.handle_left, second.co,
-            per_segment))
-    return np.array([tuple(p) for p in points]) / WORLD_SCALE
+    data = curve.data
+    kept = (data.bevel_depth, data.resolution_u)
+    data.bevel_depth, data.resolution_u = 0.0, resolution
+    try:
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = curve.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        try:
+            world = evaluated.matrix_world
+            ordered = _polyline_order(mesh)
+            points = [tuple(world @ mesh.vertices[i].co) for i in ordered]
+        finally:
+            evaluated.to_mesh_clear()
+    finally:
+        data.bevel_depth, data.resolution_u = kept
+        bpy.context.view_layer.update()
+    return np.array(points) / WORLD_SCALE
 
 
-def _distance_to_path(points, path):
-    return np.array([np.linalg.norm(path - point, axis=1).min()
-                     for point in points])
+def _polyline_order(mesh):
+    """Vertex indices of an open polyline mesh, end to end."""
+    neighbours = {v.index: [] for v in mesh.vertices}
+    for edge in mesh.edges:
+        a, b = edge.vertices
+        neighbours[a].append(b)
+        neighbours[b].append(a)
+    if not mesh.edges:
+        return list(neighbours)
+    start = next(i for i, linked in neighbours.items() if len(linked) == 1)
+    order, previous = [start], None
+    while True:
+        here = order[-1]
+        onward = [n for n in neighbours[here] if n != previous]
+        if not onward:
+            return order
+        previous = here
+        order.append(onward[0])
 
 
 def _axis_distance(preset, chain="A"):
@@ -363,15 +407,14 @@ def test_the_bend_path_runs_down_the_middle_of_the_tube():
 
 
 # --------------------------------------------------------------------------
-# The Filament builder
+# The Cytoskeleton builder
 # --------------------------------------------------------------------------
 
 def test_the_builder_makes_a_microtubule_of_the_length_asked_for():
     """50 nm at 81.5 A a dimer is 6.1, so six dimers up each of thirteen strands."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='MICROTUBULE', length=50.0,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='MICROTUBULE', length=50.0) == {'FINISHED'}
 
     molecule = _new_molecule(before)
     assert _copies(molecule) == 6 * MT_STRANDS
@@ -383,8 +426,7 @@ def test_the_builder_makes_an_actin_filament_of_the_length_asked_for():
     """27.5 nm at 27.5 A a subunit is ten subunits."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=27.5,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=27.5) == {'FINISHED'}
 
     molecule = _new_molecule(before)
     assert _copies(molecule) == 10
@@ -456,8 +498,7 @@ def test_a_built_filament_comes_with_a_path_to_bend_it_by():
     """The spline is the point of the builder, so it is there from the start."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     nodes = _nodes(molecule)
@@ -467,8 +508,65 @@ def test_a_built_filament_comes_with_a_path_to_bend_it_by():
         19 * ACTIN_RISE, abs=0.5)
 
 
-@pytest.mark.parametrize("shape", ["ARC", "S", "COIL"])
-def test_a_shaped_filament_lies_along_its_path(shape):
+def _bent_actin(length=110.0):
+    """An actin filament with its middle node pulled 300 A to one side."""
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.build_filament(
+        'EXEC_DEFAULT', preset='ACTIN', length=length) == {'FINISHED'}
+    molecule = _new_molecule(before)
+    _drag(molecule, 1, (300.0, 0.0, 0.0))
+    return molecule
+
+
+def test_a_new_filament_starts_straight():
+    """There is no shape to choose: a new filament runs straight up its axis.
+
+    Every subunit centre is the same distance from the axis, and the path is
+    a straight line, so every one of its points lies on the line from the
+    first node to the last.
+    """
+    preset = F.presets().get("ACTIN")
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.build_filament(
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
+    molecule = _new_molecule(before)
+
+    path = _drawn_path(molecule)
+    start, end = path[0], path[-1]
+    direction = (end - start) / np.linalg.norm(end - start)
+    sideways = path - start - np.outer((path - start) @ direction, direction)
+    assert np.linalg.norm(sideways, axis=1).max() < 0.5, (
+        "the path of a new filament is not a straight line")
+
+    off = _distance_to_path(F.chain_centres(molecule, preset), path)
+    assert np.abs(off - _axis_distance(preset)).max() < 1.0
+
+
+def test_the_builder_no_longer_offers_starting_shapes():
+    """Arc, S-curve and Coil are gone: the nodes make any shape there is."""
+    props = bpy.ops.molecule.build_filament.get_rna_type().properties
+    assert "shape" not in props.keys()
+    assert not hasattr(bpy.types, "MOLECULE_PB_OT_filament_bend_preset")
+
+
+def test_a_new_filament_is_drawn_as_a_surface():
+    """Every object of the filament draws through MolecularNodes' surface style."""
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.build_filament(
+        'EXEC_DEFAULT', preset='ACTIN', length=11.0) == {'FINISHED'}
+    molecule = _new_molecule(before)
+
+    objects = [molecule.object] + [d.object for d in molecule.domains.values()]
+    for obj in objects:
+        group = next(m for m in obj.modifiers if m.type == 'NODES').node_group
+        styles = [node.node_tree.name for node in group.nodes
+                  if node.type == 'GROUP' and node.node_tree is not None
+                  and node.node_tree.name.startswith('Style ')]
+        assert styles and all(name.startswith('Style Surface') for name in styles), (
+            f"{obj.name} is drawn with {styles}")
+
+
+def test_a_dragged_filament_lies_along_its_path():
     """Every subunit must sit beside the path that is drawn, all the way along.
 
     An actin subunit's centre is 15.6 A from the filament axis, so on a path
@@ -477,26 +575,21 @@ def test_a_shaped_filament_lies_along_its_path(shape):
     Angstrom off - and nodes that no longer touch what they shape.
     """
     preset = F.presets().get("ACTIN")
-    before = set(H.sm().molecules)
-    assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=110.0,
-        shape=shape) == {'FINISHED'}
-    molecule = _new_molecule(before)
+    molecule = _bent_actin()
 
     centres = F.chain_centres(molecule, preset)
     assert len(centres) == 40
 
     expected = _axis_distance(preset)
     assert expected == pytest.approx(15.6, abs=0.5)
-    off = _distance_to_path(centres, _path(molecule))
+    off = _distance_to_path(centres, _drawn_path(molecule))
     assert np.abs(off - expected).max() < 4.0, (
         f"a subunit's centre is {off.max():.0f} A from the path, "
         f"not the {expected:.1f} A it is from the axis")
 
 
-@pytest.mark.parametrize("shape", ["STRAIGHT", "ARC", "S", "COIL"])
-def test_a_shaped_filament_fills_its_path(shape):
-    """The path ends where the filament does, whatever shape it is in.
+def test_a_new_filament_fills_its_path():
+    """The path ends where the filament does.
 
     Forty subunits are thirty-nine gaps of 27.5 A, so the path is 1072.5 A
     long, and its last control node stands beside the last subunit - 15.6 A
@@ -507,11 +600,10 @@ def test_a_shaped_filament_fills_its_path(shape):
     preset = F.presets().get("ACTIN")
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=110.0,
-        shape=shape) == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=110.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
-    path = _path(molecule)
+    path = _drawn_path(molecule)
     length = np.linalg.norm(np.diff(path, axis=0), axis=1).sum()
     assert length == pytest.approx(39 * ACTIN_RISE, rel=0.005)
 
@@ -522,17 +614,12 @@ def test_a_shaped_filament_fills_its_path(shape):
         f"the last control node is {nearest:.0f} A from the nearest subunit")
 
 
-@pytest.mark.parametrize("shape", ["ARC", "S", "COIL"])
-def test_a_shaped_filament_is_bent_and_its_subunits_are_not(shape):
+def test_a_dragged_filament_is_bent_and_its_subunits_are_not():
     """Bent: the ends are closer together than the filament is long.
     Rigid: every copy's atoms stand to one another exactly as in the file.
     """
     preset = F.presets().get("ACTIN")
-    before = set(H.sm().molecules)
-    assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=110.0,
-        shape=shape) == {'FINISHED'}
-    molecule = _new_molecule(before)
+    molecule = _bent_actin()
 
     shipped = F.alpha_carbons(F.presets().structure_path(preset))
     residues = sorted(r for (chain, r) in shipped if chain == "A")[::25]
@@ -552,7 +639,7 @@ def test_a_shaped_filament_is_bent_and_its_subunits_are_not(shape):
         f"the filament spans {spread:.0f} A, as a straight one would")
 
 
-def test_a_shaped_microtubule_keeps_its_path_down_the_middle():
+def test_a_dragged_microtubule_keeps_its_path_down_the_middle():
     """A bent tube is still a tube round its path: every dimer at the wall.
 
     An alpha tubulin's centre is 112 A from the axis; on a curve whose bends
@@ -561,16 +648,16 @@ def test_a_shaped_microtubule_keeps_its_path_down_the_middle():
     preset = F.presets().get("MICROTUBULE")
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='MICROTUBULE', length=300.0,
-        shape='ARC') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='MICROTUBULE', length=300.0) == {'FINISHED'}
     molecule = _new_molecule(before)
+    _drag(molecule, 1, (600.0, 0.0, 0.0))
 
     centres = F.chain_centres(molecule, preset)
     assert len(centres) == 37 * MT_STRANDS       # 3000 / 81.5 = 36.8
 
     expected = _axis_distance(preset)
     assert expected == pytest.approx(112.0, abs=1.5)
-    off = _distance_to_path(centres, _path(molecule))
+    off = _distance_to_path(centres, _drawn_path(molecule))
     assert np.abs(off - expected).max() < 10.0, (
         f"dimers are between {off.min():.0f} and {off.max():.0f} A from the "
         f"path, not {expected:.0f}")
@@ -595,24 +682,25 @@ def _edit_length(molecule, nanometres):
 def test_a_longer_filament_gets_a_longer_path():
     """Twice the filament on the same path would run off the end of it.
 
-    Twenty subunits in an arc, then forty: the path must grow with them, so
-    the filament still lies along it from the first node to the last and is
-    still the same arc - not an arc with a straight tail.
+    Twenty subunits bent into a bow, then forty: the path must grow with
+    them, so the filament still lies along it from the first node to the
+    last and is still the same bow - not a bow with a straight tail.
     """
     preset = F.presets().get("ACTIN")
-    before = set(H.sm().molecules)
-    assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0, shape='ARC') == {'FINISHED'}
-    molecule = _new_molecule(before)
+    molecule = _bent_actin(55.0)
     assert _copies(molecule) == 20
     nodes_before = _nodes(molecule)
+    path = _drawn_path(molecule)
+    length_before = np.linalg.norm(np.diff(path, axis=0), axis=1).sum()
 
     _edit_length(molecule, 110.0)
     assert _copies(molecule) == 40
 
-    path = _path(molecule)
+    # The bow is longer than the filament it was pulled out of; it grows by
+    # as much as the filament did.
+    path = _drawn_path(molecule)
     length = np.linalg.norm(np.diff(path, axis=0), axis=1).sum()
-    assert length == pytest.approx(39 * ACTIN_RISE, rel=0.005)
+    assert length == pytest.approx(length_before * 39 / 19, rel=0.005)
 
     centres = F.chain_centres(molecule, preset)
     off = _distance_to_path(centres, path)
@@ -631,8 +719,7 @@ def test_a_path_the_user_shaped_keeps_its_shape_when_the_length_changes():
     """Dragged nodes are someone's work; resizing must scale it, not reset it."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     # Pull the middle node 100 A sideways.
@@ -658,7 +745,7 @@ def test_a_shorter_filament_gets_a_shorter_path():
     preset = F.presets().get("ACTIN")
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=110.0, shape='S') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=110.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     _edit_length(molecule, 55.0)
@@ -679,7 +766,7 @@ def test_a_keyframed_path_is_left_alone_when_the_length_changes():
     """
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0, shape='ARC') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     keyed = _bend().get_bend_nodes(molecule)[-1]
@@ -710,7 +797,7 @@ def test_a_rebuild_that_fails_gives_the_path_back():
 
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0, shape='ARC') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
     nodes_before = _nodes(molecule)
 
@@ -777,9 +864,9 @@ def test_the_nodes_field_gives_the_path_that_many_nodes(preset_id, length, copie
     preset = F.presets().get(preset_id)
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset=preset_id, length=length,
-        shape='ARC') == {'FINISHED'}
+        'EXEC_DEFAULT', preset=preset_id, length=length) == {'FINISHED'}
     molecule = _new_molecule(before)
+    _drag(molecule, 1, (200.0, 0.0, 0.0))
     assert _rig(molecule) == (3, 3)
     assert _nodes_field(molecule) == 3
     centres_before = F.chain_centres(molecule, preset)
@@ -792,7 +879,9 @@ def test_the_nodes_field_gives_the_path_that_many_nodes(preset_id, length, copie
     assert _copies(molecule) == copies
     moved = np.linalg.norm(
         F.chain_centres(molecule, preset) - centres_before, axis=1).max()
-    assert moved < 10.0, (
+    # A few Angstrom at most: a tube's dimers stand 112 A out from the path,
+    # where a twentieth of a degree of frame is already an Angstrom.
+    assert moved < 5.0, (
         f"a subunit moved {moved:.1f} A when the path was given more nodes")
 
     # And back down again.
@@ -807,8 +896,7 @@ def test_the_nodes_field_stays_within_what_a_path_can_have():
 
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     _set_nodes_field(molecule, 500)
@@ -821,7 +909,7 @@ def test_the_nodes_field_leaves_a_keyframed_path_alone():
     """New nodes are new objects, and the animation is keyed to the old ones."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0, shape='ARC') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
 
     keyed = _bend().get_bend_nodes(molecule)[-1]
@@ -843,8 +931,7 @@ def test_a_bend_added_afterwards_starts_with_the_nodes_last_chosen():
     """Taking a bend away and putting one back does not forget the count."""
     before = set(H.sm().molecules)
     assert bpy.ops.molecule.build_filament(
-        'EXEC_DEFAULT', preset='ACTIN', length=55.0,
-        shape='STRAIGHT') == {'FINISHED'}
+        'EXEC_DEFAULT', preset='ACTIN', length=55.0) == {'FINISHED'}
     molecule = _new_molecule(before)
     _set_nodes_field(molecule, 6)
 
