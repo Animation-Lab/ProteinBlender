@@ -319,6 +319,11 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
             # any object transform — they need their own teardown call.
             if kind == 'MEMBRANE':
                 delete_lattice_deformation_keyframes(obj, self.frame)
+            # A filament's numbers are keyed on its object, beside the
+            # transform, and go with it.
+            if kind == 'FILAMENT':
+                from ..core.filament_animation import delete_parameter_keyframes
+                delete_parameter_keyframes(obj, self.frame)
             delete_keyframe_metadata(obj, self.frame)
 
         for area in context.screen.areas:

@@ -121,6 +121,30 @@ Combine multiple properties for richer animations:
 
 **Result**: Protein moves, changes conformation, and changes color simultaneously.
 
+### Growing, Twisting and Bending a Filament
+
+An actin filament or a microtubule from **Create New Cytoskeleton**, or any helical assembly from **Create New Assembly**, is listed in **Create Keyframe** under its protein's name.
+Ticking its row keys three things at once:
+
+- where it stands (Location, Rotation and Scale, as for any row),
+- how it bends (every bend control node),
+- the numbers it is built from: Subunits, Rise, Twist, Strands, Stagger and Strand Twist.
+
+To animate one:
+
+1. At frame 1, press **Create Keyframe**, tick the filament and press OK.
+2. Move to frame 60 and change the filament: open **Edit Assembly** from its row and change the length or the twist, or drag its bend nodes.
+3. Press **Create Keyframe** again, tick the filament and press OK.
+
+Playing back, the filament moves between the two: a longer length grows it subunit by subunit, a twist turns its subunits, and dragged nodes bend it.
+**Edit Assembly** opened at any frame shows the numbers on screen at that frame.
+
+Two things to know:
+
+- Once its bend nodes are keyed, a filament's path keeps its nodes and its length.
+  A filament keyed to grow longer than its path carries straight on past the last node.
+- Like any keyframed value, a change made at a frame that is not then keyed is replaced by the animation when the frame changes.
+
 ### Multi-Puppet Coordination
 
 Animate multiple puppets in the same scene:

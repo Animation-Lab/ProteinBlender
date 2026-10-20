@@ -224,7 +224,7 @@ Two consequences worth knowing:
 
 - **The first subunit never moves.** The filament is anchored on the structure you imported and bends away from it, so bending the middle can swing the far end. That is what holding one end of a rope does.
 - **The path grows and shrinks with the filament.** Change Subunits or Length on a bent filament and the path is scaled by the same amount about its first node, so the shape you made is kept at the new size and the filament still ends at the last node.
-  The exception is a path with keyframes on its nodes, which is left as it is; a filament longer than its path then carries straight on past the end rather than piling up on the last point.
+  The exception is a path with keyframes on its nodes (keys on the filament itself do not count), which is left as it is; a filament longer than its path then carries straight on past the end rather than piling up on the last point.
 - **The path is the filament's axis.** For a microtubule that is the middle of the tube, not its wall.
 
 ## Clear
@@ -249,6 +249,13 @@ In **Edit Assembly**, folded under its name.
 
 Whole copies are removed rather than atoms being sliced, which is what published capsid figures do and leaves intact subunits around the opening.
 A cut assembly keeps the settings it was built with, so its dialog reopens on them, and changing any setting brings the whole assembly back.
+
+## Keyframing a filament
+
+A helical assembly is listed in Animate Scene's **Create Keyframe** under its protein's name.
+Ticking it keys where it stands, its bend nodes and its numbers (Subunits, Rise, Twist, Strands, Stagger and Strand Twist), so a filament can grow, twist and bend over time.
+The copies are re-placed on every frame, in the viewport and in a rendered animation alike.
+See [Keyframe Animation](keyframes.md#growing-twisting-and-bending-a-filament).
 
 ## Realize Copies
 

@@ -704,7 +704,8 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         # Changing the count recreates the nodes, which would orphan every
         # key set on the old ones - so a keyframed path keeps the count it has.
         keyed = bend_rig.has_keyframes(symmetry_bend.SPEC,
-                                       symmetry_bend.owner_object(molecule))
+                                       symmetry_bend.owner_object(molecule),
+                                       include_owner=False)
         count = box.row(align=True)
         count.enabled = not keyed
         count.prop(self, "bend_nodes")

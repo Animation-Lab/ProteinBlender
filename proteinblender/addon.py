@@ -211,6 +211,10 @@ def register() -> None:
     from .operators import symmetry_bend_operators
     symmetry_bend_operators.register_handlers()
 
+    # A filament's keyed numbers, and the handler that plays them back.
+    from .core import filament_animation
+    filament_animation.register()
+
     # File > Import entry for structure files (dropping them on the window is
     # handled by the registered MOLECULE_FH_import_structure file handler).
     from .operators import operator_import_local
@@ -289,6 +293,12 @@ def unregister() -> None:
         frame_change_handler.unregister()
     except Exception as e:
         logger.debug(f"Failed to unregister frame change handler: {e}")
+
+    try:
+        from .core import filament_animation
+        filament_animation.unregister()
+    except Exception as e:
+        logger.debug(f"Failed to unregister filament animation: {e}")
 
     # Unregister the filament bend follow handler
     try:

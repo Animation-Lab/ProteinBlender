@@ -161,18 +161,20 @@ def resolve_owner(spec: BendRigSpec, obj):
     return owner_of_node(spec, obj)
 
 
-def has_keyframes(spec: BendRigSpec, owner) -> bool:
-    """True if the owner, its curve or any control node carries a transform key.
+def has_keyframes(spec: BendRigSpec, owner, include_owner: bool = True) -> bool:
+    """True if the owner, its curve or any control node carries a key.
 
     Callers use this to lock structural changes once a bend is animated: adding
     or removing nodes rebuilds the rig, which orphans F-curves keyed against
-    the old nodes and silently corrupts the animation.
+    the old nodes and silently corrupts the animation. ``include_owner=False``
+    asks about the rig alone, for an owner whose own keys - where it stands,
+    what it is built from - a rebuilt rig leaves untouched.
     """
     if owner is None:
         return False
     from ..utils.animation import get_fcurves_from_action
 
-    objects = [owner]
+    objects = [owner] if include_owner else []
     curve = get_curve(spec, owner)
     if curve is not None:
         objects.append(curve)

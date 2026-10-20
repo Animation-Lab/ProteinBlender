@@ -265,7 +265,7 @@ def follow_length(molecule, was: dict, now: dict) -> bool:
     before, after = span(was), span(now)
     if before <= 0.0 or after <= 0.0 or abs(after - before) < 1e-9:
         return False
-    if bend_rig.has_keyframes(SPEC, owner):
+    if bend_rig.has_keyframes(SPEC, owner, include_owner=False):
         logger.info("the bend of %s is keyframed; its path keeps its length",
                     getattr(molecule, "identifier", "?"))
         return False
@@ -342,7 +342,8 @@ def bent_helical_operators(molecule, count: int, rise: float, twist: float,
                            axis=(0.0, 0.0, 1.0),
                            centre=(0.0, 0.0, 0.0), strands: int = 1,
                            stagger: float = 0.0,
-                           strand_twist: Optional[float] = None) -> List[Operator]:
+                           strand_twist: Optional[float] = None,
+                           depsgraph=None) -> List[Operator]:
     """A filament laid along the molecule's bend curve.
 
     ``count`` subunits along each of ``strands`` strands - see
@@ -352,6 +353,10 @@ def bent_helical_operators(molecule, count: int, rise: float, twist: float,
 
     Falls back to the straight filament whenever there is no curve to follow,
     so callers never have to ask which they are getting.
+
+    ``depsgraph`` is where to read the curve and its nodes from, for a caller
+    working in one other than the viewport's - an animation render evaluates
+    the frame's node positions into its own and leaves the objects alone.
     """
     from . import symmetry_builder
 
@@ -363,6 +368,13 @@ def bent_helical_operators(molecule, count: int, rise: float, twist: float,
     curve_obj = bend_rig.get_curve(SPEC, owner)
     if owner is None or curve_obj is None:
         return straight()
+
+    if depsgraph is not None:
+        try:
+            curve_obj = curve_obj.evaluated_get(depsgraph)
+            owner = owner.evaluated_get(depsgraph)
+        except (ReferenceError, RuntimeError):
+            logger.warning("could not read the bend from that depsgraph")
 
     arcs, angles = _lattice_arcs(count, rise, twist, strands, stagger,
                                  strand_twist)
@@ -439,7 +451,7 @@ def _anchored_on_the_original(operators: List[Operator]) -> List[Operator]:
             for rotation, translation in operators]
 
 
-def build_operators(molecule, kind: str, **settings) -> List[Operator]:
+def build_operators(molecule, kind: str, depsgraph=None, **settings) -> List[Operator]:
     """The generated operators for *molecule*, bent if it has a bend curve.
 
     The one entry point the panel, the build operator and the cutaway/axes
@@ -462,6 +474,7 @@ def build_operators(molecule, kind: str, **settings) -> List[Operator]:
         strands=settings.get("strands", 1),
         stagger=settings.get("stagger", 0.0),
         strand_twist=settings.get("strand_twist"),
+        depsgraph=depsgraph,
     )
 
 

@@ -186,7 +186,8 @@ class MOLECULE_PB_OT_set_filament_bend_nodes(Operator):
             return {"CANCELLED"}
 
         if bend_rig.has_keyframes(symmetry_bend.SPEC,
-                                  symmetry_bend.owner_object(molecule)):
+                                  symmetry_bend.owner_object(molecule),
+                                  include_owner=False):
             # Rebuilding recreates the Empties, orphaning every F-curve keyed
             # against the old ones. Refusing is kinder than silently losing an
             # animation the user cannot see has gone.

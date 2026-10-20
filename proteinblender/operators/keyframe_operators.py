@@ -7,6 +7,7 @@ from bpy.props import BoolProperty, IntProperty, CollectionProperty, StringPrope
 from ..utils.scene_manager import ProteinBlenderScene
 from .morphset_operators import PBMorphKeyframeRow, populate_keyframe_rows
 from ..core import morphsets
+from ..core import assembly as assembly_core
 from ..utils.chain_utils import get_puppet_member_objects as _resolve_puppet_member_objects
 from ..utils.animation import (
     keyframe_transforms,
@@ -190,8 +191,10 @@ def validate_keyframe_metadata(controller_obj, domain_objects, frame, stored_set
 def get_keyframe_targets(context):
     """Return ``[(label, object, kind, item_id)]`` for everything ProteinBlender
     can keyframe: puppet controllers (kind ``'PUPPET'``), DNA/RNA molecule
-    objects (kind ``'MOLECULE'``, keyframed directly) and membrane roots
-    (kind ``'MEMBRANE'`` — root transform + holes + lattice deformation).
+    objects (kind ``'MOLECULE'``, keyframed directly), membrane roots
+    (kind ``'MEMBRANE'`` — root transform + holes + lattice deformation) and
+    helical filaments (kind ``'FILAMENT'`` — molecule transform + bend rig +
+    the numbers it is built from, see ``core.filament_animation``).
 
     Shared by the Create dialog, the keyframe list and keyframe deletion so all
     three agree on what is animatable.
@@ -219,9 +222,47 @@ def get_keyframe_targets(context):
             if obj and obj.name not in seen and obj.get("pb_is_membrane", False):
                 seen.add(obj.name)
                 targets.append((item.name, obj, 'MEMBRANE', item.item_id))
+    from ..core import filament_animation
+    for molecule in list(sm.molecules.values()):
+        try:
+            obj = molecule.object
+        except ReferenceError:
+            continue
+        if (obj is None or obj.name in seen
+                or not filament_animation.is_filament(molecule)):
+            continue
+        seen.add(obj.name)
+        targets.append((_protein_label(scene, molecule), obj, 'FILAMENT',
+                        molecule.identifier))
     for morph in morphsets.morphs(scene):
         targets.append((morph.name, morph, 'MORPHSET', morph[morphsets.MORPH]))
     return targets
+
+
+def _protein_label(scene, molecule):
+    """What the PB Outliner calls a protein - "Microtubule", not an id."""
+    row = next((item for item in scene.outliner_items
+                if item.item_type == 'PROTEIN'
+                and item.item_id == molecule.identifier), None)
+    return row.name if row is not None else molecule.identifier
+
+
+def get_filament_bend_objects(obj):
+    """The bend curve plus its control nodes for a filament's molecule object.
+
+    Keyed with full transforms, like a DNA bend, so a node that was turned
+    as well as moved plays back as it was left."""
+    if obj is None:
+        return []
+    from ..core import bend_rig, symmetry_bend
+    curve = bend_rig.get_curve(symmetry_bend.SPEC, obj)
+    objs = [curve] if curve is not None else []
+    objs.extend(bend_rig.get_nodes(symmetry_bend.SPEC, obj))
+    return objs
+
+
+def _filament_molecule(item_id):
+    return ProteinBlenderScene.get_instance().molecules.get(item_id)
 
 
 def get_membrane_holes(mem_obj):
@@ -297,6 +338,8 @@ def get_keyframe_animated_objects(obj, kind):
         objs.extend(get_dna_bend_objects(obj))
     elif kind == 'MEMBRANE':
         objs.extend(get_membrane_holes(obj))
+    elif kind == 'FILAMENT':
+        objs.extend(get_filament_bend_objects(obj))
     return objs
 
 
@@ -345,6 +388,12 @@ def _target_owned_object_names(context, obj, kind, item_id):
         lat = get_membrane_lattice(obj)
         if lat is not None:
             names.add(lat.name)
+    elif kind == 'FILAMENT':
+        names.update(o.name for o in get_filament_bend_objects(obj))
+        molecule = _filament_molecule(item_id)
+        if molecule is not None:
+            names.update(d.object.name for d in molecule.domains.values()
+                         if d.object is not None)
     return names
 
 
@@ -711,6 +760,26 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mem_item.keyframe_color = False
             mem_item.brownian_enabled = False
 
+        # Helical filaments - a Create New Cytoskeleton build or a helix from
+        # Create New Assembly. One row each: ticking it keys where the
+        # filament stands, its bend and every number it is built from.
+        for label, obj, kind, item_id in get_keyframe_targets(context):
+            if kind != 'FILAMENT':
+                continue
+            fil_item = self.puppet_items.add()
+            fil_item.item_kind = 'FILAMENT'
+            fil_item.puppet_id = item_id
+            fil_item.puppet_name = label
+            fil_item.controller_object_name = obj.name
+            existing = get_keyframe_metadata(obj, self.frame_number)
+            fil_item.use_puppet = existing.get('use_puppet', False) if existing else False
+            fil_item.keyframe_location = existing.get('location', True) if existing else True
+            fil_item.keyframe_rotation = existing.get('rotation', True) if existing else True
+            fil_item.keyframe_scale = existing.get('scale', True) if existing else True
+            fil_item.keyframe_pose = False
+            fil_item.keyframe_color = False
+            fil_item.brownian_enabled = False
+
         populate_keyframe_rows(self, context)
         self._morph_frame = self.frame_number
 
@@ -782,7 +851,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         if not self.puppet_items:
             if not has_morphsets:
                 box.label(text="Nothing to keyframe", icon='INFO')
-                box.label(text="Create a Morphset, puppet, DNA/RNA strand, or membrane first")
+                box.label(text="Create a Morphset, puppet, DNA/RNA strand, membrane or filament first")
         else:
             # Create a subtle header with icons
             header_row = box.row(align=False)
@@ -820,6 +889,8 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     item_icon = 'GROUP'
                 elif is_membrane:
                     item_icon = 'MOD_FLUIDSIM'
+                elif item.item_kind == 'FILAMENT':
+                    item_icon = 'CURVE_PATH'
                 else:
                     item_icon = 'RNA'
                 name_col = row.column()
@@ -942,8 +1013,23 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 self._keyframe_targets_of(context, selected_puppets),
                 original_frame,
             )
+            # A filament's numbers are its build, not a property Blender
+            # would carry: the frame change plays its animation back over
+            # them, so what is on screen is put back after it.
+            pending_builds = {}
+            for item in selected_puppets:
+                if item.item_kind == 'FILAMENT':
+                    molecule = _filament_molecule(item.puppet_id)
+                    if molecule is not None:
+                        pending_builds[item.puppet_id] = (
+                            assembly_core.built_build_params(molecule))
             scene.frame_set(self.frame_number)
             restore_unkeyed_edits(pending_edits)
+            for molecule_id, params in pending_builds.items():
+                molecule = _filament_molecule(molecule_id)
+                if molecule is not None and params:
+                    from .assembly_operators import build_generated_symmetry
+                    build_generated_symmetry(molecule, params)
 
         keyframed_puppets = []
         total_keyframed = 0
@@ -1062,6 +1148,20 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                     keyframe_transforms(bend_obj, self.frame_number)
                 if bend_objs:
                     print(f"  ✓ Keyframed {len(bend_objs)} DNA bend object(s) at frame {self.frame_number}")
+                    total_keyframed += 1
+
+            # Filament: its bend, and the numbers it is built from. Each
+            # number is keyed at the value it was built with, so the copies
+            # play back from them (core.filament_animation).
+            if (puppet_item.item_kind == 'FILAMENT' and puppet_item.use_puppet
+                    and controller_obj):
+                from ..core import filament_animation
+                for bend_obj in get_filament_bend_objects(controller_obj):
+                    keyframe_transforms(bend_obj, self.frame_number)
+                molecule = _filament_molecule(puppet_item.puppet_id)
+                if molecule is not None and filament_animation.keyframe_parameters(
+                        molecule, self.frame_number):
+                    print(f"  ✓ Keyframed {puppet_name}'s build at frame {self.frame_number}")
                     total_keyframed += 1
 
             # Keyframe domain relative transforms (local space) based on pose checkbox

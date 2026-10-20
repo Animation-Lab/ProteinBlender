@@ -15,6 +15,7 @@ from proteinblender.core import symmetry_bend
 from proteinblender.dna_builder.dna_panel import PROTEINBLENDER_PT_builders as Builders
 from proteinblender.operators.filament_operators import MOLECULE_PB_OT_build_filament as Builder
 from proteinblender.operators.symmetry_dialog import MOLECULE_PB_OT_symmetry_dialog as Dialog
+from proteinblender.operators.keyframe_operators import PROTEINBLENDER_OT_create_keyframe as Keyframe
 
 data = {}
 folder = Path(g['report_path']).parent
@@ -62,7 +63,7 @@ def observe(cls):
     def draw(self, context):
         original(self, context)
         data[cls.__name__ + '_layout'] = self.layout.introspect()
-        if cls in (Dialog, Builder):
+        if cls in (Dialog, Builder, Keyframe):
             data['popup'] = getattr(context, 'region_popup', None) or context.region
             data['open'] = cls.__name__
     cls.draw = draw
@@ -127,7 +128,7 @@ def rig_objects():
 
 def prepare():
     H.reset_scene()
-    for cls in (Builder, Dialog, Builders):
+    for cls in (Builder, Dialog, Builders, Keyframe):
         observe(cls)
     window = g['active_window']()
     move(window.width * .45, window.height * .8)
@@ -263,6 +264,41 @@ def verify_rebuilt_longer():
     return rows[0].name
 
 
+def open_keyframe_dialog():
+    data.pop('open', None)
+    with g['ui_override']():
+        assert bpy.ops.proteinblender.create_keyframe('INVOKE_DEFAULT') == {'RUNNING_MODAL'}
+
+
+def inspect_keyframe_dialog():
+    capture('create-keyframe.png')
+    shown = labels(Keyframe)
+    mol = filament()
+    dialog = Keyframe._active_instance
+    assert dialog is not None, 'Create Keyframe is not open'
+    rows = [item for item in dialog.puppet_items if item.item_kind == 'FILAMENT']
+    assert len(rows) == 1 and rows[0].puppet_id == mol.identifier, (
+        [(r.item_kind, r.puppet_id) for r in dialog.puppet_items])
+    assert rows[0].puppet_name in shown, shown
+    assert 'Nothing to keyframe' not in shown
+    # The row's checkbox, as a click on it sets it.
+    rows[0].use_puppet = True
+    poke()
+    return rows[0].puppet_name
+
+
+def verify_keyed():
+    assert 'open' not in data, 'OK did not close Create Keyframe'
+    from proteinblender.core import filament_animation
+    mol = filament()
+    keyed = filament_animation.parameter_fcurves(mol.object)
+    assert set(keyed) == set(filament_animation.PARAMETERS), sorted(keyed)
+    assert keyed['count'].keyframe_points[0].co[1] == 12, keyed['count'].keyframe_points[0].co
+    nodes = symmetry_bend.get_bend_nodes(mol)
+    assert all(n.animation_data and n.animation_data.action for n in nodes)
+    return 'keyed: ' + ', '.join(sorted(keyed))
+
+
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', idle),
     ('prepare an empty scene', prepare), ('settle', idle),
@@ -278,4 +314,8 @@ g['steps'][:] = [
     ('inspect the longer setting', inspect_longer), ('settle', idle),
     *confirm('OK the longer filament'),
     ('verify the longer microtubule', verify_rebuilt_longer), ('settle', idle),
+    ('open Create Keyframe', open_keyframe_dialog), ('settle', idle),
+    ('inspect Create Keyframe and tick the filament', inspect_keyframe_dialog), ('settle', idle),
+    *confirm('OK the keyframe'),
+    ('verify the filament is keyed', verify_keyed), ('settle', idle),
 ]
