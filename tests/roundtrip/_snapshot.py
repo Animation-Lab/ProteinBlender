@@ -99,6 +99,8 @@ OBJECT_PROPS = (
     "temp_domain_name",
     "pb_force_field_enabled", "pb_force_field_spacing",
     "pb_conformations",
+    # A filament's keyed numbers; its animation is what plays them back.
+    "pb_filament",
 )
 
 EXCLUSIONS = {

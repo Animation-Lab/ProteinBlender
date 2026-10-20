@@ -457,9 +457,12 @@ def _write_points(mesh, operators, pivot) -> None:
     count = len(operators)
     if len(mesh.vertices) != count:
         mesh.clear_geometry()
-        # Points start at the origin; the node tree positions them from the
-        # attributes, so a factor change re-places them without a rebuild.
         mesh.vertices.add(count)
+        # Points sit at the origin; the node tree positions them from the
+        # attributes, so a factor change re-places them without a rebuild.
+        # Written, not assumed: added vertices are not cleared, and stray
+        # NaNs left the cloud with a bounding box of NaN on Blender 5.1.
+        mesh.vertices.foreach_set("co", np.zeros(count * 3, dtype=np.float32))
     pivots = np.tile(np.asarray(pivot, dtype=float), (count, 1))
     values = {"axis": axes, "trans": translations, "pivot": pivots,
               "angle": angles, "delay": delays}

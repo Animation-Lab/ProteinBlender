@@ -441,6 +441,31 @@ def test_a_change_re_places_the_copies_it_already_has():
         "the keyed assemble factor was lost")
 
 
+def test_copies_re_placed_at_a_new_count_sit_at_the_origin():
+    """Resized point clouds hold real positions, not whatever memory held.
+
+    The node tree places copies from attributes, and the points themselves
+    sit at the origin; a NaN left there gave the cloud a NaN bounding box.
+    """
+    import numpy as np
+
+    core = _assembly_core()
+    molecule = _import()
+    _set(kind="C", order=4)
+    bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', target_id=molecule.identifier)
+    _open(molecule)
+    bpy.context.scene.pb_symmetry_order = 23
+    assert _copies(molecule) == 23
+
+    clouds = [points for _group, node in core._assembly_nodes(molecule)
+              for points, _chain in core._point_clouds(node.node_tree)]
+    assert clouds
+    for points in clouds:
+        co = np.empty(len(points.data.vertices) * 3)
+        points.data.vertices.foreach_get("co", co)
+        assert len(co) == 23 * 3 and np.all(co == 0.0), points.name
+
+
 def test_picking_another_source_shows_it_at_once():
     """The source and the deposited assembly are settings like the numbers."""
     from proteinblender.core import assembly as assembly_core
