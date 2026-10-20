@@ -1681,6 +1681,9 @@ by passing that state directly (no dialog needed):
 
 ## Known issues surfaced but not fixed here
 
+- **`--scenario assembly-conformations` cannot run on Blender 5.1.** It finds the dialog's source dropdown by hovering and pressing Ctrl+C, and on 5.1 Ctrl+C over a dropdown in a popup copies nothing (number fields and buttons copy as on 5.2), so it fails with "No control showing GENERATED in the dialog".
+  Found 2026-10-19; the release commit `30b9adc` fails identically, so the add-on is not involved. The scenario passes on 5.2. Making it run on 5.1 needs another way to find a dropdown.
+
 - **`has_color_keyframe` cannot see an alpha-only keyframe.** It looks for `'Alpha'` in the F-curve `data_path`, but Blender addresses node sockets by index (`nodes["Principled BSDF"].inputs[4].default_value`), so a domain keyed only on alpha reports no colour keyframe and the keyframe indicator stays off. The key itself is stored correctly (frame 7, value 0.5, confirmed by evaluating the animation). Found while covering the `use_nodes` cleanup and left alone because fixing it changes visible behaviour. Pinned as a strict xfail: `test_blender6_deprecations.py::test_has_color_keyframe_sees_an_alpha_key`.
 
 - **Three live-lane failures that predate the pivot-mode work.** Confirmed
