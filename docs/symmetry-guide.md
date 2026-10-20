@@ -61,7 +61,8 @@ The tradeoff is that instances are anonymous.
 There is nothing to click on, and no way to colour one subunit differently.
 
 **Realizing** converts them into proteins of their own in the PB Outliner, buying per-copy identity at the cost of a full protein per copy.
-ChimeraX makes exactly this tradeoff, and switches its default at twelve copies; ProteinBlender uses the same threshold.
+ChimeraX makes exactly this tradeoff, and switches its default at twelve copies.
+ProteinBlender realizes any number you ask for, and warns above twelve, where the copies start to make a scene slow to work with.
 
 ## Assemblies with identity operators
 
@@ -260,7 +261,7 @@ Every copy stands where its instance was drawn, in the style and colour of what 
 If the original itself was not among the copies on screen - cut away, say - it becomes the first of the copies that were, rather than being left behind hidden.
 The assembly row, any bend and any symmetry axes go, since there is no longer an assembly for them to belong to.
 Each new protein carries its own atom data, so this costs memory in proportion to the number of copies.
-Refused above twelve copies.
+Above twelve copies the dialog says so in red beneath the button before you click, and Blender's status bar repeats the warning once it is done; it still realizes every one.
 
 ---
 

@@ -1,7 +1,8 @@
 """Realizing copies into real objects, and cutting a shell open.
 
-Phase 4, remaining slices. Realize follows ChimeraX's `sym copies` rule:
-full copies below a threshold, graphical clones above it unless forced.
+Phase 4, remaining slices. Realize makes any number of copies real, and
+warns above ChimeraX's `sym copies` threshold of twelve, where a great many
+proteins start to make a scene slow to work with.
 Cutaway removes whole copies on one side of a plane, which is what the
 published capsid figures do.
 """
@@ -45,9 +46,9 @@ def _placed(molecule):
 # Realize
 # --------------------------------------------------------------------------
 
-def _realize(molecule, force=False):
+def _realize(molecule):
     from proteinblender.operators.assembly_realize import realize_assembly
-    return realize_assembly(bpy.context, molecule, force=force)
+    return realize_assembly(bpy.context, molecule)
 
 
 def _chain_objects(molecule_id):
@@ -153,27 +154,45 @@ def test_realizing_clears_the_instanced_assembly(scene, sm):
     assert _placed(molecule) <= 1
 
 
-def test_a_big_assembly_is_refused_unless_forced(scene, sm):
-    """ChimeraX's rule: above the threshold, copies stay clones by default.
-
-    A capsid's worth of real proteins is rarely what anyone wanted, so it has
-    to be asked for rather than happened upon.
-    """
+def test_a_big_assembly_is_realized_too(scene, sm):
+    """Above twelve copies Realize still makes every one of them real."""
     core, builder = _core(), _builder()
     molecule = _import()
 
     order = core.REALIZE_THRESHOLD + 2
     builder.apply_symmetry(molecule, "C", order=order)
 
-    assert _realize(molecule) is None, (
-        f"{order} copies should be refused without force")
-    assert core.built_assembly_id(molecule) is not None, (
-        "a refusal must leave the assembly alone")
-    assert len(sm.molecules) == 1
+    created = _realize(molecule)
+    assert len(created.proteins) == order - 1
+    assert len(sm.molecules) == order
+    assert core.built_assembly_id(molecule) is None
 
-    created = _realize(molecule, force=True)
-    assert len(created.proteins) == order - 1, (
-        "force should realize regardless of the count")
+
+@pytest.mark.parametrize("copies, warned", [(2, False), (12, False), (13, True), (60, True)])
+def test_realizing_more_than_twelve_copies_is_warned_about(copies, warned):
+    """Twelve is ChimeraX's line; above it the user is told, not refused."""
+    from proteinblender.operators.assembly_realize import realize_warning
+
+    message = realize_warning(copies)
+    if warned:
+        assert message and str(copies) in message
+    else:
+        assert message is None
+
+
+def test_the_dialog_warns_before_a_big_assembly_is_realized(scene, sm):
+    """The count is drawn copies, read off the build; the note says how many."""
+    core, builder = _core(), _builder()
+    molecule = _import()
+
+    builder.apply_symmetry(molecule, "C", order=4)
+    assert core.copy_count(molecule) == 4
+
+    builder.apply_symmetry(molecule, "C", order=core.REALIZE_THRESHOLD + 3)
+    assert core.copy_count(molecule) == core.REALIZE_THRESHOLD + 3 == _placed(molecule)
+
+    core.clear_assembly(molecule)
+    assert core.copy_count(molecule) == 0
 
 
 def test_realizing_nothing_is_harmless(scene, sm):
@@ -328,8 +347,9 @@ def test_a_degenerate_normal_keeps_everything(scene, sm):
 # Through the operators the panel drives
 # --------------------------------------------------------------------------
 
-def test_the_realize_operator_respects_the_threshold(scene, sm):
-    core, builder = _core(), _builder()
+def test_the_realize_operator_realizes_past_the_threshold(scene, sm):
+    """As the dialog's button calls it: no flag to set, and it goes through."""
+    core = _core()
     molecule = _import()
 
     scene.pb_symmetry_kind = "C"
@@ -337,11 +357,9 @@ def test_the_realize_operator_respects_the_threshold(scene, sm):
     bpy.ops.molecule.build_symmetry("EXEC_DEFAULT", molecule_id=molecule.identifier)
 
     assert bpy.ops.molecule.realize_copies(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"CANCELLED"}
-    assert core.built_assembly_id(molecule) is not None
-
-    assert bpy.ops.molecule.realize_copies(
-        "EXEC_DEFAULT", molecule_id=molecule.identifier, force=True) == {"FINISHED"}
+        "EXEC_DEFAULT", molecule_id=molecule.identifier) == {"FINISHED"}
+    assert core.built_assembly_id(molecule) is None
+    assert len(sm.molecules) == core.REALIZE_THRESHOLD + 3
 
 
 def test_the_cutaway_operator_reads_the_panel(scene, sm):

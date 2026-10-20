@@ -547,7 +547,7 @@ def test_a_bent_filament_still_realizes_where_its_copies_are_drawn(scene, sm):
     from proteinblender.operators.assembly_realize import realize_assembly
 
     drawn = _instance_positions(domain.name)
-    created = realize_assembly(bpy.context, molecule, force=True)
+    created = realize_assembly(bpy.context, molecule)
     assert created, "nothing was realized"
 
     bpy.context.view_layer.update()

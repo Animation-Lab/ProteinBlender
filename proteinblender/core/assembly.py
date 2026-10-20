@@ -1003,11 +1003,36 @@ def _is_identity_operator(rotation, offset) -> bool:
 # Realizing copies into real objects
 # --------------------------------------------------------------------------
 
-#: Above this many copies, realizing is refused unless explicitly forced.
-#: ChimeraX's ``sym`` makes the same call at the same number: below it, copies
-#: are full atomic models; above it they stay graphical clones, because a viral
-#: capsid's worth of real models is rarely what anyone wanted.
+#: Above this many copies, realizing comes with a warning. ChimeraX's ``sym``
+#: draws its line at the same number: below it, copies are full atomic models;
+#: above it they stay graphical clones by default, because a capsid's worth of
+#: real models makes a scene slow to work with. Here the user decides - a long
+#: filament realized subunit by subunit is a reasonable thing to want - and is
+#: told what they are in for.
 REALIZE_THRESHOLD = 12
+
+
+def copy_count(molecule) -> int:
+    """How many copies the built assembly draws, original included. 0 if none.
+
+    Read off the point clouds the build wrote, without evaluating anything,
+    so it is cheap enough for a dialog to ask while it draws. Where chains
+    are placed differently, the object drawn most often is the count.
+    """
+    if built_assembly_id(molecule) is None:
+        return 0
+    counts = []
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            if node.node_tree is None:
+                continue
+            counts.append(sum(len(points.data.vertices)
+                              for points, _chain in _point_clouds(node.node_tree)
+                              if points is not None and points.data is not None))
+    return max(counts, default=0)
 
 
 def copy_placements(molecule):

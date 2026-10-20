@@ -40,13 +40,24 @@ class Realized:
         return self.done
 
 
-def realize_assembly(context, molecule, force: bool = False):
+def realize_warning(copies: int):
+    """What to tell someone realizing ``copies`` copies, or None if nothing.
+
+    Above :data:`assembly_core.REALIZE_THRESHOLD` every copy still becomes
+    real - this only says what that costs.
+    """
+    if copies <= assembly_core.REALIZE_THRESHOLD:
+        return None
+    return (f"{copies} copies is more than {assembly_core.REALIZE_THRESHOLD}: "
+            "each is a full copy of the atoms, which can make the scene slow")
+
+
+def realize_assembly(context, molecule):
     """Replace the built assembly with real copies of what it drew.
 
     Returns a :class:`Realized` - false, with the assembly left alone, when
-    there is nothing but the original to realize - or ``None`` when an object
-    is drawn more than :data:`assembly_core.REALIZE_THRESHOLD` times and
-    ``force`` was not set.
+    there is nothing but the original to realize. Any number of copies is
+    realized; :func:`realize_warning` is what a caller tells the user.
     """
     jobs = assembly_core.copy_placements(molecule)
     result = Realized()
@@ -64,9 +75,6 @@ def realize_assembly(context, molecule, force: bool = False):
 
     if not any(_split(moves)[0] for moves in drawn.values()):
         return result
-    if (max(len(moves) for moves in drawn.values())
-            > assembly_core.REALIZE_THRESHOLD and not force):
-        return None
 
     own_atoms = _draws_atoms(depsgraph, molecule.object)
     whole = _moves_of_the_whole_protein(molecule, drawn, own_atoms)

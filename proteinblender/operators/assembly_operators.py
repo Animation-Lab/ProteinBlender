@@ -372,24 +372,17 @@ class MOLECULE_PB_OT_realize_copies(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty()
-    force: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
-        from .assembly_realize import realize_assembly
+        from .assembly_realize import realize_assembly, realize_warning
 
         molecule = _molecule(self.molecule_id or _active_molecule_id(context))
         if molecule is None:
             self.report({"ERROR"}, "No protein selected")
             return {"CANCELLED"}
 
-        created = realize_assembly(context, molecule, force=self.force)
-
-        if created is None:
-            self.report(
-                {"WARNING"},
-                f"More than {assembly_core.REALIZE_THRESHOLD} copies would "
-                "make a great many proteins, so they are left as instances")
-            return {"CANCELLED"}
+        warning = realize_warning(assembly_core.copy_count(molecule))
+        created = realize_assembly(context, molecule)
 
         if not created:
             self.report({"INFO"}, "There were no copies to realize")
@@ -403,7 +396,10 @@ class MOLECULE_PB_OT_realize_copies(Operator):
             made = f"{created.copies} copies as objects"
         else:
             made = "the assembly where it stood"
-        self.report({"INFO"}, f"Realized {made}")
+        if warning:
+            self.report({"WARNING"}, f"Realized {made}. {warning}")
+        else:
+            self.report({"INFO"}, f"Realized {made}")
         _refresh(context)
         return {"FINISHED"}
 

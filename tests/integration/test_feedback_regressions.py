@@ -178,7 +178,7 @@ def test_realization_preserves_each_chains_world_placements(scene, aid, factor, 
     before = instances()
     sources = {str(d.chain_id): d.object.name for d in mol.domains.values()}
     from proteinblender.operators.assembly_realize import realize_assembly
-    created = realize_assembly(bpy.context, mol, force=True)
+    created = realize_assembly(bpy.context, mol)
     assert created
     after = instances()
     # Every copy is now a chain the outliner lists: in a protein of its own,
@@ -254,7 +254,7 @@ def test_assembly_chain_subsets_without_domain_objects(scene, aid, expected):
             instance.object.to_mesh_clear()
     assert sorted(chains) == expected
     from proteinblender.operators.assembly_realize import realize_assembly
-    created = realize_assembly(bpy.context, mol, force=True)
+    created = realize_assembly(bpy.context, mol)
     # With no chain rows left to copy, these are the one case that still
     # comes out as plain objects.
     assert len(created.objects) == len(expected)

@@ -552,6 +552,14 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         real_op = actions.operator("molecule.realize_copies",
                                    text="Realize Copies", icon='OUTLINER_OB_MESH')
         real_op.molecule_id = molecule.identifier
+        # Said before the click, since a big realization takes a while and
+        # leaves a great many proteins behind.
+        copies = assembly_core.copy_count(molecule)
+        if copies > assembly_core.REALIZE_THRESHOLD:
+            caution = tools.row()
+            caution.alert = True
+            caution.label(text=f"Realizing {copies} copies may be slow",
+                          icon='ERROR')
 
         # Folded away until asked for, so that opening the dialog to change a
         # count does not mean reading past a cutaway and a bend to reach OK.
