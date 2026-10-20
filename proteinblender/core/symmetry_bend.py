@@ -42,7 +42,7 @@ because it means bending adds a degree of freedom without moving anything that
 was already right.
 
 Everything past this point is the ordinary operator path, so a bent filament
-still animates with the assemble factor, trims, cuts away, realizes and draws
+still animates with the assemble factor, cuts away, realizes and draws
 its axes like any other build.
 """
 
@@ -408,10 +408,9 @@ def _anchored_on_the_original(operators: List[Operator]) -> List[Operator]:
     """Re-express the filament in the frame of the subunit already on screen.
 
     Copy zero is not a copy: it is the structure the user imported, sitting
-    where the import left it. Everything around it assumes so - the trim
-    filters never drop the identity, Realize Copies skips it rather than
-    duplicating what is already there, and the assemble slider at 0 puts every
-    copy back onto it.
+    where the import left it. Everything around it assumes so - Realize
+    Copies skips it rather than duplicating what is already there, and the
+    assemble slider at 0 puts every copy back onto it.
 
     A curve does not respect that on its own. Dragging a middle control node
     tilts the path's starting tangent very slightly, which was enough to swing

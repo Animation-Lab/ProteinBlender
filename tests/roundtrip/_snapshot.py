@@ -77,7 +77,6 @@ SCENE_PROPS = (
     # from a static tuple, so its stored value stays meaningful.
     "pb_symmetry_kind", "pb_symmetry_order", "pb_symmetry_count",
     "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
-    "pb_symmetry_range", "pb_symmetry_contact",
     # A filament's strands, on the same footing as its rise and twist.
     "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
     "pb_cutaway_normal", "pb_cutaway_offset",

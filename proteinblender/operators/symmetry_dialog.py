@@ -493,16 +493,6 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             twist=getattr(scene, "pb_symmetry_twist", 0.0),
             strands=getattr(scene, "pb_symmetry_strands", 1)))
 
-        layout.separator(factor=0.5)
-        trim = layout.box()
-        trim.label(text="Trim Copies")
-        trim_col = trim.column(align=True)
-        trim_col.prop(scene, "pb_symmetry_range")
-        trim_col.prop(scene, "pb_symmetry_contact")
-        note = trim.row()
-        note.enabled = False
-        note.label(text="0 keeps every copy", icon='INFO')
-
         self._draw_apply(layout)
 
     def _draw_apply(self, layout):

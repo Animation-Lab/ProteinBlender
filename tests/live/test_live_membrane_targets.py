@@ -34,8 +34,6 @@ scene = bpy.context.scene
 chain_id = next(r.item_id for r in scene.outliner_items if r.item_type == 'CHAIN')
 scene.pb_symmetry_kind = 'C'
 scene.pb_symmetry_order = 3
-scene.pb_symmetry_range = 0
-scene.pb_symmetry_contact = 0
 with R.view3d_override():
     assert bpy.ops.molecule.symmetry_dialog(target_id=chain_id) == {'FINISHED'}
 row = next(r for r in scene.outliner_items if r.item_type == 'SYMMETRY')

@@ -33,8 +33,6 @@ SYMMETRY_SETTINGS = (
     ("strands", "pb_symmetry_strands", 1),
     ("stagger", "pb_symmetry_stagger", 0.0),
     ("strand_twist", "pb_symmetry_strand_twist", 0.0),
-    ("range_limit", "pb_symmetry_range", 0.0),
-    ("contact", "pb_symmetry_contact", 0.0),
 )
 
 
@@ -129,15 +127,8 @@ def build_generated_symmetry(molecule, settings: dict):
         axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
         **shape)
 
-    range_limit = settings.get("range_limit", 0.0) or None
-    contact = settings.get("contact", 0.0) or None
-    if range_limit is not None or contact is not None:
-        operators = assembly_core.filter_operators(
-            molecule, operators,
-            range_limit=range_limit, contact_distance=contact)
-
     if not operators:
-        return failed("The range or contact limit removed every copy")
+        return failed("Those settings make no copies")
 
     targets = None
     source_id = settings.get("source_item_id", molecule.identifier)
@@ -259,21 +250,14 @@ class MOLECULE_PB_OT_build_assembly(Operator):
             self.report({"ERROR"}, f"No assembly {assembly_id} in this structure")
             return {"CANCELLED"}
 
-        operators = _filtered(context, molecule,
-                              assembly_core._operators_for(molecule, assembly_id))
-        if not operators:
-            self.report({"WARNING"}, "The range or contact limit removed every copy")
-            return {"CANCELLED"}
-
+        operators = assembly_core._operators_for(molecule, assembly_id)
         if not assembly_core.apply_operators(molecule, operators, str(assembly_id)):
             self.report({"ERROR"}, "Could not build the assembly")
             return {"CANCELLED"}
 
-        trimmed = ("" if len(operators) == info.transform_count
-                   else f" (trimmed from {info.transform_count})")
         self.report(
             {"INFO"},
-            f"Built assembly {assembly_id}: {len(operators)} copies{trimmed}")
+            f"Built assembly {assembly_id}: {len(operators)} copies")
         _set_picker(context, assembly_id)
         _refresh(context)
         return {"FINISHED"}
@@ -545,17 +529,6 @@ def refresh_symmetry_axes(context, molecule) -> None:
         symmetry_axes.show_symmetry_axes(molecule, operators)
     else:
         symmetry_axes.clear_symmetry_axes(molecule)
-
-
-def _filtered(context, molecule, operators):
-    """Apply the panel's range and contact limits. 0 means "no limit"."""
-    scene = context.scene
-    range_limit = getattr(scene, "pb_symmetry_range", 0.0) or None
-    contact = getattr(scene, "pb_symmetry_contact", 0.0) or None
-    if range_limit is None and contact is None:
-        return list(operators)
-    return assembly_core.filter_operators(
-        molecule, operators, range_limit=range_limit, contact_distance=contact)
 
 
 def _refresh(context):

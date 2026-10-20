@@ -373,18 +373,6 @@ def register():
         default=_bend_rig().RES_DEFAULT,
         min=_bend_rig().RES_MIN, max=_bend_rig().RES_MAX,
     )
-    bpy.types.Scene.pb_symmetry_range = FloatProperty(
-        name="Range",
-        description=("Drop copies whose centre lands further than this many "
-                     "Angstrom from the original. 0 keeps every copy"),
-        default=0.0, min=0.0, max=10000.0,
-    )
-    bpy.types.Scene.pb_symmetry_contact = FloatProperty(
-        name="Contact",
-        description=("Keep only copies with an atom within this many Angstrom "
-                     "of the original. 0 keeps every copy"),
-        default=0.0, min=0.0, max=100.0,
-    )
     bpy.types.Scene.pb_cutaway_normal = FloatVectorProperty(
         name="Cut Direction",
         description="The side of the assembly to take away",
@@ -414,7 +402,7 @@ def unregister():
         del bpy.types.Scene.pb_outliner_menu_index
     
     # Safe unregistration with try/except blocks
-    for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_symmetry_contact", "pb_symmetry_range", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
+    for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):

@@ -348,8 +348,6 @@ def _set_helix(count=COUNT, rise=RISE, twist=TWIST):
     scene.pb_symmetry_rise = rise
     scene.pb_symmetry_twist = twist
     scene.pb_symmetry_axis = (0.0, 0.0, 1.0)
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
 
 
 def _first_domain(molecule):

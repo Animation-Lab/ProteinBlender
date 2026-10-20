@@ -92,7 +92,7 @@ def reset_scene():
     # its side, where a cutaway along Y has nothing to take away.
     for prop_name in ("pb_assembly_id", "pb_symmetry_kind", "pb_symmetry_order",
                       "pb_symmetry_count", "pb_symmetry_rise", "pb_symmetry_twist",
-                      "pb_symmetry_axis", "pb_symmetry_range", "pb_symmetry_contact",
+                      "pb_symmetry_axis",
                       "pb_symmetry_strands", "pb_symmetry_stagger",
                       "pb_symmetry_strand_twist",
                       "pb_cutaway_normal", "pb_cutaway_offset", "pb_bend_nodes"):

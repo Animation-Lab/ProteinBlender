@@ -135,7 +135,6 @@ Everything that shapes a build lives in the same dialog:
   More than one shows **Stagger** (Angstrom each strand sits further along the axis than the one before) and **Strand Twist** (degrees round the axis from one strand to the next; 0 spaces them evenly), and Subunits becomes **Subunits per Strand**.
   This is what a tube needs and a single helix cannot give: a microtubule is 13 straight strands (Twist 0, Rise 81.5), each 27.7 degrees round from the last (Strand Twist -27.69) and 9.4 Angstrom further up (Stagger 9.4).
 - **Axis** - the direction the symmetry turns about. Z by default.
-- **Trim Copies** - Range and Contact, described below.
 
 Three ways out, and they mean different things:
 
@@ -224,18 +223,6 @@ Two consequences worth knowing:
 - **The path grows and shrinks with the filament.** Change Subunits or Length on a bent filament and the path is scaled by the same amount about its first node, so the shape you made is kept at the new size and the filament still ends at the last node.
   The exception is a path with keyframes on its nodes, which is left as it is; a filament longer than its path then carries straight on past the end rather than piling up on the last point.
 - **The path is the filament's axis.** For a microtubule that is the middle of the tube, not its wall.
-
-## Trim Copies
-
-Part of the builder's dialog, so it is part of what a build is made of and travels with it.
-Both values are in Angstrom; **0 means no limit**.
-
-- **Range** - drop copies whose centre lands further than this from the original.
-  Answers "show me the neighbourhood".
-- **Contact** - keep only copies with an atom within this distance of the original.
-  Answers "show me the subunits this one actually touches".
-
-This is what turns a 60-copy capsid into a legible patch.
 
 ## Clear
 
@@ -360,14 +347,13 @@ Build the pentamer first, then the whole shell, and the relationship is obvious.
 ### 2btv - the cautionary tale
 Assembly 1 is the expected 60-operator capsid.
 Assembly **6** is a **2500-operator** crystal lattice.
-Worth knowing it exists before someone picks it in front of an audience, and a fair demonstration of why Trim Copies is there.
+Worth knowing it exists before someone picks it in front of an audience.
 
 ### 1atn - generative helical
 Actin, bundled, and the natural subject for the helical builder.
 Try Subunits 13, Rise **27.5**, Twist **-166.7**, which are actin's real parameters.
 
 Then press **Add Bend** and drag the middle node: a curving actin filament, with every subunit still rigid.
-The **Arc** preset gets there in one click if you would rather not drag on stage.
 
 ### 2gls - gating, at scale
 Forty-eight chains and a deposited assembly consisting of one identity operator, because the file already contains the complete molecule.
@@ -389,10 +375,9 @@ Shows why an identity-only assembly is not offered as an additional build.
 Add:
 
 5. **1cd3** - pentamer (assembly 3), then hexamer (4), then the whole capsid (1).
-6. **Trim Copies** with a Contact limit, reducing the capsid to one subunit's neighbours.
-7. **Show Symmetry Axes** on the capsid.
-8. **1atn** with the helical builder at actin's real rise and twist, then **Add Bend** and drag a node to curve the filament.
-9. **Realize Copies** on something small, then click a single subunit to show per-copy identity.
+6. **Show Symmetry Axes** on the capsid.
+7. **1atn** with the helical builder at actin's real rise and twist, then **Add Bend** and drag a node to curve the filament.
+8. **Realize Copies** on something small, then click a single subunit to show per-copy identity.
 
 ---
 

@@ -994,67 +994,6 @@ def _atom_cloud(molecule) -> Optional[np.ndarray]:
     return flat.reshape(count, 3)
 
 
-def filter_operators(molecule, operators, range_limit: Optional[float] = None,
-                     contact_distance: Optional[float] = None):
-    """Drop copies that land too far away, or that never touch the original.
-
-    Both limits are in Angstrom, matching how the structures themselves are
-    quoted. ``range_limit`` compares copy centroids, which is cheap and answers
-    "show me the neighbourhood"; ``contact_distance`` asks whether any atom of
-    the copy comes within that distance of any atom of the original, which is
-    what "show me the subunits this one actually touches" means.
-
-    The identity operator is always kept - trimming away the structure the user
-    is looking at would be a strange reading of "show me its neighbours".
-
-    This is ChimeraX's ``range`` and ``contact`` on ``sym``, and it is what
-    turns a 60-copy capsid into a legible patch.
-    """
-    if range_limit is None and contact_distance is None:
-        return list(operators)
-
-    atoms = _atom_cloud(molecule)
-    if atoms is None:
-        logger.warning("no atoms to measure against; keeping every copy")
-        return list(operators)
-
-    centroid = atoms.mean(axis=0)
-    kept = []
-
-    tree = None
-    if contact_distance is not None:
-        try:
-            from scipy.spatial import cKDTree
-            tree = cKDTree(atoms)
-        except Exception:
-            logger.exception("scipy unavailable; skipping the contact filter")
-
-    for operator in operators:
-        rotation, translation = operator
-        offset = np.asarray(translation, dtype=float) * WORLD_SCALE
-
-        if _is_identity_operator(rotation, offset):
-            kept.append(operator)
-            continue
-
-        if range_limit is not None:
-            moved_centroid = rotation @ centroid + offset
-            distance = float(np.linalg.norm(moved_centroid - centroid)) / WORLD_SCALE
-            if distance > range_limit:
-                continue
-
-        if contact_distance is not None and tree is not None:
-            moved = atoms @ rotation.T + offset
-            nearest = tree.query(
-                moved, distance_upper_bound=contact_distance * WORLD_SCALE)[0]
-            if not np.isfinite(nearest).any():
-                continue
-
-        kept.append(operator)
-
-    return kept
-
-
 def _is_identity_operator(rotation, offset) -> bool:
     return (bool(np.allclose(rotation, np.eye(3), atol=1e-6))
             and bool(np.allclose(offset, 0.0, atol=1e-9)))

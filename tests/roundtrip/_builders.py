@@ -173,8 +173,6 @@ def build_scoped_symmetry():
                  if r.item_type == 'CHAIN')
     bpy.context.scene.pb_symmetry_kind = 'C'
     bpy.context.scene.pb_symmetry_order = 3
-    bpy.context.scene.pb_symmetry_range = 0
-    bpy.context.scene.pb_symmetry_contact = 0
     assert bpy.ops.molecule.symmetry_dialog(target_id=chain) == {'FINISHED'}
     symmetry = next(r for r in bpy.context.scene.outliner_items if r.item_type == 'SYMMETRY')
     assert symmetry.parent_id == chain

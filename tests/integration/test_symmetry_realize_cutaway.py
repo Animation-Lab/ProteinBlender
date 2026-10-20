@@ -194,8 +194,6 @@ def test_an_original_that_was_cut_away_becomes_the_first_copy_left(scene, sm):
     scene.pb_symmetry_rise = 20.0
     scene.pb_symmetry_twist = 0.0
     scene.pb_symmetry_axis = (0.0, -1.0, 0.0)
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     assert bpy.ops.molecule.symmetry_dialog(
         target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
     # Take away everything above a plane 30 A down: the original and copy 1.
@@ -233,8 +231,6 @@ def test_a_ring_of_one_chain_realizes_as_copies_of_that_chain(scene, sm):
 
     scene.pb_symmetry_kind = "C"
     scene.pb_symmetry_order = 3
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     assert bpy.ops.molecule.symmetry_dialog(target_id=target.item_id) == {'FINISHED'}
 
     assert bpy.ops.molecule.realize_copies(molecule_id=mid) == {'FINISHED'}
@@ -354,8 +350,6 @@ def test_the_cutaway_operator_reads_the_panel(scene, sm):
 
     scene.pb_symmetry_kind = "C"
     scene.pb_symmetry_order = 8
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     bpy.ops.molecule.build_symmetry("EXEC_DEFAULT", molecule_id=molecule.identifier)
     whole = _placed(molecule)
 
@@ -463,8 +457,6 @@ def test_a_cutaway_keeps_the_settings_the_assembly_was_built_with(scene, sm):
     molecule = _import()
     scene.pb_symmetry_kind = "C"
     scene.pb_symmetry_order = 8
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     assert bpy.ops.molecule.symmetry_dialog(
         target_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
     whole = _placed(molecule)
@@ -496,8 +488,6 @@ def test_a_cutaway_stays_on_the_chain_the_assembly_was_built_from(scene, sm):
 
     scene.pb_symmetry_kind = "C"
     scene.pb_symmetry_order = 3
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     assert bpy.ops.molecule.symmetry_dialog(target_id=chain.item_id) == {'FINISHED'}
 
     # A plane 1000 A out removes nothing, so the only thing that can change
@@ -539,8 +529,6 @@ def test_realized_copies_are_proteins_in_the_outliner(scene, sm):
     scene.pb_symmetry_rise = 20.0
     scene.pb_symmetry_twist = 0.0
     scene.pb_symmetry_axis = (0.0, -1.0, 0.0)
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
     alone = _drawn_atoms(molecule)
     atoms, centre = len(alone), float(alone[:, 1].mean())
     source_rows = _row_types(scene, source_id)

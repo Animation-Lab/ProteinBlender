@@ -65,7 +65,7 @@ def _copies(molecule):
 
 
 def _set(kind="C", order=3, count=10, rise=0.0, twist=0.0,
-         axis=(0.0, 0.0, 1.0), range_limit=0.0, contact=0.0):
+         axis=(0.0, 0.0, 1.0)):
     """Put the dialog's controls where a user would have dragged them."""
     scene = bpy.context.scene
     scene.pb_symmetry_kind = kind
@@ -74,8 +74,6 @@ def _set(kind="C", order=3, count=10, rise=0.0, twist=0.0,
     scene.pb_symmetry_rise = rise
     scene.pb_symmetry_twist = twist
     scene.pb_symmetry_axis = axis
-    scene.pb_symmetry_range = range_limit
-    scene.pb_symmetry_contact = contact
 
 
 def _symmetry_rows():
@@ -514,24 +512,33 @@ def test_a_deposited_assembly_carries_no_generator_settings():
         "a deposited assembly has no generator settings to record")
 
 
-def test_the_trim_limits_travel_with_the_build():
-    """Trim moved into the dialog, so it is part of what a build is made of."""
+def test_there_is_no_trimming_any_more():
+    """Trim Copies is gone: no controls for it, and nothing a build records.
+
+    A build made before it went may still carry a range limit in its record;
+    rebuilt from that record, it is whole - every copy the settings make.
+    """
+    from proteinblender.operators.assembly_operators import (
+        build_generated_symmetry,
+    )
+
+    scene = bpy.context.scene
+    assert not hasattr(scene, "pb_symmetry_range")
+    assert not hasattr(scene, "pb_symmetry_contact")
+
     molecule = _import()
-    _set(kind="C", order=12, range_limit=0.0)
+    _set(kind="C", order=12)
     bpy.ops.molecule.symmetry_dialog(
         'EXEC_DEFAULT', target_id=molecule.identifier)
-    untrimmed = _copies(molecule)
-    assert untrimmed == 12
-
-    _set(kind="C", order=12, range_limit=20.0)
-    bpy.ops.molecule.symmetry_dialog(
-        'EXEC_DEFAULT', target_id=molecule.identifier)
-    trimmed = _copies(molecule)
-
-    assert trimmed < untrimmed, (
-        f"a 20 A range limit kept all {untrimmed} copies of a 12-fold ring")
     stored = _assembly_core().built_build_params(molecule)
-    assert stored["range_limit"] == pytest.approx(20.0)
+    assert "range_limit" not in stored and "contact" not in stored
+
+    # 2 r sin(pi / 12) puts neighbours of a ring this size well over 1 A
+    # apart, so a 1 A range would have kept the original alone.
+    ok, _message = build_generated_symmetry(
+        molecule, dict(stored, range_limit=1.0, contact=1.0))
+    assert ok
+    assert _copies(molecule) == 12
 
 
 # --------------------------------------------------------------------------

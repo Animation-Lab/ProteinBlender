@@ -390,8 +390,6 @@ def symmetry_dialog_apply_preview():
     scene = bpy.context.scene
     scene.pb_symmetry_kind = "C"
     scene.pb_symmetry_order = 5
-    scene.pb_symmetry_range = 0.0
-    scene.pb_symmetry_contact = 0.0
 
     with ui_override("PROPERTIES"):
         result = bpy.ops.molecule.symmetry_dialog(
