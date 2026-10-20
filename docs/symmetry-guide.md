@@ -137,11 +137,13 @@ Everything that shapes a build lives in the same dialog:
   This is what a tube needs and a single helix cannot give: a microtubule is 13 straight strands (Twist 0, Rise 81.5), each 27.7 degrees round from the last (Strand Twist -27.69) and 9.4 Angstrom further up (Stagger 9.4).
 - **Axis** - the direction the symmetry turns about. Z by default.
 
-Three ways out, and they mean different things:
+Every change shows in the viewport as you make it: drag Twist and the filament turns, pick another kind or another deposited assembly and it is rebuilt there and then.
+There is no Apply button; the settings are judged against the viewport rather than against the numbers.
+A change to the same kind of build re-places the copies it already has, so dragging a value keeps up even on a long microtubule.
 
-- **Apply** builds it and leaves the dialog open, so the settings can be judged against the viewport rather than against the numbers.
-  Press it as often as you like while dialling the shape in.
-- **OK** builds it and closes, and the result takes its place in the PB Outliner as a row of its own.
+Two ways out, and they mean different things:
+
+- **OK** keeps what is on screen, and the result takes its place in the PB Outliner as a row of its own.
 - **Cancel** puts back whatever was on screen when the dialog opened.
   That is nothing, a deposited assembly, or an earlier generated symmetry, whichever it was.
   A preview you rejected is not what you are left with.
@@ -174,11 +176,11 @@ Biological assemblies appear beneath their protein as **Biological Assembly 1**
 Click the row's pencil, or right-click the row and choose **Edit Assembly**.
 It always targets that row's assembly, regardless of selection.
 The top of the dialog is the build's own settings, exactly as Create New Assembly offered them.
-Beneath Apply sit **Show Symmetry Axes** and **Realize Copies**, then **Cutaway** and, for a helical assembly, **Bend**.
+Beneath the build settings sit **Show Symmetry Axes** and **Realize Copies**, then **Cutaway** and, for a helical assembly, **Bend**.
 Cutaway and Bend are folded shut until you click their names.
 
 Those four act on the assembly as it is built.
-Change a setting above them and they grey out until the change is kept with **OK**, because a cut or a realization made in between would be thrown away by the rebuild.
+Change a setting above them and they grey out until the change is kept with **OK**, because Cancel would throw a cut or a realization made in between away with the change.
 **OK** with no setting changed closes the dialog and builds nothing, so what you did from here stays as you left it.
 Each button is one step for Blender's Undo.
 Delete the assembly child to return to the asymmetric unit.
@@ -246,7 +248,7 @@ In **Edit Assembly**, folded under its name.
 - **Cut Away** - applies it.
 
 Whole copies are removed rather than atoms being sliced, which is what published capsid figures do and leaves intact subunits around the opening.
-A cut assembly keeps the settings it was built with, so its dialog reopens on them and **Apply** brings the whole assembly back.
+A cut assembly keeps the settings it was built with, so its dialog reopens on them, and changing any setting brings the whole assembly back.
 
 ## Realize Copies
 

@@ -137,8 +137,16 @@ def build_generated_symmetry(molecule, settings: dict):
         source_molecule, targets = resolve_target(source_id)
         if source_molecule != molecule or not targets:
             return failed("The symmetry source no longer exists")
-    if not assembly_core.apply_operators(
-            molecule, operators, f"generated:{kind.upper()}", targets=targets):
+
+    # The same kind of build on the same objects is re-placed where it
+    # stands: nothing is torn down, so a value dragged in the dialog keeps
+    # up, and a factor keyed on the assembly node keeps its animation.
+    tag = f"generated:{kind.upper()}"
+    in_place = (assembly_core.built_assembly_id(molecule) == tag
+                and assembly_core.reaches(molecule, targets)
+                and assembly_core.update_operator_points(molecule, operators))
+    if not in_place and not assembly_core.apply_operators(
+            molecule, operators, tag, targets=targets):
         return failed("Could not build that symmetry")
 
     # Leave the settings with the build, so the dialog can reopen on what was

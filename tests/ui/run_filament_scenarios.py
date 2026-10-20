@@ -248,6 +248,8 @@ def inspect_longer():
     assert bpy.context.scene.pb_symmetry_count == 12
     assert 'Tube - 13 strands of 12' in shown, shown
     assert STALE_HINT in shown, 'A new length left the assembly tools live'
+    # The longer tube is on screen before OK is pressed.
+    assert placed_copies(filament()) == 12 * STRANDS, placed_copies(filament())
 
 
 def verify_rebuilt_longer():

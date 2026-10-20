@@ -370,14 +370,14 @@ def _carbon_rgb(obj):
     return None
 
 
-def symmetry_dialog_apply_preview():
-    """The Symmetry dialog must open, draw, and preview from inside itself.
+def symmetry_dialog_live_preview():
+    """The Symmetry dialog must open, draw, and show a change from inside itself.
 
     Nothing offline reaches any of this. Background Blender sends
     INVOKE_DEFAULT straight to execute(), so the dialog's ``draw`` - its
-    dynamic protein picker, its kind-dependent fields, its nested Apply
-    button - is only ever laid out here. A draw() that raised would leave the
-    headless lane perfectly green and the feature unusable.
+    dynamic protein picker, its kind-dependent fields - and the live session
+    its invoke() starts are only ever exercised here. A draw() that raised
+    would leave the headless lane perfectly green and the feature unusable.
     """
     from proteinblender.core import assembly as assembly_core
     from proteinblender.operators import symmetry_dialog
@@ -395,28 +395,27 @@ def symmetry_dialog_apply_preview():
         result = bpy.ops.molecule.symmetry_dialog(
             "INVOKE_DEFAULT", molecule_id_to_update=molecule_id)
     assert result == {"RUNNING_MODAL"}, result
+    assert assembly_core.built_assembly_id(molecule) is None, (
+        "opening the dialog built something before anything was changed")
 
-    # Apply, as the button inside the open dialog runs it.
-    with ui_override("PROPERTIES"):
-        applied = bpy.ops.molecule.symmetry_preview(
-            "EXEC_DEFAULT", molecule_id=molecule_id)
-    assert applied == {"FINISHED"}, applied
+    # The Order field, as the open dialog writes it.
+    scene.pb_symmetry_order = 6
 
     assert assembly_core.built_assembly_id(molecule) == "generated:C", (
-        "Apply did not build anything")
+        "the change was not shown")
     assert symmetry_dialog.pending_previews() == [molecule_id], (
-        "Apply recorded nothing for Cancel to put back")
+        "the change recorded nothing for Cancel to put back")
 
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
-    return "symmetry dialog opened, previewed a C5, and was sent ESC"
+    return "symmetry dialog opened, showed a C6 as Order changed, and was sent ESC"
 
 
 def assert_symmetry_preview_was_reverted():
     """ESC must have run cancel(), and cancel() undoes the preview.
 
     ``cancel`` only exists on the popup path, so this is the one place the
-    Apply-then-Cancel cycle is exercised end to end through Blender's own
+    change-then-Cancel cycle is exercised end to end through Blender's own
     event loop rather than by calling the pieces.
     """
     from proteinblender.core import assembly as assembly_core
@@ -426,6 +425,8 @@ def assert_symmetry_preview_was_reverted():
     outstanding = symmetry_dialog.pending_previews()
     assert not outstanding, (
         f"cancel() never ran - still holding previews for {outstanding}")
+    assert not symmetry_dialog.live_session(), (
+        "the dialog closed but its settings still rebuild the assembly")
     assert assembly_core.built_assembly_id(molecule) is None, (
         "the cancelled preview is still built")
     return "cancelling the dialog took the previewed symmetry back down"
@@ -1489,7 +1490,7 @@ steps = [
     ("settle puppet modal", lambda: "modal cancellation processed"),
     ("protein visuals invoke dialog", invoke_and_cancel_protein_visuals_dialog),
     ("settle protein visuals modal", lambda: "modal cancellation processed"),
-    ("symmetry dialog apply preview", symmetry_dialog_apply_preview),
+    ("symmetry dialog live preview", symmetry_dialog_live_preview),
     ("settle symmetry modal", lambda: "modal cancellation processed"),
     ("assert symmetry preview reverted", assert_symmetry_preview_was_reverted),
     ("symmetry dialog with nothing active", symmetry_dialog_opens_with_no_active_protein),

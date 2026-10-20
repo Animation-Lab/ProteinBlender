@@ -69,7 +69,6 @@ from .symmetry_bend_operators import (
 )
 from .symmetry_dialog import (
     MOLECULE_PB_OT_symmetry_dialog,
-    MOLECULE_PB_OT_symmetry_preview,
     CLASSES as SYMMETRY_DIALOG_CLASSES,
 )
 from .filament_operators import (

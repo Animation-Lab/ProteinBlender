@@ -1,7 +1,7 @@
-"""The Symmetry Builder dialog: Apply previews, OK commits, Cancel puts back.
+"""The Symmetry Builder dialog: changes show live, OK commits, Cancel puts back.
 
-Three ways out of one dialog, and the whole point of the feature is that they
-mean different things. The tests here are about those differences, not about
+Every change to the dialog's settings is shown at once, and there are two ways
+out of it that mean different things. The tests here are about those differences, not about
 the generator underneath - what a C7 *is* is settled in
 ``test_symmetry_builder.py`` against trigonometry.
 
@@ -13,6 +13,7 @@ those happened to return, including the wrong thing.
 """
 
 import json
+from types import SimpleNamespace
 
 import bpy
 import pytest
@@ -98,21 +99,42 @@ def _first_chain(molecule_id):
                 if r.item_type == 'CHAIN' and r.parent_id == molecule_id)
 
 
+def _open(molecule, source='GENERATED', assembly_id=''):
+    """What the dialog's invoke does last: start showing changes live.
+
+    Popups do not exist headless, so the session is begun directly; from
+    then on the dialog's settings are written exactly as its fields write
+    them, and the scene's own update callbacks do the rest.
+    """
+    _dialog().start_live(bpy.context.scene, molecule.identifier, source,
+                         assembly_id)
+
+
+def _pick(molecule, source='GENERATED', assembly_id=''):
+    """What changing the dialog's protein or source picker does."""
+    _dialog().follow_dialog(
+        SimpleNamespace(target_id=molecule.identifier, source=source,
+                        assembly_id=assembly_id), bpy.context)
+
+
 def _cancel():
     """What the dialog's cancel() does, minus the redraw.
 
     ``cancel`` is called by Blender when a popup is dismissed, and popups do
-    not exist headless. The work it delegates to is a module function
+    not exist headless. The work it delegates to is module functions
     precisely so it can be reached from here.
     """
+    _dialog().stop_live()
     return _dialog().discard_previews()
 
 
 @pytest.fixture(autouse=True)
 def _no_previews_leak_between_tests():
     """Previews are module state, which the scene scrub does not reach."""
+    _dialog().stop_live()
     _dialog().discard_previews()
     yield
+    _dialog().stop_live()
     _dialog().discard_previews()
 
 
@@ -293,17 +315,17 @@ def test_ok_does_not_build_over_realized_copies():
 def test_ok_builds_when_a_preview_is_outstanding():
     """Settings put back by hand are not the same as nothing having happened.
 
-    Apply has built something else in between, and OK is what replaces it.
+    Something else was shown in between, and OK is what keeps the result.
     """
     molecule = _import()
     _filament(molecule)
     opened_on = _opened_on(molecule)
+    _open(molecule)
 
     bpy.context.scene.pb_symmetry_count = 7
-    assert bpy.ops.molecule.symmetry_preview(
-        molecule_id=molecule.identifier, source='GENERATED') == {'FINISHED'}
     assert _copies(molecule) == 7
     bpy.context.scene.pb_symmetry_count = 5
+    assert _copies(molecule) == 5
 
     assert _ok(molecule, opened_on) == {'FINISHED'}
     assert _copies(molecule) == 5
@@ -323,28 +345,134 @@ def test_a_scripted_call_builds_whatever_is_already_there():
 
 
 # --------------------------------------------------------------------------
-# Apply - build without committing
+# Live - every change shown as it is made
 # --------------------------------------------------------------------------
 
-def test_apply_builds_the_same_thing_ok_would():
-    """Apply is a preview, not a different builder.
-
-    Both go through one path, so what the viewport shows during the dialog is
-    what stays there when it closes. Built twice over, once each way, and the
-    copy counts compared.
-    """
-    first = _import("ubq_apply")
+def test_a_change_shows_the_same_thing_ok_keeps():
+    """What the viewport shows during the dialog is what stays when it closes."""
+    first = _import("ubq_live")
+    _open(first)
     _set(kind="D", order=3)
-    assert bpy.ops.molecule.symmetry_preview(
-        'EXEC_DEFAULT', molecule_id=first.identifier) == {'FINISHED'}
-    previewed = _copies(first)
 
     # A D3 is two rings of three - six copies, by definition of dihedral.
-    assert previewed == 6
+    assert _copies(first) == 6
 
     assert bpy.ops.molecule.symmetry_dialog(
         'EXEC_DEFAULT', target_id=first.identifier) == {'FINISHED'}
-    assert _copies(first) == previewed
+    assert _copies(first) == 6
+
+
+def test_every_number_shows_as_it_changes():
+    """No button in between: each setting written is drawn at once."""
+    molecule = _import()
+    _set(kind="H", count=4, rise=20.0, twist=30.0)
+    _open(molecule)
+
+    scene = bpy.context.scene
+    scene.pb_symmetry_count = 6
+    assert _copies(molecule) == 6
+    scene.pb_symmetry_length = 4.0          # 40 A at 20 A a subunit: two of them
+    assert _copies(molecule) == 2
+    scene.pb_symmetry_strands = 3
+    assert _copies(molecule) == 6
+    scene.pb_symmetry_kind = "C"
+    scene.pb_symmetry_order = 5
+    assert _copies(molecule) == 5
+
+
+def test_opening_the_dialog_builds_nothing():
+    """Only a change is shown: opening on an unbuilt protein leaves it so."""
+    molecule = _import()
+    _set(kind="C", order=4)
+    _open(molecule)
+    assert _copies(molecule) == UNBUILT
+
+    # Written again with what it already says - not a change.
+    bpy.context.scene.pb_symmetry_order = 4
+    assert _copies(molecule) == UNBUILT
+    assert not _dialog().pending_previews()
+
+
+def test_with_no_dialog_open_the_settings_build_nothing():
+    """The settings are the dialog's controls; a script writing them is not it."""
+    molecule = _import()
+    _set(kind="C", order=6)
+    assert _copies(molecule) == UNBUILT
+
+
+def test_after_ok_or_cancel_the_settings_build_nothing_more():
+    molecule = _import()
+    _open(molecule)
+    _set(kind="C", order=6)
+    assert bpy.ops.molecule.symmetry_dialog(
+        'EXEC_DEFAULT', target_id=molecule.identifier) == {'FINISHED'}
+    _set(kind="C", order=8)
+    assert _copies(molecule) == 6
+
+    _open(molecule)
+    _set(kind="C", order=3)
+    _cancel()
+    _set(kind="C", order=9)
+    assert _copies(molecule) == 6
+
+
+def test_a_change_re_places_the_copies_it_already_has():
+    """A drag must keep up, and must not lose what is keyed on the assembly.
+
+    The same kind of build on the same protein is written into the point
+    clouds it already has - no object made or removed - so a factor keyed on
+    the assembly node keeps its animation.
+    """
+    core = _assembly_core()
+    molecule = _import()
+    _set(kind="C", order=4)
+    bpy.ops.molecule.symmetry_dialog('EXEC_DEFAULT', target_id=molecule.identifier)
+    assert core.keyframe_assembly(molecule, frame=1) > 0
+
+    before = {o.name: o.as_pointer() for o in bpy.data.objects}
+    _open(molecule)
+    bpy.context.scene.pb_symmetry_order = 9
+    assert _copies(molecule) == 9
+    assert {o.name: o.as_pointer() for o in bpy.data.objects} == before
+
+    group = next(m for m in _a_domain_object(molecule).modifiers
+                 if m.type == 'NODES').node_group
+    assert group.animation_data and group.animation_data.action, (
+        "the keyed assemble factor was lost")
+
+
+def test_picking_another_source_shows_it_at_once():
+    """The source and the deposited assembly are settings like the numbers."""
+    from proteinblender.core import assembly as assembly_core
+
+    mol_id = H.import_local("4ins.pdb", "4ins_live")
+    molecule = H.sm().molecules[mol_id]
+    _set(kind="C", order=5)
+    _open(molecule)
+    bpy.context.scene.pb_symmetry_order = 7
+    assert _copies(molecule) == 7
+
+    deposited = len(assembly_core._operators_for(molecule, "3"))
+    _pick(molecule, source='BIOLOGICAL', assembly_id="3")
+    assert assembly_core.built_assembly_id(molecule) == "3"
+    assert _copies(molecule) == deposited
+
+
+def test_ok_keeps_what_is_shown_without_building_it_again(monkeypatch):
+    """OK on a change already on screen keeps that build as it is."""
+    molecule = _import()
+    _open(molecule)
+    _set(kind="C", order=7)
+    assert _copies(molecule) == 7
+
+    builds = []
+    real = _dialog().build_dialog_symmetry
+    monkeypatch.setattr(_dialog(), "build_dialog_symmetry",
+                        lambda *a, **k: builds.append(a) or real(*a, **k))
+    assert bpy.ops.molecule.symmetry_dialog(
+        'EXEC_DEFAULT', target_id=molecule.identifier) == {'FINISHED'}
+    assert not builds, "OK built again what was already on screen"
+    assert _copies(molecule) == 7
 
 
 # --------------------------------------------------------------------------
@@ -357,10 +485,9 @@ def test_cancel_after_a_preview_leaves_nothing_built():
     before = _copies(molecule)
     assert before == UNBUILT
 
+    _open(molecule)
     _set(kind="C", order=6)
-    bpy.ops.molecule.symmetry_preview(
-        'EXEC_DEFAULT', molecule_id=molecule.identifier)
-    assert _copies(molecule) == 6, "the preview did not build"
+    assert _copies(molecule) == 6, "the change was not shown"
 
     _cancel()
     assert _copies(molecule) == before, "Cancel left the rejected preview behind"
@@ -381,10 +508,9 @@ def test_cancel_puts_back_the_symmetry_that_was_already_built():
         'EXEC_DEFAULT', target_id=molecule.identifier)
     assert _copies(molecule) == 4
 
+    _open(molecule)
     _set(kind="C", order=9)
-    bpy.ops.molecule.symmetry_preview(
-        'EXEC_DEFAULT', molecule_id=molecule.identifier)
-    assert _copies(molecule) == 9, "the preview did not replace the build"
+    assert _copies(molecule) == 9, "the change did not replace the build"
 
     _cancel()
     assert _copies(molecule) == 4, "Cancel did not put the original C4 back"
@@ -400,9 +526,8 @@ def test_cancel_puts_back_a_deposited_assembly():
     deposited = _copies(molecule)
     assert deposited > 1
 
+    _open(molecule)
     _set(kind="C", order=8)
-    bpy.ops.molecule.symmetry_preview(
-        'EXEC_DEFAULT', molecule_id=molecule.identifier)
     assert _copies(molecule) == 8
 
     _cancel()
@@ -414,8 +539,8 @@ def test_cancel_puts_back_a_deposited_assembly():
 def test_repeated_previews_still_cancel_back_to_the_original():
     """Cancel must undo to what the dialog opened on, not to the last preview.
 
-    The trap: recording "what to put back" on every Apply means the second
-    Apply records the *first preview* as the thing to restore, and Cancel
+    The trap: recording "what to put back" on every change means the second
+    change records the *first preview* as the thing to restore, and Cancel
     leaves the user with a C5 they never asked to keep.
     """
     molecule = _import()
@@ -424,10 +549,9 @@ def test_repeated_previews_still_cancel_back_to_the_original():
         'EXEC_DEFAULT', target_id=molecule.identifier)
     assert _copies(molecule) == 3
 
+    _open(molecule)
     for order in (5, 8, 11):
         _set(kind="C", order=order)
-        bpy.ops.molecule.symmetry_preview(
-            'EXEC_DEFAULT', molecule_id=molecule.identifier)
         assert _copies(molecule) == order
 
     _cancel()
@@ -436,20 +560,22 @@ def test_repeated_previews_still_cancel_back_to_the_original():
 
 
 def test_ok_keeps_the_committed_protein_and_puts_the_other_one_back():
-    """The picker can move after an Apply, and only one build is committed.
+    """The picker can move after a change is shown, and only one build is kept.
 
-    Preview A, change the picker to B, OK on B: B keeps its symmetry and A -
+    Show A, change the picker to B, OK on B: B keeps its symmetry and A -
     which was only ever previewed - goes back to having none.
     """
     first = _import("first_ok")
     second = _import("second_ok")
 
+    _open(first)
     _set(kind="C", order=6)
-    bpy.ops.molecule.symmetry_preview(
-        'EXEC_DEFAULT', molecule_id=first.identifier)
     assert _copies(first) == 6
 
+    _pick(second)
+    assert _copies(second) == 6
     _set(kind="C", order=4)
+    assert _copies(second) == 4
     assert bpy.ops.molecule.symmetry_dialog(
         'EXEC_DEFAULT', target_id=second.identifier) == {'FINISHED'}
 

@@ -415,62 +415,132 @@ def replace_operators(molecule, operators) -> bool:
     return True
 
 
+def _point_attributes(operators):
+    """The per-copy attributes a point cloud carries, as arrays.
+
+    Each operator is stored as an axis and an angle rather than a finished
+    matrix, because that is what makes the assembly animatable: rotating
+    about the same axis by a fraction of the angle *is* the interpolation
+    from the identity to that operator. ``delay`` is the copy's place in the
+    arrival order, normalised so the last copy still finishes at factor 1.
+    """
+    from mathutils import Matrix as BlenderMatrix
+
+    count = len(operators)
+    axes = np.zeros((count, 3))
+    angles = np.zeros(count)
+    translations = np.zeros((count, 3))
+    for i, (rotation, translation) in enumerate(operators):
+        quaternion = BlenderMatrix(np.asarray(rotation).tolist()).to_quaternion()
+        angle = float(quaternion.angle)
+        # A zero rotation leaves the axis undefined; pick one so the maths
+        # downstream stays finite.
+        axes[i] = tuple(quaternion.axis) if abs(angle) > 1e-9 else (0.0, 0.0, 1.0)
+        angles[i] = angle
+        translations[i] = np.asarray(translation, dtype=float) * WORLD_SCALE
+    delays = np.arange(count, dtype=float) / max(count - 1, 1)
+    return axes, angles, translations, delays
+
+
+_POINT_LAYOUT = (("axis", "FLOAT_VECTOR"), ("trans", "FLOAT_VECTOR"),
+                 ("pivot", "FLOAT_VECTOR"), ("angle", "FLOAT"),
+                 ("delay", "FLOAT"))
+
+
+def _write_points(mesh, operators, pivot) -> None:
+    """Make ``mesh`` one point per operator, carrying that operator.
+
+    Resizes the mesh in place when the count has changed, so the object, its
+    node tree and every reference to them stay what they were.
+    """
+    axes, angles, translations, delays = _point_attributes(operators)
+    count = len(operators)
+    if len(mesh.vertices) != count:
+        mesh.clear_geometry()
+        # Points start at the origin; the node tree positions them from the
+        # attributes, so a factor change re-places them without a rebuild.
+        mesh.vertices.add(count)
+    pivots = np.tile(np.asarray(pivot, dtype=float), (count, 1))
+    values = {"axis": axes, "trans": translations, "pivot": pivots,
+              "angle": angles, "delay": delays}
+    for name, kind in _POINT_LAYOUT:
+        attribute = mesh.attributes.get(name)
+        if attribute is None or attribute.domain != "POINT":
+            if attribute is not None:
+                mesh.attributes.remove(attribute)
+            attribute = mesh.attributes.new(name, kind, "POINT")
+        attribute.data.foreach_set(
+            "value" if kind == "FLOAT" else "vector",
+            np.ascontiguousarray(values[name], dtype=np.float32).ravel())
+    mesh.update()
+
+
+def _cloud_pivot(mesh):
+    attribute = mesh.attributes.get("pivot")
+    if attribute is None or not len(attribute.data):
+        return (0.0, 0.0, 0.0)
+    return tuple(attribute.data[0].vector)
+
+
 def update_operator_points(molecule, operators) -> bool:
     """Re-place an existing build's copies without rebuilding anything.
 
     :func:`apply_operators` tears the assembly down and constructs a fresh
     point cloud, a fresh node group and a fresh node in every target tree. That
-    is right for a build, and wrong for something that has to keep up with a
-    mouse drag: removing and re-adding objects on every depsgraph tick is the
-    churn that invalidates node pointers, fights the undo stack, and is
-    explicitly unsafe from inside a depsgraph handler.
+    is right for a new build, and wrong for anything that has to keep up with
+    a mouse drag or a frame change: removing and re-adding objects on every
+    tick is the churn that invalidates node pointers, fights the undo stack,
+    throws away animation keyed on the assembly node, and is explicitly unsafe
+    from inside a depsgraph or frame-change handler.
 
-    This writes the new rotations and translations straight into the attributes
-    the existing point cloud already carries. No datablock is created or
-    destroyed, so it is safe to call as often as the viewport asks.
+    This writes the new copies straight into the point clouds the build
+    already has - resizing them when the count has changed - so no datablock
+    is created or destroyed and it is safe to call as often as the viewport
+    asks.
 
-    Refuses - returning False, for the caller to fall back to a full rebuild -
-    when the operator count has changed, since that needs different geometry
-    rather than different attribute values.
+    Refuses, returning False for the caller to fall back to a full rebuild,
+    when there is nothing built to write into, or when the build places its
+    chains differently from one another (a deposited assembly), since one
+    operator list cannot describe that.
     """
-    from mathutils import Matrix as BlenderMatrix
-
     if not operators:
         return False
 
-    targets = {points for _, node in _assembly_nodes(molecule)
-               for points, _ in _point_clouds(node.node_tree)}
-    if not targets:
+    meshes = []
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            if node.node_tree is None:
+                continue
+            for points, chain in _point_clouds(node.node_tree):
+                if chain is not None or points is None or points.data is None:
+                    return False
+                meshes.append(points.data)
+    if not meshes:
         return False
 
-    axes, angles, translations = [], [], []
-    for rotation, translation in operators:
-        quaternion = BlenderMatrix(np.asarray(rotation).tolist()).to_quaternion()
-        angle = float(quaternion.angle)
-        axes.append(tuple(quaternion.axis) if abs(angle) > 1e-9 else (0.0, 0.0, 1.0))
-        angles.append(angle)
-        translations.append(
-            (np.asarray(translation, dtype=float) * WORLD_SCALE).tolist())
+    for mesh in meshes:
+        _write_points(mesh, operators, _cloud_pivot(mesh))
+    return True
 
-    touched = 0
-    for points in targets:
-        mesh = points.data
-        if mesh is None or len(mesh.vertices) != len(operators):
-            continue
-        for name, values in (("axis", axes), ("trans", translations)):
-            attribute = mesh.attributes.get(name)
-            if attribute is None:
-                continue
-            for i, value in enumerate(values):
-                attribute.data[i].vector = value
-        attribute = mesh.attributes.get("angle")
-        if attribute is not None:
-            for i, value in enumerate(angles):
-                attribute.data[i].value = value
-        mesh.update_tag()
-        touched += 1
 
-    return touched > 0
+def reaches(molecule, targets=None) -> bool:
+    """Whether the built assembly is wired into exactly these objects.
+
+    ``targets`` as :func:`apply_operators` takes them: None for the whole
+    molecule. A build that reaches the same objects can be re-placed in place
+    (:func:`update_operator_points`); one that should reach others - a new
+    source, a domain split since - has to be built again.
+    """
+    expected = _target_objects(molecule) if targets is None else list(targets)
+    reached = set()
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is not None and _existing_assembly_nodes(group):
+            reached.add(obj.name)
+    return bool(reached) and reached == {obj.name for obj in expected}
 
 
 def _operators_for(molecule, assembly_id: str):
@@ -527,8 +597,6 @@ def _build_points_object(obj, molecule, assembly_id, operators):
     Miss that term and every copy is offset by the pivot, which for a domain
     is nowhere near the origin.
     """
-    from mathutils import Matrix as BlenderMatrix
-
     from . import domain_space
 
     try:
@@ -542,50 +610,8 @@ def _build_points_object(obj, molecule, assembly_id, operators):
     if existing is not None:
         bpy.data.objects.remove(existing, do_unlink=True)
 
-    # Each operator is stored as an axis and an angle rather than a finished
-    # matrix, because that is what makes the assembly animatable: rotating
-    # about the same axis by a fraction of the angle *is* the interpolation
-    # from the identity to that operator, exactly, with no approximation. The
-    # node tree scales the angle and the translation by a factor, so factor 0
-    # lands every copy back on the asymmetric unit and factor 1 reproduces the
-    # deposited assembly.
-    axes, angles, translations, delays = [], [], [], []
-    last = max(len(operators) - 1, 1)
-
-    for i, (rotation, translation) in enumerate(operators):
-        quaternion = BlenderMatrix(rotation.tolist()).to_quaternion()
-        angle = float(quaternion.angle)
-        # A zero rotation leaves the axis undefined; pick one so the maths
-        # downstream stays finite.
-        axis = tuple(quaternion.axis) if abs(angle) > 1e-9 else (0.0, 0.0, 1.0)
-
-        axes.append(axis)
-        angles.append(angle)
-        translations.append((translation * WORLD_SCALE).tolist())
-        # Arrival order for the stagger, normalised so the last copy leaves at
-        # the latest possible moment and still finishes at factor 1.
-        delays.append(i / last)
-
     mesh = bpy.data.meshes.new(name)
-    # Points start at the origin; the node tree positions them from the
-    # attributes below, so that a factor change re-places them without a
-    # rebuild.
-    mesh.from_pydata([(0.0, 0.0, 0.0)] * len(operators), [], [])
-    mesh.update()
-
-    for attr_name, attr_type, values in (
-        ("axis", "FLOAT_VECTOR", axes),
-        ("trans", "FLOAT_VECTOR", translations),
-        ("pivot", "FLOAT_VECTOR", [pivot.tolist()] * len(operators)),
-        ("angle", "FLOAT", angles),
-        ("delay", "FLOAT", delays),
-    ):
-        attribute = mesh.attributes.new(attr_name, attr_type, "POINT")
-        for i, value in enumerate(values):
-            if attr_type == "FLOAT":
-                attribute.data[i].value = value
-            else:
-                attribute.data[i].vector = value
+    _write_points(mesh, operators, pivot)
 
     points = bpy.data.objects.new(name, mesh)
     points[_ASSEMBLY_OWNER_KEY] = molecule.object

@@ -1,15 +1,15 @@
 """The Symmetry Builder dialog.
 
 The Create New Assembly button opens this; everything that *shapes* a
-generated symmetry lives inside it. Three ways out, and they mean different
-things:
+generated symmetry lives inside it.
 
-* **Apply** builds the symmetry and leaves the dialog open, so the settings
-  can be judged against the viewport rather than against the numbers. It is an
-  ordinary operator button drawn in the dialog body - Blender keeps a props
-  dialog open across those, which is what makes a preview possible at all.
-* **OK** builds and closes, and refreshes the PB Outliner so the result takes
-  its place there as a row of its own.
+Every change shows as it is made: a number dragged, a kind or a source
+picked, and the assembly on screen is rebuilt to match (:func:`live_update`),
+so the settings are judged against the viewport rather than against the
+numbers. Two ways out, and they mean different things:
+
+* **OK** keeps what is on screen, and refreshes the PB Outliner so the result
+  takes its place there as a row of its own.
 * **Cancel** puts back whatever was on screen before the dialog opened -
   nothing, a deposited assembly, or an earlier generated symmetry - because a
   preview the user rejected should not be what they are left with.
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+from types import SimpleNamespace
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
@@ -55,8 +56,8 @@ _TARGET_ENUM_CACHE = {}
 #:
 #: Module state rather than operator properties, for two reasons this codebase
 #: has already been bitten by: a modal ``invoke_props_dialog`` operator is
-#: absent from ``wm.operators`` until it finishes, so Apply cannot reach the
-#: running dialog through the operator history; and Blender rebuilds the
+#: absent from ``wm.operators`` until it finishes, so a scene setting's update
+#: cannot reach the running dialog through the operator history; and Blender rebuilds the
 #: instance behind a props dialog, so the one that ran ``invoke`` is not
 #: necessarily the one whose ``cancel`` runs. Anything that must survive from
 #: opening to dismissal cannot live on the instance.
@@ -99,6 +100,92 @@ def discard_previews(keep: str = "") -> list:
             restored.append(molecule_id)
     _PREVIEWS.clear()
     return restored
+
+
+#: The open dialog, as the live preview needs it: what it builds from
+#: (``target_id``, ``source``, ``assembly_id``) and the :func:`dialog_signature`
+#: of what is on screen now (``shown``). Empty when no dialog is open, and
+#: then nothing is rebuilt - the scene settings it watches are the dialog's
+#: own controls, so a change to them with no dialog open is a script's.
+#: Module state for the same reasons as :data:`_PREVIEWS`.
+_LIVE: dict = {}
+
+
+def start_live(scene, target_id: str, source: str, assembly_id: str = "") -> None:
+    """Begin following a dialog that has just opened on these settings.
+
+    What is on screen as it opens is taken as shown, so opening builds
+    nothing; the first change does.
+    """
+    _LIVE.clear()
+    _LIVE.update(target_id=target_id or "", source=source,
+                 assembly_id=assembly_id or "")
+    _LIVE["shown"] = _live_signature(scene)
+
+
+def stop_live() -> None:
+    """The dialog has closed: setting changes stop rebuilding anything."""
+    _LIVE.clear()
+
+
+def live_session() -> dict:
+    """A copy of the open dialog's live state, or {} with none open."""
+    return dict(_LIVE)
+
+
+def _live_signature(scene) -> str:
+    return dialog_signature(SimpleNamespace(
+        target_id=_LIVE.get("target_id", ""), source=_LIVE.get("source", ""),
+        assembly_id=_LIVE.get("assembly_id", "")), scene)
+
+
+def follow_dialog(dialog, context) -> None:
+    """Take the dialog's own choices - which protein, which source - and show them."""
+    if not _LIVE:
+        return
+    _LIVE.update(target_id=dialog.target_id or "", source=dialog.source,
+                 assembly_id=dialog.assembly_id or "")
+    live_update(context)
+
+
+def live_update(context) -> bool:
+    """Rebuild the assembly on screen to match the open dialog, if it differs.
+
+    Called from every setting's update and from the dialog's own choices.
+    Cheap when nothing changed - a signature compare - and a rebuild of the
+    same kind of assembly re-places its copies in place
+    (``assembly.update_operator_points``), so it keeps up with a drag.
+    Remembers what was there before the first change, for Cancel. Returns
+    True when it built.
+    """
+    if not _LIVE or _LIVE.get("busy"):
+        return False
+    wanted = _live_signature(context.scene)
+    if wanted == _LIVE.get("shown"):
+        return False
+    molecule = _molecule(resolve_target(context, _LIVE["target_id"]))
+    if molecule is None:
+        return False
+
+    _LIVE["busy"] = True
+    try:
+        remember_preview_target(molecule)
+        ok, message = build_dialog_symmetry(
+            molecule, context, _LIVE["target_id"] or molecule.identifier,
+            _LIVE["source"], _LIVE["assembly_id"])
+    except Exception:
+        # An update callback that raises leaves the field half-set; the
+        # dialog has to stay usable whatever one build does.
+        logger.exception("could not show the dialog's settings")
+        ok, message = False, ""
+    finally:
+        _LIVE["busy"] = False
+    if ok:
+        _LIVE["shown"] = wanted
+    elif message:
+        logger.info("not shown: %s", message)
+    _refresh(context)
+    return ok
 
 
 def _molecules():
@@ -198,6 +285,17 @@ def biological_enum_items(self, context):
 
 def _assembly_choice_changed(self, context):
     self.assembly_id = self.assembly_choice
+    follow_dialog(self, context)
+
+
+def _dialog_choice_changed(self, context):
+    """Build from another protein, or from another source, as it is picked.
+
+    The deposited assembly is settled first, so a switch to the PDB-defined
+    source shows the assembly the picker will offer rather than none.
+    """
+    _sync_assembly_choice(self, context)
+    follow_dialog(self, context)
 
 
 def _sync_assembly_choice(self, context):
@@ -282,7 +380,8 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     bl_label = "Create New Assembly"
     bl_description = (
         "Repeat a protein, chain or domain using generated symmetry, or build "
-        "the protein's deposited biological assembly (BMT). Apply previews; OK keeps it")
+        "the protein's deposited biological assembly (BMT). Changes show as they "
+        "are made; OK keeps them, Cancel puts back what was there")
     bl_options = {"REGISTER", "UNDO"}
 
     source: EnumProperty(
@@ -293,6 +392,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         # Scripted calls historically build generated symmetry. The actual
         # Create window selects the deposited source in invoke below.
         default='GENERATED',
+        update=_dialog_choice_changed,
     )
     # The public id is a string: Blender 5.1 validates enum keyword arguments
     # before applying target_id, against a different protein's choices. Keep
@@ -306,6 +406,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         name="Protein, Chain or Domain",
         description="Which protein, chain or domain to repeat",
         items=target_enum_items,
+        update=_dialog_choice_changed,
         options={'SKIP_SAVE'},
     )
 
@@ -360,6 +461,10 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         symmetry built from it. Refusing here shut the one screen that could
         have helped.
         """
+        # Seeding the dialog below writes the settings it watches; nothing is
+        # shown until it is open. A session left by a dialog that closed
+        # without cancel() running goes too.
+        stop_live()
         molecule_id = resolve_target(context, self.molecule_id_to_update)
         molecule = _molecule(molecule_id)
 
@@ -413,6 +518,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
                 context.scene.pb_bend_nodes = nodes
             # A filament that is already bent opens on its bend.
             self.show_bend = symmetry_bend.has_bend(molecule)
+        start_live(context.scene, self.target_id, self.source, self.assembly_id)
         return context.window_manager.invoke_props_dialog(
             self, width=380,
             title="Edit Assembly" if self.molecule_id_to_update else "Create New Assembly")
@@ -424,6 +530,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         if self.source == 'BIOLOGICAL':
             self.assembly_id = self.assembly_choice
         _sync_assembly_choice(self, context)
+        follow_dialog(self, context)
         return True
 
     # -- body --------------------------------------------------------------
@@ -456,7 +563,7 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             info = assembly_core.get_assembly_info(molecule, self.assembly_id)
             if info:
                 layout.label(text=f'{info.transform_count} transformation applications')
-            self._draw_apply(layout)
+            self._draw_live_hint(layout)
             return
 
         kind = getattr(scene, "pb_symmetry_kind", "C")
@@ -493,21 +600,13 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
             twist=getattr(scene, "pb_symmetry_twist", 0.0),
             strands=getattr(scene, "pb_symmetry_strands", 1)))
 
-        self._draw_apply(layout)
+        self._draw_live_hint(layout)
 
-    def _draw_apply(self, layout):
-        layout.separator(factor=0.5)
-        apply_row = layout.row(align=True)
-        apply_row.scale_y = 1.2
-        apply_row.enabled = bool(self.target_id)
-        apply_op = apply_row.operator("molecule.symmetry_preview",
-                                      text="Apply", icon='CHECKMARK')
-        apply_op.molecule_id = self.target_id
-        apply_op.source = self.source
-        apply_op.assembly_id = self.assembly_id
+    def _draw_live_hint(self, layout):
         hint = layout.row()
         hint.enabled = False
-        hint.label(text="Apply previews it - OK keeps it", icon='INFO')
+        hint.label(text="Changes show as you make them - OK keeps them",
+                   icon='INFO')
 
     # -- working on the assembly the dialog was opened on --------------------
 
@@ -693,6 +792,11 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
     # -- leaving -----------------------------------------------------------
 
     def execute(self, context):
+        # Closing: nothing from here on is a preview, including the picker
+        # being pointed at a protein imported below.
+        live = live_session()
+        stop_live()
+
         if self._shows_what_it_opened_on(context.scene):
             # Opened on an assembly and asked for nothing different, so there
             # is nothing to build - and building anyway would undo whatever
@@ -712,15 +816,21 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
                 return {"CANCELLED"}
 
         target_id = self.target_id or molecule.identifier
-        ok, message = build_dialog_symmetry(
-            molecule, context, target_id, self.source, self.assembly_id)
+        if (molecule.identifier in _PREVIEWS
+                and live.get("shown") == dialog_signature(self, context.scene)):
+            # What OK asks for is already on screen, built as it was dialled
+            # in; building it a second time would change nothing.
+            ok, message = True, self._describe(context.scene)
+        else:
+            ok, message = build_dialog_symmetry(
+                molecule, context, target_id, self.source, self.assembly_id)
         if not ok:
             self.report({"WARNING"}, message)
             return {"CANCELLED"}
 
-        # A preview on some *other* protein - the picker was moved after an
-        # Apply - was still only a preview, and goes back to what it was. The
-        # one being committed keeps its build.
+        # A preview on some *other* protein - the picker was moved after a
+        # change was shown - was still only a preview, and goes back to what
+        # it was. The one being committed keeps its build.
         discard_previews(keep=molecule.identifier)
 
         # The outliner derives its symmetry row from what is actually built,
@@ -730,6 +840,15 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         self.report({"INFO"}, message)
         _refresh(context)
         return {"FINISHED"}
+
+    def _describe(self, scene) -> str:
+        if self.source == 'BIOLOGICAL':
+            return f"Built biological assembly {self.assembly_id}"
+        settings = symmetry_settings(scene)
+        return symmetry_builder.describe(
+            settings["kind"], order=settings["order"], count=settings["count"],
+            rise=settings["rise"], twist=settings["twist"],
+            strands=settings["strands"])
 
     def _import_typed_structure(self, context):
         """Import the id typed into the dialog's own Protein block, as Download would.
@@ -772,49 +891,12 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         Reads module state, not ``self``: the instance running cancel is not
         reliably the one that ran invoke.
         """
+        stop_live()
         if not _PREVIEWS:
             return
         discard_previews()
         _rebuild_outliner(context)
         _refresh(context)
-
-
-class MOLECULE_PB_OT_symmetry_preview(Operator):
-    """Build the symmetry now, without closing the dialog"""
-
-    bl_idname = "molecule.symmetry_preview"
-    bl_label = "Apply"
-    bl_description = (
-        "Build the symmetry with these settings so it can be judged in the "
-        "viewport. The dialog stays open; Cancel puts back what was there "
-        "before")
-    bl_options = {"REGISTER", "UNDO"}
-
-    molecule_id: StringProperty(options={'SKIP_SAVE'})
-    source: EnumProperty(items=[('GENERATED', 'Generated', ''), ('BIOLOGICAL', 'Biological', '')])
-    assembly_id: StringProperty()
-
-    def execute(self, context):
-        molecule = _molecule(resolve_target(context, self.molecule_id))
-        if molecule is None:
-            self.report({"ERROR"},
-                        "Import a protein first - a symmetry repeats one")
-            return {"CANCELLED"}
-
-        # Before building, not after: the point of the record is what was
-        # there *instead* of this preview.
-        remember_preview_target(molecule)
-
-        ok, message = build_dialog_symmetry(
-            molecule, context, self.molecule_id or molecule.identifier,
-            self.source, self.assembly_id)
-        if not ok:
-            self.report({"WARNING"}, message)
-            return {"CANCELLED"}
-
-        self.report({"INFO"}, message)
-        _refresh(context)
-        return {"FINISHED"}
 
 
 def _rebuild_outliner(context) -> None:
@@ -833,5 +915,4 @@ def _refresh(context) -> None:
 
 CLASSES = (
     MOLECULE_PB_OT_symmetry_dialog,
-    MOLECULE_PB_OT_symmetry_preview,
 )

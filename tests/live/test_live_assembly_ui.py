@@ -75,19 +75,26 @@ records = bpy.app.driver_namespace['pb_assembly_ui_records']
 layout = records['MOLECULE_PB_OT_symmetry_dialog']
 assert 'Create New Assembly' in str(layout)
 assert ('PDB-defined Assembly' if source == 'BIOLOGICAL' else 'Generated Symmetry') in str(layout)
-# Drive the Apply operator and arguments Blender actually drew.
+# There is no Apply: a change in the open dialog is shown at once.
 def flatten(items):
     for item in items:
         yield item
         yield from flatten(item.get('items', []))
-button = next(item for item in flatten(layout) if item.get('draw_string') == 'Apply')
-import ast
-call = ast.parse(button['operator'], mode='eval').body
-args = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}
-assert args['molecule_id'] == mid
-assert args['source'] == source
-with R.view3d_override():
-    assert bpy.ops.molecule.symmetry_preview(**args) == {'FINISHED'}
+assert not any(item.get('draw_string') == 'Apply' for item in flatten(layout))
+import importlib
+from types import SimpleNamespace
+dialog = importlib.import_module(H.PKG + '.operators.symmetry_dialog')
+assert dialog.live_session().get('target_id') == mid
+if source == 'BIOLOGICAL':
+    core = importlib.import_module(H.PKG + '.core.assembly')
+    molecule = H.sm().molecules[mid]
+    choice = core.buildable_assemblies(molecule)[-1].assembly_id
+    # What picking that entry in the drawn Assembly menu does.
+    dialog.follow_dialog(SimpleNamespace(target_id=mid, source=source,
+                                         assembly_id=choice), bpy.context)
+else:
+    bpy.context.scene.pb_symmetry_order = bpy.context.scene.pb_symmetry_order + 1
+assert dialog.pending_previews() == [mid], 'the change was not shown'
 win = bpy.context.window
 win.event_simulate(type='ESC', value='PRESS')
 win.event_simulate(type='ESC', value='RELEASE')

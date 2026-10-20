@@ -222,7 +222,9 @@ def inspect_dialog():
     # The build settings, and under them everything the popup used to hold,
     # with the cutaway and the bend folded away until they are asked for.
     assert all(label in labels for label in (
-        'Apply', 'Show Symmetry Axes', 'Realize Copies', 'Cutaway', 'Bend'))
+        'Show Symmetry Axes', 'Realize Copies', 'Cutaway', 'Bend'))
+    # Changes show as they are made, so there is nothing to apply.
+    assert 'Apply' not in labels and 'Changes show as you make them' in labels
     assert not any(folded in labels for folded in ('Cut Depth', 'Cut Away', 'Add Bend'))
     assert STALE_HINT not in labels
     # No way out to a second menu, and no assembly animation.
@@ -366,6 +368,8 @@ def inspect_reopened():
 def inspect_changed_settings():
     capture('changed-settings.png')
     assert STALE_HINT in dialog_labels(), 'Changed settings left the assembly tools live'
+    # Shown at once, before OK.
+    assert placed_copies(molecule()) == 4, placed_copies(molecule())
 
 
 def verify_ok_rebuilt():
@@ -391,7 +395,9 @@ def inspect_bend():
     labels = dialog_labels()
     # A filament that is already bent opens on its bend, and on nothing else:
     # the cutaway unfolded in the earlier dialog is folded again in this one.
-    assert all(label in labels for label in ('Nodes', 'Arc', 'Edit Bend', 'Remove'))
+    assert all(label in labels for label in ('Nodes', 'Edit Bend', 'Remove'))
+    # No ready-made shapes: the nodes make the shape.
+    assert not any(label in labels for label in ("'Arc'", 'S-curve', 'Coil'))
     assert 'Add Bend' not in labels and 'Cut Depth' not in labels
     assert STALE_HINT not in labels
     return fits_the_window()
@@ -460,7 +466,8 @@ def inspect_cleared():
     # With nothing built the same dialog is only a builder.
     labels = dialog_labels()
     assert not data['dialog']['opened_on']
-    assert 'Apply' in labels and 'Cutaway' not in labels and 'Realize Copies' not in labels
+    assert 'Changes show as you make them' in labels
+    assert 'Cutaway' not in labels and 'Realize Copies' not in labels
     key('ESC')
 
 

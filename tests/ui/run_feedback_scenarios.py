@@ -1,5 +1,4 @@
 """Exercise Janet's assembly and cycling workflows across real UI event loops."""
-import ast
 import runpy
 import site
 import sys
@@ -141,17 +140,15 @@ def select_menu():
     return f'Select assembly {data["desired_assembly"]} with keyboard navigation'
 
 
-def apply_from_layout(aid):
+def shown_on_choosing(aid):
+    """Choosing an assembly in the menu shows it: there is no button to press."""
     bpy.ops.screen.screenshot(filepath=str(Path(g['report_path']).parent / 'assembly-selected.png'))
     assert data[S.__name__].assembly_id == aid, (data[S.__name__].assembly_id, aid)
     layout = data[S.__name__ + '_layout']
-    button = next(item for item in flatten(layout) if item.get('draw_string') == 'Apply')
-    call = ast.parse(button['operator'], mode='eval').body
-    args = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}
-    assert args['assembly_id'] == aid, (args, aid)
-    with g['ui_override']():
-        assert bpy.ops.molecule.symmetry_preview(**args) == {'FINISHED'}
-    assert A.built_assembly_id(H.sm().molecules[data['mid']]) == aid
+    assert not any(item.get('draw_string') == 'Apply' for item in flatten(layout)), (
+        'The dialog still has an Apply button')
+    assert A.built_assembly_id(H.sm().molecules[data['mid']]) == aid, (
+        'Choosing an assembly did not show it', A.built_assembly_id(H.sm().molecules[data['mid']]), aid)
     verify_other_assembly()
     redraw()
 
@@ -246,16 +243,16 @@ g['steps'][:] = [
     ('switch generated to PDB-defined', switch_to_deposited), ('settle', choose_pdb_source),
     ('settle', lambda: None),
     ('choose assembly 4', lambda: choose_assembly('4')), ('settle', lambda: None),
-    ('apply assembly 4 from drawn button', lambda: apply_from_layout('4')), ('settle', lambda: None),
+    ('assembly 4 shown on choosing', lambda: shown_on_choosing('4')), ('settle', lambda: None),
     ('confirm assembly', confirm), ('settle', lambda: None),
     ('reopen assembly 4', lambda: verify_and_edit('4')), ('settle', lambda: None),
     ('verify reopened choice', lambda: verify_reopened('4')),
     ('choose assembly 5', lambda: choose_assembly('5')), ('settle', lambda: None),
-    ('apply assembly 5', lambda: apply_from_layout('5')), ('settle', lambda: None),
+    ('assembly 5 shown on choosing', lambda: shown_on_choosing('5')), ('settle', lambda: None),
     ('confirm assembly 5', confirm), ('settle', lambda: None),
     ('reopen assembly 5', lambda: verify_and_edit('5')), ('settle', lambda: None),
     ('choose assembly 1 preview', lambda: choose_assembly('1')), ('settle', lambda: None),
-    ('apply assembly 1 preview', lambda: apply_from_layout('1')), ('settle', lambda: None),
+    ('assembly 1 shown on choosing', lambda: shown_on_choosing('1')), ('settle', lambda: None),
     ('cancel preview', lambda: event('ESC')), ('settle', lambda: None),
     ('verify cancel restores 5', verify_cancel),
     ('open cycling dialog', prepare_cycle), ('settle', lambda: None),

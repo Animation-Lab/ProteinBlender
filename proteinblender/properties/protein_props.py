@@ -256,6 +256,17 @@ def _symmetry_builder():
 _ANGSTROM_PER_NM = 10.0
 
 
+def _symmetry_setting_changed(self, context):
+    """Show the change in the assembly an open Create/Edit Assembly is on.
+
+    These settings are that dialog's controls, so with no dialog open there
+    is nothing to show and this does nothing - see
+    ``symmetry_dialog.live_update``.
+    """
+    from ..operators import symmetry_dialog
+    symmetry_dialog.live_update(context)
+
+
 def _get_symmetry_length(self):
     """The filament's length in nanometres: its subunits times its rise.
 
@@ -314,17 +325,20 @@ def register():
         name="Symmetry",
         description="What kind of symmetry to generate",
         items=_symmetry_kind_items,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_order = IntProperty(
         name="Order",
         description="n, for Cn or Dn - how many copies around the axis",
         default=3, min=1, max=60,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_count = IntProperty(
         name="Subunits",
         description=("How many subunits to place along the helix - along "
                      "each strand, if it has more than one"),
         default=10, min=1, soft_max=500, max=_symmetry_builder().MAX_COUNT,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_length = FloatProperty(
         name="Length",
@@ -338,33 +352,39 @@ def register():
         description=("How many strands run side by side round the axis. 1 is "
                      "a single helix; a microtubule has 13 protofilaments"),
         default=1, min=1, max=64,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_stagger = FloatProperty(
         name="Stagger",
         description=("Angstrom each strand sits further along the axis than "
                      "the strand before it"),
         default=0.0, min=-500.0, max=500.0,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_strand_twist = FloatProperty(
         name="Strand Twist",
         description=("Degrees round the axis from one strand to the next. "
                      "0 spaces the strands evenly"),
         default=0.0, min=-360.0, max=360.0,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_rise = FloatProperty(
         name="Rise",
         description="Angstrom advanced along the axis per subunit",
         default=27.5, min=-500.0, max=500.0,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_twist = FloatProperty(
         name="Twist",
         description="Degrees rotated about the axis per subunit",
         default=-166.7, min=-360.0, max=360.0,
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_symmetry_axis = FloatVectorProperty(
         name="Axis",
         description="Direction of the symmetry axis",
         default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
+        update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_bend_nodes = IntProperty(
         name="Nodes",
