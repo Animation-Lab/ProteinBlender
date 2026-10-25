@@ -1,38 +1,38 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-10-24T04:29:53+00:00",
+  "generated_at": "2026-10-25T04:34:29+00:00",
   "summary": {
-    "views": 27,
-    "visitors": 16,
-    "clones": 313,
-    "cloners": 87
+    "views": 30,
+    "visitors": 17,
+    "clones": 298,
+    "cloners": 78
   },
   "all_time": {
-    "views": 1279,
-    "visitors": 638,
-    "clones": 5418,
-    "cloners": 2273,
-    "days_tracked": 220
+    "views": 1283,
+    "visitors": 640,
+    "clones": 5446,
+    "cloners": 2283,
+    "days_tracked": 221
   },
   "current_day": {
+    "date": "2026-10-23",
+    "views": 4,
+    "visitors": 2,
+    "clones": 28,
+    "cloners": 10
+  },
+  "previous_day": {
     "date": "2026-10-22",
     "views": 0,
     "visitors": 0,
     "clones": 13,
     "cloners": 3
   },
-  "previous_day": {
-    "date": "2026-10-21",
-    "views": 0,
-    "visitors": 0,
-    "clones": 12,
-    "cloners": 4
-  },
   "delta_since_previous_day": {
-    "views": 0,
-    "visitors": 0,
-    "clones": 1,
-    "cloners": -1
+    "views": 4,
+    "visitors": 2,
+    "clones": 15,
+    "cloners": 7
   },
   "referrers": [
     {
@@ -66,8 +66,8 @@
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 7,
-      "uniques": 7
+      "count": 9,
+      "uniques": 8
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/17",
@@ -82,6 +82,12 @@
       "uniques": 2
     },
     {
+      "path": "/Animation-Lab/proteinblender/discussions",
+      "title": "/discussions",
+      "count": 2,
+      "uniques": 2
+    },
+    {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/alpha-1.2.4",
       "title": "/releases/tag/alpha-1.2.4",
       "count": 1,
@@ -90,12 +96,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/tree/main/tests",
       "title": "/tree/main/tests",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/proteinblender/discussions",
-      "title": "/discussions",
       "count": 1,
       "uniques": 1
     }
