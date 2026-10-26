@@ -112,6 +112,7 @@ The **Cytoskeleton Subunits** panel, below the PB Outliner, lists every monomer 
 Each strand is counted up from its minus end, so "Actin 4" is the fourth actin from the pointed end.
 With more than one filament in the scene, a picker at the top chooses which one it lists.
 
+- Point at a row to find its subunit: it lights up yellow in the 3D Viewport while the mouse is on the row.
 - Tick rows to select subunits, or use **All**, **None** and **Invert**.
 - **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
 - **Colour Selected** paints the selected subunits the colour beside it; **Clear** gives them back the filament's own colour.

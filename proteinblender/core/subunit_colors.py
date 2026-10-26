@@ -18,8 +18,9 @@ keys of those after it (:func:`clear`).
 **What is drawn** is written into the point clouds as the ``pb_tint``
 attribute (``assembly.write_tints``), whenever a colour changes, whenever the
 copies are re-placed, and on every frame for colours that are keyframed. A
-transient overlay sits on top for the picker to highlight a subunit without
-touching anyone's colours.
+transient overlay sits on top to highlight a subunit without touching anyone's
+colours: one layer for the row the mouse is over in the Subunits list, one for
+the viewport picker, which is drawn over it.
 
 **The roster** (``Object.pb_filament.subunits``) is every monomer of the
 filament as a row the Subunits list can show and select: disposable, rebuilt
@@ -34,6 +35,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import bpy
 import numpy as np
+from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from bpy.types import PropertyGroup
 
@@ -48,6 +50,11 @@ GROUP = "Subunit Colours"
 #: What the picker paints the subunit under the mouse, and the ones selected.
 HOVER_TINT = (1.0, 0.85, 0.1, 1.0)
 SELECTED_TINT = (0.15, 0.75, 1.0, 0.85)
+
+#: The overlay layers, bottom first: the list's hovered row, then the picker.
+LIST_LAYER = "list"
+PICK_LAYER = "pick"
+_LAYERS = (LIST_LAYER, PICK_LAYER)
 
 
 def key(site: int, chain: str) -> str:
@@ -89,7 +96,10 @@ class PBSubunitRow(PropertyGroup):
     site: IntProperty()
     chain: StringProperty()
     label: StringProperty()
-    select: BoolProperty(name="Select", description="Select this subunit")
+    select: BoolProperty(
+        name="Select",
+        description=("Select this subunit. Point at the row to see where the "
+                     "subunit is: it lights up yellow in the 3D Viewport"))
 
 
 CLASSES = (PBSubunitColor, PBSubunitRow)
@@ -161,26 +171,99 @@ def chain_labels(molecule) -> Dict[str, str]:
 # What is drawn
 # ---------------------------------------------------------------------------
 
-#: Highlights the picker lays over the colours, per molecule object name:
-#: ``{object name: {key: rgba}}``. Never saved; never keyed.
-_OVERLAY: Dict[str, Dict[str, Tuple[float, float, float, float]]] = {}
+#: Highlights laid over the colours, per molecule object and layer:
+#: ``{object session uid: {layer: {key: rgba}}}``. Never saved; never keyed.
+#: Keyed by the object's session uid, not its name: a filament deleted while
+#: lit must not light the next one built under the same name.
+_OVERLAY: Dict[int, Dict[str, Dict[str, Tuple[float, float, float, float]]]] = {}
 
 
-def set_overlay(molecule, tints: Dict[str, Tuple[float, float, float, float]]) -> None:
+def set_overlay(molecule, tints: Dict[str, Tuple[float, float, float, float]],
+                layer: str = PICK_LAYER) -> None:
     """Lay ``{key: rgba}`` over the filament's colours until cleared, and draw it."""
     obj = owner(molecule)
     if obj is None:
         return
+    layers = _OVERLAY.setdefault(obj.session_uid, {})
     if tints:
-        _OVERLAY[obj.name] = dict(tints)
+        layers[layer] = dict(tints)
     else:
-        _OVERLAY.pop(obj.name, None)
+        layers.pop(layer, None)
+    if not layers:
+        _OVERLAY.pop(obj.session_uid, None)
     refresh(molecule)
 
 
-def overlay(molecule) -> Dict[str, Tuple[float, float, float, float]]:
+def overlay(molecule, layer: Optional[str] = None) -> Dict[str, Tuple[float, float, float, float]]:
+    """The highlights drawn over the filament: one layer, or all of them merged."""
     obj = owner(molecule)
-    return dict(_OVERLAY.get(obj.name, {})) if obj is not None else {}
+    layers = _OVERLAY.get(obj.session_uid, {}) if obj is not None else {}
+    if layer is not None:
+        return dict(layers.get(layer, {}))
+    merged = {}
+    for name in _LAYERS:
+        merged.update(layers.get(name, {}))
+    return merged
+
+
+def clear_overlays() -> None:
+    """Forget every highlight; a new file has none."""
+    _OVERLAY.clear()
+    _SET_ASIDE.clear()
+
+
+#: Highlights taken off while a file is written, to put back afterwards.
+_SET_ASIDE: Dict[int, Dict[str, Dict[str, Tuple[float, float, float, float]]]] = {}
+
+
+def _molecules_drawn_by(uids):
+    from ..utils.scene_manager import ProteinBlenderScene
+    found = []
+    for molecule in ProteinBlenderScene.get_instance().molecules.values():
+        obj = owner(molecule)
+        try:
+            if obj is not None and obj.session_uid in uids:
+                found.append(molecule)
+        except ReferenceError:
+            continue
+    return found
+
+
+@persistent
+def overlays_off_for_save(*_args) -> None:
+    """A highlight is never saved: write the colours without it first.
+
+    The tints live in the point clouds, so a file saved with the mouse over
+    a row would otherwise keep that subunit yellow.
+    """
+    if not _OVERLAY:
+        return
+    _SET_ASIDE.clear()
+    _SET_ASIDE.update(_OVERLAY)
+    _OVERLAY.clear()
+    for molecule in _molecules_drawn_by(set(_SET_ASIDE)):
+        refresh(molecule)
+
+
+@persistent
+def overlays_on_after_save(*_args) -> None:
+    if not _SET_ASIDE:
+        return
+    _OVERLAY.update(_SET_ASIDE)
+    _SET_ASIDE.clear()
+    for molecule in _molecules_drawn_by(set(_OVERLAY)):
+        refresh(molecule)
+
+
+@persistent
+def overlays_off_for_load(*_args) -> None:
+    clear_overlays()
+
+
+#: ``(handler list name, handler)`` that keep highlights out of files.
+HANDLERS = (("save_pre", overlays_off_for_save),
+            ("save_post", overlays_on_after_save),
+            ("load_pre", overlays_off_for_load))
 
 
 def _colour_curves(obj) -> dict:

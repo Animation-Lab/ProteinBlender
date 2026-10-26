@@ -436,6 +436,78 @@ def verify_picking_finished():
     return 'four selected'
 
 
+def properties_region():
+    area = g['protein_workspace_panel_area']()
+    return area, next(r for r in area.regions if r.type == 'WINDOW')
+
+
+def hovered_row():
+    """The Subunits row under the mouse, as Blender's own hovered button says."""
+    import re
+    area, region = properties_region()
+    with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
+        found = bpy.context.property
+    if not found:
+        return None
+    match = re.match(r'^pb_filament\.subunits\[(\d+)\]', found[1] or '')
+    return int(match.group(1)) if match else None
+
+
+def find_a_row():
+    """Walk the mouse down the Properties editor until it is over a list row."""
+    area, region = properties_region()
+    x = region.x + region.width * 0.3
+    spots = list(range(region.y + region.height - 20, region.y + 20, -8))
+    data['row_spots'] = spots
+    steps = []
+    for y in spots:
+        steps.append((f'point at y={y}', lambda y=y: move(x, y)))
+        steps.append(('settle', idle))
+        steps.append((f'check y={y}', lambda y=y: check_row(x, y)))
+    g['steps'][:0] = steps
+    return f'{len(spots)} spots'
+
+
+def check_row(x, y):
+    if 'row' in data:
+        return 'found already'
+    index = hovered_row()
+    if index is None:
+        return None
+    data['row'] = index
+    data['row_xy'] = (x, y)
+    # Skip the rest of the walk.
+    steps = g['steps']
+    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'point at the row again')
+    del steps[:rest]
+    return f'row {index}'
+
+
+def wait_for_the_watch():
+    assert 'row' in data, 'the mouse never found a Subunits row'
+    move(*data['row_xy'])
+
+
+def verify_row_lit():
+    mol = filament()
+    row = mol.object.pb_filament.subunits[data['row']]
+    lit = SC.overlay(mol, SC.LIST_LAYER)
+    assert lit == {row.name: SC.HOVER_TINT}, (row.name, lit)
+    capture('subunits-hover.png')
+    return row.label
+
+
+def leave_the_list():
+    area, region = viewport()
+    move(region.x + region.width * 0.1, region.y + region.height * 0.1)
+
+
+def verify_row_dark():
+    mol = filament()
+    assert SC.overlay(mol, SC.LIST_LAYER) == {}, 'the highlight stayed after the mouse left'
+    return 'cleared'
+
+
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', idle),
     ('prepare an empty scene', prepare), ('settle', idle),
@@ -467,4 +539,9 @@ g['steps'][:] = [
     ('release', lambda: click('RELEASE')), ('settle', idle),
     ('verify the pick and press Esc', verify_picked_and_finish), ('settle', idle),
     ('verify picking finished', verify_picking_finished), ('settle', idle),
+    ('find a Subunits row', find_a_row),
+    ('point at the row again', wait_for_the_watch), ('settle', idle), ('settle', idle),
+    ('verify the row is lit', verify_row_lit), ('settle', idle),
+    ('leave the list', leave_the_list), ('settle', idle), ('settle', idle), ('settle', idle),
+    ('verify the row is dark again', verify_row_dark), ('settle', idle),
 ]

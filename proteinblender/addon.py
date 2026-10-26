@@ -243,6 +243,13 @@ def unregister() -> None:
     if hasattr(bpy.app, "timers") and bpy.app.timers.is_registered(_apply_workspace_context_callback):
         bpy.app.timers.unregister(_apply_workspace_context_callback)
 
+    # Stop watching the Subunits list for a pointed-at row
+    try:
+        from .panels import subunit_hover
+        subunit_hover.stop()
+    except Exception as e:
+        logger.debug(f"Failed to stop the subunit hover watch: {e}")
+
     # Drop the custom toolbar icons
     try:
         from .utils import icons

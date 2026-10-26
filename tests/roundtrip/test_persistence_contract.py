@@ -238,6 +238,10 @@ def test_every_deferred_load_pass_is_pumped_by_the_verifier():
         "_deferred_molecule_purge":
             "deletion detector, scheduled from depsgraph updates rather than "
             "from a load handler",
+        "_look":
+            "Subunits list hover watch, started by the panel's draw and "
+            "stopped when the mouse leaves; it only lays a highlight that is "
+            "taken off before any save, so a reopened file has none",
         "_deferred_selection_update":
             "viewport->outliner selection echo; selection is not persisted state",
         "_selection_poll":

@@ -3,9 +3,10 @@
 Shown only while the scene has a filament. Its list has one row per monomer -
 "Actin 12", "Beta Tubulin 3 - Strand 5" - counted up each strand from the
 minus end, with a checkbox to select it and, once it has one, its own colour.
-Below the list: select all, none or the rest, pick subunits by clicking them
-in the 3D Viewport, and colour or clear the selected ones. Colours are keyed
-with the filament's row in Create Keyframe.
+Pointing at a row lights its subunit up yellow in the viewport
+(``subunit_hover``). Below the list: select all, none or the rest, pick
+subunits by clicking them in the 3D Viewport, and colour or clear the selected
+ones. Colours are keyed with the filament's row in Create Keyframe.
 """
 
 import fnmatch
@@ -15,6 +16,7 @@ from bpy.types import Panel, UIList
 
 from ..core import subunit_colors
 from ..operators.subunit_operators import filaments, subunit_filament
+from . import subunit_hover
 
 
 class PROTEINBLENDER_UL_subunits(UIList):
@@ -25,8 +27,9 @@ class PROTEINBLENDER_UL_subunits(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data,
                   active_propname, index):
         row = layout.row(align=True)
-        row.prop(item, "select", text="")
-        row.label(text=item.label)
+        # The checkbox carries the name, so the whole row is one button and
+        # pointing anywhere on it tells the hover watch which subunit it is.
+        row.prop(item, "select", text=item.label)
         # A small swatch at the right edge, as the PB Outliner draws its own.
         controls = row.row(align=True)
         controls.alignment = 'RIGHT'
@@ -114,6 +117,8 @@ class PROTEINBLENDER_PT_subunits(Panel):
 
         box.template_list("PROTEINBLENDER_UL_subunits", "", params, "subunits",
                           params, "subunit_index", rows=8)
+        # Drawn because the mouse may be on its way to the list.
+        subunit_hover.watch()
 
         picks = box.row(align=True)
         for action, icon, text in (("ALL", "CHECKBOX_HLT", "All"),

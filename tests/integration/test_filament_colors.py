@@ -591,3 +591,86 @@ def test_a_ray_at_a_subunit_picks_that_subunit():
         assert _colors().subunit_on_ray(molecule, origin, -radial) == f"{index}:A"
     # And one that misses the filament altogether.
     assert _colors().subunit_on_ray(molecule, middle + axis * 50.0, axis) is None
+
+
+# --------------------------------------------------------------------------
+# Highlights: the list's pointed-at row and the viewport picker
+# --------------------------------------------------------------------------
+
+def _tint_rows(molecule):
+    """``{site: rgba}`` of the copies a filament's point cloud tints, read off the mesh."""
+    from proteinblender.core import assembly
+    found = {}
+    for _obj, points in assembly.point_clouds_of(molecule):
+        mesh = points.data
+        attribute = mesh.attributes.get(assembly.TINT_ATTRIBUTE)
+        if attribute is None:
+            continue
+        count = len(mesh.vertices)
+        tints = np.zeros(count * 4)
+        attribute.data.foreach_get("color", tints)
+        sites = np.zeros(count, dtype=np.int32)
+        mesh.attributes["site"].data.foreach_get("value", sites)
+        for site, tint in zip(sites, tints.reshape(-1, 4)):
+            if tint[3] > 0:
+                found[int(site)] = tuple(np.round(tint, 3))
+    return found
+
+
+def test_the_picker_is_drawn_over_the_lists_highlight():
+    colors = _colors()
+    molecule = _build("ACTIN", 27.5)
+    colors.set_overlay(molecule, {"4:A": colors.HOVER_TINT}, colors.LIST_LAYER)
+    colors.set_overlay(molecule, {"4:A": colors.SELECTED_TINT, "6:A": colors.SELECTED_TINT})
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (8, 2)
+    assert colors.overlay(molecule)["4:A"] == colors.SELECTED_TINT
+
+    # Finishing the picker leaves the list's highlight as it was.
+    colors.set_overlay(molecule, {})
+    _instances, painted = _drawn(molecule)
+    assert len(painted) == 1
+    assert np.allclose(painted[0][1], colors.HOVER_TINT[:3], atol=1e-3)
+    colors.set_overlay(molecule, {}, colors.LIST_LAYER)
+    assert len(_drawn(molecule)[1]) == 0
+
+
+def test_a_highlight_is_never_saved(tmp_path):
+    """Saved with a row pointed at, the file keeps the subunit's own colour."""
+    colors = _colors()
+    molecule = _build("ACTIN", 27.5)
+    _paint(molecule, ["2:A"])
+    colors.set_overlay(molecule, {"5:A": colors.HOVER_TINT}, colors.LIST_LAYER)
+    assert set(_tint_rows(molecule)) == {2, 5}
+
+    written = {}
+
+    @bpy.app.handlers.persistent
+    def look(*_args):
+        written.update(_tint_rows(molecule))
+
+    bpy.app.handlers.save_pre.append(look)
+    try:
+        bpy.ops.wm.save_as_mainfile(filepath=str(tmp_path / "hover.blend"), copy=True)
+    finally:
+        bpy.app.handlers.save_pre.remove(look)
+
+    assert set(written) == {2}, written
+    assert np.allclose(written[2][:3], RED, atol=1e-3)
+    # And once saved, the highlight is back on screen.
+    assert set(_tint_rows(molecule)) == {2, 5}
+
+
+def test_a_highlight_does_not_pass_to_a_new_filament_of_the_same_name():
+    """Delete a filament while a subunit is lit, build another: nothing is lit."""
+    colors = _colors()
+    first = _build("ACTIN", 27.5)
+    name = first.object.name
+    colors.set_overlay(first, {"5:A": colors.HOVER_TINT}, colors.LIST_LAYER)
+    assert bpy.ops.molecule.delete('EXEC_DEFAULT', molecule_id=first.identifier) == {'FINISHED'}
+
+    second = _build("ACTIN", 27.5)
+    assert second.object.name == name, "the test needs the new filament to reuse the name"
+    instances, painted = _drawn(second)
+    assert (len(instances), len(painted)) == (10, 0)
+    assert colors.overlay(second) == {}

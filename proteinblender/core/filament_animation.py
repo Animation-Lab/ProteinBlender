@@ -275,11 +275,20 @@ def register():
     bpy.types.Object.pb_filament = PointerProperty(type=PBFilamentParameters)
     if filament_frame_change not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(filament_frame_change)
+    for name, handler in subunit_colors.HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if handler not in handlers:
+            handlers.append(handler)
 
 
 def unregister():
     if filament_frame_change in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.remove(filament_frame_change)
+    for name, handler in subunit_colors.HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if handler in handlers:
+            handlers.remove(handler)
+    subunit_colors.clear_overlays()
     if hasattr(bpy.types.Object, "pb_filament"):
         del bpy.types.Object.pb_filament
     for cls in (PBFilamentParameters, *reversed(subunit_colors.CLASSES)):
