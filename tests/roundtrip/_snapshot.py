@@ -79,6 +79,8 @@ SCENE_PROPS = (
     "pb_symmetry_rise", "pb_symmetry_twist", "pb_symmetry_axis",
     # A filament's strands, on the same footing as its rise and twist.
     "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
+    # And how much has been taken off its ends.
+    "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
     "pb_cutaway_normal", "pb_cutaway_offset",
     # Bend node count. Snapshotted for the same reason as the symmetry
     # settings, plus one of its own: the panel puts this field beside an apply

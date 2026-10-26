@@ -39,8 +39,9 @@ logger = logging.getLogger(__name__)
 DATA_PATH = "pb_filament"
 
 #: The build settings that can be keyed, in the order they are listed.
-PARAMETERS = ("count", "rise", "twist", "strands", "stagger", "strand_twist")
-_WHOLE = {"count", "strands"}
+PARAMETERS = ("count", "rise", "twist", "strands", "stagger", "strand_twist",
+              "shrink_plus", "shrink_minus")
+_WHOLE = {"count", "strands", "shrink_plus", "shrink_minus"}
 
 #: The action group the keys are filed under in the Graph Editor.
 GROUP = "Filament"
@@ -57,6 +58,12 @@ class PBFilamentParameters(PropertyGroup):
     stagger: FloatProperty(name="Stagger", default=0.0)
     #: 0 for "evenly round the axis", as on the dialog's control.
     strand_twist: FloatProperty(name="Strand Twist", default=0.0)
+    #: Whole subunits off each end of every strand: keyed, a filament
+    #: shrinks from its ends.
+    shrink_plus: IntProperty(name="Shrink Plus End", min=0,
+                             max=symmetry_builder.MAX_COUNT, default=0)
+    shrink_minus: IntProperty(name="Shrink Minus End", min=0,
+                              max=symmetry_builder.MAX_COUNT, default=0)
 
 
 def is_filament(molecule) -> bool:
@@ -85,6 +92,7 @@ def write_parameters(molecule) -> bool:
         "strands": lattice["strands"],
         "stagger": lattice["stagger"],
         "strand_twist": lattice["strand_twist"] or 0.0,
+        **symmetry_builder.shrink_settings(built),
     }
     target = getattr(obj, DATA_PATH)
     for name, value in values.items():
@@ -172,7 +180,8 @@ def settings_at(molecule, frame: float):
     for name, fcurve in curves.items():
         value = float(fcurve.evaluate(frame))
         if name in _WHOLE:
-            value = max(int(math.floor(value + 0.5)), 1)
+            value = max(int(math.floor(value + 0.5)),
+                        0 if name.startswith("shrink") else 1)
         settings[name] = value
     # 0 between strands is "evenly", as on the dialog's control.
     settings.update(symmetry_builder.lattice_settings(settings))
@@ -210,14 +219,8 @@ def follow_animation(molecule, frame: float, depsgraph=None) -> bool:
         return False
 
     settings = wanted if wanted is not None else built
-    lattice = symmetry_builder.lattice_settings(settings)
-    operators = symmetry_bend.build_operators(
-        molecule, "H", count=int(settings.get("count", 10)),
-        rise=float(settings.get("rise", 0.0)),
-        twist=float(settings.get("twist", 0.0)),
-        axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
-        depsgraph=depsgraph, **lattice)
-    if not operators or not assembly_core.update_operator_points(molecule, operators):
+    operators, sites = symmetry_bend.filament_copies(molecule, settings, depsgraph)
+    if not assembly_core.update_operator_points(molecule, operators, sites):
         return False
     if changed:
         assembly_core.record_build_params(molecule, dict(settings))

@@ -1570,6 +1570,10 @@ on a membrane whose typical gap was 0.28 nm.
   The copy now gets its own row carrying the source's names.
   `test_filament_subunits.py::test_realized_tubulin_dimers_keep_their_chain_names` was red before the fix (`['Chain A', 'Chain B']`).
 
+- **The test harness leaked new assembly controls between tests** (2026-10-26).
+  `H.reset_scene()` unset the assembly builder's scene controls from a hand-written list, so the new `pb_symmetry_shrink_plus/minus` survived from `test_filament_ends.py` into `test_filament_builder.py`, which then built tubes with ends missing (5 failures that passed alone).
+  The reset now reads the controls from `SYMMETRY_SETTINGS`, the list the builder itself uses.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

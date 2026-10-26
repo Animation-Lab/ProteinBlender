@@ -181,6 +181,8 @@ def verify_built():
     assert len(symmetry_bend.get_bend_nodes(mol)) >= 3
     rows = [r for r in bpy.context.scene.outliner_items if r.item_type == 'SYMMETRY']
     assert len(rows) == 1 and '13 x 6' in rows[0].name, [r.name for r in rows]
+    chains = sorted(r.name for r in bpy.context.scene.outliner_items if r.item_type == 'CHAIN')
+    assert chains == ['Alpha Tubulin', 'Beta Tubulin'], chains
     data['rig'] = rig_objects()
     assert data['rig'], 'The filament has no path'
     for area in g['active_window']().screen.areas:
@@ -232,6 +234,9 @@ def inspect_edit_dialog():
     assert all(label in shown for label in (
         'Subunits per Strand', 'Length (nm)', 'Strands', 'Stagger', 'Strand Twist'))
     assert 'Tube - 13 strands of 6' in shown, shown
+    # Either end can shrink, by the names a microtubule's ends go by.
+    assert all(label in shown for label in ('Shrink', 'Plus (+) End', 'Minus (-) End')), shown
+    assert scene.pb_symmetry_shrink_plus == 0 and scene.pb_symmetry_shrink_minus == 0
     # A filament that is already bent opens on its bend, with no shapes to pick.
     assert all(label in shown for label in ('Nodes', 'Edit Bend'))
     assert not any(label in shown for label in ("'Arc'", 'S-curve', 'Coil')), shown
@@ -251,12 +256,22 @@ def inspect_longer():
     assert STALE_HINT in shown, 'A new length left the assembly tools live'
     # The longer tube is on screen before OK is pressed.
     assert placed_copies(filament()) == 12 * STRANDS, placed_copies(filament())
+    bpy.context.scene.pb_symmetry_shrink_minus = 1
+    poke()
+
+
+def inspect_shrunk():
+    capture('edit-microtubule-shrunk.png')
+    shown = labels(Dialog)
+    # A dimer off the minus end of each of the thirteen protofilaments.
+    assert '143 left' in shown, shown
+    assert placed_copies(filament()) == 11 * STRANDS, placed_copies(filament())
 
 
 def verify_rebuilt_longer():
     assert 'open' not in data, 'OK did not close the dialog'
     mol = filament()
-    assert placed_copies(mol) == 12 * STRANDS, placed_copies(mol)
+    assert placed_copies(mol) == 11 * STRANDS, placed_copies(mol)
     assert symmetry_bend.has_bend(mol), 'Changing the length threw the path away'
     rows = [r for r in bpy.context.scene.outliner_items if r.item_type == 'SYMMETRY']
     assert len(rows) == 1 and '13 x 12' in rows[0].name, [r.name for r in rows]
@@ -311,7 +326,8 @@ g['steps'][:] = [
     ('verify undo and redo', verify_undone), ('settle', idle),
     ('verify redo and open Edit Assembly', verify_redone_and_edit), ('settle', idle),
     ('inspect Edit Assembly and ask for more', inspect_edit_dialog), ('settle', idle),
-    ('inspect the longer setting', inspect_longer), ('settle', idle),
+    ('inspect the longer setting and shrink it', inspect_longer), ('settle', idle),
+    ('inspect the shrunk setting', inspect_shrunk), ('settle', idle),
     *confirm('OK the longer filament'),
     ('verify the longer microtubule', verify_rebuilt_longer), ('settle', idle),
     ('open Create Keyframe', open_keyframe_dialog), ('settle', idle),

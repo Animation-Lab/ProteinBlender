@@ -368,6 +368,22 @@ def register():
         default=0.0, min=-360.0, max=360.0,
         update=_symmetry_setting_changed,
     )
+    bpy.types.Scene.pb_symmetry_shrink_plus = IntProperty(
+        name="Shrink Plus End",
+        description=("Subunits taken off the plus end of every strand - the "
+                     "end a filament grows at, the barbed end of actin. The "
+                     "rest stay where they are"),
+        default=0, min=0, soft_max=500, max=_symmetry_builder().MAX_COUNT,
+        update=_symmetry_setting_changed,
+    )
+    bpy.types.Scene.pb_symmetry_shrink_minus = IntProperty(
+        name="Shrink Minus End",
+        description=("Subunits taken off the minus end of every strand - the "
+                     "end the filament started from, the pointed end of "
+                     "actin. The rest stay where they are"),
+        default=0, min=0, soft_max=500, max=_symmetry_builder().MAX_COUNT,
+        update=_symmetry_setting_changed,
+    )
     bpy.types.Scene.pb_symmetry_rise = FloatProperty(
         name="Rise",
         description="Angstrom advanced along the axis per subunit",
@@ -424,6 +440,7 @@ def unregister():
     # Safe unregistration with try/except blocks
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
+                 "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

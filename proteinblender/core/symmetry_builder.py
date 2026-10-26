@@ -177,6 +177,42 @@ def lattice_sites(count: int, rise: float, twist: float, strands: int = 1,
             for k in range(count) for j in range(strands)]
 
 
+def shrink_settings(settings) -> dict:
+    """The end half of a settings dict: ``shrink_plus`` and ``shrink_minus``.
+
+    Missing means nothing taken off either end, for the same reason as
+    :func:`lattice_settings`: every filament built before the ends could
+    shrink is recorded without them.
+    """
+    settings = settings or {}
+    return {
+        "shrink_plus": max(int(settings.get("shrink_plus") or 0), 0),
+        "shrink_minus": max(int(settings.get("shrink_minus") or 0), 0),
+    }
+
+
+def kept_sites(count: int, strands: int = 1, shrink_plus: int = 0,
+               shrink_minus: int = 0) -> List[int]:
+    """Which subunits of a filament are left once its ends have shrunk.
+
+    Indices into :func:`lattice_sites`, so a subunit keeps its number however
+    much is taken off around it - which is what lets anything kept about one
+    subunit, such as its colour, stay with it.
+
+    Shrinking takes whole steps off every strand: ``shrink_minus`` from the
+    start, where the original subunit is, and ``shrink_plus`` from the far
+    end, where a growing filament adds subunits. That far end is the plus end
+    of every preset (``core.filament_presets``). The rest stay exactly where
+    they were. Shrinking from both ends meets in the middle, and past that
+    there is nothing left.
+    """
+    count = max(int(count), 1)
+    strands = max(int(strands), 1)
+    first = max(int(shrink_minus), 0)
+    last = count - max(int(shrink_plus), 0)
+    return [k * strands + j for k in range(first, last) for j in range(strands)]
+
+
 def length_for_count(count: int, rise: float) -> float:
     """How long a filament of ``count`` subunits a strand is, in Angstrom.
 

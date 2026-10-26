@@ -360,14 +360,20 @@ def build_assembly(molecule, assembly_id: str) -> bool:
     return apply_operators(molecule, operators, str(assembly_id))
 
 
-def apply_operators(molecule, operators, tag: str, targets=None) -> bool:
+def apply_operators(molecule, operators, tag: str, targets=None,
+                    sites=None) -> bool:
     """Place a copy of the molecule under each operator.
 
     The one path both deposited assemblies and generated symmetry go through:
     an operator is a (3x3 rotation, 3-vector translation in Angstrom) pair, and
     where it came from makes no difference past this point.
+
+    ``sites`` numbers the copies, one per operator - a filament's place in its
+    whole lattice for each, where its ends have shrunk (see
+    :func:`_write_points`). Given, it also lets the list be empty: a filament
+    shrunk away to nothing is still a filament.
     """
-    if not operators:
+    if not operators and sites is None:
         return False
 
     # Rebuilding from scratch keeps this idempotent, and means a failed
@@ -380,7 +386,7 @@ def apply_operators(molecule, operators, tag: str, targets=None) -> bool:
         if group is None:
             continue
         try:
-            if _wire_assembly_into(obj, group, molecule, tag, operators):
+            if _wire_assembly_into(obj, group, molecule, tag, operators, sites):
                 wired += 1
         except Exception:
             logger.exception("could not wire the assembly into %s", obj.name)
@@ -388,7 +394,7 @@ def apply_operators(molecule, operators, tag: str, targets=None) -> bool:
     return wired > 0
 
 
-def replace_operators(molecule, operators) -> bool:
+def replace_operators(molecule, operators, sites=None) -> bool:
     """Put the current build's copies somewhere else, or keep fewer of them.
 
     For a change *to* a build - a cutaway, a filament laid along a new path -
@@ -408,7 +414,8 @@ def replace_operators(molecule, operators) -> bool:
         if group is not None and _existing_assembly_nodes(group):
             reached.append(obj)
 
-    if not apply_operators(molecule, operators, tag, targets=reached):
+    if not apply_operators(molecule, operators, tag, targets=reached,
+                           sites=sites):
         return False
     if params is not None:
         record_build_params(molecule, params)
@@ -444,17 +451,27 @@ def _point_attributes(operators):
 
 _POINT_LAYOUT = (("axis", "FLOAT_VECTOR"), ("trans", "FLOAT_VECTOR"),
                  ("pivot", "FLOAT_VECTOR"), ("angle", "FLOAT"),
-                 ("delay", "FLOAT"))
+                 ("delay", "FLOAT"), ("site", "INT"))
+
+#: Where each copy stands in its build as a whole, as written to the points.
+SITE_ATTRIBUTE = "site"
 
 
-def _write_points(mesh, operators, pivot) -> None:
+def _write_points(mesh, operators, pivot, sites=None) -> None:
     """Make ``mesh`` one point per operator, carrying that operator.
 
     Resizes the mesh in place when the count has changed, so the object, its
     node tree and every reference to them stay what they were.
+
+    Each point also carries its ``site``: which copy of the build it is. That
+    is its place in the operator list unless ``sites`` says otherwise, as it
+    does for a filament with its ends shrunk, whose first point may be its
+    tenth subunit.
     """
     axes, angles, translations, delays = _point_attributes(operators)
     count = len(operators)
+    if sites is None or len(sites) != count:
+        sites = range(count)
     if len(mesh.vertices) != count:
         mesh.clear_geometry()
         mesh.vertices.add(count)
@@ -465,16 +482,19 @@ def _write_points(mesh, operators, pivot) -> None:
         mesh.vertices.foreach_set("co", np.zeros(count * 3, dtype=np.float32))
     pivots = np.tile(np.asarray(pivot, dtype=float), (count, 1))
     values = {"axis": axes, "trans": translations, "pivot": pivots,
-              "angle": angles, "delay": delays}
+              "angle": angles, "delay": delays,
+              "site": np.fromiter(sites, dtype=np.int32, count=count)}
     for name, kind in _POINT_LAYOUT:
         attribute = mesh.attributes.get(name)
-        if attribute is None or attribute.domain != "POINT":
+        if (attribute is None or attribute.domain != "POINT"
+                or attribute.data_type != kind):
             if attribute is not None:
                 mesh.attributes.remove(attribute)
             attribute = mesh.attributes.new(name, kind, "POINT")
+        dtype = np.int32 if kind == "INT" else np.float32
         attribute.data.foreach_set(
-            "value" if kind == "FLOAT" else "vector",
-            np.ascontiguousarray(values[name], dtype=np.float32).ravel())
+            "vector" if kind == "FLOAT_VECTOR" else "value",
+            np.ascontiguousarray(values[name], dtype=dtype).ravel())
     mesh.update()
 
 
@@ -485,7 +505,7 @@ def _cloud_pivot(mesh):
     return tuple(attribute.data[0].vector)
 
 
-def update_operator_points(molecule, operators) -> bool:
+def update_operator_points(molecule, operators, sites=None) -> bool:
     """Re-place an existing build's copies without rebuilding anything.
 
     :func:`apply_operators` tears the assembly down and constructs a fresh
@@ -505,8 +525,11 @@ def update_operator_points(molecule, operators) -> bool:
     when there is nothing built to write into, or when the build places its
     chains differently from one another (a deposited assembly), since one
     operator list cannot describe that.
+
+    ``sites`` as :func:`apply_operators` takes them; with them, an empty list
+    is a filament shrunk away to nothing rather than a mistake.
     """
-    if not operators:
+    if not operators and sites is None:
         return False
 
     meshes = []
@@ -525,7 +548,7 @@ def update_operator_points(molecule, operators) -> bool:
         return False
 
     for mesh in meshes:
-        _write_points(mesh, operators, _cloud_pivot(mesh))
+        _write_points(mesh, operators, _cloud_pivot(mesh), sites)
     return True
 
 
@@ -562,19 +585,24 @@ def _operators_for(molecule, assembly_id: str):
     return operators
 
 
-def _wire_assembly_into(obj, group, molecule, assembly_id, operators) -> bool:
+def _wire_assembly_into(obj, group, molecule, assembly_id, operators,
+                        sites=None) -> bool:
     """Respect the deposited chain membership on each placement."""
     domain = next((d for d in molecule.domains.values() if d.object == obj), None)
     if domain is not None:
         chain = molecule._resolve_chain_socket_name(domain.chain_id)
         chosen = [op for op in operators if not isinstance(op, AssemblyOperator) or chain in op.chain_ids]
-        tree = _assembly_node_tree(_build_points_object(obj, molecule, assembly_id, chosen))
+        # The numbering belongs to the whole list; a chain that only some
+        # placements draw is numbered by its own.
+        kept = sites if len(chosen) == len(operators) else None
+        tree = _assembly_node_tree(_build_points_object(obj, molecule, assembly_id, chosen, kept))
     else:
         chains = list(obj.get('chain_ids', []))
         selections = [[op for op in operators if not isinstance(op, AssemblyOperator) or c in op.chain_ids]
                       for c in chains]
         if all(len(ops) == len(operators) for ops in selections):
-            tree = _assembly_node_tree(_build_points_object(obj, molecule, assembly_id, operators))
+            tree = _assembly_node_tree(_build_points_object(
+                obj, molecule, assembly_id, operators, sites))
         else:
             tree = _chain_assembly_tree(obj, molecule, assembly_id, selections)
     node = _add_assembly_node(group, tree)
@@ -585,7 +613,7 @@ def _wire_assembly_into(obj, group, molecule, assembly_id, operators) -> bool:
     return True
 
 
-def _build_points_object(obj, molecule, assembly_id, operators):
+def _build_points_object(obj, molecule, assembly_id, operators, sites=None):
     """One point per operator, carrying that operator's rotation.
 
     The position is not simply the operator's translation. ProteinBlender's
@@ -614,7 +642,7 @@ def _build_points_object(obj, molecule, assembly_id, operators):
         bpy.data.objects.remove(existing, do_unlink=True)
 
     mesh = bpy.data.meshes.new(name)
-    _write_points(mesh, operators, pivot)
+    _write_points(mesh, operators, pivot, sites)
 
     points = bpy.data.objects.new(name, mesh)
     points[_ASSEMBLY_OWNER_KEY] = molecule.object

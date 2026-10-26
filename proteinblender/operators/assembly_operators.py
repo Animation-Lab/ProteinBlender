@@ -33,6 +33,10 @@ SYMMETRY_SETTINGS = (
     ("strands", "pb_symmetry_strands", 1),
     ("stagger", "pb_symmetry_stagger", 0.0),
     ("strand_twist", "pb_symmetry_strand_twist", 0.0),
+    # Whole subunits taken off a filament's plus and minus ends (barbed and
+    # pointed, for actin). See symmetry_builder.kept_sites.
+    ("shrink_plus", "pb_symmetry_shrink_plus", 0),
+    ("shrink_minus", "pb_symmetry_shrink_minus", 0),
 )
 
 
@@ -45,6 +49,7 @@ def symmetry_settings(scene) -> dict:
         # survive being stored or JSON-encoded.
         values[key] = tuple(float(v) for v in value) if key == "axis" else value
     values.update(symmetry_builder.lattice_settings(values))
+    values.update(symmetry_builder.shrink_settings(values))
     return values
 
 
@@ -59,7 +64,8 @@ def apply_symmetry_settings(scene, values: dict) -> None:
     # controls are one set standing in for whichever assembly was last worked
     # on, so leaving them alone would show an older helix the thirteen strands
     # of the microtubule built after it.
-    values = {**values, **symmetry_builder.lattice_settings(values)}
+    values = {**values, **symmetry_builder.lattice_settings(values),
+              **symmetry_builder.shrink_settings(values)}
     for key, prop, default in SYMMETRY_SETTINGS:
         if key not in values:
             continue
@@ -83,6 +89,7 @@ def built_symmetry_settings(scene, molecule) -> dict:
     if built:
         settings.update(built)
         settings.update(symmetry_builder.lattice_settings(built))
+        settings.update(symmetry_builder.shrink_settings(built))
     settings["axis"] = tuple(settings["axis"])
     return settings
 
@@ -120,14 +127,20 @@ def build_generated_symmetry(molecule, settings: dict):
         return False, message
 
     # Through symmetry_bend, not symmetry_builder: a helical filament with a
-    # bend curve is laid along it, and everything else falls straight through
-    # to the generator.
-    operators = symmetry_bend.build_operators(
-        molecule, kind,
-        axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
-        **shape)
+    # bend curve is laid along it, with its shrunk ends taken off, and
+    # everything else falls straight through to the generator.
+    sites = None
+    if kind.upper() == "H":
+        operators, sites = symmetry_bend.filament_copies(molecule, settings)
+    else:
+        operators = symmetry_bend.build_operators(
+            molecule, kind,
+            axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
+            **shape)
 
-    if not operators:
+    # A filament whose ends have shrunk into one another has no copies left,
+    # and is still a filament - one whose shrinking can be undone.
+    if not operators and sites is None:
         return failed("Those settings make no copies")
 
     targets = None
@@ -144,9 +157,9 @@ def build_generated_symmetry(molecule, settings: dict):
     tag = f"generated:{kind.upper()}"
     in_place = (assembly_core.built_assembly_id(molecule) == tag
                 and assembly_core.reaches(molecule, targets)
-                and assembly_core.update_operator_points(molecule, operators))
+                and assembly_core.update_operator_points(molecule, operators, sites))
     if not in_place and not assembly_core.apply_operators(
-            molecule, operators, tag, targets=targets):
+            molecule, operators, tag, targets=targets, sites=sites):
         return failed("Could not build that symmetry")
 
     # Leave the settings with the build, so the dialog can reopen on what was
@@ -503,6 +516,9 @@ def _operators_of_built(context, molecule, tag):
     from ..core import symmetry_bend
 
     tag = str(tag)
+    if tag == "generated:H":
+        built = built_symmetry_settings(context.scene, molecule)
+        return symmetry_bend.filament_copies(molecule, built)[0]
     if tag.startswith("generated:"):
         built = built_symmetry_settings(context.scene, molecule)
         return symmetry_bend.build_operators(

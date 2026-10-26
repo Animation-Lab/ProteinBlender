@@ -302,7 +302,8 @@ def test_keys_on_the_filament_alone_leave_its_nodes_free():
     from proteinblender.operators import symmetry_dialog
 
     molecule = _build(27.5)
-    assert _anim().keyframe_parameters(molecule, 1) == 6
+    # Subunits, Rise, Twist, Strands, Stagger, Strand Twist and both ends.
+    assert _anim().keyframe_parameters(molecule, 1) == 8
     molecule.object.keyframe_insert("location", frame=1)
     assert not bend_rig.has_keyframes(_bend().SPEC, molecule.object,
                                       include_owner=False)

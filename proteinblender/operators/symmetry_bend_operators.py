@@ -63,12 +63,11 @@ def _rebuild_filament(context, molecule) -> bool:
     if tag is None or not str(tag).startswith("generated:H"):
         return False
 
-    operators = symmetry_bend.build_operators(molecule, "H", **_settings(context, molecule))
-    if not operators:
-        return False
-    if assembly_core.update_operator_points(molecule, operators):
+    operators, sites = symmetry_bend.filament_copies(
+        molecule, built_symmetry_settings(context.scene, molecule))
+    if assembly_core.update_operator_points(molecule, operators, sites):
         return True
-    return assembly_core.replace_operators(molecule, operators)
+    return assembly_core.replace_operators(molecule, operators, sites)
 
 
 def _remember_node_count(context, molecule) -> None:
@@ -280,13 +279,11 @@ def filament_bend_follow_handler(scene, depsgraph):
             if tag is None or not str(tag).startswith("generated:H"):
                 continue
 
-            operators = symmetry_bend.build_operators(
-                molecule, "H", **_built_settings(scene, molecule),
-            )
-            if operators:
-                # In place only. A full rebuild from here would create and
-                # remove objects inside the depsgraph's own callback.
-                assembly_core.update_operator_points(molecule, operators)
+            operators, sites = symmetry_bend.filament_copies(
+                molecule, built_symmetry_settings(scene, molecule))
+            # In place only. A full rebuild from here would create and
+            # remove objects inside the depsgraph's own callback.
+            assembly_core.update_operator_points(molecule, operators, sites)
     except Exception:
         # A handler that raises is a handler Blender disables, taking the live
         # bend with it for the rest of the session.

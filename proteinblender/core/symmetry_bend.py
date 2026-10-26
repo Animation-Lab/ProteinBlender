@@ -478,6 +478,34 @@ def build_operators(molecule, kind: str, depsgraph=None, **settings) -> List[Ope
     )
 
 
+def filament_copies(molecule, settings: dict, depsgraph=None):
+    """Where a helical filament's subunits go: ``(operators, sites)``.
+
+    The one place a filament is laid out from its settings, so every caller -
+    the dialog, a dragged node, a frame of animation - lays it out the same
+    way. The whole lattice is laid along the path first and its shrunk ends
+    taken off afterwards, so the subunits that are left stand exactly where
+    they stood before anything was taken away. ``sites`` numbers each copy by
+    its place in the whole lattice (``symmetry_builder.kept_sites``).
+
+    Both lists are empty when the ends have shrunk past one another.
+    """
+    from . import symmetry_builder
+
+    lattice = symmetry_builder.lattice_settings(settings)
+    count = min(int(settings.get("count", 10)), symmetry_builder.MAX_COUNT)
+    operators = build_operators(
+        molecule, "H", depsgraph=depsgraph, count=count,
+        rise=float(settings.get("rise", 0.0)),
+        twist=float(settings.get("twist", 0.0)),
+        axis=tuple(settings.get("axis", (0.0, 0.0, 1.0))),
+        **lattice)
+    sites = symmetry_builder.kept_sites(
+        count, lattice["strands"], **symmetry_builder.shrink_settings(settings))
+    sites = [site for site in sites if site < len(operators)]
+    return [operators[site] for site in sites], sites
+
+
 def bend_departure(molecule, count: int, rise: float, twist: float,
                    axis=(0.0, 0.0, 1.0), strands: int = 1,
                    stagger: float = 0.0,

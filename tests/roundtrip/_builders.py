@@ -206,6 +206,10 @@ def build_bent_filament():
     scene.pb_symmetry_strands = 2
     scene.pb_symmetry_stagger = 5.0
     scene.pb_symmetry_strand_twist = 170.0
+    # One ring off the plus end and one off the minus end, so a reload that
+    # forgot either would draw a different filament.
+    scene.pb_symmetry_shrink_plus = 1
+    scene.pb_symmetry_shrink_minus = 1
     # Deliberately not bend_rig.RES_DEFAULT: a builder that sets a property to
     # its default proves nothing on reload, because a value that was dropped
     # entirely comes back looking identical to one that persisted.

@@ -489,7 +489,10 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
 
         # Reopening on a build shows what that build was made with, not what
         # the scene sliders happen to say - they are one set of controls
-        # standing in for whichever protein was last active.
+        # standing in for whichever protein was last active. Shrunk ends are
+        # the one thing a new build never inherits from the last one.
+        context.scene.pb_symmetry_shrink_plus = 0
+        context.scene.pb_symmetry_shrink_minus = 0
         if molecule is not None:
             stored = assembly_core.built_build_params(molecule)
             if stored:
@@ -590,17 +593,38 @@ class MOLECULE_PB_OT_symmetry_dialog(Operator):
         axis_row.label(text="Axis")
         axis_row.prop(scene, "pb_symmetry_axis", text="")
 
+        if kind == "H":
+            self._draw_ends(layout, scene)
+
         summary = layout.row()
         summary.enabled = False
-        summary.label(text=symmetry_builder.describe(
-            kind,
-            order=getattr(scene, "pb_symmetry_order", 3),
-            count=getattr(scene, "pb_symmetry_count", 10),
-            rise=getattr(scene, "pb_symmetry_rise", 0.0),
-            twist=getattr(scene, "pb_symmetry_twist", 0.0),
-            strands=getattr(scene, "pb_symmetry_strands", 1)))
+        summary.label(text=self._summary(scene, kind))
 
         self._draw_live_hint(layout)
+
+    def _draw_ends(self, layout, scene):
+        """Shrink from either end, by the names the filament gives its ends."""
+        from ..core import filament_presets
+
+        plus, minus = filament_presets.end_names(_molecule(self.target_id))
+        ends = layout.column(align=True)
+        ends.label(text="Shrink")
+        ends.prop(scene, "pb_symmetry_shrink_plus", text=plus)
+        ends.prop(scene, "pb_symmetry_shrink_minus", text=minus)
+
+    @staticmethod
+    def _summary(scene, kind) -> str:
+        settings = symmetry_settings(scene)
+        text = symmetry_builder.describe(kind, **{
+            key: settings[key] for key in ("order", "count", "rise", "twist",
+                                           "strands")})
+        shrunk = settings["shrink_plus"] or settings["shrink_minus"]
+        if kind == "H" and shrunk:
+            left = len(symmetry_builder.kept_sites(
+                settings["count"], settings["strands"],
+                settings["shrink_plus"], settings["shrink_minus"]))
+            text += f" - {left} left" if left else " - none left"
+        return text
 
     def _draw_live_hint(self, layout):
         hint = layout.row()

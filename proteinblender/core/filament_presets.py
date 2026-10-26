@@ -26,6 +26,9 @@ from . import symmetry_builder
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "filaments"
 
+#: What a filament's ends are called when nothing more is known about it.
+DEFAULT_END_NAMES = ("Plus (+) End", "Minus (-) End")
+
 
 @dataclass(frozen=True)
 class FilamentPreset:
@@ -61,7 +64,7 @@ class FilamentPreset:
     #: laid out with it at the far end - where new subunits are added - which
     #: ``tests/integration/test_filament_subunits.py`` checks against the
     #: structure.
-    end_names: Tuple[str, str] = ("Plus (+) End", "Minus (-) End")
+    end_names: Tuple[str, str] = DEFAULT_END_NAMES
 
     def settings(self, count: Optional[int] = None) -> dict:
         """Build settings, in the shape the symmetry builder takes them."""
@@ -164,6 +167,12 @@ def of_molecule(molecule) -> Optional[FilamentPreset]:
         return get(obj.get(PRESET_PROP, "")) if obj is not None else None
     except (AttributeError, ReferenceError):
         return None
+
+
+def end_names(molecule) -> Tuple[str, str]:
+    """What ``molecule``'s filament ends are called, plus end first."""
+    preset = of_molecule(molecule)
+    return preset.end_names if preset is not None else DEFAULT_END_NAMES
 
 
 def structure_path(preset: FilamentPreset) -> str:

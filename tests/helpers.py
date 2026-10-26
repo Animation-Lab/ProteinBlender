@@ -90,11 +90,11 @@ def reset_scene():
     # The assembly builder's controls live on the scene as well. A test that
     # builds a filament down -Y must not leave the next one's ring lying on
     # its side, where a cutaway along Y has nothing to take away.
-    for prop_name in ("pb_assembly_id", "pb_symmetry_kind", "pb_symmetry_order",
-                      "pb_symmetry_count", "pb_symmetry_rise", "pb_symmetry_twist",
-                      "pb_symmetry_axis",
-                      "pb_symmetry_strands", "pb_symmetry_stagger",
-                      "pb_symmetry_strand_twist",
+    # Read from the builder's own list of them, so a control added later is
+    # reset too rather than leaking into whichever test runs next.
+    from proteinblender.operators.assembly_operators import SYMMETRY_SETTINGS
+    for prop_name in ("pb_assembly_id",
+                      *(prop for _key, prop, _default in SYMMETRY_SETTINGS),
                       "pb_cutaway_normal", "pb_cutaway_offset", "pb_bend_nodes"):
         try:
             scene.property_unset(prop_name)
