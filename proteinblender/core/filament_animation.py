@@ -27,11 +27,12 @@ import math
 
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import FloatProperty, IntProperty, PointerProperty
+from bpy.props import (CollectionProperty, FloatProperty, IntProperty,
+                       PointerProperty, StringProperty)
 from bpy.types import PropertyGroup
 
 from . import assembly as assembly_core
-from . import bend_rig, symmetry_bend, symmetry_builder
+from . import bend_rig, subunit_colors, symmetry_bend, symmetry_builder
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,13 @@ class PBFilamentParameters(PropertyGroup):
                              max=symmetry_builder.MAX_COUNT, default=0)
     shrink_minus: IntProperty(name="Shrink Minus End", min=0,
                               max=symmetry_builder.MAX_COUNT, default=0)
+    #: Monomers with a colour of their own (``core.subunit_colors``).
+    colors: CollectionProperty(type=subunit_colors.PBSubunitColor)
+    #: Every monomer, as rows of the Subunits list, and what they were made
+    #: from. Rebuilt whenever the lattice changes; never keyed.
+    subunits: CollectionProperty(type=subunit_colors.PBSubunitRow)
+    subunit_index: IntProperty(default=-1)
+    roster_signature: StringProperty()
 
 
 def is_filament(molecule) -> bool:
@@ -101,7 +109,8 @@ def write_parameters(molecule) -> bool:
 
 
 def keyframe_parameters(molecule, frame: int) -> int:
-    """Key every number the filament is built from at ``frame``. Returns how many."""
+    """Key every number the filament is built from at ``frame``, and every
+    subunit's own colour. Returns how many properties were keyed."""
     obj = _owner(molecule)
     if obj is None or not write_parameters(molecule):
         return 0
@@ -110,7 +119,7 @@ def keyframe_parameters(molecule, frame: int) -> int:
         if obj.keyframe_insert(data_path=f"{DATA_PATH}.{name}", frame=frame,
                                group=GROUP):
             keyed += 1
-    return keyed
+    return keyed + subunit_colors.keyframe(molecule, frame)
 
 
 def delete_parameter_keyframes(obj, frame: int) -> None:
@@ -122,6 +131,7 @@ def delete_parameter_keyframes(obj, frame: int) -> None:
             obj.keyframe_delete(data_path=f"{DATA_PATH}.{name}", frame=frame)
         except (RuntimeError, TypeError):
             pass  # not keyed at that frame
+    subunit_colors.delete_keyframes(obj, frame)
 
 
 def parameter_fcurves(obj) -> dict:
@@ -248,6 +258,7 @@ def filament_frame_change(scene, depsgraph=None):
         for molecule in molecules:
             try:
                 follow_animation(molecule, frame, depsgraph)
+                subunit_colors.follow(molecule, frame)
             except ReferenceError:
                 continue
     except Exception:
@@ -258,6 +269,8 @@ def filament_frame_change(scene, depsgraph=None):
 
 
 def register():
+    for cls in subunit_colors.CLASSES:
+        bpy.utils.register_class(cls)
     bpy.utils.register_class(PBFilamentParameters)
     bpy.types.Object.pb_filament = PointerProperty(type=PBFilamentParameters)
     if filament_frame_change not in bpy.app.handlers.frame_change_post:
@@ -269,7 +282,8 @@ def unregister():
         bpy.app.handlers.frame_change_post.remove(filament_frame_change)
     if hasattr(bpy.types.Object, "pb_filament"):
         del bpy.types.Object.pb_filament
-    try:
-        bpy.utils.unregister_class(PBFilamentParameters)
-    except RuntimeError:
-        pass
+    for cls in (PBFilamentParameters, *reversed(subunit_colors.CLASSES)):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass

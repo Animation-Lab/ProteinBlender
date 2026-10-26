@@ -128,7 +128,8 @@ Ticking its row keys three things at once:
 
 - where it stands (Location, Rotation and Scale, as for any row),
 - how it bends (every bend control node),
-- the numbers it is built from: Subunits, Rise, Twist, Strands, Stagger and Strand Twist.
+- the numbers it is built from: Subunits, Rise, Twist, Strands, Stagger, Strand Twist and how many subunits are shrunk off each end,
+- the colours of the subunits painted in the Cytoskeleton Subunits panel, and how strongly each is painted.
 
 To animate one:
 
@@ -137,6 +138,7 @@ To animate one:
 3. Press **Create Keyframe** again, tick the filament and press OK.
 
 Playing back, the filament moves between the two: a longer length grows it subunit by subunit, a twist turns its subunits, and dragged nodes bend it.
+A larger Shrink takes subunits off that end one at a time, and a subunit painted a new colour, or a lower strength, changes colour smoothly.
 **Edit Assembly** opened at any frame shows the numbers on screen at that frame.
 
 Two things to know:
@@ -144,6 +146,7 @@ Two things to know:
 - Once its bend nodes are keyed, a filament's path keeps its nodes and its length.
   A filament keyed to grow longer than its path carries straight on past the last node.
 - Like any keyframed value, a change made at a frame that is not then keyed is replaced by the animation when the frame changes.
+- Clearing a subunit's colour also removes its colour keyframes.
 
 ### Multi-Puppet Coordination
 

@@ -457,7 +457,7 @@ _POINT_LAYOUT = (("axis", "FLOAT_VECTOR"), ("trans", "FLOAT_VECTOR"),
 SITE_ATTRIBUTE = "site"
 
 
-def _write_points(mesh, operators, pivot, sites=None) -> None:
+def _write_points(mesh, operators, pivot, sites=None, tints=None) -> None:
     """Make ``mesh`` one point per operator, carrying that operator.
 
     Resizes the mesh in place when the count has changed, so the object, its
@@ -466,7 +466,7 @@ def _write_points(mesh, operators, pivot, sites=None) -> None:
     Each point also carries its ``site``: which copy of the build it is. That
     is its place in the operator list unless ``sites`` says otherwise, as it
     does for a filament with its ends shrunk, whose first point may be its
-    tenth subunit.
+    tenth subunit. ``tints`` is written as :func:`write_tints` takes it.
     """
     axes, angles, translations, delays = _point_attributes(operators)
     count = len(operators)
@@ -495,7 +495,61 @@ def _write_points(mesh, operators, pivot, sites=None) -> None:
         attribute.data.foreach_set(
             "vector" if kind == "FLOAT_VECTOR" else "value",
             np.ascontiguousarray(values[name], dtype=dtype).ravel())
+    write_tints(mesh, tints)
     mesh.update()
+
+
+def write_tints(mesh, tints) -> None:
+    """Give each point of a cloud its tint: an ``(n, 4)`` array, or None for none.
+
+    None leaves a cloud with no tint attribute at all, or clears the one it
+    has, so a build nobody has painted costs nothing. Does not call
+    ``mesh.update()``; the caller does, once.
+    """
+    attribute = mesh.attributes.get(TINT_ATTRIBUTE)
+    if tints is None:
+        if attribute is None:
+            return
+        tints = np.zeros((len(mesh.vertices), 4), dtype=np.float32)
+    if (attribute is None or attribute.domain != "POINT"
+            or attribute.data_type != "FLOAT_COLOR"):
+        if attribute is not None:
+            mesh.attributes.remove(attribute)
+        attribute = mesh.attributes.new(TINT_ATTRIBUTE, "FLOAT_COLOR", "POINT")
+    attribute.data.foreach_set(
+        "color", np.ascontiguousarray(tints, dtype=np.float32).ravel())
+
+
+def point_sites(mesh) -> np.ndarray:
+    """Which copy each point of a cloud is (its ``site``), as an int array."""
+    count = len(mesh.vertices)
+    attribute = mesh.attributes.get(SITE_ATTRIBUTE)
+    if attribute is None or attribute.data_type != "INT":
+        return np.arange(count, dtype=np.int32)
+    sites = np.zeros(count, dtype=np.int32)
+    attribute.data.foreach_get("value", sites)
+    return sites
+
+
+def _tints(molecule, obj, sites):
+    from . import subunit_colors
+    return subunit_colors.tints_for(molecule, obj, sites)
+
+
+def point_clouds_of(molecule):
+    """``(object, points object)`` for every point cloud the build drew with."""
+    found = []
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            if node.node_tree is None:
+                continue
+            for points, _chain in _point_clouds(node.node_tree):
+                if points is not None and points.data is not None:
+                    found.append((obj, points))
+    return found
 
 
 def _cloud_pivot(mesh):
@@ -543,12 +597,14 @@ def update_operator_points(molecule, operators, sites=None) -> bool:
             for points, chain in _point_clouds(node.node_tree):
                 if chain is not None or points is None or points.data is None:
                     return False
-                meshes.append(points.data)
+                meshes.append((obj, points.data))
     if not meshes:
         return False
 
-    for mesh in meshes:
-        _write_points(mesh, operators, _cloud_pivot(mesh), sites)
+    numbered = list(sites) if sites is not None else list(range(len(operators)))
+    for obj, mesh in meshes:
+        _write_points(mesh, operators, _cloud_pivot(mesh), sites,
+                      _tints(molecule, obj, numbered))
     return True
 
 
@@ -642,7 +698,8 @@ def _build_points_object(obj, molecule, assembly_id, operators, sites=None):
         bpy.data.objects.remove(existing, do_unlink=True)
 
     mesh = bpy.data.meshes.new(name)
-    _write_points(mesh, operators, pivot, sites)
+    numbered = list(sites) if sites is not None else list(range(len(operators)))
+    _write_points(mesh, operators, pivot, sites, _tints(molecule, obj, numbered))
 
     points = bpy.data.objects.new(name, mesh)
     points[_ASSEMBLY_OWNER_KEY] = molecule.object
@@ -845,11 +902,151 @@ def _assembly_node_tree(points):
     link(set_position.outputs["Geometry"], instance_on.inputs["Points"])
     link(to_instance.outputs[0], instance_on.inputs["Instance"])
     link(rotation.outputs["Rotation"], instance_on.inputs["Rotation"])
-    link(instance_on.outputs[0], group_out.inputs[0])
+    instance_on.name = "PB Instance Copies"
+    stage = _tint_stage(tree, ("PB Instance Copies", 0))
+    tree.links.new(stage, next(n for n in tree.nodes
+                               if n.type == "GROUP_OUTPUT").inputs[0])
 
     if hasattr(tree, "color_tag"):
         tree.color_tag = "GEOMETRY"
     return tree
+
+
+#: The per-copy colour each point carries, as (red, green, blue, strength).
+#: Strength 0 leaves a copy its own colour; 1 paints it this colour.
+TINT_ATTRIBUTE = "pb_tint"
+
+#: Name of the node that starts the tint stage, to find it again.
+TINT_NODE_NAME = "PB Tint Realize"
+
+
+def _socket(node, name, kind=None, outputs=False):
+    """A node's socket by name - the active one, where a type has several.
+
+    Blender 5.2 exposes only the sockets of a node's active type; earlier
+    versions keep the others in the collection, hidden.
+    """
+    sockets = node.outputs if outputs else node.inputs
+    return next(s for s in sockets if s.name == name and s.enabled
+                and (kind is None or s.type == kind))
+
+
+def _tint_stage(tree, copies_from):
+    """Paint the copies that carry a tint, and leave the rest as instances.
+
+    A copy is an instance of the one styled geometry, so it cannot be a colour
+    of its own while it stays one. The copies with a tint are realized - only
+    those, so a filament of hundreds with three subunits picked out realizes
+    three - and their ``Color`` attribute, which every style's material reads,
+    is mixed towards the tint by its strength. Each point's tint rides along
+    from the point to its instance and from the instance to the atoms it
+    realizes.
+
+    ``copies_from`` is ``(node name, output index)`` of the instanced copies.
+    Every node is made first and wired by name afterwards: ``nodes.new()``
+    can reallocate the collection under any pointer held across it.
+    Returns the stage's output socket.
+    """
+    made = {}
+    for name, kind, location in (
+            ("PB Tint", "GeometryNodeInputNamedAttribute", (700, -500)),
+            ("PB Tint Split", "FunctionNodeSeparateColor", (900, -500)),
+            ("PB Tint Test", "FunctionNodeCompare", (1100, -400)),
+            (TINT_NODE_NAME, "GeometryNodeRealizeInstances", (1100, 120)),
+            ("PB Tint Own Color", "GeometryNodeInputNamedAttribute", (1100, -650)),
+            ("PB Tint Paint", "FunctionNodeCombineColor", (1100, -800)),
+            ("PB Tint Mix", "ShaderNodeMix", (1300, -600)),
+            ("PB Tint Store", "GeometryNodeStoreNamedAttribute", (1500, 120))):
+        created = tree.nodes.new(kind)
+        created.name = name
+        created.location = location
+        made[name] = created.name
+    nodes = {name: tree.nodes[actual] for name, actual in made.items()}
+    link = tree.links.new
+
+    tint, split = nodes["PB Tint"], nodes["PB Tint Split"]
+    tint.data_type = "FLOAT_COLOR"
+    tint.inputs["Name"].default_value = TINT_ATTRIBUTE
+    link(_socket(tint, "Attribute", outputs=True), split.inputs[0])
+    alpha = _socket(split, "Alpha", outputs=True)
+
+    tinted = nodes["PB Tint Test"]
+    tinted.data_type = "FLOAT"
+    tinted.operation = "GREATER_THAN"
+    first, second = [x for x in tinted.inputs if x.type == "VALUE" and x.enabled][:2]
+    link(alpha, first)
+    second.default_value = 1e-4
+
+    realize = nodes[TINT_NODE_NAME]
+    source_name, source_index = copies_from
+    link(tree.nodes[source_name].outputs[source_index], realize.inputs["Geometry"])
+    link(tinted.outputs[0], realize.inputs["Selection"])
+
+    own, paint = nodes["PB Tint Own Color"], nodes["PB Tint Paint"]
+    own.data_type = "FLOAT_COLOR"
+    own.inputs["Name"].default_value = "Color"
+    for channel in ("Red", "Green", "Blue"):
+        link(_socket(split, channel, outputs=True), paint.inputs[channel])
+    paint.inputs["Alpha"].default_value = 1.0
+
+    mix = nodes["PB Tint Mix"]
+    mix.data_type = "RGBA"
+    mix.blend_type = "MIX"
+    link(alpha, _socket(mix, "Factor", "VALUE"))
+    link(_socket(own, "Attribute", outputs=True), _socket(mix, "A", "RGBA"))
+    link(paint.outputs[0], _socket(mix, "B", "RGBA"))
+
+    store = nodes["PB Tint Store"]
+    store.data_type = "FLOAT_COLOR"
+    store.domain = "POINT"
+    store.inputs["Name"].default_value = "Color"
+    link(realize.outputs[0], store.inputs["Geometry"])
+    link(tinted.outputs[0], store.inputs["Selection"])
+    link(_socket(mix, "Result", "RGBA", outputs=True), _socket(store, "Value", "RGBA"))
+    return store.outputs[0]
+
+
+def has_tint_stage(tree) -> bool:
+    """Whether an assembly tree can paint its copies (older builds cannot)."""
+    return any(n.name == TINT_NODE_NAME for n in tree.nodes)
+
+
+def _point_trees(tree):
+    """The trees under ``tree`` that instance copies onto a point cloud."""
+    if tree.get('pb_assembly_points') is not None:
+        yield tree
+        return
+    for node in tree.nodes:
+        if node.type == 'GROUP' and node.node_tree is not None:
+            yield from _point_trees(node.node_tree)
+
+
+def ensure_tint_stage(molecule) -> int:
+    """Splice the tint stage into assembly trees built before it existed.
+
+    Returns how many trees were given one. A tree built since has it already.
+    """
+    added = 0
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            if node.node_tree is None:
+                continue
+            for tree in _point_trees(node.node_tree):
+                if has_tint_stage(tree):
+                    continue
+                output = next((n for n in tree.nodes if n.type == 'GROUP_OUTPUT'), None)
+                if output is None or not output.inputs[0].links:
+                    continue
+                source = output.inputs[0].links[0].from_socket
+                index = list(source.node.outputs).index(source)
+                stage = _tint_stage(tree, (source.node.name, index))
+                output = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
+                tree.links.new(stage, output.inputs[0])
+                added += 1
+    return added
 
 
 def _plug(link, socket, value):
@@ -1096,11 +1293,12 @@ def copy_placements(molecule):
     """Where every copy of every object is drawn right now.
 
     One ``(object, node group, placements)`` per object the assembly reaches,
-    each placement a ``(rotation, offset, chain)`` read back off the point
-    cloud the build wrote - so it describes what is on screen, including a
+    each placement a ``(rotation, offset, chain, site)`` read back off the
+    point cloud the build wrote - so it describes what is on screen, including a
     cutaway, a bend and an assembly caught part-way through assembling, rather
     than what the build was asked for. ``chain`` is set where a placement draws
-    one chain of the object and not all of it.
+    one chain of the object and not all of it; ``site`` is which copy of the
+    lattice it is, as a filament's subunit colours name it.
     """
     if built_assembly_id(molecule) is None:
         return []
@@ -1117,8 +1315,10 @@ def copy_placements(molecule):
             factor = float(node.inputs[FACTOR_SOCKET].default_value)
             stagger = float(node.inputs[STAGGER_SOCKET].default_value)
             for points, chain in _point_clouds(node.node_tree):
-                placements.extend((rotation, offset, chain) for rotation, offset in
-                                  _operators_from_points(points, factor, stagger))
+                operators = _operators_from_points(points, factor, stagger)
+                sites = point_sites(points.data) if operators else ()
+                placements.extend((rotation, offset, chain, int(site))
+                                  for (rotation, offset), site in zip(operators, sites))
         jobs.append((obj, group, placements))
     return jobs
 

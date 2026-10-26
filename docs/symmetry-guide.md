@@ -90,13 +90,35 @@ specified by the deposited assembly.
 
 It starts straight and drawn as a surface.
 It always gets a bend path, so its control nodes are there to drag into any shape as soon as it is built.
+Its chains are named for what they are: an actin filament's chain is **Actin**, a microtubule's are **Alpha Tubulin** and **Beta Tubulin**.
+
+Both ends of a filament are told apart, because they are not alike.
+The **plus end** is the fast-growing one; for actin it is the **barbed end**, and the **minus end** is the **pointed end**.
+Making a filament longer adds subunits at its plus end, as a real one grows fastest there.
 
 What it builds is an ordinary helical assembly.
 It appears in the PB Outliner as a protein with a symmetry row beneath it, and that row's pencil opens **Edit Assembly** on it: change the length, the strands or the bend there, exactly as for an assembly you built by hand.
+**Edit Assembly** also has **Shrink**, a number of subunits to take off each strand at each end: Barbed (+) End and Pointed (-) End for actin, Plus (+) End and Minus (-) End for a microtubule.
+Set both and the filament shrinks from both sides towards the middle.
+The subunits that are left stay exactly where they were, and the line underneath says how many are left.
 Every copy is an instance, so a micron of microtubule - about 1,600 tubulin dimers - builds at once.
 
 To build a filament from your own structure instead, use **Create New Assembly** and choose Helical.
 The structure has to be in the filament's own frame for the radius to be right: the helix turns about the axis through the origin of the file's coordinates.
+
+### Colouring single subunits
+
+The **Cytoskeleton Subunits** panel, below the PB Outliner, lists every monomer of a filament: "Actin 12", or "Beta Tubulin 3 - Strand 5" for a microtubule, where alpha and beta tubulin are listed apart.
+Each strand is counted up from its minus end, so "Actin 4" is the fourth actin from the pointed end.
+With more than one filament in the scene, a picker at the top chooses which one it lists.
+
+- Tick rows to select subunits, or use **All**, **None** and **Invert**.
+- **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
+- **Colour Selected** paints the selected subunits the colour beside it; **Clear** gives them back the filament's own colour.
+
+A painted subunit keeps its colour while the filament changes: grow it, shrink it or bend it and the colour stays on the same subunit, and one shrunk away gets its colour back when it returns.
+Each colour has a strength, which mixes it with the subunit's own colour.
+Colours are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)).
 
 ## Create New Assembly
 
@@ -253,7 +275,7 @@ A cut assembly keeps the settings it was built with, so its dialog reopens on th
 ## Keyframing a filament
 
 A helical assembly is listed in Animate Scene's **Create Keyframe** under its protein's name.
-Ticking it keys where it stands, its bend nodes and its numbers (Subunits, Rise, Twist, Strands, Stagger and Strand Twist), so a filament can grow, twist and bend over time.
+Ticking it keys where it stands, its bend nodes, its numbers (Subunits, Rise, Twist, Strands, Stagger, Strand Twist and how much is shrunk off each end) and the colours of its painted subunits, so a filament can grow, shrink, twist, bend and change colour over time.
 The copies are re-placed on every frame, in the viewport and in a rendered animation alike.
 See [Keyframe Animation](keyframes.md#growing-twisting-and-bending-a-filament).
 
@@ -267,6 +289,8 @@ Replaces the assembly with real copies that the PB Outliner lists, so each one c
   A deposited assembly that places its chains differently from one another is realized the same way, chain by chain.
 
 Every copy stands where its instance was drawn, in the style and colour of what it copies.
+A filament's subunit colours go with them: a painted subunit becomes a protein in that colour, as it looks on the current frame.
+The copies of an actin filament are named actin_1, actin_2 and so on, and a microtubule's tubulin_dimer_1, tubulin_dimer_2 and so on.
 If the original itself was not among the copies on screen - cut away, say - it becomes the first of the copies that were, rather than being left behind hidden.
 The assembly row, any bend and any symmetry axes go, since there is no longer an assembly for them to belong to.
 Each new protein carries its own atom data, so this costs memory in proportion to the number of copies.

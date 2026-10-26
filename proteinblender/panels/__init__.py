@@ -2,6 +2,7 @@
 
 # Import all panel modules
 from .panel_import_protein import PROTEIN_PB_PT_import_protein
+from .subunit_panel import PROTEINBLENDER_PT_subunits, PROTEINBLENDER_UL_subunits
 from .protein_outliner_panel import (
     PROTEINBLENDER_UL_outliner,
     draw_outliner_context_menu,
@@ -84,10 +85,12 @@ CLASSES = [
     # be registered before PROTEINBLENDER_PT_animation references them.
     PROTEINBLENDER_KeyframeListItem,
     PROTEINBLENDER_UL_keyframes,
+    PROTEINBLENDER_UL_subunits,
 
     # Panels in order (top to bottom)
     PROTEIN_PB_PT_import_protein,      # 0: Importer
     PROTEINBLENDER_PT_outliner,        # 1: Protein Outliner
+    PROTEINBLENDER_PT_subunits,        # 2: Cytoskeleton Subunits
     PROTEINBLENDER_PT_puppet_maker,    # 3: Puppet Maker
     PROTEINBLENDER_PT_pose_library,    # 4: Pose Library
     PROTEINBLENDER_PT_animation,       # 5: Animation

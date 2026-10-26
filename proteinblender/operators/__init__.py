@@ -75,6 +75,7 @@ from .filament_operators import (
     MOLECULE_PB_OT_build_filament,
     CLASSES as FILAMENT_CLASSES,
 )
+from .subunit_operators import CLASSES as SUBUNIT_CLASSES
 from .domain_splitter import CLASSES as DOMAIN_SPLITTER_CLASSES
 from .outliner_color_picker import CLASSES as OUTLINER_COLOR_CLASSES
 from .lighting_operators import CLASSES as LIGHTING_CLASSES
@@ -170,6 +171,7 @@ CLASSES = (
     *SYMMETRY_DIALOG_CLASSES,
     # The Filament builder: actin and microtubules, by length
     *FILAMENT_CLASSES,
+    *SUBUNIT_CLASSES,
     # Domain Splitter dialog (row PropertyGroup first, then its operators)
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)

@@ -78,6 +78,10 @@ def realize_assembly(context, molecule):
 
     own_atoms = _draws_atoms(depsgraph, molecule.object)
     whole = _moves_of_the_whole_protein(molecule, drawn, own_atoms)
+    # A filament's painted subunits, as they look on this frame: each copy
+    # keeps its colour once it is a protein of its own.
+    from ..core import subunit_colors
+    painted = subunit_colors.colour_values(molecule, context.scene.frame_current)
 
     # First, so that a copied protein does not inherit the assembly and draw
     # every copy over again.
@@ -85,7 +89,7 @@ def realize_assembly(context, molecule):
     result.done = True
 
     if whole is not None:
-        _realize_as_proteins(context, molecule, whole, world, result)
+        _realize_as_proteins(context, molecule, whole, world, result, painted)
     else:
         _realize_within_the_protein(context, molecule, drawn, groups, world,
                                     own_atoms, result)
@@ -111,14 +115,16 @@ class Move:
     matrix: object                 # mathutils.Matrix, applied before the world matrix
     chain: object = None           # set where only one chain of the object is drawn
     original: bool = False         # the copy that is the original, where it already is
+    site: int = 0                  # which copy of the lattice, as subunit colours name it
 
 
 def _moves(placements, world):
     inverse = world.inverted()
     return [Move(world @ assembly_core.placement_matrix(rotation, offset) @ inverse,
                  chain,
-                 chain is None and assembly_core.is_identity_placement(rotation, offset))
-            for rotation, offset, chain in placements]
+                 chain is None and assembly_core.is_identity_placement(rotation, offset),
+                 site)
+            for rotation, offset, chain, site in placements]
 
 
 def _same_moves(first, second) -> bool:
@@ -129,10 +135,16 @@ def _same_moves(first, second) -> bool:
 
 def _split(moves):
     """(the moves that need a copy made, whether the original is drawn in place)."""
-    extras, kept = [], False
+    extras, kept = _split_kept(moves)
+    return extras, kept is not None
+
+
+def _split_kept(moves):
+    """(the moves that need a copy made, the original's own move or None)."""
+    extras, kept = [], None
     for move in moves:
-        if move.original and not kept:
-            kept = True
+        if move.original and kept is None:
+            kept = move
         else:
             extras.append(move)
     return extras, kept
@@ -199,13 +211,40 @@ def _stand(context, source, target, mapping, world, move) -> None:
     context.view_layer.update()
 
 
-def _realize_as_proteins(context, molecule, moves, world, result) -> None:
+def _paint(target, mapping, source, site, painted) -> None:
+    """Give ``target``'s domains the subunit colours of copy ``site``.
+
+    A painted subunit's colour is mixed into its chain's own colour by its
+    strength, as the filament drew it.
+    """
+    from ..core import subunit_colors
+
+    for source_id, target_id in mapping.items():
+        domain = source.domains.get(source_id)
+        if domain is None or target_id not in target.domains:
+            continue
+        paint = painted.get(subunit_colors.key(site, str(domain.chain_id)))
+        if paint is None or paint[3] <= 0.0:
+            continue
+        base = tuple(domain.color)
+        alpha = base[3] if len(base) > 3 else 1.0
+        strength = paint[3]
+        mixed = tuple(base[i] * (1.0 - strength) + paint[i] * strength for i in range(3))
+        target.update_domain_color(target_id, (*mixed, alpha))
+
+
+def _realize_as_proteins(context, molecule, moves, world, result, painted=None) -> None:
     from .molecule_operators import duplicate_molecule
 
-    extras, kept = _split(moves)
+    painted = painted or {}
+    extras, kept = _split_kept(moves)
     # With the original cut away there is no copy for it to stay as, so it
     # becomes the first of the ones that are left rather than a hidden extra.
-    first = None if kept else extras.pop(0)
+    first = None if kept is not None else extras.pop(0)
+    own = {i: i for i in molecule.domains}
+    # Read before any copy is coloured: each copy is coloured from the
+    # original's own colours, and the original is coloured last.
+    original_site = (kept or first).site
 
     # A filament's copies are named for what each one is: tubulin_dimer_3,
     # not Microtubule_copy_3.
@@ -219,11 +258,13 @@ def _realize_as_proteins(context, molecule, moves, world, result) -> None:
         # animation it would be carried back onto the source at the next frame.
         copy.object.animation_data_clear()
         _stand(context, molecule, copy, mapping, world, move)
+        _paint(copy, mapping, molecule, move.site, painted)
         result.proteins.append(copy.identifier)
         result.copies += 1
 
     if first is not None:
-        _stand(context, molecule, molecule, {i: i for i in molecule.domains}, world, first)
+        _stand(context, molecule, molecule, own, world, first)
+    _paint(molecule, own, molecule, original_site, painted)
 
 
 # ---------------------------------------------------------------------------

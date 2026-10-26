@@ -16,6 +16,8 @@ from proteinblender.dna_builder.dna_panel import PROTEINBLENDER_PT_builders as B
 from proteinblender.operators.filament_operators import MOLECULE_PB_OT_build_filament as Builder
 from proteinblender.operators.symmetry_dialog import MOLECULE_PB_OT_symmetry_dialog as Dialog
 from proteinblender.operators.keyframe_operators import PROTEINBLENDER_OT_create_keyframe as Keyframe
+from proteinblender.panels.subunit_panel import PROTEINBLENDER_PT_subunits as Subunits
+from proteinblender.core import subunit_colors as SC
 
 data = {}
 folder = Path(g['report_path']).parent
@@ -128,7 +130,7 @@ def rig_objects():
 
 def prepare():
     H.reset_scene()
-    for cls in (Builder, Dialog, Builders, Keyframe):
+    for cls in (Builder, Dialog, Builders, Keyframe, Subunits):
         observe(cls)
     window = g['active_window']()
     move(window.width * .45, window.height * .8)
@@ -314,6 +316,126 @@ def verify_keyed():
     return 'keyed: ' + ', '.join(sorted(keyed))
 
 
+# --------------------------------------------------------------------------
+# The Cytoskeleton Subunits panel, and picking subunits in the viewport
+# --------------------------------------------------------------------------
+
+def viewport():
+    window = g['active_window']()
+    area = max((a for a in window.screen.areas if a.type == 'VIEW_3D'),
+               key=lambda a: a.width * a.height)
+    return area, next(r for r in area.regions if r.type == 'WINDOW')
+
+
+def show_subunits():
+    area, region = viewport()
+    area.spaces.active.shading.type = 'MATERIAL'
+    with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
+        bpy.ops.view3d.view_all()
+    panel_area = g['protein_workspace_panel_area']()
+    panel_area.tag_redraw()
+    return 'shown'
+
+
+def inspect_subunits_panel():
+    text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
+    assert 'Cytoskeleton Subunits' in text, 'the Subunits panel was not drawn'
+    for label in ('Pick in Viewport', 'Colour Selected', 'Nothing selected'):
+        assert label in text, (label, text[:400])
+    mol = filament()
+    rows = mol.object.pb_filament.subunits
+    # 12 dimers up each of 13 protofilaments, two monomers a dimer.
+    assert len(rows) == 12 * STRANDS * 2, len(rows)
+    capture('subunits-panel.png')
+    return f'{len(rows)} rows'
+
+
+def colour_three():
+    mol = filament()
+    present = SC.present_sites(mol)
+    rows = [row for row in mol.object.pb_filament.subunits if row.site in present]
+    for row in rows[:3]:
+        row.select = True
+    data['coloured'] = [row.name for row in rows[:3]]
+    bpy.context.scene.pb_subunit_color = (0.1, 0.9, 0.2)
+    with g['protein_workspace_override']():
+        assert bpy.ops.molecule.color_subunits(
+            'EXEC_DEFAULT', molecule_id=mol.identifier) == {'FINISHED'}
+    return ', '.join(data['coloured'])
+
+
+def verify_coloured():
+    mol = filament()
+    assert sorted(mol.object.pb_filament.colors.keys()) == sorted(data['coloured'])
+    text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
+    assert '3 selected' in text, text[:400]
+    capture('subunits-coloured.png')
+    return '3 coloured'
+
+
+def aim_at_a_subunit():
+    """Park the mouse over the subunit nearest the viewer, then start picking."""
+    from bpy_extras import view3d_utils
+    mol = filament()
+    area, region = viewport()
+    view = area.spaces.active.region_3d
+    eye = np.array(view.view_matrix.inverted().translation)
+    best = None
+    for name, centre, _radius in SC.subunit_spheres(mol):
+        if name in data['coloured']:
+            continue
+        where = view3d_utils.location_3d_to_region_2d(region, view, centre.tolist())
+        if where is None or not (40 < where.x < region.width - 40
+                                 and 40 < where.y < region.height - 40):
+            continue
+        depth = float(np.linalg.norm(centre - eye))
+        if best is None or depth < best[0]:
+            best = (depth, name, where)
+    assert best is not None, 'no subunit in view to pick'
+    _depth, name, where = best
+    data['target'] = name
+    data['target_xy'] = (region.x + where.x, region.y + where.y)
+    move(*data['target_xy'])
+    with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
+        assert bpy.ops.molecule.pick_subunits(
+            'INVOKE_DEFAULT', molecule_id=mol.identifier) == {'RUNNING_MODAL'}
+    return name
+
+
+def hover():
+    move(*data['target_xy'])
+
+
+def verify_hover():
+    mol = filament()
+    tints = SC.overlay(mol)
+    assert tints.get(data['target']) == SC.HOVER_TINT, (data['target'], sorted(tints)[:6])
+    for name in data['coloured']:
+        assert tints.get(name) == SC.SELECTED_TINT, name
+    capture('pick-hover.png')
+    return data['target']
+
+
+def click(value):
+    x, y = data['target_xy']
+    g['active_window']().event_simulate(type='LEFTMOUSE', value=value, x=int(x), y=int(y))
+
+
+def verify_picked_and_finish():
+    mol = filament()
+    row = mol.object.pb_filament.subunits[data['target']]
+    assert row.select, f"the click did not select {data['target']}"
+    key('ESC')
+
+
+def verify_picking_finished():
+    mol = filament()
+    assert SC.overlay(mol) == {}, 'Esc left the pick highlight on the filament'
+    assert sorted(SC.selected_keys(mol)) == sorted(data['coloured'] + [data['target']])
+    capture('pick-finished.png')
+    return 'four selected'
+
+
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', idle),
     ('prepare an empty scene', prepare), ('settle', idle),
@@ -334,4 +456,15 @@ g['steps'][:] = [
     ('inspect Create Keyframe and tick the filament', inspect_keyframe_dialog), ('settle', idle),
     *confirm('OK the keyframe'),
     ('verify the filament is keyed', verify_keyed), ('settle', idle),
+    ('show the Subunits panel', show_subunits), ('settle', idle), ('settle', idle),
+    ('inspect the Subunits panel', inspect_subunits_panel), ('settle', idle),
+    ('colour three subunits', colour_three), ('settle', idle), ('settle', idle),
+    ('verify the colours', verify_coloured), ('settle', idle),
+    ('aim at a subunit and start picking', aim_at_a_subunit), ('settle', idle),
+    ('hover the subunit', hover), ('settle', idle), ('settle', idle),
+    ('verify the hover highlight', verify_hover), ('settle', idle),
+    ('press', lambda: click('PRESS')), ('settle', idle),
+    ('release', lambda: click('RELEASE')), ('settle', idle),
+    ('verify the pick and press Esc', verify_picked_and_finish), ('settle', idle),
+    ('verify picking finished', verify_picking_finished), ('settle', idle),
 ]

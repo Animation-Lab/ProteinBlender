@@ -285,6 +285,11 @@ def _set_symmetry_length(self, nanometres):
         self.pb_symmetry_count = min(count, builder.MAX_COUNT)
 
 
+def _subunit_filament_items(self, context):
+    from ..operators.subunit_operators import filament_items
+    return filament_items(self, context)
+
+
 def _assembly_enum_items(self, context):
     """Deposited assemblies worth offering for the active protein.
 
@@ -402,6 +407,16 @@ def register():
         default=(0.0, 0.0, 1.0), size=3, subtype="XYZ",
         update=_symmetry_setting_changed,
     )
+    bpy.types.Scene.pb_subunit_color = FloatVectorProperty(
+        name="Subunit Colour",
+        description="The colour Colour Selected paints the selected subunits",
+        size=3, subtype="COLOR", min=0.0, max=1.0, default=(0.9, 0.2, 0.2),
+    )
+    bpy.types.Scene.pb_subunit_filament = EnumProperty(
+        name="Filament",
+        description="Which filament's subunits the list shows",
+        items=_subunit_filament_items,
+    )
     bpy.types.Scene.pb_bend_nodes = IntProperty(
         name="Nodes",
         description=("How many control nodes a bend added to a filament "
@@ -441,6 +456,7 @@ def unregister():
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
+                 "pb_subunit_color", "pb_subunit_filament",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

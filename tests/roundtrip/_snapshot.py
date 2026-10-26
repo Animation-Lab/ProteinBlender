@@ -81,6 +81,8 @@ SCENE_PROPS = (
     "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
     # And how much has been taken off its ends.
     "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
+    # The colour beside the Subunits list's Colour Selected button.
+    "pb_subunit_color",
     "pb_cutaway_normal", "pb_cutaway_offset",
     # Bend node count. Snapshotted for the same reason as the symmetry
     # settings, plus one of its own: the panel puts this field beside an apply
@@ -122,6 +124,12 @@ EXCLUSIONS = {
         "pb_symmetry_rise by a getter, and setting it only sets the count. "
         "Both of those are snapshotted, so there is nothing of its own to "
         "lose on reload."),
+    "Scene.pb_subunit_filament": (
+        "Transient UI choice - which filament the Subunits list shows when the "
+        "scene has more than one. Its enum items are computed from the "
+        "filaments in the scene, so a stored value is only an index into a "
+        "list that is rebuilt on load; with it unset the list shows the "
+        "active protein's filament, which is what a fresh file should do."),
     "Scene.pb_assembly_id": (
         "Transient UI choice - which deposited assembly the Symmetry panel "
         "would build next. The assembly actually *built* persists as the "
@@ -521,6 +529,12 @@ def _serialize_object_data(obj):
                 name: [v.value for v in attributes[name].data]
                 for name in ('pb_cartoon_reference_turn', 'pb_cartoon_helix_turn')
                 if name in attributes}
+            # A filament's point cloud: which copy each point is, and the
+            # colour a painted subunit is drawn with.
+            entry['assembly_point_values'] = {
+                name: _digest([_round(v) for item in attributes[name].data
+                               for v in ((item.value,) if name == 'site' else item.color)])
+                for name in ('site', 'pb_tint') if name in attributes}
 
     splines = getattr(data, "splines", None)
     if splines is not None:                       # curves (linkers, DNA bends)
