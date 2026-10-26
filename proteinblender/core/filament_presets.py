@@ -50,6 +50,18 @@ class FilamentPreset:
     strand_twist: Optional[float] = None
     #: Units along each strand when the user has not asked for a length.
     default_count: int = 10
+    #: What each chain of the unit is called, as (chain letter, name), in
+    #: place of "Chain A". Checked against the chains' sequences.
+    chain_names: Tuple[Tuple[str, str], ...] = ()
+    #: What a realized copy of the unit is called: "tubulin_dimer" makes
+    #: tubulin_dimer_1, tubulin_dimer_2, ...
+    copy_name: str = ""
+    #: What the two ends of the filament are called, plus end first. The plus
+    #: end is the one a filament grows at fastest, and every preset here is
+    #: laid out with it at the far end - where new subunits are added - which
+    #: ``tests/integration/test_filament_subunits.py`` checks against the
+    #: structure.
+    end_names: Tuple[str, str] = ("Plus (+) End", "Minus (-) End")
 
     def settings(self, count: Optional[int] = None) -> dict:
         """Build settings, in the shape the symmetry builder takes them."""
@@ -96,6 +108,11 @@ PRESETS: Tuple[FilamentPreset, ...] = (
         rise=27.5,
         twist=-166.7,
         default_count=26,
+        chain_names=(("A", "Actin"),),
+        copy_name="actin",
+        # The barbed end is the plus end, the pointed end the minus end -
+        # named for how myosin decorates the filament.
+        end_names=("Barbed (+) End", "Pointed (-) End"),
     ),
     FilamentPreset(
         id="MICROTUBULE",
@@ -113,6 +130,9 @@ PRESETS: Tuple[FilamentPreset, ...] = (
         stagger=1.5 * _TUBULIN_DIMER / 13,
         strand_twist=-360.0 / 13,
         default_count=12,
+        # Chain A opens MRECISIHVGQA (TUBA1B), chain B MREIVHIQAGQC (TUBB3).
+        chain_names=(("A", "Alpha Tubulin"), ("B", "Beta Tubulin")),
+        copy_name="tubulin_dimer",
     ),
 )
 
@@ -121,6 +141,29 @@ def get(preset_id: str) -> Optional[FilamentPreset]:
     """The preset with this id, or ``None``."""
     wanted = (preset_id or "").upper()
     return next((preset for preset in PRESETS if preset.id == wanted), None)
+
+
+#: The custom property on a molecule's object naming the preset it was
+#: built from. On the object rather than the assembly's build record: it is
+#: what the molecule *is*, and stays so when its assembly is rebuilt or
+#: cleared.
+PRESET_PROP = "pb_filament_preset"
+
+
+def mark(molecule, preset: FilamentPreset) -> None:
+    """Record that ``molecule`` is a subunit of ``preset``."""
+    obj = getattr(molecule, "object", None)
+    if obj is not None:
+        obj[PRESET_PROP] = preset.id
+
+
+def of_molecule(molecule) -> Optional[FilamentPreset]:
+    """The preset ``molecule`` was built from, or ``None``."""
+    try:
+        obj = molecule.object
+        return get(obj.get(PRESET_PROP, "")) if obj is not None else None
+    except (AttributeError, ReferenceError):
+        return None
 
 
 def structure_path(preset: FilamentPreset) -> str:

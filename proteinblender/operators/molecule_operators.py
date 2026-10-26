@@ -307,21 +307,47 @@ def _copy_material_alpha(source_obj, target_obj, source_tree, target_tree):
         print(f"Warning: Could not copy material alpha: {e}")
 
 
-def duplicate_molecule(context, source_molecule):
+def _copy_identifier(scene_manager, source_molecule, base_name=None):
+    """The first free ``<protein>_copy_<n>``, or ``<base_name>_<n>`` if given."""
+    stem = (f"{base_name}_" if base_name
+            else f"{source_molecule.identifier}_copy_")
+    counter = 1
+    while f"{stem}{counter}" in scene_manager.molecules:
+        counter += 1
+    return f"{stem}{counter}"
+
+
+def _list_copy(context, source_identifier, new_identifier, new_object):
+    """Give a copy its own row in the molecule list, carrying the chain names.
+
+    The row is where a chain renamed in the PB Outliner keeps its name; a copy
+    without one shows "Chain A" whatever its source was called, and has
+    nowhere to keep a rename of its own.
+    """
+    items = context.scene.molecule_list_items
+    item = next((it for it in items if it.identifier == new_identifier), None)
+    if item is None:
+        item = items.add()
+        item.identifier = new_identifier
+        item.object_ptr = new_object
+    source = next((it for it in items if it.identifier == source_identifier), None)
+    if source is not None and source.chain_custom_names:
+        item.chain_custom_names = source.chain_custom_names
+
+
+def duplicate_molecule(context, source_molecule, base_name=None):
     """Make a complete copy of a protein, registered and in the outliner.
 
     The copy sits exactly on its source, with its own mesh, node trees and
     domains. Returns ``(new molecule, {source domain id: new domain id})``.
+    It is called ``<protein>_copy_<n>``, or ``<base_name>_<n>`` when a name
+    for copies is given.
     """
     scene_manager = ProteinBlenderScene.get_instance()
 
     # 1. Generate unique identifier for the duplicate
     base_id = source_molecule.identifier
-    counter = 1
-    new_identifier = f"{base_id}_copy_{counter}"
-    while new_identifier in scene_manager.molecules:
-        counter += 1
-        new_identifier = f"{base_id}_copy_{counter}"
+    new_identifier = _copy_identifier(scene_manager, source_molecule, base_name)
 
     print(f"Duplicating protein '{base_id}' as '{new_identifier}'")
 
@@ -541,6 +567,7 @@ def duplicate_molecule(context, source_molecule):
 
     # 16. Add to scene manager (directly to molecules dict since MoleculeManager doesn't have add_molecule)
     scene_manager.molecules[new_identifier] = new_molecule
+    _list_copy(context, base_id, new_identifier, new_protein_obj)
 
     # 17. Rebuild outliner to show the new protein
     build_outliner_hierarchy(context)

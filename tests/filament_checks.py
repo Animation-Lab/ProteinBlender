@@ -149,3 +149,72 @@ def chain_centres(molecule, preset, chain_letter="A"):
     residues = sorted(r for (chain, r) in shipped if chain == chain_letter)
     return np.array([copy.mean(axis=0)
                      for copy in drawn_copies(molecule, chain_letter, residues)])
+
+
+# --------------------------------------------------------------------------
+# Building, naming and realizing
+# --------------------------------------------------------------------------
+
+ONE_LETTER = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q",
+    "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K",
+    "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W",
+    "TYR": "Y", "VAL": "V",
+}
+
+#: The first residues of each tubulin, from UniProt.
+ALPHA_TUBULIN_START = "MRECISIHVGQA"      # TUBA1B, P68363
+BETA_TUBULIN_START = "MREIVHIQAGQC"       # TUBB3, Q13509
+
+
+def sequence_starts(path, length=12):
+    """``{chain letter: first residues}`` read from the PDB text."""
+    seen, starts = set(), {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if not line.startswith("ATOM"):
+                continue
+            chain, residue = line[21], int(line[22:26])
+            if (chain, residue) in seen:
+                continue
+            seen.add((chain, residue))
+            starts[chain] = starts.get(chain, "") + ONE_LETTER.get(line[17:20], "X")
+    return {chain: seq[:length] for chain, seq in starts.items()}
+
+
+def tubulin_chains():
+    """``{'alpha': letter, 'beta': letter}`` from the shipped dimer's sequence."""
+    path = presets().structure_path(presets().get("MICROTUBULE"))
+    starts = sequence_starts(path)
+    found = {}
+    for chain, start in starts.items():
+        if start == ALPHA_TUBULIN_START:
+            found["alpha"] = chain
+        elif start == BETA_TUBULIN_START:
+            found["beta"] = chain
+    assert set(found) == {"alpha", "beta"}, f"unrecognised chains: {starts}"
+    return found
+
+
+def build(preset_id, length):
+    """Build a filament with the Cytoskeleton builder; return the new molecule."""
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.build_filament(
+        'EXEC_DEFAULT', preset=preset_id, length=length) == {'FINISHED'}
+    after = set(H.sm().molecules) - before
+    assert len(after) == 1
+    return H.sm().molecules[after.pop()]
+
+
+def chain_rows(molecule_id):
+    """The names of a protein's chain rows in the PB Outliner."""
+    return [item.name for item in bpy.context.scene.outliner_items
+            if item.item_type == 'CHAIN' and item.parent_id == molecule_id]
+
+
+def realize(molecule):
+    """Realize a filament's copies; return the new proteins' ids, sorted."""
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.realize_copies(
+        'EXEC_DEFAULT', molecule_id=molecule.identifier) == {'FINISHED'}
+    return sorted(set(H.sm().molecules) - before)

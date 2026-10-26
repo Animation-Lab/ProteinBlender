@@ -62,6 +62,39 @@ def show_as(molecule, style: str) -> None:
         domain.style = style
 
 
+def name_chains(context, molecule, preset) -> None:
+    """Call the unit's chains what they are: "Alpha Tubulin", not "Chain A".
+
+    Stored where a rename from the PB Outliner stores it - the chain row's
+    name on the molecule's list item, and each domain's own name - so the
+    names read as if the user had typed them, and can be renamed again.
+    """
+    import json
+
+    wanted = dict(preset.chain_names)
+    if not wanted:
+        return
+    letters = getattr(molecule, "auth_chain_id_map", None) or {}
+    rows = {str(index): wanted[letter] for index, letter in letters.items()
+            if letter in wanted}
+    item = next((it for it in context.scene.molecule_list_items
+                 if it.identifier == molecule.identifier), None)
+    if item is not None and rows:
+        try:
+            names = json.loads(item.chain_custom_names or "{}")
+        except ValueError:
+            names = {}
+        names.update(rows)
+        item.chain_custom_names = json.dumps(names)
+
+    for domain in molecule.domains.values():
+        name = wanted.get(str(domain.chain_id))
+        if name and getattr(domain, "is_copy", False) is False:
+            domain.name = name
+    if hasattr(molecule, "_mirror_domains_to_property_group"):
+        molecule._mirror_domains_to_property_group()
+
+
 def build_filament(context, preset, length: float):
     """Import a preset's subunit and build ``length`` Angstrom of its filament.
 
@@ -75,6 +108,8 @@ def build_filament(context, preset, length: float):
             filament_presets.structure_path(preset), identifier):
         return None, f"Could not load the {preset.label.lower()} subunit"
     molecule = manager.molecules.get(identifier)
+    filament_presets.mark(molecule, preset)
+    name_chains(context, molecule, preset)
     show_as(molecule, FILAMENT_STYLE)
 
     # Every setting the Assembly dialog has, so that it can reopen on this

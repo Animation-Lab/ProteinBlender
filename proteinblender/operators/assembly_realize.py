@@ -207,8 +207,14 @@ def _realize_as_proteins(context, molecule, moves, world, result) -> None:
     # becomes the first of the ones that are left rather than a hidden extra.
     first = None if kept else extras.pop(0)
 
+    # A filament's copies are named for what each one is: tubulin_dimer_3,
+    # not Microtubule_copy_3.
+    from ..core import filament_presets
+    preset = filament_presets.of_molecule(molecule)
+    base_name = preset.copy_name if preset is not None else None
+
     for move in extras:
-        copy, mapping = duplicate_molecule(context, molecule)
+        copy, mapping = duplicate_molecule(context, molecule, base_name)
         # A copy stays where its instance was drawn. Left with its source's
         # animation it would be carried back onto the source at the next frame.
         copy.object.animation_data_clear()

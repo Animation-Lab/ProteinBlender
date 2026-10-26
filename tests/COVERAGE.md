@@ -1564,6 +1564,12 @@ on a membrane whose typical gap was 0.28 nm.
   Fixed in `bend_rig.resample_curve_arc_length`: the end tangents come exactly from the old curve's handles, interior tangents from a centred difference, and each segment's handle reaches are a least-squares fit to the old path with the tangents fixed (Schneider 1990) rather than 0.3 of the spacing.
   Subunits now move 0.2 A on actin after a 100 A drag and 4.3 A on the dragged microtubule; the test's bound is 5 A (a tube's dimers stand 112 A out from the path), and `test_bend_rig.py` holds the opening tangent to 0.01 degrees and every sample to 0.5% of the length.
 
+- **A duplicated protein lost its chain names** (2026-10-26).
+  `duplicate_molecule` registered the copy without a molecule-list row, and chain renames live on that row (`chain_custom_names`).
+  So every copy - Duplicate and Realize Copies alike - showed "Chain A" whatever its source was called, and a rename on the copy had nowhere to go.
+  The copy now gets its own row carrying the source's names.
+  `test_filament_subunits.py::test_realized_tubulin_dimers_keep_their_chain_names` was red before the fix (`['Chain A', 'Chain B']`).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
