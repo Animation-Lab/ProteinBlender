@@ -81,8 +81,9 @@ SCENE_PROPS = (
     "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
     # And how much has been taken off its ends.
     "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
-    # The colour beside the Subunits list's Colour Selected button.
-    "pb_subunit_color",
+    # The Subunits panel's colour and strength: the first selected subunit's,
+    # else the last given.
+    "pb_subunit_color", "pb_subunit_strength",
     "pb_cutaway_normal", "pb_cutaway_offset",
     # Bend node count. Snapshotted for the same reason as the symmetry
     # settings, plus one of its own: the panel puts this field beside an apply

@@ -32,18 +32,29 @@ def filaments():
     return found
 
 
+def ticked_filaments(context):
+    """The filaments whose own row is ticked in the PB Outliner."""
+    ticked = {row.item_id for row in getattr(context.scene, "outliner_items", ())
+              if row.is_selected and row.item_type == 'PROTEIN'}
+    return [molecule for molecule in filaments() if molecule.identifier in ticked]
+
+
 def subunit_filament(context, molecule_id: str = ""):
     """The filament the Subunits list is showing.
 
-    The one asked for by id; else the one chosen in the list's picker; else
-    the active protein, if it is a filament; else the first filament.
+    The one asked for by id, among every filament. Else, among the filaments
+    ticked in the PB Outliner: the one chosen in the list's picker, else the
+    active protein, else the first ticked. None when no filament is ticked.
     """
     from ..utils.scene_manager import resolve_active_molecule_id
 
-    found = filaments()
+    if molecule_id:
+        for molecule in filaments():
+            if molecule.identifier == molecule_id:
+                return molecule
+    found = ticked_filaments(context)
     by_id = {molecule.identifier: molecule for molecule in found}
-    for wanted in (molecule_id,
-                   getattr(context.scene, "pb_subunit_filament", ""),
+    for wanted in (getattr(context.scene, "pb_subunit_filament", ""),
                    resolve_active_molecule_id(context)):
         if wanted and wanted in by_id:
             return by_id[wanted]
@@ -55,11 +66,11 @@ _ITEMS_CACHE = []
 
 
 def filament_items(self, context):
-    """The filaments the Subunits list can show, for its picker."""
+    """The ticked filaments the Subunits list can show, for its picker."""
     from ..core import filament_presets
 
     items = []
-    for molecule in filaments():
+    for molecule in ticked_filaments(context):
         preset = filament_presets.of_molecule(molecule)
         label = molecule.identifier
         items.append((molecule.identifier, label,
@@ -116,7 +127,7 @@ class MOLECULE_PB_OT_color_subunits(Operator):
 
 
 class MOLECULE_PB_OT_select_subunits(Operator):
-    """Select all, none, or the other subunits of the filament"""
+    """Select all, none, the other, or one chain's subunits of the filament"""
 
     bl_idname = "molecule.select_subunits"
     bl_label = "Select Subunits"
@@ -127,11 +138,21 @@ class MOLECULE_PB_OT_select_subunits(Operator):
         name="Action",
         items=(("ALL", "All", "Select every subunit the filament has now"),
                ("NONE", "None", "Select no subunits"),
-               ("INVERT", "Invert", "Select the subunits that are not selected")),
+               ("INVERT", "Invert", "Select the subunits that are not selected"),
+               ("CHAIN", "Chain", "Select every subunit of one chain, and no other")),
         default="ALL")
+    chain: StringProperty(
+        name="Chain", options={"SKIP_SAVE"},
+        description="The chain whose subunits the Chain action selects")
 
     @classmethod
     def description(cls, context, properties):
+        if properties.action == "CHAIN":
+            molecule = subunit_filament(context, properties.molecule_id)
+            name = (subunit_colors.chain_labels(molecule).get(properties.chain)
+                    if molecule is not None else None) or f"Chain {properties.chain}"
+            return (f"Select every {name} subunit the filament has now, and "
+                    f"deselect the others")
         return {"ALL": "Select every subunit the filament has now",
                 "NONE": "Deselect every subunit",
                 "INVERT": "Select the subunits that are not selected, and "
@@ -147,6 +168,8 @@ class MOLECULE_PB_OT_select_subunits(Operator):
             here = row.site in present
             if self.action == "ALL":
                 row.select = here
+            elif self.action == "CHAIN":
+                row.select = here and row.chain == self.chain
             elif self.action == "NONE":
                 row.select = False
             else:

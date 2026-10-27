@@ -237,14 +237,18 @@ def build_bent_filament():
         f"the filament is only {departure:.1f} A off straight - nothing to "
         "round-trip")
 
-    # One subunit painted, at less than full strength, and selected in the
-    # Subunits list: a reload must draw it the same colour and keep the list.
+    # One subunit painted, at less than full strength, through the Subunits
+    # panel's fields with the filament ticked in the PB Outliner and its row
+    # selected: a reload must draw it the same colour and keep the list.
     from proteinblender.core import subunit_colors
-    subunit_colors.sync_roster(molecule)
-    scene.pb_subunit_color = (0.1, 0.7, 0.3)
-    assert subunit_colors.paint(molecule, ["2:A"], scene.pb_subunit_color, strength=0.6) == 1
-    molecule.object.pb_filament.subunits["2:A"].select = True
     _build_outliner()
+    for item in scene.outliner_items:
+        item.is_selected = item.item_id == molecule.identifier
+    subunit_colors.sync_roster(molecule)
+    molecule.object.pb_filament.subunits["2:A"].select = True
+    scene.pb_subunit_color = (0.1, 0.7, 0.3)
+    scene.pb_subunit_strength = 0.6
+    assert list(molecule.object.pb_filament.colors.keys()) == ["2:A"]
 
 
 def build_chain_rename():

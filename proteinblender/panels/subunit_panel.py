@@ -1,12 +1,17 @@
 """Cytoskeleton Subunits panel: every monomer of a filament, to pick and colour.
 
-Shown only while the scene has a filament. Its list has one row per monomer -
-"Actin 12", "Beta Tubulin 3 - Strand 5" - counted up each strand from the
-minus end, with a checkbox to select it and, once it has one, its own colour.
+Shown only while a filament's own row is ticked in the PB Outliner, and
+showing that filament; with several ticked, a picker chooses between them.
+Its list has one row per monomer - "Actin 12", "Beta Tubulin 3 - Strand 5" -
+counted up each strand from the minus end, with a checkbox to select it and,
+once it has one, its own colour.
 Pointing at a row lights its subunit up yellow in the viewport
-(``subunit_hover``). Below the list: select all, none or the rest, pick
-subunits by clicking them in the 3D Viewport, and colour or clear the selected
-ones. Colours are keyed with the filament's row in Create Keyframe.
+(``subunit_hover``). Above the list: select all, none or the rest, and on
+a filament of more than one chain - a microtubule's alpha and beta tubulin -
+every subunit of one chain. Below it: pick subunits by clicking them in the 3D
+Viewport; a colour and a strength that apply to the selected subunits as
+soon as they change, and Clear. Colours are keyed with the filament's row in
+Create Keyframe.
 """
 
 import fnmatch
@@ -15,7 +20,7 @@ import bpy
 from bpy.types import Panel, UIList
 
 from ..core import subunit_colors
-from ..operators.subunit_operators import filaments, subunit_filament
+from ..operators.subunit_operators import subunit_filament, ticked_filaments
 from . import subunit_hover
 
 
@@ -81,6 +86,15 @@ def _sync_later(molecule_id):
     bpy.app.timers.register(run, first_interval=0.0)
 
 
+def _chains_in_list_order(params):
+    """The chains a filament's list names, in the order it first names them."""
+    seen = []
+    for row in params.subunits:
+        if row.chain not in seen:
+            seen.append(row.chain)
+    return seen
+
+
 class PROTEINBLENDER_PT_subunits(Panel):
     """Every monomer of a filament, to select, pick and colour."""
 
@@ -96,7 +110,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
 
     @classmethod
     def poll(cls, context):
-        return bool(filaments())
+        return bool(ticked_filaments(context))
 
     def draw(self, context):
         layout = self.layout
@@ -108,37 +122,48 @@ class PROTEINBLENDER_PT_subunits(Panel):
         if molecule is None:
             box.label(text="No filament", icon="INFO")
             return
-        if len(filaments()) > 1:
+        if len(ticked_filaments(context)) > 1:
             box.prop(scene, "pb_subunit_filament", text="")
 
         params = molecule.object.pb_filament
         if subunit_colors.roster_stale(molecule):
             _sync_later(molecule.identifier)
 
-        box.template_list("PROTEINBLENDER_UL_subunits", "", params, "subunits",
-                          params, "subunit_index", rows=8)
-        # Drawn because the mouse may be on its way to the list.
-        subunit_hover.watch()
-
         picks = box.row(align=True)
-        for action, icon, text in (("ALL", "CHECKBOX_HLT", "All"),
+        for action, icon, text in (("ALL", "CHECKBOX_HLT", "Select All"),
                                    ("NONE", "CHECKBOX_DEHLT", "None"),
                                    ("INVERT", "ARROW_LEFTRIGHT", "Invert")):
             op = picks.operator("molecule.select_subunits", text=text, icon=icon)
             op.action = action
             op.molecule_id = molecule.identifier
+        chains = _chains_in_list_order(params)
+        if len(chains) > 1:
+            names = subunit_colors.chain_labels(molecule)
+            by_chain = box.row(align=True)
+            for chain in chains:
+                op = by_chain.operator("molecule.select_subunits",
+                                       text=f"All {names.get(chain, f'Chain {chain}')}",
+                                       icon="CHECKBOX_HLT")
+                op.action = "CHAIN"
+                op.chain = chain
+                op.molecule_id = molecule.identifier
+
+        box.template_list("PROTEINBLENDER_UL_subunits", "", params, "subunits",
+                          params, "subunit_index", rows=8)
+        # Drawn because the mouse may be on its way to the list.
+        subunit_hover.watch()
+
         pick = box.row()
         pick.operator("molecule.pick_subunits", icon="EYEDROPPER").molecule_id = (
             molecule.identifier)
 
         selected = len(subunit_colors.selected_keys(molecule))
+        # Both fields show the first selected subunit and, changed, apply to
+        # every selected one at once.
         paint = box.row(align=True)
         paint.enabled = selected > 0
-        swatch = paint.row(align=True)
-        swatch.ui_units_x = 3
-        swatch.prop(scene, "pb_subunit_color", text="")
-        paint.operator("molecule.color_subunits", text="Colour Selected",
-                       icon="BRUSH_DATA").molecule_id = molecule.identifier
+        paint.prop(scene, "pb_subunit_color", text="")
+        paint.prop(scene, "pb_subunit_strength", slider=True)
         clear = paint.operator("molecule.color_subunits", text="Clear", icon="X")
         clear.molecule_id = molecule.identifier
         clear.clear = True

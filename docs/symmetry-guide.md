@@ -108,17 +108,22 @@ The structure has to be in the filament's own frame for the radius to be right: 
 
 ### Colouring single subunits
 
-The **Cytoskeleton Subunits** panel, below the PB Outliner, lists every monomer of a filament: "Actin 12", or "Beta Tubulin 3 - Strand 5" for a microtubule, where alpha and beta tubulin are listed apart.
+Tick a filament's row in the PB Outliner and the **Cytoskeleton Subunits** panel appears below the outliner.
+It lists every monomer of that filament: "Actin 12", or "Beta Tubulin 3 - Strand 5" for a microtubule, where alpha and beta tubulin are listed apart.
 Each strand is counted up from its minus end, so "Actin 4" is the fourth actin from the pointed end.
-With more than one filament in the scene, a picker at the top chooses which one it lists.
+With more than one filament ticked, a picker at the top chooses which one it lists.
+Untick the filament and the panel goes away.
 
 - Point at a row to find its subunit: it lights up yellow in the 3D Viewport while the mouse is on the row.
-- Tick rows to select subunits, or use **All**, **None** and **Invert**.
+- Tick rows to select subunits, or use **Select All**, **None** and **Invert** above the list.
+- On a microtubule, **All Alpha Tubulin** and **All Beta Tubulin** select every subunit of that tubulin and deselect the rest.
 - **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
-- **Colour Selected** paints the selected subunits the colour beside it; **Clear** gives them back the filament's own colour.
+- The colour and **Strength** fields below the list show the first selected subunit.
+  Change either and every selected subunit takes it at once; there is no button to press.
+- Strength mixes the paint with the filament's own colour: 1 is entirely the paint, 0 the filament's colour.
+- **Clear** gives the selected subunits back the filament's own colour.
 
 A painted subunit keeps its colour while the filament changes: grow it, shrink it or bend it and the colour stays on the same subunit, and one shrunk away gets its colour back when it returns.
-Each colour has a strength, which mixes it with the subunit's own colour.
 Colours are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)).
 
 ## Create New Assembly

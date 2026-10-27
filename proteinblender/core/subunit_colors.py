@@ -67,8 +67,14 @@ def parse_key(name: str) -> Tuple[int, str]:
     return int(site), chain
 
 
+#: Set while many entries change at once, so each is not drawn on its own.
+_QUIET = False
+
+
 def _changed(self, context):
     """A colour was edited: draw it."""
+    if _QUIET:
+        return
     molecule = molecule_of_object(self.id_data)
     if molecule is not None:
         refresh(molecule)
@@ -369,24 +375,72 @@ def ensure_paintable(molecule) -> None:
 # Changing colours
 # ---------------------------------------------------------------------------
 
-def paint(molecule, keys: Iterable[str], color, strength: float = 1.0) -> int:
-    """Colour these monomers. Returns how many."""
+def _set_entries(molecule, keys: Iterable[str], color=None, strength=None,
+                 add: bool = True) -> int:
+    """Write the colour and/or strength of these monomers, then draw them once.
+
+    A monomer with no entry yet gets one (painted at full strength) when
+    ``add``; otherwise it is left as it is. Returns how many were written.
+    """
+    global _QUIET
     params = _params(molecule)
     if params is None:
         return 0
     done = 0
-    for name in keys:
-        site, chain = parse_key(name)
-        item = params.colors.get(name)
-        if item is None:
-            item = params.colors.add()
-            item.name = name
-            item.site, item.chain = site, chain
-        item.color = tuple(color)[:3]
-        item.strength = strength
-        done += 1
+    _QUIET = True
+    try:
+        for name in keys:
+            item = params.colors.get(name)
+            if item is None:
+                if not add:
+                    continue
+                site, chain = parse_key(name)
+                item = params.colors.add()
+                item.name = name
+                item.site, item.chain = site, chain
+                item.color = own_colour(molecule, chain)
+                item.strength = 1.0
+            if color is not None:
+                item.color = tuple(color)[:3]
+            if strength is not None:
+                item.strength = strength
+            done += 1
+    finally:
+        _QUIET = False
     refresh(molecule)
     return done
+
+
+def paint(molecule, keys: Iterable[str], color, strength: float = 1.0) -> int:
+    """Colour these monomers. Returns how many."""
+    return _set_entries(molecule, keys, color=color, strength=strength)
+
+
+def recolour(molecule, keys: Iterable[str], color) -> int:
+    """Give these monomers this colour, each keeping its strength."""
+    return _set_entries(molecule, keys, color=color)
+
+
+def restrength(molecule, keys: Iterable[str], strength: float) -> int:
+    """Set how strongly the painted ones of these monomers show their colour."""
+    return _set_entries(molecule, keys, strength=strength, add=False)
+
+
+def own_colour(molecule, chain: str) -> Tuple[float, float, float]:
+    """The colour a chain is drawn in when none of its monomers is painted."""
+    for domain in molecule.domains.values():
+        if str(domain.chain_id) == chain and not getattr(domain, "is_copy", False):
+            return tuple(domain.color)[:3]
+    return (0.8, 0.8, 0.8)
+
+
+def shown(molecule, name: str) -> Tuple[Tuple[float, float, float], float]:
+    """``(colour, strength)`` a monomer's row shows: its paint, else its chain's colour."""
+    params = _params(molecule)
+    item = params.colors.get(name) if params is not None else None
+    if item is not None:
+        return tuple(item.color), float(item.strength)
+    return own_colour(molecule, parse_key(name)[1]), 1.0
 
 
 def clear(molecule, keys: Iterable[str]) -> int:

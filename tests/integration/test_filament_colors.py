@@ -577,6 +577,23 @@ def test_select_all_selects_only_what_is_left():
     assert _colors().selected_keys(molecule) == []
 
 
+def test_select_all_of_one_tubulin_selects_only_that_tubulin():
+    """On a microtubule, all alpha selects every alpha monomer and nothing else."""
+    chains = F.tubulin_chains()
+    molecule = _build("MICROTUBULE", 17.0)        # two dimers a protofilament
+    _colors().sync_roster(molecule)
+    rows = molecule.object.pb_filament.subunits
+    rows[f"0:{chains['beta']}"].select = True     # a beta picked earlier is let go
+    for tubulin, other in (("alpha", "beta"), ("beta", "alpha")):
+        assert bpy.ops.molecule.select_subunits(
+            'EXEC_DEFAULT', molecule_id=molecule.identifier, action='CHAIN',
+            chain=chains[tubulin]) == {'FINISHED'}
+        chosen = _colors().selected_keys(molecule)
+        assert len(chosen) == 2 * 13, (tubulin, len(chosen))
+        assert {key.split(":")[1] for key in chosen} == {chains[tubulin]}
+        assert not any(row.select for row in rows if row.chain == chains[other])
+
+
 def test_a_ray_at_a_subunit_picks_that_subunit():
     """Aimed in from outside the filament at the fourth subunit from the pointed end."""
     molecule = _build("ACTIN", 27.5)
@@ -674,3 +691,150 @@ def test_a_highlight_does_not_pass_to_a_new_filament_of_the_same_name():
     instances, painted = _drawn(second)
     assert (len(instances), len(painted)) == (10, 0)
     assert colors.overlay(second) == {}
+
+
+# --------------------------------------------------------------------------
+# The Subunits panel follows the filament ticked in the PB Outliner
+# --------------------------------------------------------------------------
+
+def _tick(molecule_id):
+    """Click a top-level row's checkbox in the PB Outliner, as a user does."""
+    assert bpy.ops.proteinblender.outliner_select(
+        'EXEC_DEFAULT', item_id=molecule_id) == {'FINISHED'}
+
+
+def _ticked():
+    return sorted(row.item_id for row in bpy.context.scene.outliner_items
+                  if row.is_selected and row.item_type == 'PROTEIN')
+
+
+def _untick_all():
+    for molecule_id in _ticked():
+        _tick(molecule_id)
+    assert _ticked() == []
+
+
+def _panel_shows():
+    from proteinblender.panels.subunit_panel import PROTEINBLENDER_PT_subunits
+    return PROTEINBLENDER_PT_subunits.poll(bpy.context)
+
+
+def test_the_subunits_panel_shows_only_while_its_filament_is_ticked():
+    molecule = _build("ACTIN", 27.5)
+    _untick_all()
+    assert not _panel_shows()
+
+    _tick(molecule.identifier)
+    assert _ticked() == [molecule.identifier]
+    assert _panel_shows()
+
+    _tick(molecule.identifier)
+    assert _ticked() == []
+    assert not _panel_shows()
+
+
+def test_the_subunits_list_shows_the_ticked_filament():
+    from proteinblender.operators.subunit_operators import filament_items, subunit_filament
+    actin = _build("ACTIN", 27.5)
+    tube = _build("MICROTUBULE", 17.0)
+    _untick_all()
+
+    for ticked in (actin, tube, actin):
+        _untick_all()
+        _tick(ticked.identifier)
+        assert subunit_filament(bpy.context).identifier == ticked.identifier
+        # Its picker offers only what is ticked.
+        offered = [item[0] for item in filament_items(None, bpy.context)]
+        assert offered == [ticked.identifier], offered
+
+    # With both ticked the picker offers both, and the list shows the one picked.
+    _tick(tube.identifier)
+    assert _ticked() == sorted([actin.identifier, tube.identifier])
+    bpy.context.scene.pb_subunit_filament = tube.identifier
+    assert subunit_filament(bpy.context).identifier == tube.identifier
+    bpy.context.scene.pb_subunit_filament = actin.identifier
+    assert subunit_filament(bpy.context).identifier == actin.identifier
+
+
+# --------------------------------------------------------------------------
+# The colour and strength fields apply to the selected subunits as they change
+# --------------------------------------------------------------------------
+
+GREEN = (0.0, 1.0, 0.0)
+
+
+def _ticked_actin():
+    molecule = _build("ACTIN", 27.5)
+    _untick_all()
+    _tick(molecule.identifier)
+    _colors().sync_roster(molecule)
+    return molecule
+
+
+def _select(molecule, names):
+    for row in molecule.object.pb_filament.subunits:
+        row.select = row.name in names
+
+
+def test_changing_the_colour_paints_the_selected_subunits_at_once():
+    molecule = _ticked_actin()
+    _select(molecule, ["3:A", "6:A"])
+    bpy.context.scene.pb_subunit_color = GREEN
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (8, 2)
+    for _centre, colour in painted:
+        assert np.allclose(colour, GREEN, atol=1e-3), colour
+
+
+def test_changing_the_colour_with_nothing_selected_paints_nothing():
+    molecule = _ticked_actin()
+    _select(molecule, [])
+    bpy.context.scene.pb_subunit_color = GREEN
+    assert len(_drawn(molecule)[1]) == 0
+    assert len(molecule.object.pb_filament.colors) == 0
+    assert np.allclose(bpy.context.scene.pb_subunit_color, GREEN)
+
+
+def test_the_strength_slider_fades_the_selected_subunits():
+    molecule = _ticked_actin()
+    own = _drawn(molecule)[0][0][1]
+    _select(molecule, ["2:A"])
+    bpy.context.scene.pb_subunit_color = RED
+    bpy.context.scene.pb_subunit_strength = 0.5
+    _instances, painted = _drawn(molecule)
+    assert len(painted) == 1
+    assert np.allclose(painted[0][1], (own + np.array(RED)) / 2, atol=0.02)
+    # Back to full strength, the subunit is its own colour again.
+    bpy.context.scene.pb_subunit_strength = 1.0
+    assert np.allclose(_drawn(molecule)[1][0][1], RED, atol=1e-3)
+
+
+def test_the_colour_field_shows_the_first_selected_subunit():
+    molecule = _ticked_actin()
+    own = _drawn(molecule)[0][0][1]
+    _select(molecule, ["5:A"])
+    bpy.context.scene.pb_subunit_color = GREEN
+    bpy.context.scene.pb_subunit_strength = 0.3
+
+    _select(molecule, ["2:A"])                    # not painted: as the filament draws it
+    assert np.allclose(bpy.context.scene.pb_subunit_color, own, atol=0.02)
+    assert bpy.context.scene.pb_subunit_strength == pytest.approx(1.0)
+    _select(molecule, ["5:A", "2:A"])             # the first in the list
+    assert np.allclose(bpy.context.scene.pb_subunit_color, own, atol=0.02)
+    _select(molecule, ["5:A"])
+    assert np.allclose(bpy.context.scene.pb_subunit_color, GREEN, atol=1e-3)
+    assert bpy.context.scene.pb_subunit_strength == pytest.approx(0.3)
+
+
+def test_the_same_colour_again_paints_the_next_subunits():
+    """Paint one red, select another, choose red again: both are red."""
+    molecule = _ticked_actin()
+    _select(molecule, ["2:A"])
+    bpy.context.scene.pb_subunit_color = RED
+    _select(molecule, ["7:A"])
+    bpy.context.scene.pb_subunit_color = RED
+    assert sorted(molecule.object.pb_filament.colors.keys()) == ["2:A", "7:A"]
+    _instances, painted = _drawn(molecule)
+    assert len(painted) == 2
+    for _centre, colour in painted:
+        assert np.allclose(colour, RED, atol=1e-3), colour

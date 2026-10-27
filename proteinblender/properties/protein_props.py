@@ -285,6 +285,58 @@ def _set_symmetry_length(self, nanometres):
         self.pb_symmetry_count = min(count, builder.MAX_COUNT)
 
 
+# The Subunits panel's colour and strength fields show the first selected
+# subunit and, edited, apply to every selected one at once. With no filament
+# ticked or nothing selected they keep the last value given.
+_SUBUNIT_COLOR_KEY = "pb_subunit_color_value"
+_SUBUNIT_STRENGTH_KEY = "pb_subunit_strength_value"
+
+
+def _subunit_selection():
+    """``(filament, selected keys)`` of the Subunits panel, or ``(None, [])``."""
+    from ..core import subunit_colors
+    from ..operators.subunit_operators import subunit_filament
+    try:
+        molecule = subunit_filament(bpy.context)
+        if molecule is None:
+            return None, []
+        return molecule, subunit_colors.selected_keys(molecule)
+    except (AttributeError, ReferenceError):
+        return None, []
+
+
+def _get_subunit_color(scene):
+    molecule, keys = _subunit_selection()
+    if keys:
+        from ..core import subunit_colors
+        return subunit_colors.shown(molecule, keys[0])[0]
+    return tuple(scene.get(_SUBUNIT_COLOR_KEY, (0.9, 0.2, 0.2)))
+
+
+def _set_subunit_color(scene, value):
+    scene[_SUBUNIT_COLOR_KEY] = tuple(value)
+    molecule, keys = _subunit_selection()
+    if keys:
+        from ..core import subunit_colors
+        subunit_colors.recolour(molecule, keys, value)
+
+
+def _get_subunit_strength(scene):
+    molecule, keys = _subunit_selection()
+    if keys:
+        from ..core import subunit_colors
+        return subunit_colors.shown(molecule, keys[0])[1]
+    return float(scene.get(_SUBUNIT_STRENGTH_KEY, 1.0))
+
+
+def _set_subunit_strength(scene, value):
+    scene[_SUBUNIT_STRENGTH_KEY] = float(value)
+    molecule, keys = _subunit_selection()
+    if keys:
+        from ..core import subunit_colors
+        subunit_colors.restrength(molecule, keys, value)
+
+
 def _subunit_filament_items(self, context):
     from ..operators.subunit_operators import filament_items
     return filament_items(self, context)
@@ -409,8 +461,18 @@ def register():
     )
     bpy.types.Scene.pb_subunit_color = FloatVectorProperty(
         name="Subunit Colour",
-        description="The colour Colour Selected paints the selected subunits",
+        description=("The colour of the selected subunits. Change it to paint "
+                     "every selected subunit at once"),
         size=3, subtype="COLOR", min=0.0, max=1.0, default=(0.9, 0.2, 0.2),
+        get=_get_subunit_color, set=_set_subunit_color,
+    )
+    bpy.types.Scene.pb_subunit_strength = FloatProperty(
+        name="Strength",
+        description=("How strongly the selected subunits show their colour: 0 "
+                     "is the filament's own colour, 1 entirely their paint. "
+                     "Key it with Create Keyframe to fade"),
+        min=0.0, max=1.0, default=1.0, subtype="FACTOR",
+        get=_get_subunit_strength, set=_set_subunit_strength,
     )
     bpy.types.Scene.pb_subunit_filament = EnumProperty(
         name="Filament",
@@ -456,7 +518,7 @@ def unregister():
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
-                 "pb_subunit_color", "pb_subunit_filament",
+                 "pb_subunit_color", "pb_subunit_strength", "pb_subunit_filament",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

@@ -327,21 +327,49 @@ def viewport():
     return area, next(r for r in area.regions if r.type == 'WINDOW')
 
 
-def show_subunits():
+def tick_in_outliner(molecule_id):
+    """Click a top-level row's checkbox in the PB Outliner."""
+    with g['ui_override']():
+        assert bpy.ops.proteinblender.outliner_select(
+            'EXEC_DEFAULT', item_id=molecule_id) == {'FINISHED'}
+
+
+def untick_the_filament():
     area, region = viewport()
     area.spaces.active.shading.type = 'MATERIAL'
     with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
         bpy.ops.view3d.view_all()
-    panel_area = g['protein_workspace_panel_area']()
-    panel_area.tag_redraw()
-    return 'shown'
+    mol = filament()
+    row = next(r for r in bpy.context.scene.outliner_items if r.item_id == mol.identifier)
+    if row.is_selected:
+        tick_in_outliner(mol.identifier)
+    assert not row.is_selected
+    # Forget what was drawn, to see what the next redraw draws.
+    for cls in (Builders, Subunits):
+        data.pop(cls.__name__ + '_layout', None)
+    g['protein_workspace_panel_area']().tag_redraw()
+    return 'unticked'
+
+
+def verify_hidden_and_tick():
+    assert Builders.__name__ + '_layout' in data, 'the Properties editor did not redraw'
+    assert Subunits.__name__ + '_layout' not in data, (
+        'the Subunits panel was drawn with its filament unticked')
+    capture('subunits-hidden.png')
+    tick_in_outliner(filament().identifier)
+    g['protein_workspace_panel_area']().tag_redraw()
+    return 'hidden until ticked'
 
 
 def inspect_subunits_panel():
     text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
     assert 'Cytoskeleton Subunits' in text, 'the Subunits panel was not drawn'
-    for label in ('Pick in Viewport', 'Colour Selected', 'Nothing selected'):
+    for label in ('Pick in Viewport', 'Strength', 'Clear', 'Nothing selected'):
         assert label in text, (label, text[:400])
+    # The select buttons sit above the list, a microtubule's tubulins below Select All.
+    order = [text.find(label) for label in (
+        'Select All', 'All Alpha Tubulin', 'All Beta Tubulin', 'Pick in Viewport')]
+    assert -1 not in order and order == sorted(order), (order, text[:600])
     mol = filament()
     rows = mol.object.pb_filament.subunits
     # 12 dimers up each of 13 protofilaments, two monomers a dimer.
@@ -357,10 +385,8 @@ def colour_three():
     for row in rows[:3]:
         row.select = True
     data['coloured'] = [row.name for row in rows[:3]]
+    # Changing the colour field paints them; there is no button to press.
     bpy.context.scene.pb_subunit_color = (0.1, 0.9, 0.2)
-    with g['protein_workspace_override']():
-        assert bpy.ops.molecule.color_subunits(
-            'EXEC_DEFAULT', molecule_id=mol.identifier) == {'FINISHED'}
     return ', '.join(data['coloured'])
 
 
@@ -371,6 +397,31 @@ def verify_coloured():
     assert '3 selected' in text, text[:400]
     capture('subunits-coloured.png')
     return '3 coloured'
+
+
+def select_all_alpha():
+    mol = filament()
+    alpha = next(row.chain for row in mol.object.pb_filament.subunits
+                 if row.label.startswith('Alpha Tubulin'))
+    data['alpha'] = alpha
+    with g['protein_workspace_override']():
+        assert bpy.ops.molecule.select_subunits(
+            'EXEC_DEFAULT', molecule_id=mol.identifier, action='CHAIN',
+            chain=alpha) == {'FINISHED'}
+    return alpha
+
+
+def verify_all_alpha():
+    mol = filament()
+    present = SC.present_sites(mol)
+    rows = [row for row in mol.object.pb_filament.subunits if row.site in present]
+    chosen = [row for row in rows if row.select]
+    assert chosen and all(row.chain == data['alpha'] for row in chosen)
+    assert len(chosen) == sum(1 for row in rows if row.chain == data['alpha'])
+    text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
+    assert f'{len(chosen)} selected' in text, text[:400]
+    capture('subunits-all-alpha.png')
+    return f'{len(chosen)} alpha'
 
 
 def aim_at_a_subunit():
@@ -528,7 +579,9 @@ g['steps'][:] = [
     ('inspect Create Keyframe and tick the filament', inspect_keyframe_dialog), ('settle', idle),
     *confirm('OK the keyframe'),
     ('verify the filament is keyed', verify_keyed), ('settle', idle),
-    ('show the Subunits panel', show_subunits), ('settle', idle), ('settle', idle),
+    ('untick the filament in the PB Outliner', untick_the_filament), ('settle', idle), ('settle', idle),
+    ('verify the Subunits panel is hidden, and tick the filament', verify_hidden_and_tick),
+    ('settle', idle), ('settle', idle),
     ('inspect the Subunits panel', inspect_subunits_panel), ('settle', idle),
     ('colour three subunits', colour_three), ('settle', idle), ('settle', idle),
     ('verify the colours', verify_coloured), ('settle', idle),
@@ -544,4 +597,6 @@ g['steps'][:] = [
     ('verify the row is lit', verify_row_lit), ('settle', idle),
     ('leave the list', leave_the_list), ('settle', idle), ('settle', idle), ('settle', idle),
     ('verify the row is dark again', verify_row_dark), ('settle', idle),
+    ('select all alpha tubulin', select_all_alpha), ('settle', idle), ('settle', idle),
+    ('verify only alpha tubulin is selected', verify_all_alpha), ('settle', idle),
 ]
