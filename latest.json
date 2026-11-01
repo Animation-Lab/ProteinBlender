@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-10-31T05:31:23+00:00",
+  "generated_at": "2026-11-01T05:55:48+00:00",
   "summary": {
-    "views": 34,
-    "visitors": 21,
-    "clones": 235,
-    "cloners": 60
+    "views": 28,
+    "visitors": 18,
+    "clones": 241,
+    "cloners": 62
   },
   "all_time": {
     "views": 1292,
     "visitors": 649,
-    "clones": 5541,
-    "cloners": 2315,
-    "days_tracked": 227
+    "clones": 5559,
+    "cloners": 2321,
+    "days_tracked": 228
   },
   "current_day": {
+    "date": "2026-10-30",
+    "views": 0,
+    "visitors": 0,
+    "clones": 18,
+    "cloners": 6
+  },
+  "previous_day": {
     "date": "2026-10-29",
     "views": 1,
     "visitors": 1,
     "clones": 10,
     "cloners": 2
   },
-  "previous_day": {
-    "date": "2026-10-28",
-    "views": 1,
-    "visitors": 1,
-    "clones": 10,
-    "cloners": 2
-  },
   "delta_since_previous_day": {
-    "views": 0,
-    "visitors": 0,
-    "clones": 0,
-    "cloners": 0
+    "views": -1,
+    "visitors": -1,
+    "clones": 8,
+    "cloners": 4
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 11,
-      "uniques": 10
+      "count": 8,
+      "uniques": 7
     },
     {
       "referrer": "github.com",
@@ -65,26 +65,20 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 12,
-      "uniques": 12
+      "count": 10,
+      "uniques": 10
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 9,
-      "uniques": 8
+      "count": 7,
+      "uniques": 6
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/17",
       "title": "/discussions/17",
       "count": 6,
       "uniques": 3
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
-      "title": "/releases/tag/1.1.0",
-      "count": 2,
-      "uniques": 2
     },
     {
       "path": "/Animation-Lab/proteinblender/discussions",
