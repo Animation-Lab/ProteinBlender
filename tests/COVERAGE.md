@@ -593,6 +593,11 @@ on a membrane whose typical gap was 0.28 nm.
   a partial dependency set shipping as a complete release. Guarded by
   `test_build_tooling.py` (verified red pre-fix).
 
+- **The daily site and extension-index publish failed for eleven days** (2026-11-01).
+  `publish-extension.yml` ran on `ubuntu-latest`, and `ruby/setup-ruby` needs a Ruby prebuilt for that exact image; when `ubuntu-latest` became 26.04 on 2026-10-20 there was no 3.1.7 build for it, so every run failed until one appeared on 2026-10-31.
+  The job is now pinned to `ubuntu-26.04`.
+  `test_repository_contracts.py::test_jobs_that_install_prebuilt_ruby_pin_their_runner_image` was red before the fix.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

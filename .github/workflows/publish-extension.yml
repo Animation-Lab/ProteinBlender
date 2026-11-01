@@ -21,7 +21,10 @@ permissions:
 jobs:
   publish:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: setup-ruby needs a Ruby prebuilt for this exact
+    # image. When ubuntu-latest moved to 26.04 before a 3.1.7 build existed for
+    # it, every publish failed for eleven days. Move the pin on purpose.
+    runs-on: ubuntu-26.04
 
     steps:
       # Always build the site from `main`, never from the ref that happened to
