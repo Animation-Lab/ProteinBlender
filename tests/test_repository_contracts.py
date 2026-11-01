@@ -294,3 +294,26 @@ def test_shipped_manifest_runs_on_every_supported_blender_python():
         f"shipped wheels cover Python {sorted(derived)}, but Blender 5.0 needs "
         f"3.11 and Blender 5.1/5.2 need 3.13"
     )
+
+
+def test_jobs_that_install_prebuilt_ruby_pin_their_runner_image():
+    """A job using ruby/setup-ruby must name its Ubuntu image, not ubuntu-latest.
+
+    setup-ruby downloads a Ruby built for one exact runner image. When GitHub
+    moved ubuntu-latest to 26.04 (2026-10-20) no 3.1.7 build existed for it yet,
+    and every daily site and extension-index publish failed for eleven days.
+    That would have blocked the next release from ever reaching testers.
+    """
+    import yaml
+
+    offenders = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name, job in (workflow.get("jobs") or {}).items():
+            uses = [str(step.get("uses", "")) for step in job.get("steps", [])]
+            if not any(u.startswith("ruby/setup-ruby") for u in uses):
+                continue
+            runner = str(job.get("runs-on", ""))
+            if not re.fullmatch(r"ubuntu-\d+\.\d+", runner):
+                offenders.append(f"{path.name}:{name} runs-on {runner!r}")
+    assert not offenders, offenders
