@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-11-01T05:55:48+00:00",
+  "generated_at": "2026-11-02T05:55:24+00:00",
   "summary": {
-    "views": 28,
-    "visitors": 18,
-    "clones": 241,
-    "cloners": 62
+    "views": 33,
+    "visitors": 24,
+    "clones": 229,
+    "cloners": 56
   },
   "all_time": {
-    "views": 1292,
-    "visitors": 649,
-    "clones": 5559,
-    "cloners": 2321,
-    "days_tracked": 228
+    "views": 1300,
+    "visitors": 657,
+    "clones": 5576,
+    "cloners": 2326,
+    "days_tracked": 229
   },
   "current_day": {
+    "date": "2026-10-31",
+    "views": 8,
+    "visitors": 8,
+    "clones": 17,
+    "cloners": 5
+  },
+  "previous_day": {
     "date": "2026-10-30",
     "views": 0,
     "visitors": 0,
     "clones": 18,
     "cloners": 6
   },
-  "previous_day": {
-    "date": "2026-10-29",
-    "views": 1,
-    "visitors": 1,
-    "clones": 10,
-    "cloners": 2
-  },
   "delta_since_previous_day": {
-    "views": -1,
-    "visitors": -1,
-    "clones": 8,
-    "cloners": 4
+    "views": 8,
+    "visitors": 8,
+    "clones": -1,
+    "cloners": -1
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 8,
-      "uniques": 7
+      "count": 7,
+      "uniques": 6
     },
     {
       "referrer": "github.com",
@@ -65,14 +65,14 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 10,
-      "uniques": 10
+      "count": 17,
+      "uniques": 16
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 7,
-      "uniques": 6
+      "count": 6,
+      "uniques": 5
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/17",
@@ -89,12 +89,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/alpha-1.2.4",
       "title": "/releases/tag/alpha-1.2.4",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/tree/main/tests",
-      "title": "/tree/main/tests",
       "count": 1,
       "uniques": 1
     },
