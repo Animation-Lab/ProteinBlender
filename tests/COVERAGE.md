@@ -1587,6 +1587,21 @@ on a membrane whose typical gap was 0.28 nm.
   The job is now pinned to `ubuntu-26.04`.
   `test_repository_contracts.py::test_jobs_that_install_prebuilt_ruby_pin_their_runner_image` was red before the fix.
 
+- **A broken dependency made the add-on vanish without a word** (2026-11-01, reported by Janet and Rachel after an alpha update).
+  Blender deletes `bl_info` from an extension's module before calling `register()`, and the missing-dependencies `register()` read `bl_info['name']`, so it raised NameError and Blender dropped the add-on: no tab, no popup.
+  The fallback now registers a ProteinBlender sidebar panel that names the failing import and offers **Retry Install**.
+  `test_dependency_fallback.py::test_broken_dependencies_still_register_and_say_why` was red before the fix (`NameError: name 'bl_info' is not defined`); the same NameError was reproduced end to end by installing the built zip in an isolated Blender 5.2 profile and removing biotite from its `.local` site-packages.
+
+- **The dependency error popup crashed Blender** (2026-11-01).
+  `_show_error_popup` called `popup_menu` while the add-on was still importing; in a background session that is an access violation, and at an interactive startup there is no window, so the message was lost.
+  Messages are now logged at once and shown from a timer once a window exists (never in background mode).
+  Every `test_dependency_fallback.py` case that reaches the installer died with `Windows fatal exception: access violation` in `popup_menu` before the fix.
+
+- **A healthy start suppressed the next day's dependency repair** (2026-11-01).
+  Every successful start refreshed the same 24-hour timestamp that a failed install used, so dependencies that broke within a day of a good start were never repaired and the log claimed "an install was attempted recently".
+  The record now holds repair attempts only and is cleared when the packages import.
+  `test_dependency_fallback.py::test_a_healthy_start_does_not_hold_back_a_later_repair` was red before the fix (`assert []`); `test_a_failed_repair_is_not_retried_on_every_start` keeps the back-off and `test_retry_runs_a_repair_even_inside_the_back_off` covers the panel's button.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

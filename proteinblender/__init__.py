@@ -73,6 +73,18 @@ def _unload_modules() -> None:
         time.sleep(0.5)
 
 
+def _specifier_set(spec: str):
+    """A packaging SpecifierSet for ``spec``, e.g. ">=1.1,<1.7".
+
+    Blender 5.1+ bundles ``packaging``; 5.0 does not, but its pip vendors it.
+    """
+    try:
+        from packaging.specifiers import SpecifierSet
+    except ImportError:
+        from pip._vendor.packaging.specifiers import SpecifierSet
+    return SpecifierSet(spec, prereleases=True)
+
+
 def _needs_reinstall(package_name: str, required_version: str) -> bool:
     """Check if a package needs to be reinstalled.
 
@@ -84,20 +96,14 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
         bool: True if the package needs to be reinstalled, False otherwise.
     """
     try:
-        import pkg_resources
-        dist = pkg_resources.get_distribution(package_name)
+        # importlib.metadata, not pkg_resources: setuptools has deprecated
+        # pkg_resources and is removing it, and Blender bundles setuptools.
+        from importlib import metadata
+        installed = metadata.version(package_name)
 
-        if not required_version:
-            # No specific version required, package exists, so it's fine
-            # But still check if it can be imported
-            pass
-        else:
-            from pkg_resources import Requirement
-            req = Requirement.parse(f"{package_name}{required_version}")
-
-            # Check if current version meets requirement
-            if dist.version not in req:
-                logger.info(f"{package_name} version {dist.version} does not meet requirement {required_version}")
+        if required_version:
+            if installed not in _specifier_set(required_version):
+                logger.info(f"{package_name} version {installed} does not meet requirement {required_version}")
                 return True
 
         # Try to import the package to verify it's not corrupted
@@ -127,11 +133,8 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
         return False  # Package is installed and working
 
     except Exception:
-        # Deliberately broad, and deliberately NOT a tuple naming
-        # pkg_resources.DistributionNotFound: the `import pkg_resources` above is
-        # inside this try, so naming that attribute in the except clause raised
-        # NameError in exactly the case it was meant to catch. Exception already
-        # covers DistributionNotFound.
+        # Deliberately broad: a missing distribution (PackageNotFoundError), an
+        # unreadable one, or an unparseable spec all mean "reinstall".
         return True  # Package not found or error checking, needs install
 
 
@@ -145,6 +148,7 @@ def _can_import_core_packages():
         bool: True if all core packages can be imported successfully
     """
     import importlib
+    global _import_problem
 
     core_packages = ['biotite', 'databpy', 'MDAnalysis', 'numpy', 'scipy', 'mrcfile', 'starfile']
 
@@ -153,12 +157,22 @@ def _can_import_core_packages():
             # Map package names to their import names if different
             import_name = 'yaml' if package == 'PyYAML' else package
             importlib.import_module(import_name)
-        except ImportError:
-            logger.debug(f"Core package {package} cannot be imported")
+        except Exception as e:
+            # Not just ImportError: a half-replaced package can fail on import
+            # with anything (AttributeError from a mismatched version, OSError
+            # from a missing DLL), and letting that escape kills the whole
+            # add-on import with no explanation.
+            _import_problem = f"{package}: {type(e).__name__}: {e}"
+            logger.warning(f"Core package cannot be imported - {_import_problem}")
             return False
 
+    _import_problem = ""
     logger.debug("All core packages are importable")
     return True
+
+
+#: Why the core packages cannot be imported, for the sidebar panel; empty when they can.
+_import_problem = ""
 
 
 def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0) -> bool:
@@ -225,29 +239,15 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
         logger.info("Preparing for package installation on Windows...")
         _unload_modules()
 
-    try:
-        import pkg_resources
-    except ImportError:
-        logger.error("pkg_resources not found. Attempting to install setuptools...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "setuptools"])
-            import pkg_resources
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to install setuptools: {e}")
-            _show_error_popup("Failed to install setuptools. Please install manually.")
-            return False
-
     import importlib.util
     import glob
 
     # Find the wheels directory relative to this file
     wheels_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "wheels"))
 
-    # Reload pkg_resources to ensure it picks up newly installed packages
-    try:
-        importlib.reload(pkg_resources)
-    except Exception as e:
-        logger.warning(f"Could not reload pkg_resources: {e}")
+    # Make the import system and importlib.metadata see packages installed
+    # since the last look.
+    importlib.invalidate_caches()
 
     packages_installed_or_updated = False
     restart_required = False
@@ -387,27 +387,57 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
 
     return True
 
+_pending_popups = []
+
+
 def _show_error_popup(message: str) -> None:
-    """Show an error popup in Blender's UI."""
-    def draw_error(self, context):
-        self.layout.label(text=message, icon='ERROR')
-        if "System Console" not in message:
-            self.layout.label(text="See System Console (Window > Toggle System Console).", icon='INFO')
-    
+    """Tell the user about a dependency problem once Blender has a window.
+
+    Never opens the popup on the spot. This runs while the add-on is being
+    imported or registered, when Blender has no usable window: calling
+    ``popup_menu`` there crashed Blender outright (an access violation, seen
+    in background mode), and at an interactive startup it was silently lost.
+    The message is logged now and shown from a timer once a window exists.
+    """
+    logger.error(message)
+    _pending_popups.append(message)
+    if bpy.app.background:
+        return
     try:
-        if bpy.context.window_manager and bpy.context.window:
-            bpy.context.window_manager.popup_menu(draw_error, title="ProteinBlender Dependency Error", icon='ERROR')
-        else:
-            logger.error(f"Could not show popup (no window context): {message}")
-    except RuntimeError:
-        logger.error(f"Could not show popup: {message}")
+        if not bpy.app.timers.is_registered(_flush_popups):
+            bpy.app.timers.register(_flush_popups, first_interval=1.0, persistent=True)
+    except Exception as e:
+        logger.debug(f"Could not schedule the dependency popup: {e}")
+
+
+def _flush_popups():
+    """Timer: show the queued dependency messages in the first window."""
+    wm = bpy.context.window_manager
+    windows = list(wm.windows) if wm else []
+    if not windows:
+        return 1.0  # Blender is still starting up; try again shortly
+    messages = list(dict.fromkeys(_pending_popups))
+    _pending_popups.clear()
+
+    def draw_error(self, context):
+        for message in messages:
+            self.layout.label(text=message, icon='ERROR')
+        self.layout.label(text="Open the ProteinBlender tab in the 3D View sidebar (N) to retry.",
+                          icon='INFO')
+        self.layout.label(text="See System Console (Window > Toggle System Console).", icon='CONSOLE')
+
+    try:
+        with bpy.context.temp_override(window=windows[0]):
+            wm.popup_menu(draw_error, title="ProteinBlender Dependency Error", icon='ERROR')
+    except Exception as e:
+        logger.error(f"Could not show popup: {e}")
+    return None
 
 
 def _reload_modules(packages: Dict[str, str]) -> None:
     """Reload modules after package installation."""
     try:
-        import pkg_resources
-        importlib.reload(pkg_resources)
+        importlib.invalidate_caches()
 
         # Reload specific modules if they were updated
         modules_to_reload = {
@@ -480,34 +510,48 @@ REQUIRED_PACKAGES = {
 import json
 from pathlib import Path
 
+# A record of the last automatic repair attempt, so a repair that fails is not
+# re-run on every startup (pip is slow and freezes Blender while it runs).
+#
+# It records attempts only. It used to be refreshed on every *healthy* start
+# too, under a key it then read as "an install was attempted", so dependencies
+# that broke within a day of a good start were never repaired and the log said
+# a repair had been tried when none had. Older files carry only that old
+# 'last_check' key, which is deliberately ignored.
 _cache_file = Path(__file__).parent / ".dependency_cache.json"
-_cache_validity_hours = 24  # Check dependencies once per day
+_cache_validity_hours = 24
+_ATTEMPT_KEY = 'last_install_attempt'
 
-def _should_check_dependencies():
-    """Check if we need to verify dependencies based on cache"""
-    if not _cache_file.exists():
-        return True
 
+def _last_install_attempt():
+    """When an automatic repair last ran (seconds since the epoch), or None."""
     try:
         with open(_cache_file, 'r') as f:
-            cache_data = json.load(f)
+            value = json.load(f).get(_ATTEMPT_KEY)
+        return float(value) if value is not None else None
+    except Exception:
+        return None
 
-        last_check = cache_data.get('last_check', 0)
-        import time
-        hours_since_check = (time.time() - last_check) / 3600
 
-        return hours_since_check > _cache_validity_hours
-    except:
-        return True
+def _install_attempted_recently():
+    last = _last_install_attempt()
+    return last is not None and (time.time() - last) / 3600 < _cache_validity_hours
 
-def _update_dependency_cache():
-    """Update the cache file with current timestamp"""
+
+def _record_install_attempt():
     try:
-        import time
         with open(_cache_file, 'w') as f:
-            json.dump({'last_check': time.time()}, f)
+            json.dump({_ATTEMPT_KEY: time.time()}, f)
     except Exception as e:
-        logger.debug(f"Could not update dependency cache: {e}")
+        logger.debug(f"Could not record the dependency repair attempt: {e}")
+
+
+def _clear_install_attempt():
+    """The dependencies work, so a future breakage should be repaired at once."""
+    try:
+        _cache_file.unlink(missing_ok=True)
+    except Exception as e:
+        logger.debug(f"Could not clear the dependency repair record: {e}")
 
 
 def _restore_missing_libs(wheels_dir, site_dirs, pytag):
@@ -627,17 +671,20 @@ except Exception as _repair_exc:  # never let repair block a load
 if _can_import_core_packages():
     logger.info("All core packages importable, skipping installation")
     dependencies_installed = True
-    _update_dependency_cache()
-elif _should_check_dependencies():
+    _clear_install_attempt()
+elif not _install_attempted_recently():
     logger.info("Core packages missing, verifying dependencies...")
-    dependencies_installed = ensure_packages(REQUIRED_PACKAGES)
-    # Record the attempt either way, so a persistently failing install backs
-    # off instead of re-running pip on every startup.
-    _update_dependency_cache()
+    # Recorded before pip runs, so an install that hangs or crashes Blender
+    # still backs off instead of re-running on every startup.
+    _record_install_attempt()
+    # ensure_packages can report success while an import still fails, and
+    # going on to `from .addon import register` would then kill the import.
+    dependencies_installed = ensure_packages(REQUIRED_PACKAGES) and _can_import_core_packages()
 else:
     logger.warning(
-        "Core packages are not importable and an install was attempted "
-        "recently; not retrying yet.")
+        "Core packages are not importable and an automatic repair was tried "
+        "in the last %d hours; not retrying at startup. Use Retry in the "
+        "ProteinBlender sidebar tab.", _cache_validity_hours)
     dependencies_installed = False
 
 # Dynamically set warning if dependencies failed
@@ -651,17 +698,8 @@ if dependencies_installed:
     logger.info("Dependencies met. Loading addon.")
     from .addon import register, unregister, _test_register
 else:
-    # Define dummy functions if dependencies failed
     logger.error("Dependencies failed to install. Addon will not be fully functional.")
-
-    def register() -> None:
-        """Dummy register function when dependencies are missing."""
-        logger.error(f"Cannot register {bl_info['name']} due to missing dependencies.")
-        _show_error_popup(f"Cannot register {bl_info['name']} due to missing dependencies.")
-
-    def unregister() -> None:
-        """Dummy unregister function when dependencies are missing."""
-        logger.info(f"Unregistering {bl_info['name']} (no-op due to failed registration).")
+    from .dependency_fallback import register, unregister, dependency_problem
 
     def _test_register() -> None:
         """Dummy test register function when dependencies are missing."""
