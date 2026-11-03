@@ -635,6 +635,8 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         for domain_id in domains_to_remove:
             if domain_id in molecule.domains:
                 domain = molecule.domains[domain_id]
+                # Its pieces draw the assembly it drew (a filament's subunits).
+                molecule.remember_assembly(domain_id)
                 # Remove the domain's Blender object if it exists
                 if hasattr(domain, 'object') and domain.object:
                     try:
@@ -996,6 +998,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
 
             if domain_to_remove:
                 domain = molecule.domains[domain_to_remove]
+                molecule.remember_assembly(domain_to_remove)
                 # Remove the domain's Blender object if it exists
                 if hasattr(domain, 'object') and domain.object:
                     bpy.data.objects.remove(domain.object, do_unlink=True)

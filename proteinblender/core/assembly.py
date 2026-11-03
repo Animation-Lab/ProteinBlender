@@ -608,6 +608,138 @@ def update_operator_points(molecule, operators, sites=None) -> bool:
     return True
 
 
+def sync_pivot(obj) -> None:
+    """Re-place ``obj``'s copies for the pivot it has now.
+
+    Each point cloud stores the pivot its object had when the build was wired
+    (see :func:`_build_points_object` for why the placement needs it). A pivot
+    set later - by the pivot buttons, or on each piece a split makes - left
+    every copy but the original standing somewhere else. Called whenever a
+    pivot is written (``domain_space.set_pivot_local``).
+    """
+    group = _node_group_of(obj)
+    if group is None:
+        return
+    nodes = _existing_assembly_nodes(group)
+    if not nodes:
+        return
+    from . import domain_space
+    pivot = np.asarray(domain_space.get_pivot(obj), dtype=np.float32)
+    for node in nodes:
+        if node.node_tree is None:
+            continue
+        for points, _chain in _point_clouds(node.node_tree):
+            if points is None or points.data is None:
+                continue
+            mesh = points.data
+            attribute = mesh.attributes.get("pivot")
+            if attribute is None or attribute.data_type != "FLOAT_VECTOR":
+                continue
+            attribute.data.foreach_set("vector", np.tile(pivot, len(mesh.vertices)))
+            mesh.update()
+    obj.update_tag()
+
+
+def capture_build(obj):
+    """What one domain object's assembly node draws, as plain data, or None.
+
+    Taken just before a domain object is deleted, so the objects that replace
+    it can draw the same copies (:func:`restore_build`). An assembly is drawn
+    by a node on each domain object; a split used to delete the chain's object
+    and make pieces with no node, collapsing a filament to its one subunit.
+    Plain data, because the object it was read from is about to go.
+    """
+    group = _node_group_of(obj)
+    nodes = _existing_assembly_nodes(group) if group is not None else []
+    if not nodes or nodes[0].node_tree is None:
+        return None
+    node = nodes[0]
+    clouds = list(_point_clouds(node.node_tree))
+    # A domain draws one chain, so its build is one cloud; a per-chain tree
+    # only ever sits on a molecule object, which a domain change never replaces.
+    if len(clouds) != 1 or clouds[0][1] is not None or clouds[0][0] is None:
+        return None
+    mesh = clouds[0][0].data
+    count = len(mesh.vertices)
+
+    def read(name, width, dtype=float):
+        attribute = mesh.attributes.get(name)
+        flat = np.zeros(count * width, dtype=dtype)
+        if attribute is not None:
+            attribute.data.foreach_get("vector" if width == 3 else "value", flat)
+        return flat.reshape(count, width) if width == 3 else flat
+
+    from mathutils import Quaternion
+    axes, angles, translations = read("axis", 3), read("angle", 1), read("trans", 3)
+    operators = [(np.array(Quaternion(axes[i].tolist(), float(angles[i])).to_matrix()),
+                  translations[i] / WORLD_SCALE) for i in range(count)]
+
+    prefix = f'nodes["{node.name}"]'
+    curves = []
+    animation = group.animation_data
+    if animation is not None and animation.action is not None:
+        from ..utils.animation import get_fcurves_from_action
+        for curve in get_fcurves_from_action(animation.action, animation):
+            if curve.data_path.startswith(prefix):
+                curves.append((curve.data_path[len(prefix):], curve.array_index,
+                               [(k.co[0], k.co[1], k.interpolation)
+                                for k in curve.keyframe_points]))
+    return {
+        "tag": node.get(_ASSEMBLY_ID_KEY, ""),
+        "operators": operators,
+        "sites": point_sites(mesh).tolist(),
+        "props": {key: node[key] for key in node.keys()},
+        "inputs": {socket.identifier: socket.default_value for socket in node.inputs
+                   if socket.type in {"VALUE", "INT", "BOOLEAN"}},
+        "curves": curves,
+    }
+
+
+def restore_build(obj, molecule, state):
+    """Wire a captured build into ``obj``, as :func:`_wire_assembly_into` would.
+
+    Carries the numbering of each copy, the node's factor and stagger, any
+    keyframes on them, and the settings recorded with the build. Does nothing
+    to an object that already draws an assembly.
+    """
+    group = _node_group_of(obj)
+    if group is None or _existing_assembly_nodes(group):
+        return
+    tree = _assembly_node_tree(_build_points_object(
+        obj, molecule, state["tag"], state["operators"], state["sites"]))
+    node = _add_assembly_node(group, tree)
+    if node is None:
+        return
+    for key, value in state["props"].items():
+        node[key] = value
+    for socket in node.inputs:
+        if socket.identifier in state["inputs"]:
+            socket.default_value = state["inputs"][socket.identifier]
+    if state["curves"]:
+        from ..utils.animation import get_fcurves_from_action
+        prefix = f'nodes["{node.name}"]'
+        for suffix, index, keys in state["curves"]:
+            path = prefix + suffix
+            owner_path, attribute = path.rsplit(".", 1)
+            owner = group.path_resolve(owner_path)
+            for frame, value, _ in keys:
+                setattr(owner, attribute, value)
+                group.keyframe_insert(path, index=index, frame=frame)
+        animation = group.animation_data
+        for curve in get_fcurves_from_action(animation.action, animation):
+            match = next((keys for suffix, index, keys in state["curves"]
+                          if curve.data_path == prefix + suffix
+                          and curve.array_index == index), None)
+            if match is None:
+                continue
+            by_frame = {round(frame, 3): mode for frame, _, mode in match}
+            for point in curve.keyframe_points:
+                mode = by_frame.get(round(point.co[0], 3))
+                if mode is not None:
+                    point.interpolation = mode
+    obj.update_tag()
+
+
 def reaches(molecule, targets=None) -> bool:
     """Whether the built assembly is wired into exactly these objects.
 
@@ -1063,6 +1195,11 @@ def clear_assembly(molecule) -> bool:
     Returns True if anything was removed.
     """
     removed = False
+    # A build that is gone, or about to be replaced, must not come back on
+    # the next domain made from a chain it used to cover.
+    carry = getattr(molecule, "_assembly_carry", None)
+    if carry:
+        carry.clear()
     points, trees = _assembly_datablocks(molecule)
 
     for obj in _target_objects(molecule):

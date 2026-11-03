@@ -237,6 +237,9 @@ def set_pivot_local(obj, pivot) -> bool:
     except (RuntimeError, TypeError) as e:
         logger.warning("Could not set pivot on %r: %s", obj.name, e)
         return False
+    # An assembly's copies are placed from the pivot stored with them.
+    from . import assembly
+    assembly.sync_pivot(obj)
     return True
 
 

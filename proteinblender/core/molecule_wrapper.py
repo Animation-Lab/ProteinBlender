@@ -7,6 +7,7 @@ The MoleculeWrapper uses ObjectRef for safe handling of Blender object reference
 that can become invalid after undo/redo operations.
 """
 
+import functools
 from typing import Optional, Dict, List, Tuple
 import bpy
 import numpy as np
@@ -20,11 +21,75 @@ from ..core.domain import ensure_domain_properties_registered
 from . import domain_space
 from ..utils.blender_utils import is_object_valid
 
+def _remembers_assembly(method):
+    """Before a domain object goes, remember the assembly it draws.
+
+    An assembly (a filament's subunits, a deposited symmetry) is drawn by a
+    node on each domain object. Every split, merge and Domain Splitter edit
+    deletes a chain's objects and makes new ones, so the build is kept per
+    chain here and handed to the new objects by :func:`_restores_assembly`.
+    """
+    @functools.wraps(method)
+    def wrapper(self, domain_id, *args, **kwargs):
+        self.remember_assembly(domain_id)
+        return method(self, domain_id, *args, **kwargs)
+    return wrapper
+
+
+def _restores_assembly(method):
+    """Give newly made domain objects the assembly their chain drew."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        created = method(self, *args, **kwargs)
+        if self._assembly_carry and created:
+            from . import assembly
+            for domain_id in created:
+                domain = self.domains.get(domain_id)
+                state = self._assembly_carry.get(str(getattr(domain, "chain_id", "")))
+                if state is not None and domain.object is not None:
+                    assembly.restore_build(domain.object, self, state)
+        return created
+    return wrapper
+
+
 class MoleculeWrapper:
     """
     Wraps a MolecularNodes molecule and provides additional functionality
     and metadata specific to ProteinBlender
     """
+    def remember_assembly(self, domain_id: str) -> None:
+        """Keep the assembly a domain object draws, before that object is deleted.
+
+        Anything that deletes a domain object itself, rather than through
+        ``_delete_domain_direct``, must call this first, or the new pieces of
+        its chain will not draw the assembly.
+        """
+        domain = self.domains.get(domain_id)
+        obj = getattr(domain, "object", None) if domain is not None else None
+        if obj is None or str(domain.chain_id) in self._assembly_carry:
+            return
+        from . import assembly
+        try:
+            state = assembly.capture_build(obj)
+        except ReferenceError:
+            return
+        if state is not None:
+            self._assembly_carry[str(domain.chain_id)] = state
+
+    @property
+    def _assembly_carry(self) -> Dict[str, dict]:
+        """Per chain, the assembly its deleted domain objects drew.
+
+        Filled as domain objects are deleted and read as new ones are made
+        (``_remembers_assembly`` / ``_restores_assembly``); cleared with the
+        assembly itself. Lazily created, since some wrappers are built without
+        ``__init__``.
+        """
+        carry = self.__dict__.get("_assembly_carry_store")
+        if carry is None:
+            carry = self.__dict__["_assembly_carry_store"] = {}
+        return carry
+
     def __init__(self, molecule: Molecule, identifier: str):
         self.molecule = molecule
         self.identifier = identifier
@@ -532,6 +597,7 @@ class MoleculeWrapper:
         print("Could not find suitable section for domain creation")
         return None # Changed from [] to None to match original return type for this specific path
         
+    @_restores_assembly
     def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, 
                                    auto_fill_chain: bool = True, 
                                    parent_domain_id: Optional[str] = None,
@@ -2823,6 +2889,7 @@ class MoleculeWrapper:
             return default_domain_name(domain.chain_id, domain.start, domain.end)
         return domain.name
 
+    @_remembers_assembly
     def _delete_domain_direct(self, domain_id: str):
         """Internal method to delete a domain without adjusting adjacent domains"""
         # Delete domain mask nodes in parent molecule

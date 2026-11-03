@@ -1602,6 +1602,16 @@ on a membrane whose typical gap was 0.28 nm.
   The record now holds repair attempts only and is cleared when the packages import.
   `test_dependency_fallback.py::test_a_healthy_start_does_not_hold_back_a_later_repair` was red before the fix (`assert []`); `test_a_failed_repair_is_not_retried_on_every_start` keeps the back-off and `test_retry_runs_a_repair_even_inside_the_back_off` covers the panel's button.
 
+- **Splitting a filament's chain collapsed it to one monomer** (2026-11-01).
+  A split replaces the chain's object with one object per piece, and the assembly node that draws the copies stayed behind on the deleted object.
+  The wrapper now carries the assembly (copies, settings and keys) across the delete and rebuilds it on each new piece, including the Domain Splitter and merge paths that delete objects directly.
+  `test_filament_chain_split.py` (4 tests) was red before the fix: each piece drew 1 copy instead of 10.
+
+- **Setting a pivot on a filament moved its subunits** (2026-11-01).
+  Each copy was placed from a pivot stored with it at build time, so a pivot set later left every copy but the first standing somewhere else.
+  `domain_space.set_pivot_local` now rewrites the stored pivot.
+  `test_filament_chain_split.py::test_moving_a_filament_chain_pivot_moves_none_of_its_subunits` was red before the fix.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
