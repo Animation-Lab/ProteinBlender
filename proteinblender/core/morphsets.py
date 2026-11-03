@@ -657,10 +657,19 @@ def compile_animation(context, keys):
         from .cartoon_motion import stabilize
         stabilize(obj)
         restore_output(obj, member)
-        if member.get('source') and member['source'].get('pb_bfactor_enabled'):
-            from .thermal_motion import prepare, install, INTENSITY
+        # Motion is set per chain: follow the object this member was made
+        # from, or its molecule in files from before that.
+        from .thermal_motion import ENABLED, INTENSITY, install, intensity_of, prepare
+        source, original = member.get('source'), member.get('original')
+        if original is not None and ENABLED in original:
+            moving = bool(original[ENABLED])
+            level = intensity_of(original, source.get(INTENSITY, 1.0) if source else 1.0)
+        else:
+            moving = bool(source and source.get(ENABLED))
+            level = source.get(INTENSITY, 1.0) if source else 1.0
+        if moving:
             prepare(obj.data)
-            install(obj, member['source'].get(INTENSITY, 1.0))
+            install(obj, level)
         for frame, value in sorted(group['samples'].items()):
             for uid in group['shapes']:
                 key = obj.data.shape_keys.key_blocks[uid]

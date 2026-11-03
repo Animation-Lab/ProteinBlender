@@ -1,8 +1,9 @@
 """The Visual Set-up block shared by the per-item edit dialogs.
 
-Colour, representation, membrane force field and pivot used to live in one
-selection-driven panel: pick rows in the Protein Outliner, then reach across to
-a separate panel and hope it was talking about the rows you meant. They are now
+Colour, representation, membrane force field, B-factor motion and pivot
+used to live in one
+selection-driven panel: pick rows in the Protein Outliner, then reach across
+to a separate panel and hope it was talking about the rows you meant. They are now
 edited *on the item*, from the pencil button on its own outliner row, and the
 same block appears in all three dialogs:
 
@@ -165,6 +166,12 @@ def _on_force_field_edited(_operator, context):
         dialog.apply_visual_force_field(context)
 
 
+def _on_thermal_edited(_operator, context):
+    dialog = _live()
+    if dialog is not None and hasattr(dialog, 'apply_thermal'):
+        dialog.apply_thermal(context)
+
+
 class VisualEditMixin:
     """Colour / style / force-field properties plus the block that draws them.
 
@@ -211,6 +218,20 @@ class VisualEditMixin:
     # Blender rebuilds the operator behind a props dialog and draw() has to be
     # able to ask the instance it is drawing.
     vs_color_is_mixed: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    # B-factor motion, per item: a protein row sets every chain, a chain or
+    # domain row only its own objects (Janet, 2026-10-30: motion on the
+    # flexible chain, not on the whole complex).
+    bfactor_motion: BoolProperty(name='B-factor (Temperature) Motion',
+        description='Animate gentle motion weighted by the imported temperature factors',
+        default=False, update=_on_thermal_edited)
+    bfactor_intensity: FloatProperty(name='Motion Intensity',
+        description='Scale the jiggle amplitude: 0 is still, 1 is the imported B-factor strength, '
+                    '2 is twice as much motion. This is an illustrative effect, not a temperature in kelvin',
+        default=1.0, min=0.0, max=5.0, soft_max=2.0, precision=2,
+        update=_on_thermal_edited)
+    # Set while only some of the item's parts move; the checkbox cannot say so.
+    vs_motion_is_mixed: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
 
     # ------------------------------------------------------------------
     # What the dialog is editing. Subclasses supply the row.
@@ -301,15 +322,24 @@ class VisualEditMixin:
             self.vs_force_field_spacing = float(
                 getattr(first_owner, "pb_force_field_spacing", 1.5))
 
+            from ..core import thermal_motion
+            moving = [obj for obj in objects if thermal_motion.is_enabled(obj)]
+            self.bfactor_motion = bool(moving) and len(moving) == len(objects)
+            self.vs_motion_is_mixed = bool(moving) and len(moving) < len(objects)
+            self.bfactor_intensity = (thermal_motion.intensity_of(moving[0])
+                                      if moving else 1.0)
+
         _state["seeded"] = self.visual_snapshot()
 
     def visual_snapshot(self):
-        """The four fields as plain comparable values."""
+        """The fields as plain comparable values."""
         return {
             "color": tuple(round(channel, 6) for channel in self.vs_color),
             "style": self.vs_style,
             "force_field": bool(self.vs_force_field),
             "spacing": round(float(self.vs_force_field_spacing), 6),
+            "motion": bool(self.bfactor_motion),
+            "intensity": round(float(self.bfactor_intensity), 6),
         }
 
     # ------------------------------------------------------------------
@@ -355,6 +385,27 @@ class VisualEditMixin:
                 obj.pb_force_field_spacing = self.vs_force_field_spacing
         self._after_visual_edit(context)
 
+    def thermal_objects(self, context):
+        """The objects B-factor motion is set on: everything the row draws."""
+        return self.visual_objects(context)
+
+    def apply_thermal(self, context):
+        """Set motion on this item's objects.
+
+        A field the caller did not set is left alone, so a script that only
+        passes an intensity changes the strength of what already moves and
+        turns nothing on.
+        """
+        from ..core import thermal_motion
+        enabled = (self.bfactor_motion
+                   if self.properties.is_property_set('bfactor_motion') else None)
+        intensity = (self.bfactor_intensity
+                     if self.properties.is_property_set('bfactor_intensity') else None)
+        thermal_motion.set_objects(self.thermal_objects(context), enabled, intensity)
+        if enabled is not None:
+            self.vs_motion_is_mixed = False
+        self._after_visual_edit(context)
+
     def _persist_style(self, context, row):
         """Mirror the new style onto the model, not just the node trees.
 
@@ -397,7 +448,7 @@ class VisualEditMixin:
     # ------------------------------------------------------------------
 
     def draw_visual_setup(self, layout, context, *, show_color=True, show_pivot=True):
-        """The Visual Set-up block: colour, representation, pivot, force field."""
+        """The Visual Set-up block: colour, representation, motion, pivot."""
         _ACTIVE["dialog"] = self
 
         row = self.visual_row(context)
@@ -424,6 +475,18 @@ class VisualEditMixin:
         # the item actually has.
         if show_color and self.vs_color_is_mixed:
             box.label(text="Multiple colors: pick one to apply it to all.",
+                      icon='INFO')
+
+        # Straight into the box, like the colour note: a label in a nested
+        # column is drawn brighter than one in the box itself.
+        box.separator()
+        box.prop(self, 'bfactor_motion')
+        if self.vs_motion_is_mixed:
+            box.label(text="Only some parts move: tick to move them all.",
+                      icon='INFO')
+        if self.bfactor_motion:
+            box.prop(self, 'bfactor_intensity', slider=True)
+            box.label(text='Play the timeline to see temperature motion.',
                       icon='INFO')
 
         if show_pivot:
@@ -503,12 +566,8 @@ class VisualEditMixin:
         if (chosen("vs_force_field", "force_field")
                 or chosen("vs_force_field_spacing", "spacing")):
             self.apply_visual_force_field(context)
-
-
-def _on_thermal_edited(_operator, context):
-    dialog = _live()
-    if dialog is not None and hasattr(dialog, 'apply_thermal'):
-        dialog.apply_thermal(context)
+        if chosen("bfactor_motion", "motion") or chosen("bfactor_intensity", "intensity"):
+            self.apply_thermal(context)
 
 
 class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
@@ -521,25 +580,6 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         name="Protein Row",
         description="item_id of the protein row in the Protein Outliner")
 
-    bfactor_motion: BoolProperty(name='B-factor (Temperature) Motion',
-        description='Animate gentle motion weighted by the imported temperature factors',
-        default=False, update=_on_thermal_edited)
-    bfactor_intensity: FloatProperty(name='Motion Intensity',
-        description='Scale the jiggle amplitude: 0 is still, 1 is the imported B-factor strength, '
-                    '2 is twice as much motion. This is an illustrative effect, not a temperature in kelvin',
-        default=1.0, min=0.0, max=5.0, soft_max=2.0, precision=2,
-        update=_on_thermal_edited)
-
-    def apply_thermal(self, context):
-        from ..core.thermal_motion import set_enabled
-        mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
-        if mol:
-            enabled = (self.bfactor_motion if self.properties.is_property_set('bfactor_motion')
-                       else bool(mol.object.get('pb_bfactor_enabled')))
-            intensity = (self.bfactor_intensity if self.properties.is_property_set('bfactor_intensity')
-                         else None)
-            set_enabled(mol, enabled, intensity)
-
     def visual_row(self, context):
         return find_row(context.scene, self.item_id)
 
@@ -548,10 +588,6 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}
         self.begin_visual_edit(context)
-        mol = ProteinBlenderScene.get_instance().molecules.get(self.item_id)
-        with _Suspend():
-            self.bfactor_motion = bool(mol and mol.object.get('pb_bfactor_enabled'))
-            self.bfactor_intensity = float(mol.object.get('pb_bfactor_intensity', 1.0)) if mol else 1.0
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def check(self, context):
@@ -568,11 +604,6 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
         if row is not None:
             layout.label(text=row.name, icon=row.icon or 'MESH_DATA')
         self.draw_visual_setup(layout, context, show_pivot=False)
-        layout.separator()
-        layout.prop(self, 'bfactor_motion')
-        if self.bfactor_motion:
-            layout.prop(self, 'bfactor_intensity', slider=True)
-            layout.label(text='Play the timeline to see temperature motion.', icon='INFO')
 
     def execute(self, context):
         row = self.visual_row(context)
@@ -581,9 +612,6 @@ class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
             self.report({'ERROR'}, "Could not resolve the protein to edit")
             return {'CANCELLED'}
         self.commit_visual_edit(context)
-        if (self.properties.is_property_set('bfactor_motion')
-                or self.properties.is_property_set('bfactor_intensity')):
-            self.apply_thermal(context)
         self.end_visual_edit()
         return {'FINISHED'}
 

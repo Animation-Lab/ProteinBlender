@@ -11,6 +11,7 @@ from ..utils.chain_utils import (
     normalize_domain_residue_range,
 )
 from .visual_edit import VisualEditMixin
+from ..core.molecule_wrapper import restructures_domains
 
 
 def _is_identity_matrix(m, tol=1e-6):
@@ -524,6 +525,7 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         
         col.label(text="Auto-generates complementary domains", icon='INFO')
     
+    @restructures_domains
     def execute(self, context):
         scene_manager = ProteinBlenderScene.get_instance()
         molecule = scene_manager.molecules.get(self.molecule_id)
@@ -635,8 +637,9 @@ class PROTEINBLENDER_OT_split_domain(Operator):
         for domain_id in domains_to_remove:
             if domain_id in molecule.domains:
                 domain = molecule.domains[domain_id]
-                # Its pieces draw the assembly it drew (a filament's subunits).
-                molecule.remember_assembly(domain_id)
+                # Its pieces keep what it carried: the assembly it drew (a
+                # filament's subunits) and its motion.
+                molecule.remember_domain(domain_id)
                 # Remove the domain's Blender object if it exists
                 if hasattr(domain, 'object') and domain.object:
                     try:
@@ -887,6 +890,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
     bl_label = "Merge Domains"
     bl_options = {'REGISTER', 'UNDO'}
     
+    @restructures_domains
     def execute(self, context):
         scene = context.scene
         scene_manager = ProteinBlenderScene.get_instance()
@@ -998,7 +1002,7 @@ class PROTEINBLENDER_OT_merge_domains(Operator):
 
             if domain_to_remove:
                 domain = molecule.domains[domain_to_remove]
-                molecule.remember_assembly(domain_to_remove)
+                molecule.remember_domain(domain_to_remove)
                 # Remove the domain's Blender object if it exists
                 if hasattr(domain, 'object') and domain.object:
                     bpy.data.objects.remove(domain.object, do_unlink=True)
@@ -1143,6 +1147,21 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
                 return [domain.object]
         return []
 
+    def appearance_objects(self, context):
+        """What the item looks like, row or no row (see ``visual_objects``).
+
+        Without this a full-chain auto-domain seeded nothing and the dialog
+        showed the field defaults - a magenta surface - as if they were its
+        look."""
+        return super().appearance_objects(context) or self.visual_objects(context)
+
+    def _domain(self, domain_id):
+        for molecule in ProteinBlenderScene.get_instance().molecules.values():
+            domain = getattr(molecule, 'domains', {}).get(domain_id)
+            if domain is not None:
+                return domain
+        return None
+
     def invoke(self, context, event):
         scene = context.scene
         wanted = self.target_item_id or self.domain_id
@@ -1158,6 +1177,9 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
             self.target_item_id = wanted
             if not self.item_type:
                 self.item_type = 'DOMAIN'
+            domain = self._domain(wanted)
+            if domain is not None:
+                self.new_name = domain.name
         else:
             self.report({'WARNING'}, "Please select a chain or domain to rename")
             return {'CANCELLED'}

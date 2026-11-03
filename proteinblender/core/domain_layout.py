@@ -353,6 +353,14 @@ def apply_layout(context, molecule: Any, chain_token: Any,
     Returns an :class:`ApplyResult`; ``errors`` is non-empty only when the
     layout was rejected outright, in which case nothing was changed.
     """
+    # One scope for the deletes and the creates: the new domains take what
+    # the deleted ones carried (an assembly, motion), and nothing outlives it.
+    with molecule.restructuring():
+        return _apply_layout(context, molecule, chain_token, specs)
+
+
+def _apply_layout(context, molecule: Any, chain_token: Any,
+                  specs: List[DomainSpec]) -> ApplyResult:
     from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
 
     scene = context.scene

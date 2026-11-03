@@ -128,26 +128,97 @@ def install(obj, intensity=None):
     return mod
 
 
-def set_enabled(molecule, enabled, intensity=None):
-    intensity = float(molecule.object.get(INTENSITY, 1.0) if intensity is None else intensity)
-    if not math.isfinite(intensity) or not 0 <= intensity <= 5:
-        raise ValueError('Motion intensity must be between 0 and 5.')
-    objects = [molecule.object] + [d.object for d in molecule.domains.values() if d.object]
+#: Per object: whether its motion is on. Motion is set per chain or domain,
+#: so each object carries its own; a molecule object's flag says whether any
+#: part of it moves.
+ENABLED = 'pb_bfactor_enabled'
+
+
+def is_enabled(obj):
+    """Whether ``obj`` has temperature motion installed."""
+    return any(m.name.startswith(NAME) for m in obj.modifiers)
+
+
+def intensity_of(obj, default=1.0):
+    """The motion intensity ``obj`` is drawn with, read off its modifier."""
+    from ..utils.gn_compat import read_modifier_socket
+    for mod in obj.modifiers:
+        if mod.name.startswith(NAME) and mod.node_group is not None:
+            for item in mod.node_group.interface.items_tree:
+                if getattr(item, 'in_out', '') == 'INPUT' and item.name == 'Intensity':
+                    value = read_modifier_socket(mod, item.identifier, default)
+                    return float(default if value is None else value)
+    return float(default)
+
+
+def _molecules_drawing(objects):
+    from ..utils.scene_manager import ProteinBlenderScene
+    names = {obj.name for obj in objects}
+    found = []
+    for molecule in ProteinBlenderScene.get_instance().molecules.values():
+        drawn = [molecule.object] + [d.object for d in molecule.domains.values() if d.object]
+        if any(obj is not None and obj.name in names for obj in drawn):
+            found.append((molecule, drawn))
+    return found
+
+
+def set_objects(objects, enabled=None, intensity=None):
+    """Turn motion on or off for these objects, or change how strong it is.
+
+    ``enabled=None`` keeps each object as it is and only sets the intensity
+    of those that move. An object being turned on with no ``intensity`` keeps
+    its own, or takes its molecule's last one.
+    """
+    if intensity is not None:
+        intensity = float(intensity)
+        if not math.isfinite(intensity) or not 0 <= intensity <= 5:
+            raise ValueError('Motion intensity must be between 0 and 5.')
+    unique = {}
+    for obj in objects:
+        if obj is not None:
+            unique.setdefault(obj.name, obj)
+    objects = list(unique.values())
+    molecules = _molecules_drawing(objects)
+    fallback = {}
+    for molecule, drawn in molecules:
+        for obj in drawn:
+            if obj is not None:
+                fallback[obj.name] = float(molecule.object.get(INTENSITY, 1.0))
     # Update existing morph outputs in place: dragging intensity must not
     # rebuild shape keys, visibility keys, pivots, or puppet pose animation.
     from . import morphsets
-    objects += [obj for obj in morphsets.outputs(bpy.context.scene)
-                if obj.get('pb_morph_member_object') in objects]
+    for output in morphsets.outputs(bpy.context.scene):
+        member = output.get('pb_morph_member_object')
+        if member is not None and member.name in unique:
+            fallback[output.name] = fallback.get(member.name, 1.0)
+            objects.append(output)
     for obj in objects:
-        if enabled:
+        on = is_enabled(obj) if enabled is None else bool(enabled)
+        if on:
+            level = intensity
+            if level is None:
+                level = intensity_of(obj, fallback.get(obj.name, 1.0)) if is_enabled(obj) \
+                    else fallback.get(obj.name, 1.0)
             prepare(obj.data)
-            install(obj, intensity)
+            install(obj, level)
         else:
             for mod in list(obj.modifiers):
                 if mod.name.startswith(NAME):
                     obj.modifiers.remove(mod)
-    molecule.object['pb_bfactor_enabled'] = bool(enabled)
-    molecule.object[INTENSITY] = intensity
+        obj[ENABLED] = on
+    for molecule, drawn in molecules:
+        # The atoms are drawn by the domains; the molecule object only draws
+        # them itself when it has none.
+        parts = [obj for obj in drawn[1:] if obj is not None] or drawn[:1]
+        molecule.object[ENABLED] = any(is_enabled(obj) for obj in parts)
+        molecule.object[INTENSITY] = (intensity if intensity is not None
+                                      else float(molecule.object.get(INTENSITY, 1.0)))
+
+
+def set_enabled(molecule, enabled, intensity=None):
+    """Motion for a whole molecule: its object and every domain."""
+    objects = [molecule.object] + [d.object for d in molecule.domains.values() if d.object]
+    set_objects(objects, enabled, intensity)
 
 
 def restore_saved_motion():

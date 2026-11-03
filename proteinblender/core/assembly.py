@@ -1197,9 +1197,9 @@ def clear_assembly(molecule) -> bool:
     removed = False
     # A build that is gone, or about to be replaced, must not come back on
     # the next domain made from a chain it used to cover.
-    carry = getattr(molecule, "_assembly_carry", None)
+    carry = getattr(molecule, "_carry", None)
     if carry:
-        carry.clear()
+        carry["assembly"].clear()
     points, trees = _assembly_datablocks(molecule)
 
     for obj in _target_objects(molecule):

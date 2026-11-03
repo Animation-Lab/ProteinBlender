@@ -7,6 +7,7 @@ The MoleculeWrapper uses ObjectRef for safe handling of Blender object reference
 that can become invalid after undo/redo operations.
 """
 
+import contextlib
 import functools
 from typing import Optional, Dict, List, Tuple
 import bpy
@@ -21,35 +22,85 @@ from ..core.domain import ensure_domain_properties_registered
 from . import domain_space
 from ..utils.blender_utils import is_object_valid
 
-def _remembers_assembly(method):
-    """Before a domain object goes, remember the assembly it draws.
+def _remembers_domain(method):
+    """Before a domain object goes, remember what its chain's new pieces keep.
 
-    An assembly (a filament's subunits, a deposited symmetry) is drawn by a
-    node on each domain object. Every split, merge and Domain Splitter edit
-    deletes a chain's objects and makes new ones, so the build is kept per
-    chain here and handed to the new objects by :func:`_restores_assembly`.
+    Every split, merge and Domain Splitter edit deletes a chain's objects and
+    makes new ones, so what lives on an object and not in the model - the
+    assembly it draws, and its B-factor motion - is kept here and handed to
+    the new objects by :func:`_restores_domain`.
     """
     @functools.wraps(method)
     def wrapper(self, domain_id, *args, **kwargs):
-        self.remember_assembly(domain_id)
+        self.remember_domain(domain_id)
         return method(self, domain_id, *args, **kwargs)
     return wrapper
 
 
-def _restores_assembly(method):
-    """Give newly made domain objects the assembly their chain drew."""
+def _restores_domain(method):
+    """Give newly made domain objects what their chain's deleted ones had.
+
+    The assembly is the chain's, so every new piece draws it. Motion is set
+    per domain, so each new piece takes the motion of the deleted piece whose
+    residues it overlaps most.
+    """
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         created = method(self, *args, **kwargs)
-        if self._assembly_carry and created:
-            from . import assembly
+        carry = self._carry
+        if (carry["assembly"] or carry["motion"]) and created:
             for domain_id in created:
                 domain = self.domains.get(domain_id)
-                state = self._assembly_carry.get(str(getattr(domain, "chain_id", "")))
-                if state is not None and domain.object is not None:
+                if domain is None or domain.object is None:
+                    continue
+                chain = str(getattr(domain, "chain_id", ""))
+                state = carry["assembly"].get(chain)
+                if state is not None:
+                    from . import assembly
                     assembly.restore_build(domain.object, self, state)
+                motion = _overlapping(carry["motion"].get(chain, ()),
+                                      domain.start, domain.end)
+                if motion is not None:
+                    from . import thermal_motion
+                    enabled, intensity = motion
+                    thermal_motion.set_objects([domain.object], enabled,
+                                               intensity if enabled else None)
         return created
     return wrapper
+
+
+def _restructures(method):
+    """Forget what deleted domains left behind once this edit is done."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self.restructuring():
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
+def restructures_domains(execute):
+    """For an operator's ``execute`` that deletes and remakes domain objects
+    itself: one :meth:`MoleculeWrapper.restructuring` scope on every molecule
+    for the whole call."""
+    @functools.wraps(execute)
+    def wrapper(self, context):
+        from ..utils.scene_manager import ProteinBlenderScene
+        with contextlib.ExitStack() as stack:
+            for molecule in list(ProteinBlenderScene.get_instance().molecules.values()):
+                if hasattr(molecule, "restructuring"):
+                    stack.enter_context(molecule.restructuring())
+            return execute(self, context)
+    return wrapper
+
+
+def _overlapping(records, start, end):
+    """The ``(enabled, intensity)`` of the record sharing most residues."""
+    best, best_overlap = None, 0
+    for first, last, enabled, intensity in records:
+        overlap = min(last, end) - max(first, start) + 1
+        if overlap > best_overlap:
+            best, best_overlap = (enabled, intensity), overlap
+    return best
 
 
 class MoleculeWrapper:
@@ -57,38 +108,66 @@ class MoleculeWrapper:
     Wraps a MolecularNodes molecule and provides additional functionality
     and metadata specific to ProteinBlender
     """
-    def remember_assembly(self, domain_id: str) -> None:
-        """Keep the assembly a domain object draws, before that object is deleted.
+    def remember_domain(self, domain_id: str) -> None:
+        """Keep what a domain object carries, before that object is deleted.
 
-        Anything that deletes a domain object itself, rather than through
-        ``_delete_domain_direct``, must call this first, or the new pieces of
-        its chain will not draw the assembly.
+        Its chain's assembly (once per chain: every piece draws the same one)
+        and its own B-factor motion, by residue range. Anything that deletes a
+        domain object itself, rather than through ``_delete_domain_direct``,
+        must call this first, inside :meth:`restructuring`.
         """
         domain = self.domains.get(domain_id)
         obj = getattr(domain, "object", None) if domain is not None else None
-        if obj is None or str(domain.chain_id) in self._assembly_carry:
+        if obj is None:
             return
-        from . import assembly
+        from . import assembly, thermal_motion
+        chain = str(domain.chain_id)
         try:
-            state = assembly.capture_build(obj)
+            if chain not in self._carry["assembly"]:
+                state = assembly.capture_build(obj)
+                if state is not None:
+                    self._carry["assembly"][chain] = state
+            enabled = thermal_motion.is_enabled(obj)
+            intensity = thermal_motion.intensity_of(obj) if enabled else None
         except ReferenceError:
             return
-        if state is not None:
-            self._assembly_carry[str(domain.chain_id)] = state
+        self._carry["motion"].setdefault(chain, []).append(
+            (int(domain.start), int(domain.end), enabled, intensity))
 
     @property
-    def _assembly_carry(self) -> Dict[str, dict]:
-        """Per chain, the assembly its deleted domain objects drew.
+    def _carry(self) -> Dict[str, dict]:
+        """What deleted domain objects left for their chain's new ones.
 
-        Filled as domain objects are deleted and read as new ones are made
-        (``_remembers_assembly`` / ``_restores_assembly``); cleared with the
-        assembly itself. Lazily created, since some wrappers are built without
-        ``__init__``.
+        ``{"assembly": {chain: build}, "motion": {chain: [(start, end,
+        enabled, intensity)]}}``. Filled as domain objects are deleted, read as
+        new ones are made, and emptied when the edit doing both is over
+        (:meth:`restructuring`), so nothing is handed to a domain made later
+        - a copy, say - from a delete it had no part in. Lazily created, since
+        some wrappers are built without ``__init__``.
         """
-        carry = self.__dict__.get("_assembly_carry_store")
+        carry = self.__dict__.get("_carry_store")
         if carry is None:
-            carry = self.__dict__["_assembly_carry_store"] = {}
+            carry = self.__dict__["_carry_store"] = {"assembly": {}, "motion": {}}
         return carry
+
+    @contextlib.contextmanager
+    def restructuring(self):
+        """Scope one edit that deletes domain objects and makes new ones.
+
+        Nests: only the outermost one forgets the carried state on the way out.
+        """
+        depth = self.__dict__.get("_restructuring_depth", 0)
+        self.__dict__["_restructuring_depth"] = depth + 1
+        try:
+            yield
+        finally:
+            self.__dict__["_restructuring_depth"] = depth
+            if depth == 0:
+                self.forget_carried_state()
+
+    def forget_carried_state(self) -> None:
+        for kept in self._carry.values():
+            kept.clear()
 
     def __init__(self, molecule: Molecule, identifier: str):
         self.molecule = molecule
@@ -597,7 +676,7 @@ class MoleculeWrapper:
         print("Could not find suitable section for domain creation")
         return None # Changed from [] to None to match original return type for this specific path
         
-    @_restores_assembly
+    @_restores_domain
     def _create_domain_with_params(self, chain_id: str, start: int, end: int, name: Optional[str] = None, 
                                    auto_fill_chain: bool = True, 
                                    parent_domain_id: Optional[str] = None,
@@ -908,6 +987,7 @@ class MoleculeWrapper:
             if not domain.name.startswith("Chain "):
                 print(f"Domain {domain_id_to_normalize} has custom name '{domain.name}'. Skipping normalization.")
 
+    @_restructures
     def split_domain(self, original_domain_id: str, split_start: int, split_end: int, split_name: Optional[str] = None) -> List[str]:
         """Splits an existing domain into multiple new domains.
 
@@ -1693,6 +1773,7 @@ class MoleculeWrapper:
         # Note: We're no longer removing the domain infrastructure nodes (join node and NOT node)
         # when all domains are deleted. They will persist for future domain creations.
 
+    @_restructures
     def delete_domain(self, domain_id: str, is_cleanup_call: bool = False) -> Optional[str]:
         """Delete a domain and its object.
 
@@ -2699,6 +2780,13 @@ class MoleculeWrapper:
         if new_domain.object:
             new_domain.object.domain_color = original_domain.color
             new_domain.object.domain_style = style
+            # And its motion: a new object starts from the molecule object's.
+            if original_domain.object is not None:
+                from . import thermal_motion
+                moving = thermal_motion.is_enabled(original_domain.object)
+                thermal_motion.set_objects(
+                    [new_domain.object], moving,
+                    thermal_motion.intensity_of(original_domain.object) if moving else None)
 
         print(f"Created domain copy: {new_domain_id} "
               f"(copy #{copy_number} of {domain_id})")
@@ -2889,7 +2977,7 @@ class MoleculeWrapper:
             return default_domain_name(domain.chain_id, domain.start, domain.end)
         return domain.name
 
-    @_remembers_assembly
+    @_remembers_domain
     def _delete_domain_direct(self, domain_id: str):
         """Internal method to delete a domain without adjusting adjacent domains"""
         # Delete domain mask nodes in parent molecule

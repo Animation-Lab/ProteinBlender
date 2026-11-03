@@ -1622,6 +1622,20 @@ on a membrane whose typical gap was 0.28 nm.
   Poses now keep each held filament's rig and numbers, Apply Pose restores them after the chains, and Create Keyframe on a puppet keys them with its pose.
   `test_filament_poses.py` (3 tests) was red with the filament carry switched off (`assert 14 == 10`).
 
+- **B-factor motion could only be set on a whole protein** (2026-11-02).
+  The toggle lived on the protein dialog and switched every chain at once.
+  It now sits in the Visual Set-up block of the protein, Edit Chain and Edit Domain dialogs, each setting only the objects its row draws, with a note when only some parts move; split pieces keep the motion of the piece they replace, and copies take their original's.
+  `test_thermal_per_chain.py` (6 tests); the split and copy cases were red with the inheritance switched off.
+
+- **Remembered split state could leak into a later domain** (2026-11-02).
+  What deleted domain objects carried (a filament's build) stayed remembered after the split that deleted them, so a domain made later, such as a copy, could pick it up.
+  It is now forgotten when the split, merge or Domain Splitter edit ends.
+  `test_thermal_per_chain.py::test_a_copy_moves_like_its_original_not_like_an_earlier_split`.
+
+- **Edit Domain on a whole-chain domain showed a magenta surface** (2026-11-02).
+  A domain with no outliner row of its own seeded the dialog from nothing, so it showed the field defaults and an empty name as if they were the domain's.
+  It now seeds from the domain's object and name; verified by GUI screenshot (dialog seeding runs only in a windowed Blender).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
