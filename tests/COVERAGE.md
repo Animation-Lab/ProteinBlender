@@ -1636,6 +1636,10 @@ on a membrane whose typical gap was 0.28 nm.
   A domain with no outliner row of its own seeded the dialog from nothing, so it showed the field defaults and an empty name as if they were the domain's.
   It now seeds from the domain's object and name; verified by GUI screenshot (dialog seeding runs only in a windowed Blender).
 
+- **A membrane test failed after the sphere-morph test ran first** (2026-11-02, test isolation).
+  The scene reset left `membrane_builder_props` alone, so the sphere shape from `test_lipids_do_not_flip_about_their_own_axis_during_a_morph[SPHERE]` turned the next test's 40 x 40 sheet into a 15 A sphere with the protein outside it.
+  `helpers.reset_scene` now restores the membrane settings as it does the import settings.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

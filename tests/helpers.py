@@ -101,16 +101,20 @@ def reset_scene():
         except Exception:
             pass
 
-    # Import settings (pdb_id, remote_format, ...) live on the scene and the
-    # import helpers set them. Restoring the defaults keeps one test's import
-    # from deciding what a later test sees, whatever order they run in.
-    import_props = getattr(scene, "protein_props", None)
-    if import_props is not None:
-        for prop in import_props.bl_rna.properties:
+    # Import settings (pdb_id, remote_format, ...) and membrane settings
+    # (shape, size, ...) live on the scene and the helpers set them. Restoring
+    # the defaults keeps one test's choices from deciding what a later test
+    # sees, whatever order they run in: a sphere left by one membrane test
+    # once made the next test's 40 x 40 sheet a 15 A sphere.
+    for group_name in ("protein_props", "membrane_builder_props"):
+        group = getattr(scene, group_name, None)
+        if group is None:
+            continue
+        for prop in group.bl_rna.properties:
             if prop.identifier == "rna_type" or prop.is_readonly:
                 continue
             try:
-                import_props.property_unset(prop.identifier)
+                group.property_unset(prop.identifier)
             except Exception:
                 pass
 
