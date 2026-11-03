@@ -25,7 +25,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#157878">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=6c590eb829e218780d5d1d03ea8d77454f895452">
+    <link rel="stylesheet" href="/ProteinBlender/assets/css/style.css?v=37f849c84cb919d29dd029fc936acb0d004185fd">
     <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
 
 <!-- Setup Google Analytics -->
@@ -56,12 +56,12 @@
 <p><a href="index.html">Back to Home</a></p>
 
 <p>The <strong>Alpha</strong> channel is a separate release stream for testers. It installs as its
-own extension — <strong>ProteinBlender (Alpha)</strong> — so you get update notifications for
+own extension - <strong>ProteinBlender (Alpha)</strong> - so you get update notifications for
 alpha builds through Blender’s normal extension updater instead of passing zip
 files around.</p>
 
 <blockquote>
-  <p><strong>Important — do not run both at once.</strong> The alpha build shares internal
+  <p><strong>Important - do not run both at once.</strong> The alpha build shares internal
 identifiers with the release build, so having <strong>ProteinBlender</strong> and
 <strong>ProteinBlender (Alpha)</strong> <em>enabled at the same time</em> will cause errors.
 <strong>Disable (or uninstall) the release version before enabling the alpha</strong>, and
@@ -72,7 +72,7 @@ switch back when you’re done testing. Installing both is fine; only one may be
 <h2 id="add-the-alpha-repository">Add the Alpha Repository</h2>
 
 <ol>
-  <li><strong>Open Blender</strong> (4.2 or newer)</li>
+  <li><strong>Open Blender</strong> (5.0 or newer)</li>
   <li>Go to <strong>Edit -&gt; Preferences -&gt; Get Extensions</strong></li>
   <li>Click the <strong>Repositories</strong> dropdown at the top -&gt; <strong>+</strong> -&gt; <strong>Add Remote Repository</strong></li>
   <li>
@@ -105,6 +105,42 @@ new alpha is published.</li>
   <li><strong>Restart Blender.</strong></li>
 </ol>
 
+<h2 id="updating-safely">Updating Safely</h2>
+
+<p>Blender replaces the whole extension folder during an update, and a crash in the middle of that can leave the alpha half-installed.</p>
+
+<ol>
+  <li>Save your work, then restart Blender and open an empty scene (<strong>File -&gt; New -&gt; General</strong>).</li>
+  <li>Go to <strong>Edit -&gt; Preferences -&gt; Get Extensions</strong> and click <strong>Update</strong> next to <strong>ProteinBlender (Alpha)</strong>.</li>
+  <li>Wait for the update to finish, then <strong>restart Blender</strong>.</li>
+</ol>
+
+<h2 id="if-the-alpha-disappears-or-will-not-update">If the Alpha Disappears or Will Not Update</h2>
+
+<p><strong>“Remote data unavailable, sync with the remote repository”</strong>, or <strong>Check for Updates</strong> does nothing:
+Blender crashed during an earlier update and left the repository locked.
+The lock is kept with your Blender settings, so reinstalling Blender does not clear it.</p>
+
+<ol>
+  <li>Go to <strong>Edit -&gt; Preferences -&gt; Get Extensions</strong>.</li>
+  <li>Open the <strong>Repositories</strong> dropdown at the top right and select the alpha repository (it may show as <em>animation-lab.github.io</em>).</li>
+  <li>Click the small down-arrow to the right of the repository list and choose <strong>Force Unlock Repository…</strong>.</li>
+  <li>Click <strong>Check for Updates</strong>, then install <strong>ProteinBlender (Alpha)</strong> again and <strong>restart Blender</strong>.</li>
+</ol>
+
+<p><strong>The alpha vanished after an update</strong>:
+the update failed partway and Blender removed the half-installed copy.
+Install <strong>ProteinBlender (Alpha)</strong> again from the alpha repository (keep the release <strong>ProteinBlender</strong> disabled) and restart Blender.</p>
+
+<p><strong>The ProteinBlender tab says “ProteinBlender could not load”</strong>:
+one of the Python packages it needs is broken.
+Click <strong>Retry Install</strong> in that tab and restart Blender.
+If that does not fix it, reinstall the alpha as above.</p>
+
+<p><strong>Something else, or the Add-ons list is empty</strong>:
+open <strong>Window -&gt; Toggle System Console</strong>, reproduce the problem, and send us a screenshot of the console text.
+If Blender crashed, it also writes a <code class="language-plaintext highlighter-rouge">.crash.txt</code> file to your Temp folder (type <code class="language-plaintext highlighter-rouge">%TEMP%</code> into the File Explorer address bar); please send that too.</p>
+
 <h2 id="reporting-issues">Reporting Issues</h2>
 
 <p>When you report a bug, please include the alpha <strong>version number</strong>
@@ -113,7 +149,7 @@ and your <strong>operating system</strong>.</p>
 
 <hr />
 
-<h2 id="for-maintainers--publishing-an-alpha">For Maintainers — Publishing an Alpha</h2>
+<h2 id="for-maintainers---publishing-an-alpha">For Maintainers - Publishing an Alpha</h2>
 
 <p>The alpha channel is a “swap” build of the same codebase with a different
 extension <code class="language-plaintext highlighter-rouge">id</code>. To publish one:</p>
