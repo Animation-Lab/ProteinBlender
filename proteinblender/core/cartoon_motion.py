@@ -1,4 +1,4 @@
-"""Keep cartoon ribbons continuous during morphing and B-factor motion.
+"""Keep cartoons and ribbons continuous during morphing and B-factor motion.
 
 MolecularNodes corrects alternating peptide normals with a thresholded dot
 product. Repeating that decision on interpolated coordinates can flip a ribbon
@@ -15,6 +15,10 @@ HELIX_TURN = 'pb_cartoon_helix_turn'
 INDEX = 'pb_cartoon_reference_index'
 VERSION = 'pb_cartoon_motion_version'
 REVISION = 3
+BACKBONE_VERSION = 'pb_continuous_backbone_version'
+BACKBONE_REVISION = 1
+RIBBON_VERSION = 'pb_ribbon_motion_version'
+RIBBON_REVISION = 1
 
 
 def _group(tree, name):
@@ -120,6 +124,52 @@ def _bake_turns(obj, style):
         bpy.data.node_groups.remove(tree)
 
 
+def _continuous_backbone():
+    """The CA spline builder with its gap test moved to the unjiggled atoms.
+
+    The original distance cutoff otherwise repeatedly severs neighbouring
+    residues as thermal motion moves them across the threshold. Only the gap
+    decision uses these positions; the spline still follows the animated
+    atoms. Shared by the cartoon and the ribbon.
+    """
+    existing = next((t for t in bpy.data.node_groups
+                     if t.get(BACKBONE_VERSION) == BACKBONE_REVISION), None)
+    if existing:
+        return existing
+    backbone = bpy.data.node_groups['.Atoms to CA Splines'].copy()
+    backbone.name = '.PB continuous backbone'
+    curves = bpy.data.node_groups['Atoms to Curves'].copy()
+    curves.name = '.PB continuous curves'
+    chains = bpy.data.node_groups['Chain Group ID'].copy()
+    chains.name = '.PB continuous chain groups'
+    _group(backbone, 'Atoms to Curves').node_tree = curves
+    _group(curves, 'Chain Group ID').node_tree = chains
+    destinations = [(l.to_node.name, l.to_socket.identifier) for l in chains.links
+                    if l.from_node.bl_idname == 'GeometryNodeInputPosition']
+    _reference_positions(chains)
+    for name, identifier in destinations:
+        socket = next(s for s in chains.nodes[name].inputs if s.identifier == identifier)
+        chains.links.new(chains.nodes['Gap Positions'].outputs['Output'], socket)
+    backbone[BACKBONE_VERSION] = BACKBONE_REVISION
+    return backbone
+
+
+def _stable_ribbon():
+    """The ribbon, with its backbone gaps judged like the cartoon's."""
+    existing = next((t for t in bpy.data.node_groups
+                     if t.get(RIBBON_VERSION) == RIBBON_REVISION), None)
+    if existing:
+        return existing
+    root = bpy.data.node_groups['Style Ribbon'].copy()
+    root.name = 'Style Ribbon (Continuous Motion)'
+    peptide = bpy.data.node_groups['.MN_utils_style_ribbon_peptide'].copy()
+    peptide.name = '.PB continuous ribbon'
+    _group(root, '.MN_utils_style_ribbon_peptide').node_tree = peptide
+    _group(peptide, '.Atoms to CA Splines').node_tree = _continuous_backbone()
+    root[RIBBON_VERSION] = RIBBON_REVISION
+    return root
+
+
 def _stable_style():
     """Copy only the affected groups; ordinary proteins keep their renderer."""
     existing = next((t for t in bpy.data.node_groups if t.get(VERSION) == REVISION), None)
@@ -132,25 +182,7 @@ def _stable_style():
     sheet = bpy.data.node_groups['.CA to sheet'].copy()
     sheet.name = '.PB continuous sheet'
     _group(root, '.MN_utils_style_cartoon').node_tree = cartoon
-    # Detect genuine backbone gaps on the unjiggled atoms. The original
-    # distance cutoff otherwise repeatedly severs neighboring residues as
-    # thermal motion moves them across the threshold. Only the gap decision
-    # uses these positions; the spline still follows the animated atoms.
-    backbone = bpy.data.node_groups['.Atoms to CA Splines'].copy()
-    backbone.name = '.PB continuous backbone'
-    curves = bpy.data.node_groups['Atoms to Curves'].copy()
-    curves.name = '.PB continuous curves'
-    chains = bpy.data.node_groups['Chain Group ID'].copy()
-    chains.name = '.PB continuous chain groups'
-    _group(cartoon, '.Atoms to CA Splines').node_tree = backbone
-    _group(backbone, 'Atoms to Curves').node_tree = curves
-    _group(curves, 'Chain Group ID').node_tree = chains
-    destinations = [(l.to_node.name, l.to_socket.identifier) for l in chains.links
-                    if l.from_node.bl_idname == 'GeometryNodeInputPosition']
-    _reference_positions(chains)
-    for name, identifier in destinations:
-        socket = next(s for s in chains.nodes[name].inputs if s.identifier == identifier)
-        chains.links.new(chains.nodes['Gap Positions'].outputs['Output'], socket)
+    _group(cartoon, '.Atoms to CA Splines').node_tree = _continuous_backbone()
     _group(cartoon, '.CA to sheet').node_tree = sheet
     helix = bpy.data.node_groups['.CA to helix'].copy()
     helix.name = '.PB continuous helix'
@@ -203,8 +235,17 @@ def _stable_style():
 def stabilize(obj):
     """Prepare new or saved transitions, and restore the renderer after style swaps."""
     from .visual_style import find_style_node
+    from ..utils.molecularnodes.blender.nodes import append, swap
     style = find_style_node(obj)
-    if style is None or 'Style Cartoon' not in style.node_tree.name:
+    if style is None:
+        return
+    if 'Style Ribbon' in style.node_tree.name:
+        # A ribbon makes no orientation decisions to bake; only its gaps.
+        if style.node_tree.get(RIBBON_VERSION) != RIBBON_REVISION:
+            append('Style Ribbon')
+            swap(style, _stable_ribbon())
+        return
+    if 'Style Cartoon' not in style.node_tree.name:
         return
     needs_reference = obj.data.get(VERSION) != REVISION or any(
         name not in obj.data.attributes for name in (TURN, HELIX_TURN))
@@ -212,10 +253,8 @@ def stabilize(obj):
     if needs_reference or needs_style:
         # An old saved transition may retain only its copied renderer: unused
         # original templates are not necessarily present after reopening.
-        from ..utils.molecularnodes.blender.nodes import append
         append('Style Cartoon')
     if needs_reference:
         _bake_turns(obj, style)
     if needs_style:
-        from ..utils.molecularnodes.blender.nodes import swap
         swap(style, _stable_style())

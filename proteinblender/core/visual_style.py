@@ -551,7 +551,7 @@ def apply_style_to_object(obj, style, *, sync_morphsets=True):
         return
     nodes.swap(style_node, target_style_name)
     from .thermal_motion import NAME as THERMAL_MOTION
-    if style == 'cartoon' and (obj.get('pb_morphset_output') or obj.modifiers.get(THERMAL_MOTION)):
+    if style in ('cartoon', 'ribbon') and (obj.get('pb_morphset_output') or obj.modifiers.get(THERMAL_MOTION)):
         from .cartoon_motion import stabilize
         stabilize(obj)
     if sync_morphsets:

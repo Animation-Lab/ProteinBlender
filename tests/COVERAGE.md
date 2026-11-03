@@ -1612,6 +1612,11 @@ on a membrane whose typical gap was 0.28 nm.
   `domain_space.set_pivot_local` now rewrites the stored pivot.
   `test_filament_chain_split.py::test_moving_a_filament_chain_pivot_moves_none_of_its_subunits` was red before the fix.
 
+- **B-factor motion broke a ribbon into fragments** (2026-11-01).
+  The ribbon judged backbone gaps by C-alpha distance on the jiggling atoms, so neighbours drifting past the cutoff cut chain A of 1atn into short pieces that changed every frame; the cartoon had been fixed for this, the ribbon had not.
+  The ribbon now shares the cartoon's continuous backbone, whose gap test reads the unjiggled positions.
+  `test_thermal_ribbon.py` (3 tests) was red before the fix: 48 of 48 frames lost a quarter (1x) to 70% (5x) of the ribbon.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
