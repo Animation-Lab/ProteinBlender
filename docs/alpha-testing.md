@@ -8,11 +8,11 @@ title: Alpha Testing
 [Back to Home](index.html)
 
 The **Alpha** channel is a separate release stream for testers. It installs as its
-own extension — **ProteinBlender (Alpha)** — so you get update notifications for
+own extension - **ProteinBlender (Alpha)** - so you get update notifications for
 alpha builds through Blender's normal extension updater instead of passing zip
 files around.
 
-> **Important — do not run both at once.** The alpha build shares internal
+> **Important - do not run both at once.** The alpha build shares internal
 > identifiers with the release build, so having **ProteinBlender** and
 > **ProteinBlender (Alpha)** *enabled at the same time* will cause errors.
 > **Disable (or uninstall) the release version before enabling the alpha**, and
@@ -21,7 +21,7 @@ files around.
 
 ## Add the Alpha Repository
 
-1. **Open Blender** (4.2 or newer)
+1. **Open Blender** (5.0 or newer)
 2. Go to **Edit -> Preferences -> Get Extensions**
 3. Click the **Repositories** dropdown at the top -> **+** -> **Add Remote Repository**
 4. **URL**:
@@ -49,6 +49,38 @@ files around.
 2. Re-enable the release **ProteinBlender**.
 3. **Restart Blender.**
 
+## Updating Safely
+
+Blender replaces the whole extension folder during an update, and a crash in the middle of that can leave the alpha half-installed.
+
+1. Save your work, then restart Blender and open an empty scene (**File -> New -> General**).
+2. Go to **Edit -> Preferences -> Get Extensions** and click **Update** next to **ProteinBlender (Alpha)**.
+3. Wait for the update to finish, then **restart Blender**.
+
+## If the Alpha Disappears or Will Not Update
+
+**"Remote data unavailable, sync with the remote repository"**, or **Check for Updates** does nothing:
+Blender crashed during an earlier update and left the repository locked.
+The lock is kept with your Blender settings, so reinstalling Blender does not clear it.
+
+1. Go to **Edit -> Preferences -> Get Extensions**.
+2. Open the **Repositories** dropdown at the top right and select the alpha repository (it may show as *animation-lab.github.io*).
+3. Click the small down-arrow to the right of the repository list and choose **Force Unlock Repository...**.
+4. Click **Check for Updates**, then install **ProteinBlender (Alpha)** again and **restart Blender**.
+
+**The alpha vanished after an update**:
+the update failed partway and Blender removed the half-installed copy.
+Install **ProteinBlender (Alpha)** again from the alpha repository (keep the release **ProteinBlender** disabled) and restart Blender.
+
+**The ProteinBlender tab says "ProteinBlender could not load"**:
+one of the Python packages it needs is broken.
+Click **Retry Install** in that tab and restart Blender.
+If that does not fix it, reinstall the alpha as above.
+
+**Something else, or the Add-ons list is empty**:
+open **Window -> Toggle System Console**, reproduce the problem, and send us a screenshot of the console text.
+If Blender crashed, it also writes a `.crash.txt` file to your Temp folder (type `%TEMP%` into the File Explorer address bar); please send that too.
+
 ## Reporting Issues
 
 When you report a bug, please include the alpha **version number**
@@ -57,7 +89,7 @@ and your **operating system**.
 
 ---
 
-## For Maintainers — Publishing an Alpha
+## For Maintainers - Publishing an Alpha
 
 The alpha channel is a "swap" build of the same codebase with a different
 extension `id`. To publish one:
