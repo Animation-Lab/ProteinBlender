@@ -1,5 +1,7 @@
 """Pose Library Panel for ProteinBlender - Simplified Group-Based System"""
 
+import json
+
 import bpy
 from bpy.types import Panel, Operator, PropertyGroup
 from bpy.props import StringProperty, IntProperty, BoolProperty
@@ -92,6 +94,91 @@ def get_puppet_objects(context, puppet_id):
     scene_manager = ProteinBlenderScene.get_instance()
     return get_puppet_member_objects(context.scene, scene_manager, puppet_item)
 
+def _puppet_item(context, puppet_id):
+    return next((it for it in context.scene.outliner_items
+                 if it.item_id == puppet_id and it.item_type == 'PUPPET'), None)
+
+
+def _scene_puppets(context):
+    """Every puppet in the scene, as ``{'id', 'name'}`` rows."""
+    return [{'id': it.item_id, 'name': it.name}
+            for it in getattr(context.scene, 'outliner_items', ())
+            if it.item_type == 'PUPPET' and it.item_id != "puppets_separator"]
+
+
+def capture_puppet(context, pose, puppet_id):
+    """Record one puppet in ``pose``.
+
+    Each member object is stored relative to the puppet's controller (or as
+    its own transform when there is no controller), with its colour, and the
+    controller itself relative to its protein.
+    """
+    from ..core.visual_style import get_object_color
+
+    item = _puppet_item(context, puppet_id)
+    puppet_name = item.name if item else puppet_id
+    controller_obj = (bpy.data.objects.get(item.controller_object_name)
+                      if item and item.controller_object_name else None)
+    for obj in get_puppet_objects(context, puppet_id):
+        transform = pose.transforms.add()
+        transform.puppet_id = puppet_id
+        transform.puppet_name = puppet_name
+        transform.object_name = obj.name
+        if controller_obj:
+            relative_matrix = controller_obj.matrix_world.inverted() @ obj.matrix_world
+            transform.location = relative_matrix.to_translation()
+            transform.rotation_euler = relative_matrix.to_euler()
+            transform.scale = relative_matrix.to_scale()
+        else:
+            transform.location = obj.location.copy()
+            transform.rotation_euler = obj.rotation_euler.copy()
+            transform.scale = obj.scale.copy()
+        color = get_object_color(obj)
+        transform.has_color = bool(color)
+        if color:
+            transform.color = color
+    capture_controller_transform(context, pose, puppet_id, controller_obj)
+
+
+def capture_filaments(context, pose):
+    """Record the shape of every filament the pose's puppets hold.
+
+    A filament's bend and its subunit count are not chain transforms, so
+    without this a pose of a filament puppet kept neither.
+    """
+    from ..core import filament_animation
+
+    objects = []
+    for puppet_id in filter(None, pose.puppet_ids.split(',')):
+        objects.extend(get_puppet_objects(context, puppet_id))
+    states = {}
+    for molecule in filament_animation.filaments_drawn_by(objects):
+        state = filament_animation.capture_state(molecule)
+        if state:
+            states[molecule.identifier] = state
+    pose.filament_states = json.dumps(states) if states else ""
+
+
+def apply_filaments(pose) -> int:
+    """Put back the filament shapes a pose recorded. Returns how many."""
+    if not pose.filament_states:
+        return 0
+    from ..core import filament_animation
+    from ..utils.scene_manager import ProteinBlenderScene
+
+    try:
+        states = json.loads(pose.filament_states)
+    except ValueError:
+        return 0
+    molecules = ProteinBlenderScene.get_instance().molecules
+    applied = 0
+    for molecule_id, state in states.items():
+        molecule = molecules.get(molecule_id)
+        if molecule is not None and filament_animation.apply_state(molecule, state):
+            applied += 1
+    return applied
+
+
 def capture_pose_preview(context, pose):
     """Capture a preview image for the pose"""
     try:
@@ -174,7 +261,11 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         description="Name for the new pose",
         default="New Pose"
     )
-    
+    # Run without the dialog (scripts, tests): the puppets to include,
+    # comma-separated. Empty includes every puppet.
+    puppet_ids: StringProperty(name="Puppet IDs", default="",
+                               options={'SKIP_SAVE', 'HIDDEN'})
+
     def invoke(self, context, event):
         # Set default pose name based on count
         pose_count = 0
@@ -183,19 +274,9 @@ class PROTEINBLENDER_OT_create_pose(Operator):
         self.pose_name = f"Pose {pose_count + 1}"
         
         # Store available puppets as a simple list for this operator instance
-        self.available_puppets = []
-        self.selected_puppets = {}  # Dictionary to track selected state
-        
-        # Get available puppets
-        if hasattr(context.scene, 'outliner_items'):
-            for item in context.scene.outliner_items:
-                if item.item_type == 'PUPPET' and item.item_id != "puppets_separator":
-                    self.available_puppets.append({
-                        'id': item.item_id,
-                        'name': item.name
-                    })
-                    # Initialize all puppets as selected by default
-                    self.selected_puppets[item.item_id] = True
+        self.available_puppets = _scene_puppets(context)
+        # Every puppet starts ticked.
+        self.selected_puppets = {p['id']: True for p in self.available_puppets}
         
         if not self.available_puppets:
             self.report({'WARNING'}, "No puppets available. Create puppets first.")
@@ -240,140 +321,43 @@ class PROTEINBLENDER_OT_create_pose(Operator):
     
     def execute(self, context):
         scene = context.scene
-        
-        # Ensure pose_library exists
         if not hasattr(scene, 'pose_library'):
             self.report({'ERROR'}, "Pose library not initialized")
             return {'CANCELLED'}
-        
-        # Collect selected puppets
-        selected_ids = []
-        selected_names = []
-        
-        for puppet in self.available_puppets:
-            if self.selected_puppets.get(puppet['id'], False):
-                selected_ids.append(puppet['id'])
-                selected_names.append(puppet['name'])
-        
-        if not selected_ids:
+
+        available = getattr(self, 'available_puppets', None)
+        if available is None:
+            # Run without the dialog: tick what puppet_ids names, or all.
+            available = _scene_puppets(context)
+            wanted = set(filter(None, self.puppet_ids.split(',')))
+            ticked = {p['id']: not wanted or p['id'] in wanted for p in available}
+        else:
+            ticked = self.selected_puppets
+        chosen = [p for p in available if ticked.get(p['id'], False)]
+        if not chosen:
             self.report({'WARNING'}, "No puppets selected. Please select at least one puppet.")
             return {'CANCELLED'}
-        
-        # Clean up stored instance
-        if hasattr(PROTEINBLENDER_OT_create_pose, '_active_instances'):
-            instance_id = str(id(self))
-            if instance_id in PROTEINBLENDER_OT_create_pose._active_instances:
-                del PROTEINBLENDER_OT_create_pose._active_instances[instance_id]
-        
-        # Create new pose
+
+        instances = getattr(PROTEINBLENDER_OT_create_pose, '_active_instances', {})
+        instances.pop(str(id(self)), None)
+
         pose = scene.pose_library.add()
         pose.name = self.pose_name
-        pose.puppet_ids = ','.join(selected_ids)
-        pose.puppet_names = ', '.join(selected_names)
+        pose.puppet_ids = ','.join(p['id'] for p in chosen)
+        pose.puppet_names = ', '.join(p['name'] for p in chosen)
         pose.created_timestamp = datetime.now().isoformat()
         pose.modified_timestamp = pose.created_timestamp
-        
-        # Capture transforms for each puppet
-        print(f"\nDebug: Creating pose '{self.pose_name}'")
-        print(f"Debug: Selected puppet IDs: {selected_ids}")
-        
-        for puppet_id in selected_ids:
-            print(f"Debug: Processing puppet {puppet_id}")
-            try:
-                # Get the puppet controller Empty object
-                controller_obj = None
-                for item in context.scene.outliner_items:
-                    if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                        if item.controller_object_name:
-                            controller_obj = bpy.data.objects.get(item.controller_object_name)
-                            if controller_obj:
-                                print(f"Debug: Found controller '{controller_obj.name}' for puppet {puppet_id}")
-                        break
-
-                # Get objects in this puppet
-                objects = get_puppet_objects(context, puppet_id)
-                print(f"Debug: Group {puppet_id} has {len(objects)} objects")
-
-                if not objects:
-                    print(f"Debug: WARNING - No objects found for puppet {puppet_id}")
-                    # Try to understand why
-                    for item in context.scene.outliner_items:
-                        if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                            print(f"  Group members: {item.puppet_memberships}")
-                            # Try alternative approach to find objects
-                            if item.puppet_memberships:
-                                for member_id in item.puppet_memberships.split(','):
-                                    print(f"  Checking member: {member_id}")
-                                    # Look for outliner item with this ID
-                                    for member_item in context.scene.outliner_items:
-                                        if member_item.item_id == member_id and member_item.object_name:
-                                            obj = bpy.data.objects.get(member_item.object_name)
-                                            if obj:
-                                                print(f"    Found object via outliner: {obj.name}")
-                                                objects.append(obj)
-                            break
-
-                for obj in objects:
-                    transform = pose.transforms.add()
-                    transform.puppet_id = puppet_id
-                    # Find the puppet name
-                    puppet_name = next((g['name'] for g in self.available_puppets
-                                     if g['id'] == puppet_id), puppet_id)
-                    transform.puppet_name = puppet_name
-                    transform.object_name = obj.name
-
-                    # Store transforms RELATIVE to the puppet controller
-                    if controller_obj:
-                        # Calculate relative transforms using matrix math for accuracy
-
-                        # Get the inverse of the controller's world matrix
-                        controller_matrix_inv = controller_obj.matrix_world.inverted()
-
-                        # Get object's transform relative to controller
-                        relative_matrix = controller_matrix_inv @ obj.matrix_world
-
-                        # Extract location, rotation, scale from the relative matrix
-                        transform.location = relative_matrix.to_translation()
-                        transform.rotation_euler = relative_matrix.to_euler()
-                        transform.scale = relative_matrix.to_scale()
-
-                        print(f"  Stored RELATIVE: {obj.name}")
-                        print(f"    Controller location: {list(controller_obj.location)}")
-                        print(f"    Object world location: {list(obj.location)}")
-                        print(f"    Relative location: {list(transform.location)}")
-                    else:
-                        # Fallback to absolute positions if no controller found
-                        print(f"  WARNING: No controller found, storing absolute positions")
-                        transform.location = obj.location.copy()
-                        transform.rotation_euler = obj.rotation_euler.copy()
-                        transform.scale = obj.scale.copy()
-
-                    # Capture color if available
-                    from ..core.visual_style import get_object_color
-                    color = get_object_color(obj)
-                    if color:
-                        transform.color = color
-                        transform.has_color = True
-                    else:
-                        transform.has_color = False
-
-                # Also capture where the controller sits relative to its protein
-                capture_controller_transform(context, pose, puppet_id, controller_obj)
-            except Exception as e:
-                print(f"Debug: ERROR processing puppet {puppet_id}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Capture screenshot preview
+        for puppet in chosen:
+            capture_puppet(context, pose, puppet['id'])
+        capture_filaments(context, pose)
         capture_pose_preview(context, pose)
-        
-        # Set as active
+
         if hasattr(scene, 'active_pose_index'):
             scene.active_pose_index = len(scene.pose_library) - 1
-        
-        self.report({'INFO'}, f"Created pose '{self.pose_name}' with {len(selected_ids)} puppet(s)")
+        self.report({'INFO'}, f"Created pose '{self.pose_name}' with {len(chosen)} puppet(s)")
         return {'FINISHED'}
-    
+
+
 class PROTEINBLENDER_OT_apply_pose(Operator):
     """Apply a saved pose to restore puppet positions"""
     bl_idname = "proteinblender.apply_pose"
@@ -398,52 +382,12 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
         applied_count = 0
         not_found = []
 
-        print(f"\n{'='*60}")
-        print(f"DEBUG: Applying pose '{pose.name}' (index {self.pose_index})")
-        print(f"{'='*60}")
-        print(f"Pose puppet_ids: {pose.puppet_ids}")
-        print(f"Pose puppet_names: {pose.puppet_names}")
-        print(f"Pose has {len(pose.transforms)} transforms:")
-        
-        # List all transforms stored in this pose
-        for i, t in enumerate(pose.transforms):
-            print(f"  [{i}] puppet_id='{t.puppet_id}', object_name='{t.object_name}'")
-
         # Group transforms by puppet to find their controllers
         puppets = {}
         for transform in pose.transforms:
-            if transform.puppet_id not in puppets:
-                puppets[transform.puppet_id] = {'controller': None, 'transforms': []}
+            puppets.setdefault(transform.puppet_id,
+                               {'controller': None, 'transforms': []})
             puppets[transform.puppet_id]['transforms'].append(transform)
-
-        print(f"\nPuppets referenced in pose: {list(puppets.keys())}")
-        
-        # Show current puppet membership for comparison
-        print(f"\nCurrent puppet membership (for comparison):")
-        for item in scene.outliner_items:
-            if item.item_type == 'PUPPET' and item.item_id in puppets:
-                print(f"  Puppet '{item.name}' (id={item.item_id}):")
-                print(f"    controller: {item.controller_object_name}")
-                print(f"    members: {item.puppet_memberships}")
-                
-                # Get current puppet objects for validation
-                current_objects = get_puppet_objects(context, item.item_id)
-                current_obj_names = {obj.name for obj in current_objects}
-                stored_obj_names = {t.object_name for t in puppets[item.item_id]['transforms']
-                                    if not t.is_controller}
-                
-                # Check for mismatches
-                in_pose_not_puppet = stored_obj_names - current_obj_names
-                in_puppet_not_pose = current_obj_names - stored_obj_names
-                
-                if in_pose_not_puppet:
-                    print(f"    ⚠️  IN POSE BUT NOT IN CURRENT PUPPET: {in_pose_not_puppet}")
-                if in_puppet_not_pose:
-                    print(f"    ⚠️  IN CURRENT PUPPET BUT NOT IN POSE: {in_puppet_not_pose}")
-                if not in_pose_not_puppet and not in_puppet_not_pose:
-                    print(f"    ✓ Pose objects match current puppet membership")
-
-        print(f"\n--- Applying transforms ---")
 
         # Find controller for each puppet
         for puppet_id in puppets:
@@ -566,10 +510,16 @@ class PROTEINBLENDER_OT_apply_pose(Operator):
                     not_found.append(transform.object_name)
 
         if not_found:
-            print(f"Debug: Could not find objects: {not_found}")
-            print(f"Debug: Available objects: {[obj.name for obj in bpy.data.objects if 'domain' in obj.name.lower() or 'chain' in obj.name.lower()][:10]}")
+            print(f"Apply Pose: objects no longer in the scene: {not_found}")
 
-        self.report({'INFO'}, f"Applied pose '{pose.name}' ({applied_count}/{len(pose.transforms)} objects)")
+        # Filaments last: their copies are placed along a bend rig that hangs
+        # off the molecule, so the chains must already stand where they will.
+        context.view_layer.update()
+        filaments = apply_filaments(pose)
+        message = f"Applied pose '{pose.name}' ({applied_count}/{len(pose.transforms)} objects"
+        if filaments:
+            message += f", {filaments} filament shape{'s' if filaments > 1 else ''}"
+        self.report({'INFO'}, message + ")")
         return {'FINISHED'}
 
 
@@ -595,59 +545,10 @@ class PROTEINBLENDER_OT_capture_pose(Operator):
         
         pose = scene.pose_library[self.pose_index]
         
-        # Clear existing transforms
         pose.transforms.clear()
-        
-        # Re-capture transforms for each puppet
-        puppet_ids = pose.puppet_ids.split(',') if pose.puppet_ids else []
-
-        for puppet_id in puppet_ids:
-            # Get the puppet controller Empty object
-            controller_obj = None
-            for item in context.scene.outliner_items:
-                if item.item_id == puppet_id and item.item_type == 'PUPPET':
-                    if item.controller_object_name:
-                        controller_obj = bpy.data.objects.get(item.controller_object_name)
-                    break
-
-            # Get objects in this puppet
-            objects = get_puppet_objects(context, puppet_id)
-
-            for obj in objects:
-                transform = pose.transforms.add()
-                transform.puppet_id = puppet_id
-                transform.object_name = obj.name
-
-                # Store transforms RELATIVE to the puppet controller
-                if controller_obj:
-
-                    # Get the inverse of the controller's world matrix
-                    controller_matrix_inv = controller_obj.matrix_world.inverted()
-
-                    # Get object's transform relative to controller
-                    relative_matrix = controller_matrix_inv @ obj.matrix_world
-
-                    # Extract location, rotation, scale from the relative matrix
-                    transform.location = relative_matrix.to_translation()
-                    transform.rotation_euler = relative_matrix.to_euler()
-                    transform.scale = relative_matrix.to_scale()
-                else:
-                    # Fallback to absolute positions if no controller found
-                    transform.location = obj.location.copy()
-                    transform.rotation_euler = obj.rotation_euler.copy()
-                    transform.scale = obj.scale.copy()
-
-                # Capture color if available
-                from ..core.visual_style import get_object_color
-                color = get_object_color(obj)
-                if color:
-                    transform.color = color
-                    transform.has_color = True
-                else:
-                    transform.has_color = False
-
-            # Also capture where the controller sits relative to its protein
-            capture_controller_transform(context, pose, puppet_id, controller_obj)
+        for puppet_id in filter(None, pose.puppet_ids.split(',')):
+            capture_puppet(context, pose, puppet_id)
+        capture_filaments(context, pose)
 
         # Update timestamp
         pose.modified_timestamp = datetime.now().isoformat()

@@ -8,6 +8,7 @@ from ..utils.scene_manager import ProteinBlenderScene
 from .morphset_operators import PBMorphKeyframeRow, populate_keyframe_rows
 from ..core import morphsets
 from ..core import assembly as assembly_core
+from ..core import filament_animation
 from ..utils.chain_utils import get_puppet_member_objects as _resolve_puppet_member_objects
 from ..utils.animation import (
     keyframe_transforms,
@@ -222,7 +223,6 @@ def get_keyframe_targets(context):
             if obj and obj.name not in seen and obj.get("pb_is_membrane", False):
                 seen.add(obj.name)
                 targets.append((item.name, obj, 'MEMBRANE', item.item_id))
-    from ..core import filament_animation
     for molecule in list(sm.molecules.values()):
         try:
             obj = molecule.object
@@ -643,7 +643,10 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 continue
             targets.extend(get_keyframe_animated_objects(obj, item.item_kind))
             if item.item_kind == 'PUPPET':
-                targets.extend(self.get_puppet_objects(context, item.puppet_id))
+                members = self.get_puppet_objects(context, item.puppet_id)
+                targets.extend(members)
+                targets.extend(o for molecule in filament_animation.filaments_drawn_by(members)
+                               for o in filament_animation.bend_objects(molecule))
             elif item.item_kind == 'MEMBRANE':
                 lattice = get_membrane_lattice(obj)
                 if lattice is not None and lattice.data is not None:
@@ -1019,9 +1022,15 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             pending_builds = {}
             for item in selected_puppets:
                 if item.item_kind == 'FILAMENT':
-                    molecule = _filament_molecule(item.puppet_id)
+                    held = [_filament_molecule(item.puppet_id)]
+                elif item.item_kind == 'PUPPET' and item.keyframe_pose:
+                    held = filament_animation.filaments_drawn_by(
+                        self.get_puppet_objects(context, item.puppet_id))
+                else:
+                    held = []
+                for molecule in held:
                     if molecule is not None:
-                        pending_builds[item.puppet_id] = (
+                        pending_builds[molecule.identifier] = (
                             assembly_core.built_build_params(molecule))
             scene.frame_set(self.frame_number)
             restore_unkeyed_edits(pending_edits)
@@ -1155,7 +1164,6 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             # play back from them (core.filament_animation).
             if (puppet_item.item_kind == 'FILAMENT' and puppet_item.use_puppet
                     and controller_obj):
-                from ..core import filament_animation
                 for bend_obj in get_filament_bend_objects(controller_obj):
                     keyframe_transforms(bend_obj, self.frame_number)
                 molecule = _filament_molecule(puppet_item.puppet_id)
@@ -1163,6 +1171,18 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                         molecule, self.frame_number):
                     print(f"  ✓ Keyframed {puppet_name}'s build at frame {self.frame_number}")
                     total_keyframed += 1
+
+            # A puppet that holds a filament keys the filament's shape with its
+            # pose: the bend and the numbers are not chain transforms, so
+            # keying the chains alone left a posed filament unanimated.
+            # Unticking Pose leaves them alone; the filament's own row owns
+            # deleting them.
+            if puppet_item.item_kind == 'PUPPET' and puppet_item.keyframe_pose:
+                for molecule in filament_animation.filaments_drawn_by(domain_objects):
+                    for bend_obj in filament_animation.bend_objects(molecule):
+                        keyframe_transforms(bend_obj, self.frame_number)
+                    if filament_animation.keyframe_parameters(molecule, self.frame_number):
+                        total_keyframed += 1
 
             # Keyframe domain relative transforms (local space) based on pose checkbox
             for domain_obj in domain_objects:

@@ -1617,6 +1617,11 @@ on a membrane whose typical gap was 0.28 nm.
   The ribbon now shares the cartoon's continuous backbone, whose gap test reads the unjiggled positions.
   `test_thermal_ribbon.py` (3 tests) was red before the fix: 48 of 48 frames lost a quarter (1x) to 70% (5x) of the ribbon.
 
+- **A puppet's pose and keyframes ignored its filament's bend and subunit count** (2026-11-01).
+  A pose stored only chain transforms, and a filament's shape is its bend rig and the numbers its copies are placed from, so two poses of an actin puppet (straight and bent, or 10 and 14 subunits) applied to the same shape and keyed nothing.
+  Poses now keep each held filament's rig and numbers, Apply Pose restores them after the chains, and Create Keyframe on a puppet keys them with its pose.
+  `test_filament_poses.py` (3 tests) was red with the filament carry switched off (`assert 14 == 10`).
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

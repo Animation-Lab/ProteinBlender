@@ -18,6 +18,10 @@ What a filament is built from stays the record on its assembly node
 (``assembly.built_build_params``): the dialog reopens on it and Cancel puts
 it back. Playing the animation keeps that record on the frame's values, so
 Edit Assembly at any frame opens on what is on screen.
+
+A puppet that holds a filament carries its shape the same way: a pose keeps
+the bend rig and the numbers (:func:`capture_state`), Apply Pose puts both
+back (:func:`apply_state`), and keying the puppet keys both.
 """
 
 from __future__ import annotations
@@ -234,6 +238,78 @@ def follow_animation(molecule, frame: float, depsgraph=None) -> bool:
         return False
     if changed:
         assembly_core.record_build_params(molecule, dict(settings))
+    return True
+
+
+# --------------------------------------------------------------------------
+# Poses
+# --------------------------------------------------------------------------
+
+def filaments_drawn_by(objects) -> list:
+    """The filaments whose molecule or domain objects are among ``objects``.
+
+    A puppet holds a filament through its chains, so this is how a pose or a
+    puppet keyframe finds the filaments it has to carry.
+    """
+    from ..utils.scene_manager import ProteinBlenderScene
+
+    names = {obj.name for obj in objects if obj is not None}
+    found = []
+    for molecule in ProteinBlenderScene.get_instance().molecules.values():
+        try:
+            if not is_filament(molecule):
+                continue
+            drawn = [getattr(d, "object", None) for d in molecule.domains.values()]
+            drawn.append(_owner(molecule))
+        except ReferenceError:
+            continue
+        if any(obj is not None and obj.name in names for obj in drawn):
+            found.append(molecule)
+    return found
+
+
+def capture_state(molecule):
+    """A filament's shape as plain data: its numbers and its bend rig.
+
+    The rig is kept as each object's own transform (``matrix_basis``): the
+    curve hangs off the molecule object and its nodes off the curve, so the
+    shape comes back wherever the filament or its puppet has moved since.
+    """
+    built = assembly_core.built_build_params(molecule)
+    if not built or not write_parameters(molecule):
+        return None
+    numbers = getattr(_owner(molecule), DATA_PATH)
+    return {
+        "numbers": {name: getattr(numbers, name) for name in PARAMETERS},
+        "rig": {obj.name: [list(row) for row in obj.matrix_basis]
+                for obj in bend_objects(molecule)},
+    }
+
+
+def apply_state(molecule, state) -> bool:
+    """Put a filament back in a captured shape. Returns True if it was."""
+    from mathutils import Matrix
+
+    if not state or not is_filament(molecule):
+        return False
+    rig = {obj.name: obj for obj in bend_objects(molecule)}
+    for name, matrix in (state.get("rig") or {}).items():
+        obj = rig.get(name)
+        if obj is not None:
+            obj.matrix_basis = Matrix(matrix)
+    bpy.context.view_layer.update()
+
+    built = assembly_core.built_build_params(molecule)
+    if not built:
+        return False
+    settings = dict(built)
+    settings.update(state.get("numbers") or {})
+    settings.update(symmetry_builder.lattice_settings(settings))
+    operators, sites = symmetry_bend.filament_copies(molecule, settings)
+    if not assembly_core.update_operator_points(molecule, operators, sites):
+        return False
+    assembly_core.record_build_params(molecule, settings)
+    write_parameters(molecule)
     return True
 
 

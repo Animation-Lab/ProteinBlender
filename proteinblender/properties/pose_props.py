@@ -57,6 +57,11 @@ class ScenePose(PropertyGroup):
     
     # Transforms for all objects in the puppets
     transforms: CollectionProperty(type=PuppetTransform)
+
+    # Shapes of the filaments these puppets hold, as JSON keyed by molecule id:
+    # each one's bend rig and the numbers its copies are placed from
+    # (core.filament_animation.capture_state). Neither is a chain transform.
+    filament_states: StringProperty(name="Filament States", default="")
     
     # Screenshot/preview (for future implementation)
     preview_path: StringProperty(name="Preview Path", description="Path to preview image")
