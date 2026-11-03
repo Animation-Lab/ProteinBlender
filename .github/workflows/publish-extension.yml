@@ -18,6 +18,18 @@ permissions:
   pages: write      # Required to deploy to GitHub Pages
   id-token: write   # Required for OIDC (if using newer auth)
 
+# One publish at a time, in trigger order. Each run rebuilds every page and
+# both extension indexes from the Releases API and replaces gh-pages, so two
+# overlapping runs race and the last to finish wins, even when it read the API
+# before the other's release existed (a docs push put alpha 1.2.4 back over
+# 1.2.5 this way). Queued, a later run always reads a later state; GitHub
+# keeps only the newest waiting run, which is fine since each run rebuilds
+# everything. Never cancel in progress: a docs push right after a release
+# would drop the release's run.
+concurrency:
+  group: publish-pages
+  cancel-in-progress: false
+
 jobs:
   publish:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}

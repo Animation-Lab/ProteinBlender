@@ -1640,6 +1640,12 @@ on a membrane whose typical gap was 0.28 nm.
   The scene reset left `membrane_builder_props` alone, so the sphere shape from `test_lipids_do_not_flip_about_their_own_axis_during_a_morph[SPHERE]` turned the next test's 40 x 40 sheet into a 15 A sphere with the protein outside it.
   `helpers.reset_scene` now restores the membrane settings as it does the import settings.
 
+- **Alpha 1.2.5 was published but the alpha channel kept offering 1.2.4** (2026-11-03).
+  Two causes.
+  A publish run started by a docs push read the Releases API before 1.2.5 existed, finished after the release's own run, and replaced gh-pages with the older index; the workflow now has a `publish-pages` concurrency group, so runs queue instead of overlapping.
+  The run dispatched to repair it then died with "Disk quota exceeded": `generate_index.py` kept every release's zips on disk until the end, about 1 GB more per release; it now deletes each zip as soon as it is hashed and its manifest read.
+  `test_repository_contracts.py::test_workflows_that_deploy_gh_pages_never_overlap` and `::test_index_generator_keeps_one_release_zip_on_disk_at_a_time` were red before the fix.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
