@@ -242,20 +242,22 @@ def main():
                 download_url = asset["browser_download_url"]
 
                 print(f"    Downloading from: {download_url}")
-                download_file(asset["url"], zip_path, token)
-
-                # Get file size and hash
-                archive_size = zip_path.stat().st_size
-                archive_hash = compute_sha256(zip_path)
-                print(f"    Size: {archive_size}, SHA256: {archive_hash[:16]}...")
-
-                # Extract manifest
+                # Delete each zip as soon as it is read. Every release adds
+                # about 1 GB of zips, and keeping them all until the end ran
+                # the runner out of disk after alpha 1.2.5.
                 try:
-                    manifest = extract_manifest(zip_path)
-                    print(f"    Manifest: {manifest.get('id')} v{manifest.get('version')}")
-                except FileNotFoundError as e:
-                    print(f"    Warning: {e}, skipping")
-                    continue
+                    download_file(asset["url"], zip_path, token)
+                    archive_size = zip_path.stat().st_size
+                    archive_hash = compute_sha256(zip_path)
+                    print(f"    Size: {archive_size}, SHA256: {archive_hash[:16]}...")
+                    try:
+                        manifest = extract_manifest(zip_path)
+                        print(f"    Manifest: {manifest.get('id')} v{manifest.get('version')}")
+                    except FileNotFoundError as e:
+                        print(f"    Warning: {e}, skipping")
+                        continue
+                finally:
+                    zip_path.unlink(missing_ok=True)
 
                 # Determine platform from filename
                 platform = get_platform_from_filename(filename)

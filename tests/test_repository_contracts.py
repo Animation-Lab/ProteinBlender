@@ -293,6 +293,72 @@ def test_shipped_manifest_runs_on_every_supported_blender_python():
     )
 
 
+def test_index_generator_keeps_one_release_zip_on_disk_at_a_time(tmp_path, monkeypatch):
+    """Reading every release must not pile every release's zips up on disk.
+
+    The generator downloads each zip of each release to hash it and read its
+    manifest. It used to keep them all until the end, so every release added
+    about 1 GB (four platforms of about 250 MB), and on 2026-11-03 the run
+    after alpha 1.2.5 died with "Disk quota exceeded" and left the alpha
+    channel offering 1.2.4. Ground truth is the download directory itself,
+    counted before each download, and hashes computed here from the bytes.
+    """
+    import hashlib
+    import io
+    import json
+    import zipfile
+
+    module = _load_index_generator()
+
+    def zip_bytes(ext_id, version):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("blender_manifest.toml",
+                        f'id = "{ext_id}"\nversion = "{version}"\n')
+        return buffer.getvalue()
+
+    platforms = ("linux_x64", "macos_arm64", "macos_x64", "windows_x64")
+    releases, payloads = [], {}
+    for ext_id, versions in (("proteinblender_alpha", ("1.2.4", "1.2.5")),
+                             ("proteinblender", ("1.0.9", "1.1.0"))):
+        for version in versions:
+            assets = []
+            for platform in platforms:
+                name = f"{ext_id}-{version}-{platform}.zip"
+                payloads[name] = zip_bytes(ext_id, version)
+                assets.append({"name": name, "url": name,
+                               "browser_download_url": f"https://example.invalid/{name}"})
+            releases.append({"tag_name": f"{ext_id}-{version}", "assets": assets})
+
+    left_on_disk = []
+
+    def fake_download(url, dest_path, token=None):
+        left_on_disk.append(sorted(p.name for p in Path(dest_path).parent.glob("*.zip")))
+        Path(dest_path).write_bytes(payloads[url])
+
+    monkeypatch.setattr(module, "get_releases", lambda: releases)
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "OUTPUT_DIR", str(tmp_path))
+    module.main()
+
+    assert len(left_on_disk) == len(payloads)
+    piled = [names for names in left_on_disk if names]
+    assert not piled, (
+        f"{len(piled[-1]) if piled else 0} zips were still on disk when the last "
+        f"download started: {piled[-1] if piled else []}")
+
+    # Deleting early must not change what the index says.
+    alpha = json.loads((tmp_path / "alpha" / "index.json").read_text())["data"]
+    release = json.loads((tmp_path / "index.json").read_text())["data"]
+    assert {e["version"] for e in alpha} == {"1.2.5"}
+    assert {e["version"] for e in release} == {"1.1.0"}
+    for entry in alpha + release:
+        name = entry["archive_url"].rsplit("/", 1)[1]
+        assert entry["archive_hash"] == "sha256:" + hashlib.sha256(payloads[name]).hexdigest()
+        assert entry["archive_size"] == len(payloads[name])
+    assert len(alpha) == len(release) == len(platforms)
+
+
 def test_jobs_that_install_prebuilt_ruby_pin_their_runner_image():
     """A job using ruby/setup-ruby must name its Ubuntu image, not ubuntu-latest.
 
@@ -313,4 +379,29 @@ def test_jobs_that_install_prebuilt_ruby_pin_their_runner_image():
             runner = str(job.get("runs-on", ""))
             if not re.fullmatch(r"ubuntu-\d+\.\d+", runner):
                 offenders.append(f"{path.name}:{name} runs-on {runner!r}")
+    assert not offenders, offenders
+
+
+def test_workflows_that_deploy_gh_pages_never_overlap():
+    """A workflow that rewrites gh-pages must queue its runs, never overlap them.
+
+    Each publish run rebuilds every page and both extension indexes from the
+    GitHub Releases API, then replaces gh-pages wholesale, so two overlapping
+    runs race and the last one to finish wins. On 2026-11-03 a run started by
+    a docs push read the API before alpha 1.2.5 was released, finished after
+    the release's own run, and put 1.2.4 back as the alpha testers' update.
+    """
+    import yaml
+
+    offenders = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if "actions-gh-pages" not in text:
+            continue
+        concurrency = yaml.safe_load(text).get("concurrency")
+        if not isinstance(concurrency, dict) or not concurrency.get("group"):
+            offenders.append(f"{path.name}: no workflow-level concurrency group")
+        elif concurrency.get("cancel-in-progress") is not False:
+            # Cancelling would drop a release's run when a docs push follows it.
+            offenders.append(f"{path.name}: cancel-in-progress must be false")
     assert not offenders, offenders
