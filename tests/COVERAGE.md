@@ -1738,11 +1738,10 @@ by passing that state directly (no dialog needed):
 
 ## Intentional xfails (design, not bugs)
 
-- `proteinblender.create_pose` — modal dialog whose selection state is *plain
-  Python* built in `invoke()` (`self.available_puppets` / `self.selected_puppets`),
-  so `bpy.ops` can't set it and the wrapper can't be `execute()`-driven without a
-  refactor. Its pose-creation logic is already fully covered by
-  `molecule.create_pose`, so no refactor is warranted.
+- None at present. `proteinblender.create_pose` was one until 2026-11-02: its
+  selection lived only in `invoke()`. It now takes a `puppet_ids` string when run
+  without its dialog (`test_filament_poses.py`,
+  `test_poses.py::test_pose_library_create_pose_without_puppets_saves_nothing`).
 
 ## Not reachable headless (skipped)
 

@@ -242,6 +242,9 @@ def test_every_deferred_load_pass_is_pumped_by_the_verifier():
             "Subunits list hover watch, started by the panel's draw and "
             "stopped when the mouse leaves; it only lays a highlight that is "
             "taken off before any save, so a reopened file has none",
+        "_flush_popups":
+            "shows a broken-dependency message once a window exists, at add-on "
+            "import; it writes nothing to the file and never runs headless",
         "_deferred_selection_update":
             "viewport->outliner selection echo; selection is not persisted state",
         "_selection_poll":

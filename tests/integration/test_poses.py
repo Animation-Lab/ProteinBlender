@@ -233,22 +233,14 @@ def test_pose_library_apply_pose_invalid_index_rejected(scene):
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=False,
-    reason="proteinblender.create_pose is a modal invoke_props_dialog whose "
-           "selection state (self.available_puppets / self.selected_puppets) is "
-           "plain-Python built only in invoke() - not settable via bpy.ops, so "
-           "the wrapper can't be execute()-driven without a refactor. The pose "
-           "CREATION logic it wraps is already fully covered by "
-           "molecule.create_pose (test_create_pose_* above), so no refactor is "
-           "warranted just to test the UI wrapper.",
-)
-def test_pose_library_create_pose_needs_puppet_and_dialog(scene, single_chain):
-    """Documents that the pose-library create path is UI/puppet-bound. With no
-    puppets and no dialog, execute() has no ``available_puppets`` attribute."""
+def test_pose_library_create_pose_without_puppets_saves_nothing(scene, single_chain):
+    """Create Pose runs without its dialog (``puppet_ids`` names the puppets,
+    empty means all), and with no puppet in the scene it saves no pose.
+
+    Until 2026-11-02 the selection lived only in invoke(), so a scripted call
+    raised on the missing ``available_puppets`` and this was an xfail. Creating
+    a pose of a real puppet is covered in ``test_filament_poses.py``."""
     scene.selected_molecule_id = single_chain
     res = bpy.ops.proteinblender.create_pose('EXEC_DEFAULT', pose_name="X")
-    # If this ever returns FINISHED headless, the xfail flips to XPASS and we
-    # should promote it to a real test.
-    assert res == {'FINISHED'}
-    assert len(scene.pose_library) == 1
+    assert res == {'CANCELLED'}
+    assert len(scene.pose_library) == 0
