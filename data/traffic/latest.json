@@ -1,47 +1,52 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-11-06T06:32:55+00:00",
+  "generated_at": "2026-11-07T05:52:25+00:00",
   "summary": {
-    "views": 51,
-    "visitors": 26,
-    "clones": 317,
-    "cloners": 80
+    "views": 54,
+    "visitors": 28,
+    "clones": 357,
+    "cloners": 94
   },
   "all_time": {
-    "views": 1330,
-    "visitors": 667,
-    "clones": 5722,
-    "cloners": 2375,
-    "days_tracked": 233
+    "views": 1333,
+    "visitors": 669,
+    "clones": 5775,
+    "cloners": 2395,
+    "days_tracked": 234
   },
   "current_day": {
+    "date": "2026-11-05",
+    "views": 3,
+    "visitors": 2,
+    "clones": 53,
+    "cloners": 20
+  },
+  "previous_day": {
     "date": "2026-11-04",
     "views": 6,
     "visitors": 2,
     "clones": 49,
     "cloners": 20
   },
-  "previous_day": {
-    "date": "2026-11-03",
-    "views": 12,
-    "visitors": 5,
-    "clones": 58,
-    "cloners": 17
-  },
   "delta_since_previous_day": {
-    "views": -6,
-    "visitors": -3,
-    "clones": -9,
-    "cloners": 3
+    "views": -3,
+    "visitors": 0,
+    "clones": 4,
+    "cloners": 0
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 17,
-      "uniques": 11
+      "count": 18,
+      "uniques": 12
     },
     {
       "referrer": "DuckDuckGo",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "referrer": "Google",
       "count": 1,
       "uniques": 1
     },
@@ -60,8 +65,8 @@
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 23,
-      "uniques": 22
+      "count": 25,
+      "uniques": 24
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
@@ -80,6 +85,12 @@
       "title": "/tree/main/.claude",
       "count": 2,
       "uniques": 2
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/discussions/16",
+      "title": "/discussions/16",
+      "count": 1,
+      "uniques": 1
     },
     {
       "path": "/Animation-Lab/ProteinBlender/discussions/17",
@@ -108,12 +119,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/tree/alpha-1.2.4",
       "title": "/tree/alpha-1.2.4",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/tree/main/.claude/agents",
-      "title": "/tree/main/.claude/agents",
       "count": 1,
       "uniques": 1
     }
