@@ -34,12 +34,16 @@ SOURCE = PACKAGE / "__init__.py"
 BROKEN = "biotite"
 
 
-def _load_broken_copy(tmp_path, monkeypatch, cache=None):
+def _load_broken_copy(tmp_path, monkeypatch, cache=None, system="Linux", pip_works=False,
+                      wheels=()):
     """Import a copy of the add-on's entry module with ``biotite`` broken.
 
     Returns ``(module, pip_calls)``. ``cache`` is written as the package's
     ``.dependency_cache.json`` before import, standing in for what an
-    earlier Blender session left behind.
+    earlier Blender session left behind. ``system`` is what
+    ``platform.system()`` reports; ``pip_works`` makes the recorded pip
+    succeed, so every command the installer would run is seen. ``wheels``
+    names empty stand-ins put in the copy's ``wheels`` folder.
     """
     package = tmp_path / "pb_broken_probe"
     package.mkdir()
@@ -47,25 +51,36 @@ def _load_broken_copy(tmp_path, monkeypatch, cache=None):
     shutil.copy(PACKAGE / "dependency_fallback.py", package / "dependency_fallback.py")
     if cache is not None:
         (package / ".dependency_cache.json").write_text(json.dumps(cache))
+    if wheels:
+        (package / "wheels").mkdir()
+        for name in wheels:
+            (package / "wheels" / name).write_bytes(b"")
 
     pip_calls = []
 
-    def offline_pip(command, *args, **kwargs):
+    def recorded_pip(command, *args, **kwargs):
         pip_calls.append(list(command))
-        raise subprocess.CalledProcessError(1, command)
+        if not pip_works:
+            raise subprocess.CalledProcessError(1, command)
+        return 0
 
     monkeypatch.setitem(sys.modules, BROKEN, None)
-    monkeypatch.setattr(subprocess, "check_call", offline_pip)
-    # The Windows path unloads scipy/pandas from sys.modules before installing,
-    # which would pull them out from under the rest of this test session.
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(subprocess, "check_call", recorded_pip)
+    monkeypatch.setattr(platform, "system", lambda: system)
     spec = importlib.util.spec_from_file_location(
         "pb_broken_probe", package / "__init__.py",
         submodule_search_locations=[str(package)])
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "pb_broken_probe", module)
     monkeypatch.delitem(sys.modules, "pb_broken_probe.dependency_fallback", raising=False)
-    spec.loader.exec_module(module)
+    # The Windows path unloads scipy/pandas from sys.modules before installing;
+    # put them back, or they are pulled out from under the rest of the session.
+    loaded = dict(sys.modules)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        for name, mod in loaded.items():
+            sys.modules.setdefault(name, mod)
     return module, pip_calls
 
 
@@ -157,3 +172,55 @@ def test_version_check_reads_installed_versions_without_pkg_resources():
     assert proteinblender._needs_reinstall("numpy", f"<{major}.0") is True
     assert proteinblender._needs_reinstall("numpy", "") is False
     assert proteinblender._needs_reinstall("no-such-package-pb", "") is True
+
+
+def _shipped_wheel_names():
+    """The wheel file names the manifest ships, read from the manifest itself."""
+    import re
+    manifest = (PACKAGE / "blender_manifest.toml").read_text(encoding="utf-8")
+    return re.findall(r'"\./wheels/([^"]+\.whl)"', manifest)
+
+
+def test_a_windows_repair_never_reinstalls_blenders_numpy(tmp_path, monkeypatch):
+    """Blender ships numpy and has it loaded, so a repair must leave it alone.
+
+    Reported 2026-11-09 (Janet, Windows, Blender 5.2): Blender's own extension
+    installer stopped before unpacking the bundled wheels, ProteinBlender's
+    repair ran, and it failed with "Error installing 'numpy'": on Windows a
+    loaded numpy's DLLs are locked, and replacing it can only break Blender.
+
+    Here the repair believes every package needs installing (no installed
+    version can be read), on the Windows path, with the shipped wheel names
+    in place and a pip that succeeds, so every command it would run is seen.
+    The truth is pip's own command-line contract, not the installer's code: a
+    command naming numpy reinstalls it; ``--force-reinstall`` without
+    ``--no-deps`` reinstalls the dependencies too, numpy among them; and any
+    command that resolves dependencies may upgrade numpy unless a constraint
+    pins it to the version Blender has loaded.
+    """
+    import importlib.metadata
+    import numpy
+
+    def unreadable(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", unreadable)
+    _module, pip_calls = _load_broken_copy(
+        tmp_path, monkeypatch, system="Windows", pip_works=True,
+        wheels=_shipped_wheel_names())
+    monkeypatch.undo()
+
+    installs = [c[c.index("install") + 1:] for c in pip_calls if "install" in c]
+    assert installs, "the repair ran no pip install at all"
+    for args in installs:
+        pinned_by = args[args.index("-c") + 1] if "-c" in args else None
+        named = [a for a in args if not a.startswith("-") and a != pinned_by]
+        assert not any(a.lower().startswith("numpy") or "numpy-" in a.lower()
+                       for a in named), f"the repair installs numpy: {args}"
+        if "--force-reinstall" in args:
+            assert "--no-deps" in args, (
+                f"force-reinstalls dependencies too, numpy among them: {args}")
+        if "--no-deps" not in args and named != ["pip"]:
+            assert pinned_by, f"may upgrade numpy while resolving dependencies: {args}"
+            pins = Path(pinned_by).read_text().split()
+            assert f"numpy=={numpy.__version__}" in pins, (args, pins)

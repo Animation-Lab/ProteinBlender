@@ -117,7 +117,6 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
             'starfile': [('starfile', None)],
             'msgpack': [('msgpack', None), ('msgpack.exceptions', None)],
             'scipy': [('scipy', None), ('scipy.linalg', None), ('scipy.linalg._fblas', None)],
-            'numpy': [('numpy', None)]
         }
 
         # Get the tests for this package, or use default
@@ -173,6 +172,31 @@ def _can_import_core_packages():
 
 #: Why the core packages cannot be imported, for the sidebar panel; empty when they can.
 _import_problem = ""
+
+
+def _numpy_pin() -> str:
+    """A pip constraints file holding numpy at the version Blender has loaded.
+
+    Empty when numpy cannot be imported or the file cannot be written; the
+    repair then never names numpy, but a dependency could still upgrade it.
+    """
+    try:
+        import numpy
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".numpy_constraint.txt")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"numpy=={numpy.__version__}\n")
+        return path
+    except Exception as exc:
+        logger.warning(f"Could not pin numpy for the dependency repair: {exc}")
+        return ""
+
+
+def _pip_install(*args: str) -> list:
+    """A ``pip install`` command that cannot replace Blender's own numpy."""
+    command = [sys.executable, "-m", "pip", "install"]
+    if pin := _numpy_pin():
+        command += ["-c", pin]
+    return command + list(args)
 
 
 def _install_with_retry(command: list, max_retries: int = 3, delay: float = 1.0) -> bool:
@@ -252,20 +276,10 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
     packages_installed_or_updated = False
     restart_required = False
 
-    # On Windows, ensure numpy and scipy are installed first and in the correct order
-    # This helps avoid DLL loading issues
+    # On Windows, scipy goes first: the packages after it load its DLLs.
     if is_windows:
-        ordered_packages = []
-        # First numpy
-        if 'numpy' in packages:
-            ordered_packages.append(('numpy', packages['numpy']))
-        # Then scipy
-        if 'scipy' in packages:
-            ordered_packages.append(('scipy', packages['scipy']))
-        # Then everything else
-        for name, version in packages.items():
-            if name not in ['numpy', 'scipy']:
-                ordered_packages.append((name, version))
+        ordered_packages = [(name, spec) for name, spec in packages.items() if name == 'scipy']
+        ordered_packages += [(name, spec) for name, spec in packages.items() if name != 'scipy']
     else:
         ordered_packages = list(packages.items())
 
@@ -315,15 +329,12 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
                 if package_version_spec.strip('=<>!') in wheel_filename or not package_version_spec:
                     logger.info(f"Installing {package_name} from local wheel: {wheel_filename}")
 
-                    install_cmd = [sys.executable, "-m", "pip", "install"]
                     if is_windows:
-                        # On Windows, force reinstall to overwrite locked files
-                        # For scipy, we need deps to ensure proper BLAS libraries
-                        if package_name == 'scipy':
-                            install_cmd.append("--force-reinstall")
-                        else:
-                            install_cmd.extend(["--force-reinstall", "--no-deps"])
-                    install_cmd.append(wheel_path)
+                        # Force, to overwrite a half-replaced copy; never its
+                        # dependencies, which would force numpy too.
+                        install_cmd = _pip_install("--force-reinstall", "--no-deps", wheel_path)
+                    else:
+                        install_cmd = _pip_install(wheel_path)
 
                     if _install_with_retry(install_cmd):
                         wheel_installed = True
@@ -336,13 +347,14 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
             if not wheel_installed:
                 logger.info(f"No matching local wheel found for {package_name}. Installing from PyPI...")
 
-                install_cmd = [sys.executable, "-m", "pip", "install"]
+                requirement = f"{package_name}{package_version_spec}"
+                commands = [_pip_install(requirement)]
                 if is_windows:
-                    # On Windows, force reinstall to overwrite locked files
-                    install_cmd.append("--force-reinstall")
-                install_cmd.append(f"{package_name}{package_version_spec}")
+                    # Force only the package itself, to overwrite a half-replaced
+                    # copy; the second command then adds any missing dependency.
+                    commands.insert(0, _pip_install("--force-reinstall", "--no-deps", requirement))
 
-                if _install_with_retry(install_cmd):
+                if all(_install_with_retry(command) for command in commands):
                     packages_installed_or_updated = True
                 else:
                     restart_required = True
@@ -441,7 +453,6 @@ def _reload_modules(packages: Dict[str, str]) -> None:
 
         # Reload specific modules if they were updated
         modules_to_reload = {
-            "numpy": ["numpy"],
             "biotite": ["biotite", "biotite.structure"],
         }
 
@@ -481,8 +492,9 @@ bl_info = {
 # never built against. They had already drifted (databpy >=0.0.15 here vs
 # >=0.0.18 there; biotite >=1.2.0 here vs the cap there).
 REQUIRED_PACKAGES = {
-    # Core scientific packages - must be installed first with compatible versions
-    "numpy": ">=1.24.0",  # Blender 5.1 ships numpy 2.x; don't cap
+    # No numpy: Blender ships it and has it loaded. Replacing it can only break
+    # Blender (on Windows its DLLs are locked, so pip fails half-way), and
+    # `_pip_install` pins it so no dependency resolution upgrades it either.
     "scipy": ">=1.13",  # Required by biotite and MDAnalysis
 
     # Main dependencies

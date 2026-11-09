@@ -1730,6 +1730,11 @@ on a membrane whose typical gap was 0.28 nm.
   It now marks the dialog's own settings with `ui.reset_default_button.poll()` where `context.property` is None, and maps them in order onto the dialog's introspected layout, failing if the counts disagree.
   The UI harness also writes its report with `repr` for values JSON cannot hold and quits Blender even if writing fails, so a step returning an odd value can no longer hang a lane.
 
+- **The dependency repair tried to replace Blender's own numpy** (2026-11-09).
+  Janet's Windows install (Blender 5.2) stopped before Blender unpacked the bundled wheels, and the repair then ran `pip install --force-reinstall numpy`, which fails on Windows because Blender has numpy's DLLs loaded ("Error installing 'numpy'"); it also force-reinstalled scipy with its dependencies and reloaded numpy in the running Blender.
+  numpy is no longer on the repair's list, every forced reinstall carries `--no-deps`, and every command that resolves dependencies is constrained to the numpy Blender has loaded.
+  `test_dependency_fallback.py::test_a_windows_repair_never_reinstalls_blenders_numpy` checks the recorded pip commands against pip's own flags; it was red with the reported numpy install.
+
 - **Undo of a states import and of removing a Morphset that a linker joins had no window-level check** (2026-11-09).
   The local-import UI lane now imports a file as "States for Morphsets", checks the Morphset was made, and presses Ctrl+Z once: the protein and its Morphset both go.
   The new `morph-linkers` UI lane removes a Morphset joined by a linker, then Ctrl+Z brings both back with the linker on the drawn alpha carbons, and Ctrl+Shift+Z leaves the linker on the returned chains.
