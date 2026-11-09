@@ -688,8 +688,34 @@ def test_style_seeds_multiple_only_when_the_parts_disagree(scene, sm,
     _color, _mixed, style = _seed(scene, multi_chain)
     assert style not in _REAL_STYLES, (
         f"a protein whose domains disagree must show Multiple, got {style!r}")
+    # Seeded as the pencil seeds it, the dropdown can hold that entry.
+    _DialogOn('PROTEINBLENDER_OT_edit_protein_visuals',
+              item_id=multi_chain).load_visual_state(bpy.context)
     assert style in _settable_styles('PROTEINBLENDER_OT_edit_protein_visuals'), (
         f"the Multiple entry {style!r} is not a value the dropdown can hold")
+
+
+@pytest.mark.integration
+def test_the_dropdown_offers_multiple_only_while_the_parts_disagree(scene, sm,
+                                                                   multi_chain):
+    """"Multiple" is a state the dropdown reports, not a style to pick. Offered
+    on a protein whose parts all agree, choosing it applied nothing while the
+    list claimed it was chosen. It is offered only while they disagree, and
+    goes once a real style has made them agree."""
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    cls = 'PROTEINBLENDER_OT_edit_protein_visuals'
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=multi_chain, vs_style='surface') == {'FINISHED'}
+    dialog = _DialogOn(cls, item_id=multi_chain)
+    dialog.load_visual_state(bpy.context)
+    assert _settable_styles(cls) == _REAL_STYLES, _settable_styles(cls)
+
+    _restyle_first_domain(molecule, 'cartoon')
+    dialog = _DialogOn(cls, item_id=multi_chain)
+    dialog.load_visual_state(bpy.context)
+    offered = _settable_styles(cls)
+    assert offered - _REAL_STYLES == {dialog.vs_style}, (offered, dialog.vs_style)
 
 
 # Hand-written, not imported: the six styles a user can actually pick.
@@ -700,14 +726,23 @@ _REAL_STYLES = {'spheres', 'cartoon', 'surface', 'ribbon', 'sticks',
 def _settable_styles(class_name):
     """The identifiers Blender itself will accept for a dialog's ``vs_style``.
 
-    Read from the registered operator's RNA, not from the add-on's item list:
-    Blender drops an item whose identifier is empty from the settable set (it
-    becomes a heading), and that is exactly the difference that matters here.
+    Found by assigning each candidate to the registered operator's real
+    properties, as the dropdown does, not read from the add-on's item list:
+    Blender refuses an empty identifier (it becomes a heading), and the list
+    is built on demand, so only an assignment says what it holds right now.
     """
     idname = getattr(bpy.types, class_name).bl_idname
     props = bpy.context.window_manager.operator_properties_last(idname)
-    return {item.identifier
-            for item in props.bl_rna.properties['vs_style'].enum_items}
+    before = props.vs_style
+    accepted = set()
+    for identifier in sorted(_REAL_STYLES | {'', 'MIXED', 'Multiple', before}):
+        try:
+            props.vs_style = identifier
+        except TypeError:
+            continue
+        accepted.add(identifier)
+    props.vs_style = before
+    return accepted
 
 
 class _DialogOn:

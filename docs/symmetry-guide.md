@@ -118,13 +118,17 @@ Untick the filament and the panel goes away.
 - Tick rows to select subunits, or use **Select All**, **None** and **Invert** above the list.
 - On a microtubule, **All Alpha Tubulin** and **All Beta Tubulin** select every subunit of that tubulin and deselect the rest.
 - **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
-- The colour and **Strength** fields below the list show the first selected subunit.
-  Change either and every selected subunit takes it at once; there is no button to press.
-- Strength mixes the paint with the filament's own colour: 1 is entirely the paint, 0 the filament's colour.
+- Each row ends with the subunit's colour swatch and an eye, as PB Outliner rows do.
+  Change a row's swatch to paint that subunit alone.
+  Click its eye to hide that subunit in the viewport and in renders, and again to show it; it comes back where it was.
+- The colour field below the list shows the first selected subunit.
+  Change it and every selected subunit takes it at once; there is no button to press.
 - **Clear** gives the selected subunits back the filament's own colour.
 
+**Realize Copies** keeps every subunit's colour, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
+
 A painted subunit keeps its colour while the filament changes: grow it, shrink it or bend it and the colour stays on the same subunit, and one shrunk away gets its colour back when it returns.
-Colours are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)).
+Colours are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)), or one at a time by pointing at a painted subunit's swatch and pressing **I**.
 
 ## Create New Assembly
 

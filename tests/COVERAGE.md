@@ -1716,6 +1716,14 @@ on a membrane whose typical gap was 0.28 nm.
   A scripted `screen.screenshot` while a file browser window is open, then Import closing it, crashes 5.1.0 in the NVIDIA OpenGL driver (`nvoglv64.dll`); Blender's own OBJ importer crashes the same way, so it is not the add-on's.
   The lane skips that one screenshot on 5.1 and now runs to the end there.
 
+- **The style dropdown offered "Multiple" as a choice when every part agreed** (2026-11-09).
+  Picking it applied nothing while the list said it was chosen.
+  It is now listed only while the item's parts wear different styles, and leaves the list once a real style makes them agree.
+  `test_visual_edit_dialogs.py::test_the_dropdown_offers_multiple_only_while_the_parts_disagree` was red before the fix; the settable values are found by assigning them, since Blender does not list a dynamic enum's items through RNA.
+
+- **A Subunits row put its eye before its swatch, unlike every PB Outliner row** (2026-11-09).
+  It now draws the swatch, then the eye at the right edge; the filament UI lane walks the row from the right and fails unless the eye comes first from that edge.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

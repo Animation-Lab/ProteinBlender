@@ -592,7 +592,7 @@ def drawn_vertices(mol, chain):
 
 
 def find_the_eye():
-    """Walk the mouse right to left along the lit row, past its swatch, to its eye."""
+    """Walk the mouse right to left along the lit row to its eye and swatch."""
     area, region = properties_region()
     y = data['row_xy'][1]
     data['passed'] = []
@@ -606,17 +606,22 @@ def find_the_eye():
 
 
 def check_eye(x, y):
-    if 'eye_xy' in data:
+    if 'eye_xy' in data and 'swatch_xy' in data:
         return 'found already'
     path = hovered_path()
     if path and (not data['passed'] or data['passed'][-1] != path):
         data['passed'].append(path)
     if path.endswith('.color') and 'swatch_xy' not in data:
         data['swatch_xy'] = (x, y)
-    if not path.endswith('.hide'):
+        data['swatch_after_eye'] = 'eye_xy' in data
+    if path.endswith('.hide') and 'eye_xy' not in data:
+        data['eye_xy'] = (x, y)
+        data['eye_row'] = int(path.split('[', 1)[1].split(']', 1)[0])
+    if 'eye_xy' not in data or 'swatch_xy' not in data:
         return path or None
-    data['eye_xy'] = (x, y)
-    data['eye_row'] = int(path.split('[', 1)[1].split(']', 1)[0])
+    # As the PB Outliner draws its rows: the swatch, then the eye at the edge.
+    assert data['swatch_after_eye'], (
+        f"the eye is not at the row's right edge, after its swatch: {data['passed']}")
     steps = g['steps']
     rest = next(i for i, (name, _f) in enumerate(steps) if name == 'click the eye')
     del steps[:rest]

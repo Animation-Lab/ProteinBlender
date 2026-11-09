@@ -645,6 +645,18 @@ REAL_STYLE_ITEMS = [
 STYLE_ITEMS = ([(MIXED_STYLE, "Multiple", "The parts use different styles: "
                  "pick one to apply it to all")] + REAL_STYLE_ITEMS)
 
+# The same lists with fixed numbers, for a dropdown that offers "Multiple"
+# only while the parts disagree. A dynamic enum stores its value as the item's
+# number, so every style keeps one number whether or not "Multiple" is listed.
+# Module-level so Blender's references to their strings stay alive.
+NUMBERED_STYLE_ITEMS = [(*item, number) for number, item in enumerate(STYLE_ITEMS)]
+NUMBERED_REAL_STYLE_ITEMS = NUMBERED_STYLE_ITEMS[1:]
+
+
+def style_number(identifier):
+    """The fixed number of a style in :data:`NUMBERED_STYLE_ITEMS`."""
+    return next(n for ident, _name, _desc, n in NUMBERED_STYLE_ITEMS if ident == identifier)
+
 
 # Register color property
 def register_props():

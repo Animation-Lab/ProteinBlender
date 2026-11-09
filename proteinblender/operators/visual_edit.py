@@ -154,6 +154,12 @@ def _on_color_edited(_operator, context):
         dialog.apply_visual_color(context)
 
 
+def _style_items(self, _context):
+    if getattr(self, "vs_style_is_mixed", False):
+        return visual_style.NUMBERED_STYLE_ITEMS
+    return visual_style.NUMBERED_REAL_STYLE_ITEMS
+
+
 def _on_style_edited(_operator, context):
     dialog = _live()
     if dialog is not None:
@@ -197,10 +203,13 @@ class VisualEditMixin:
     vs_style: EnumProperty(
         name="Representation",
         description="How this item is drawn",
-        items=visual_style.STYLE_ITEMS,
-        default='surface',
+        items=_style_items,
+        default=visual_style.style_number('surface'),
         update=_on_style_edited,
     )
+    # Set while the item's parts wear different styles, so the dropdown can
+    # offer "Multiple" to show it; never a style to choose otherwise.
+    vs_style_is_mixed: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
     vs_force_field: BoolProperty(
         name="Membrane Force Field",
         description="Part the lipids of any membrane around this item",
@@ -313,6 +322,9 @@ class VisualEditMixin:
             for index in range(4):
                 self.vs_color[index] = color[index]
             self.vs_color_is_mixed = mixed
+            # First: "Multiple" is only a value the dropdown can hold while
+            # it is offered.
+            self.vs_style_is_mixed = style == visual_style.MIXED_STYLE
             self.vs_style = style
 
             owners = self.force_field_objects(context)
@@ -372,6 +384,8 @@ class VisualEditMixin:
         row = self.visual_row(context)
         for obj in self.visual_objects(context):
             visual_style.apply_style_to_object(obj, self.vs_style)
+        # The parts agree now, so "Multiple" leaves the list.
+        self.vs_style_is_mixed = False
         self._persist_style(context, row)
         self._after_visual_edit(context)
 

@@ -35,18 +35,19 @@ class PROTEINBLENDER_UL_subunits(UIList):
         # The checkbox carries the name, so the whole row is one button and
         # pointing anywhere on it tells the hover watch which subunit it is.
         row.prop(item, "select", text=item.label)
-        # At the right edge, as the PB Outliner draws its own: the eye, then
-        # the subunit's colour. A painted subunit shows its colour entry
-        # itself, so I over the swatch keys it; any other shows the colour it
-        # is drawn and, changed, is painted that.
+        # At the right edge, as the PB Outliner draws its rows: the
+        # subunit's colour, then the eye. A painted subunit shows its colour
+        # entry itself, so I over the swatch keys it; any other shows the
+        # colour it is drawn and, changed, is painted that.
         controls = row.row(align=True)
         controls.alignment = 'RIGHT'
-        controls.prop(item, "hide", text="", emboss=False,
-                      icon="HIDE_ON" if item.hide else "HIDE_OFF")
         swatch = controls.row(align=True)
         swatch.ui_units_x = 1.0
         colour = data.colors.get(item.name)
         swatch.prop(colour if colour is not None else item, "color", text="")
+        controls.separator(factor=0.5)
+        controls.prop(item, "hide", text="", emboss=True,
+                      icon="HIDE_ON" if item.hide else "HIDE_OFF")
 
     def filter_items(self, context, data, propname):
         rows = getattr(data, propname)
