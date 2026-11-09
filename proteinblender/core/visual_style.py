@@ -572,8 +572,8 @@ def update_style(self, context):
     scene = context.scene
     scene_manager = ProteinBlenderScene.get_instance()
 
-    # Skip if empty value (multiple selections)
-    if not scene.visual_setup_style:
+    # "Multiple" is something the list displays, not a style to apply.
+    if scene.visual_setup_style in ('', MIXED_STYLE):
         return
 
     # Store current active object
@@ -625,10 +625,15 @@ def update_style(self, context):
 
 
 # The six representations a molecular object can wear, in the order they are
-# offered. STYLE_ITEMS prepends the empty "Multiple" sentinel: a chain or a
-# protein whose domains disagree has no single style to display, and choosing a
-# real entry from the list is what resolves them. Shared with the per-item
-# Visual Set-up dialogs so both lists can never drift apart.
+# offered. STYLE_ITEMS prepends the "Multiple" sentinel: a chain or a protein
+# whose domains disagree has no single style to display, and choosing a real
+# entry from the list is what resolves them. Shared with the per-item Visual
+# Set-up dialogs so both lists can never drift apart.
+#
+# The sentinel needs a real identifier. Blender treats an enum item with an
+# empty identifier as a heading, not a value, so seeding a dialog with "" raised
+# `enum "" not found` and the pencil on a mixed-style protein never opened.
+MIXED_STYLE = 'MIXED'
 REAL_STYLE_ITEMS = [
     ('spheres', "Spheres", "Sphere representation"),
     ('cartoon', "Cartoon", "Cartoon representation"),
@@ -637,7 +642,8 @@ REAL_STYLE_ITEMS = [
     ('sticks', "Sticks", "Stick representation"),
     ('ball_and_stick', "Ball & Stick", "Ball and stick representation"),
 ]
-STYLE_ITEMS = [('', "Multiple", "Multiple styles selected")] + REAL_STYLE_ITEMS
+STYLE_ITEMS = ([(MIXED_STYLE, "Multiple", "The parts use different styles: "
+                 "pick one to apply it to all")] + REAL_STYLE_ITEMS)
 
 
 # Register color property

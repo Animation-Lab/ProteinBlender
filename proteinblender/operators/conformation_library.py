@@ -5,9 +5,14 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
 from bpy.types import PropertyGroup
 
 MODEL_INTERPRETATIONS = [
-    ('AUTO', 'Detect from file', 'Use NMR/deposition provenance; ambiguous models need an explicit choice'),
-    ('CONFORMATIONS', 'States for Morphsets', 'Models are alternative states of the same protein'),
-    ('ASSEMBLY', 'Assembly copies', 'Models are simultaneous copies forming one assembly'),
+    ('AUTO', 'Detect from file',
+     'An NMR ensemble is read as states and a numbered assembly file (.pdb1) as copies. '
+     'Any other file with several models asks you to choose'),
+    ('CONFORMATIONS', 'States for Morphsets',
+     'Each model is another state of the same protein, such as a morph or trajectory '
+     'saved from ChimeraX, to animate between with Morphsets'),
+    ('ASSEMBLY', 'Assembly copies',
+     'Each model is another copy in the same structure, all drawn together'),
 ]
 # Old files may contain these values. They are no longer exposed as controls.
 FIT_ITEMS = [(value, label, '') for value, label in (

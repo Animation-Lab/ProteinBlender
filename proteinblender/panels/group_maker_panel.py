@@ -6,6 +6,7 @@ from bpy.props import StringProperty, EnumProperty
 from mathutils import Vector
 from ..utils.scene_manager import build_outliner_hierarchy
 from ..core import puppets as puppet_core
+from ..core.evaluated_bounds import evaluated_center
 
 
 def _strip_puppet_from_pose_library(scene, puppet_id):
@@ -162,27 +163,29 @@ class PROTEINBLENDER_OT_create_puppet(Operator):
         # Create Empty controller object for the puppet
         empty_name = f"{self.puppet_name}_Controller"
         
-        # Calculate center position of all domain objects
+        # Centre the controller on what the members draw
         if domain_objects:
-            # Get bounding box center of all objects
-            min_coord = [float('inf')] * 3
-            max_coord = [float('-inf')] * 3
-            
             bounds = []
             for obj in domain_objects:
                 bounds.extend([child for child in obj.children_recursive
                                if child.type == 'MESH' and not child.hide_get()
                                and not child.hide_viewport] if obj.get('pb_morphset') else [obj])
-            for obj in bounds or domain_objects:
-                # Get world space bounding box
-                bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-                for corner in bbox_corners:
-                    for i in range(3):
-                        min_coord[i] = min(min_coord[i], corner[i])
-                        max_coord[i] = max(max_coord[i], corner[i])
-            
-            # Calculate center
-            center = Vector([(min_coord[i] + max_coord[i]) / 2 for i in range(3)])
+            # Evaluated, not obj.bound_box: the box misses every assembly copy
+            # geometry nodes instance from a member, which put the controller
+            # of an icosahedral virus on its deposited pentamer instead.
+            center = evaluated_center(
+                context, {obj.name for obj in bounds or domain_objects})
+            if center is None:
+                # Nothing drawn (every member hidden): fall back to the boxes.
+                min_coord = [float('inf')] * 3
+                max_coord = [float('-inf')] * 3
+                for obj in bounds or domain_objects:
+                    for corner in obj.bound_box:
+                        world = obj.matrix_world @ Vector(corner)
+                        for i in range(3):
+                            min_coord[i] = min(min_coord[i], world[i])
+                            max_coord[i] = max(max_coord[i], world[i])
+                center = Vector([(min_coord[i] + max_coord[i]) / 2 for i in range(3)])
         else:
             # Default to world origin if no objects
             center = Vector((0, 0, 0))

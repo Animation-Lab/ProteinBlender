@@ -250,6 +250,24 @@ def build_bent_filament():
     scene.pb_subunit_strength = 0.6
     assert list(molecule.object.pb_filament.colors.keys()) == ["2:A"]
 
+    # And another hidden by the eye on its row: a reload must leave it hidden.
+    # Where it was drawn is read off Blender before and after hiding it, so
+    # the reopened file is judged against the scene, not the add-on's record.
+    import numpy as np
+    chain = next(d.object for d in molecule.domains.values() if str(d.chain_id) == "A")
+    every = H.drawn_copy_centres(chain)
+    target = f"{max(subunit_colors.present_sites(molecule))}:A"
+    assert target != "2:A"
+    molecule.object.pb_filament.subunits[target].hide = True
+    shown = H.drawn_copy_centres(chain)
+    assert len(shown) == len(every) - 1, (len(every), len(shown))
+    gone = [c for c in every
+            if min(np.linalg.norm(c - s) for s in shown) > 1e-3]
+    assert len(gone) == 1
+    scene["pb_rt_hidden_subunit"] = {
+        "molecule": molecule.identifier, "key": target,
+        "centre": [float(v) for v in gone[0]], "shown": len(shown)}
+
 
 def build_chain_rename():
     """A user-renamed chain.
@@ -547,6 +565,90 @@ def build_linkers():
 
     assert linker.uid, "linker has no uid to match across the round trip"
     assert linker.curve_object_name, "linker created no curve object"
+    assert bpy.data.objects.get(linker.curve_object_name) is not None
+
+
+def build_morph_linkers():
+    """A linker between chains A and B of a keyed, two-chain Morphset.
+
+    Janet's scene (2026-11-03): a morph of two chains that both change shape,
+    imported as states, made into a Morphset, puppeted whole and linked A to
+    B. Saved mid-morph with the puppet moved and turned, so the linker on
+    reload has to land on the morphing output again, not on the first state.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import biotite.structure.io.pdb as pdb
+
+    from proteinblender.core import morphsets as C, model_morphsets as M
+
+    scene = bpy.context.scene
+    path = H.chimera_like_ensemble(
+        Path(tempfile.mkdtemp(prefix='pb-morph-ab-')) / 'morph_ab.pdb')
+    assert bpy.ops.molecule.import_local(
+        filepath=str(path), model_interpretation='CONFORMATIONS',
+        identifier_override='saved_morph_ab') == {'FINISHED'}
+    # Where each source chain is drawn before it joins anything: Blender's own
+    # evaluated atoms. The verifier reveals the sources again after reopening
+    # (by deleting the Morphset) and checks they come back exactly here,
+    # carried by the puppet's move.
+    import numpy as np
+    from mathutils import Matrix, Vector
+    bpy.context.view_layer.update()
+    sources = [d.object for d in H.sm().molecules['saved_morph_ab'].domains.values()
+               if d.object]
+    assert len(sources) == 2, "expected chains A and B as two source objects"
+    centroids = {obj.name: Vector(H.evaluated_atom_positions([obj]).mean(axis=0))
+                 for obj in sources}
+
+    assert bpy.ops.proteinblender.create_morphset(
+        source='saved_morph_ab', name='Morph AB') == {'FINISHED'}
+    root = C.sets(scene)[0]
+    morph = M.subject(root)
+    for frame, index in ((1, 0), (50, 2)):
+        assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
+            show_visibility=False, members=[], set_name=root.name, name=morph.name,
+            morph_id=morph[C.MORPH], use_morph=True,
+            state=C.states(morph)[index]['uid'], visible=True)]) == {'FINISHED'}
+    members = [r.item_id for r in scene.outliner_items
+               if r.item_type == 'MORPH_MEMBER' and r.parent_id == root[C.TAG]]
+    assert len(members) == 2, "the morph should have chains A and B"
+    # Spheres: the verifier reads the visible alpha carbons off the output.
+    for member in members:
+        assert bpy.ops.proteinblender.edit_morph_member(
+            item_id=member, vs_style='spheres') == {'FINISHED'}
+
+    _select_rows([root[C.TAG]])
+    assert bpy.ops.proteinblender.create_puppet(
+        'EXEC_DEFAULT', puppet_name='Morph AB puppet') == {'FINISHED'}
+    puppet = next(r for r in scene.outliner_items if r.name == 'Morph AB puppet')
+
+    stack = pdb.PDBFile.read(str(path)).get_structure(model=1)
+    middle = {}
+    for chain in ('A', 'B'):
+        residues = sorted(set(stack.res_id[(stack.chain_id == chain)
+                                           & (stack.atom_name == 'CA')]))
+        middle[chain] = int(residues[len(residues) // 2])
+    names = {r.item_id: r.name for r in scene.outliner_items}
+    chain_a, chain_b = (names[m].split()[-1] for m in members)
+    assert bpy.ops.pb2.add_linker(
+        'EXEC_DEFAULT', puppet_selector=puppet.item_id,
+        endpoint_a_item=f"A_{members[0]}", endpoint_a_residue=middle[chain_a],
+        endpoint_b_item=f"B_{members[1]}", endpoint_b_residue=middle[chain_b],
+        length_residues=100, linker_name='A to B') == {'FINISHED'}
+    assert len(scene.pb2_linkers) == 1, "the morph linker was not added"
+
+    controller = bpy.data.objects[puppet.controller_object_name]
+    before = Matrix(controller.matrix_world)
+    controller.location = (0.6, -0.3, 0.2)
+    controller.rotation_euler = (0.4, -0.2, 0.9)
+    bpy.context.view_layer.update()
+    moved = Matrix(controller.matrix_world) @ before.inverted()
+    scene['pb_rt_source_centroids'] = {
+        name: list(moved @ centroid) for name, centroid in centroids.items()}
+    scene.frame_set(25)
+    linker = scene.pb2_linkers[0]
     assert bpy.data.objects.get(linker.curve_object_name) is not None
 
 
@@ -901,6 +1003,7 @@ BUILDERS = {
     "pose_library": build_pose_library,
     "puppets": build_puppets,
     "linkers": build_linkers,
+    "morph_linkers": build_morph_linkers,
     "dna": build_dna,
     "membrane": build_membrane,
     "force_fields": build_force_fields,
@@ -933,6 +1036,7 @@ BUILDER_SUBSYSTEMS = {
     "pose_library": ("properties",),
     "puppets": ("operators", "layout"),
     "linkers": ("linkers",),
+    "morph_linkers": ("linkers", "core"),
     "dna": ("dna_builder",),
     "membrane": ("membrane_builder",),
     "force_fields": ("membrane_builder",),

@@ -180,6 +180,46 @@ def test_saveload_roundtrip(name, tmp_path):
         f"[{name}] state did not survive save → reopen "
         f"(Blender {payload.get('blender')}):")
 
+    if name == "morph_linkers":
+        # The verifier's behavioural checks for this scene must have run, not
+        # been skipped by a scene they failed to recognise.
+        assert payload.get("morph_linker_frames_checked") == [50, 10], payload.keys()
+        assert len(payload.get("morph_sources_restored", ())) == 2, payload.keys()
+    if name == "bent_filament":
+        assert payload.get("filament_hidden_checked"), payload.keys()
+
+
+@pytest.mark.roundtrip
+@pytest.mark.slow
+def test_a_builders_verifier_notes_do_not_reach_the_next_scene(tmp_path):
+    """What one builder records for its verifier must not follow the next one.
+
+    The builders all run in the same Blender, one after another, and the
+    scene's custom properties outlive the objects. The bent filament records
+    which subunit it hid; when that note survived the scrub between tests,
+    every later builder's file carried it, and its verifier went looking for
+    a hidden filament that was never built - 22 failures per Blender version.
+    """
+    import bpy
+    import helpers as H
+
+    BUILDERS["bent_filament"]()
+    assert bpy.context.scene.get("pb_rt_hidden_subunit"), (
+        "the bent filament recorded nothing, so this order proves nothing")
+
+    H.reset_scene()
+    left = [key for key in bpy.context.scene.keys() if key.startswith("pb_rt_")]
+    assert not left, f"the scrub between tests left verifier notes behind: {left}"
+
+    BUILDERS["domains"]()
+    settle()
+    blend = tmp_path / "rt_after_filament.blend"
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend))
+
+    payload = run_verifier(blend)
+    assert_load_lifecycle_clean(payload, "domains after bent_filament")
+    assert "filament_hidden_checked" not in payload, payload.keys()
+
 
 @pytest.mark.roundtrip
 @pytest.mark.slow

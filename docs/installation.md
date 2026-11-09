@@ -21,7 +21,7 @@ The extension repository provides automatic update notifications and one-click u
 
 ### Step 1: Add the Repository
 
-1. **Open Blender** (4.2 or newer)
+1. **Open Blender** (5.0 or newer)
 2. Go to Edit -> Preferences
 3. Navigate to the **Get Extensions** section
 4. Click on the **Repositories** dropdown at the top
@@ -60,11 +60,18 @@ If you prefer to install manually or are having issues with the repository:
 ### Step 1: Download
 
 1. Go to the [latest stable release](https://github.com/Animation-Lab/ProteinBlender/releases/latest)
-2. Download the .zip file for your platform:
-   - proteinblender-X.X.X-windows-x64.zip (Windows)
-   - proteinblender-X.X.X-linux-x64.zip (Linux)
-   - proteinblender-X.X.X-macos-arm64.zip (Mac M1/M2)
-   - proteinblender-X.X.X-macos-x64.zip (Mac Intel)
+2. Scroll down to **Assets** (click it to expand it if it is collapsed).
+3. Download the .zip file for your platform:
+   - proteinblender-X.X.X-windows_x64.zip (Windows)
+   - proteinblender-X.X.X-linux_x64.zip (Linux)
+   - proteinblender-X.X.X-macos_arm64.zip (Mac with Apple Silicon)
+   - proteinblender-X.X.X-macos_x64.zip (Mac with Intel)
+
+Do not download **Source code (zip)** or **Source code (tar.gz)**.
+GitHub adds those to every release automatically; they are the repository's files, not an extension Blender can install.
+
+Keep the downloaded .zip as it is: do not extract it.
+Blender installs the .zip file itself.
 
 That link always resolves to the current stable build. Alpha builds are
 published to the same repository but marked **Pre-release**, so they are
@@ -76,10 +83,10 @@ follow [Alpha Testing](alpha-testing.html) rather than the steps below.
 
 ### Step 2: Install in Blender
 
-1. **Open Blender**
+1. **Open Blender** (5.0 or newer)
 2. Go to Edit -> Preferences -> Get Extensions
 3. Click **Install from Disk** (top-right corner)
-4. Navigate to and select the downloaded .zip file
+4. Navigate to and select the downloaded .zip file (the .zip itself, not an extracted folder)
 5. Click **Install from Disk**
 6. **Restart Blender**
 

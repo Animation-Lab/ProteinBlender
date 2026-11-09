@@ -51,7 +51,8 @@ def identifier_from_filename(filename: str) -> str:
 class MOLECULE_OT_import_local(Operator, ImportHelper):
     """Import one or more protein structure files from the local filesystem."""
     bl_idname = "molecule.import_local"
-    bl_label = "Import Local Structure File"
+    # Also the file browser's confirm button, which cut a longer label short.
+    bl_label = "Import Structure"
     bl_description = "Import a protein structure file (PDB, CIF, etc.) from your local filesystem"
     bl_options = {'REGISTER', 'UNDO'}
     # Not remembered between imports: a choice made for one file (say Assembly
@@ -75,6 +76,16 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         options={'HIDDEN'},
         description="Optional stable identifier for scripted public imports",
     )
+
+    def draw(self, context):
+        # The file browser's side panel is narrow: split beside its value,
+        # "Multiple models" was cut to "Multiple mod...". A heading over the
+        # choices, each a full-width button, keeps every word readable.
+        layout = self.layout
+        layout.use_property_split = False
+        column = layout.column(align=True)
+        column.label(text="Multiple models in the file")
+        column.prop(self, "model_interpretation", expand=True)
 
     def invoke(self, context, event):
         # Dropped files arrive already chosen. Only ask when there are none.

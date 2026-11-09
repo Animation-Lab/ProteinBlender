@@ -74,6 +74,16 @@ def _objects_for_item(item_id: str) -> List[bpy.types.Object]:
     if item is None:
         return objs
 
+    if item.item_type == 'MORPH_MEMBER':
+        # A Morphset chain is drawn by its animated output once it has keys,
+        # and by its source object before that. The row's object_name always
+        # names the source, which is hidden while the output plays.
+        from ..core import morphsets
+        obj = morphsets.row_object(scene, item)
+        if obj is not None:
+            _add(obj.name)
+        return objs
+
     _add(getattr(item, 'object_name', ''))
     if not objs and item.item_type == 'CHAIN':
         for child in scene.outliner_items:
@@ -190,6 +200,29 @@ def get_object_for_item(item_id: str) -> Optional[bpy.types.Object]:
     return None
 
 
+def _shaped_vertex_co(mesh, index: int) -> Vector:
+    """A vertex where its shape keys currently put it, in mesh space.
+
+    ``mesh.vertices[i].co`` is the Basis key only. A Morphset output keeps
+    every state as a relative shape key and morphs by animating their values,
+    so reading the Basis pinned a linker to the first state for the whole
+    animation. Key values on the original datablock are the animated values
+    for the current frame (frame changes write them back before the frame
+    handlers run).
+    """
+    co = Vector(mesh.vertices[index].co)
+    keys = mesh.shape_keys
+    if not keys or not keys.use_relative:
+        return co
+    for block in keys.key_blocks[1:]:
+        if block.mute or not block.value:
+            continue
+        reference = block.relative_key
+        co += block.value * (Vector(block.data[index].co)
+                             - Vector(reference.data[index].co))
+    return co
+
+
 def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
                                        residue_num: int,
                                        numeric_chain_id: Optional[int] = None) -> Optional[Vector]:
@@ -267,8 +300,9 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
 
         # Raw mesh coordinate: the object's pivot is applied inside geometry
         # nodes, so mapping with matrix_world alone would miss it and land the
-        # linker endpoint off by exactly the pivot.
-        pos = Vector(positions[i].co)
+        # linker endpoint off by exactly the pivot. Shape keys are applied,
+        # though: a Morphset output morphs through them.
+        pos = _shaped_vertex_co(mesh, i)
 
         # Prefer alpha carbons
         if has_is_alpha:

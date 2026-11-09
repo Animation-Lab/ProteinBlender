@@ -109,7 +109,7 @@ def seed_from_objects(objects):
     """``(color, color_is_mixed, style)`` for a dialog opening on ``objects``.
 
     Both fields are read across *every* object, not off the first one, and
-    both have an answer for "they disagree": the style dropdown has its empty
+    both have an answer for "they disagree": the style dropdown has its
     "Multiple" entry, and the colour swatch - which cannot render "mixed" -
     gets :data:`MIXED_COLOR` and a note. Showing one domain's colour as if it
     spoke for the rest is a lie the user then commits by pressing OK.
@@ -123,7 +123,7 @@ def seed_from_objects(objects):
 
     styles = {visual_style.get_object_style(obj) for obj in objects}
     styles.discard(None)
-    style = styles.pop() if len(styles) == 1 else ''
+    style = styles.pop() if len(styles) == 1 else visual_style.MIXED_STYLE
 
     return color, mixed, style
 
@@ -289,7 +289,7 @@ class VisualEditMixin:
         Both fields are read across *every* object that draws the item, not
         off the first one, and both have an answer for "they disagree":
 
-        * style falls back to the empty "Multiple" entry in the dropdown;
+        * style falls back to the "Multiple" entry in the dropdown;
         * colour falls back to :data:`MIXED_COLOR`, a neutral grey, with a
           note beside it. A colour swatch has no way to render "mixed", and
           showing one domain's colour as if it spoke for the rest is a lie the
@@ -364,9 +364,9 @@ class VisualEditMixin:
         self._after_visual_edit(context)
 
     def apply_visual_style(self, context):
-        # The empty entry means "these objects disagree"; it is a thing the
-        # list can display, not a style anything can be set to.
-        if not self.vs_style:
+        # "Multiple" means "these objects disagree"; it is a thing the list
+        # can display, not a style anything can be set to.
+        if self.vs_style in ('', visual_style.MIXED_STYLE):
             return
         self.before_visual_edit(context)
         row = self.visual_row(context)

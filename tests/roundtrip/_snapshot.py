@@ -530,12 +530,13 @@ def _serialize_object_data(obj):
                 name: [v.value for v in attributes[name].data]
                 for name in ('pb_cartoon_reference_turn', 'pb_cartoon_helix_turn')
                 if name in attributes}
-            # A filament's point cloud: which copy each point is, and the
-            # colour a painted subunit is drawn with.
+            # A filament's point cloud: which copy each point is, the colour
+            # a painted subunit is drawn with, and which are hidden.
             entry['assembly_point_values'] = {
                 name: _digest([_round(v) for item in attributes[name].data
-                               for v in ((item.value,) if name == 'site' else item.color)])
-                for name in ('site', 'pb_tint') if name in attributes}
+                               for v in ((item.color) if name == 'pb_tint'
+                                         else (item.value,))])
+                for name in ('site', 'pb_tint', 'pb_hidden') if name in attributes}
 
     splines = getattr(data, "splines", None)
     if splines is not None:                       # curves (linkers, DNA bends)
@@ -771,18 +772,34 @@ def scene_snapshot(include_registry=True):
     # the exact visibility before sampling. The verifier separately shows the
     # chain and checks its actual pivot after a key edit; nothing is excluded
     # from the structural comparison to accommodate this cache normalization.
+    #
+    # The same holds for the source objects a keyed Morphset hides while its
+    # outputs play (``morphsets._hide_members`` marks each with
+    # ``pb_morphset_visibility`` and disables it globally and in the view
+    # layer). A two-chain Morphset's sources carry their own pivot offsets, so
+    # their stale cache reopened with a zero translation while location,
+    # rotation, scale, parent and parent inverse all matched.
+    view_layer = bpy.context.view_layer
     hidden_displays = [obj for obj in scene.objects
-                       if obj.get('pb_morphset_output') and obj.hide_viewport]
+                       if (obj.get('pb_morphset_output')
+                           or 'pb_morphset_visibility' in obj)
+                       and obj.hide_viewport]
+    layer_hidden = [obj for obj in hidden_displays
+                    if obj.name in view_layer.objects and obj.hide_get()]
     try:
         for obj in hidden_displays:
             obj.hide_viewport = False
+        for obj in layer_hidden:
+            obj.hide_set(False)
         if hidden_displays:
-            bpy.context.view_layer.update()
+            view_layer.update()
     finally:
+        for obj in layer_hidden:
+            obj.hide_set(True)
         for obj in hidden_displays:
             obj.hide_viewport = True
         if hidden_displays:
-            bpy.context.view_layer.update()
+            view_layer.update()
 
     scene_state = {}
     for name in SCENE_PROPS:

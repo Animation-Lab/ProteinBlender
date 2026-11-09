@@ -267,11 +267,12 @@ def main():
             for obj in morphsets.outputs(bpy.context.scene):
                 assert get_object_style(obj) == expected[(obj['pb_morph_uid'], obj['pb_slot'])]
 
-        if any(r.get('pb_model_morphset') for r in morphsets.sets(bpy.context.scene)):
-            from proteinblender.core import model_morphsets as M
-            root = next(r for r in morphsets.sets(bpy.context.scene) if r.get(M.MANAGED))
+        from proteinblender.core import model_morphsets as M
+        saved_models = next((r for r in morphsets.sets(bpy.context.scene)
+                             if r.get(M.MANAGED) and M.source_id(r) == 'saved_models'), None)
+        if saved_models is not None:
+            root = saved_models
             morph = M.subject(root)
-            assert M.source_id(root) == 'saved_models'
             puppet = next((r for r in bpy.context.scene.outliner_items
                            if r.item_type == 'PUPPET'
                            and root[morphsets.TAG] in r.puppet_memberships.split(',')), None)
@@ -304,6 +305,83 @@ def main():
             expected_pivot = root.matrix_world @ Vector((.12, .24, .36))
             assert max(abs(a-b) for a,b in zip(output.matrix_world.translation, expected_pivot)) < 1e-6, tuple(output.matrix_world.translation)
             assert bpy.ops.proteinblender.toggle_visibility(item_id=member_id) == {'FINISHED'}
+
+        morph_ab = next((r for r in morphsets.sets(bpy.context.scene)
+                         if r.get(M.MANAGED) and M.source_id(r) == 'saved_morph_ab'), None)
+        if morph_ab is not None:
+            # The reopened linker must still ride the morph: at frames other
+            # than the saved one, each end sits on the CA Blender draws.
+            import numpy as np
+            import helpers as H
+            scene = bpy.context.scene
+            assert len(scene.pb2_linkers) == 1, "the morph linker did not survive"
+            linker = scene.pb2_linkers[0]
+            names = {r.item_id: r.name for r in scene.outliner_items}
+            curve = bpy.data.objects[linker.curve_object_name]
+            for frame in (50, 10):
+                scene.frame_set(frame)
+                points = curve.data.splines[0].bezier_points
+                ends = (np.array(curve.matrix_world @ points[0].co),
+                        np.array(curve.matrix_world @ points[-1].co))
+                for end, item_id, residue in (
+                        (ends[0], linker.endpoint_a_item_id, linker.endpoint_a_residue),
+                        (ends[1], linker.endpoint_b_item_id, linker.endpoint_b_residue)):
+                    visible = H.visible_alpha_carbon(
+                        [H.morph_output_named(names[item_id])], residue)
+                    assert np.allclose(end, visible, atol=1e-4), (
+                        f"frame {frame}: {names[item_id]} end {end} is off its CA {visible}")
+            out["morph_linker_frames_checked"] = [50, 10]
+
+            # Take the morph away: the source chains are revealed and must be
+            # drawn where the puppet carried them, measured before the save
+            # from Blender's evaluated atoms (not from any add-on helper).
+            expected = dict(scene['pb_rt_source_centroids'])
+            assert bpy.ops.proteinblender.delete_morphset(
+                morphset_id=morph_ab[morphsets.TAG]) == {'FINISHED'}
+            bpy.context.view_layer.update()
+            for name, centroid in expected.items():
+                obj = bpy.data.objects[name]
+                assert not obj.hide_viewport and not obj.hide_get(), (
+                    f"{name} stayed hidden after its Morphset was deleted")
+                drawn = H.evaluated_atom_positions([obj]).mean(axis=0)
+                assert np.allclose(drawn, list(centroid), atol=1e-4), (
+                    f"{name} came back at {drawn}, expected {list(centroid)}")
+            out["morph_sources_restored"] = sorted(expected)
+
+        hidden_subunit = bpy.context.scene.get("pb_rt_hidden_subunit")
+        if hidden_subunit is not None:
+            # The reopened filament must still leave its hidden subunit out,
+            # and show it where it stood once its eye is clicked again.
+            import numpy as np
+            import helpers as H
+            from proteinblender.core import subunit_colors
+            record = hidden_subunit.to_dict()
+            filament = H.sm().molecules.get(record["molecule"])
+            assert filament is not None, (
+                f"pb_rt_hidden_subunit names {record['molecule']!r}, which this file "
+                "does not have: the marker leaked in from another builder's scene")
+            assert len(filament.object.pb_filament.hidden), (
+                "the filament came back with no hidden subunits")
+            chain = next(d.object for d in filament.domains.values()
+                         if str(d.chain_id) == "A")
+            spot = np.array(record["centre"])
+
+            def near(centres):
+                return any(np.linalg.norm(c - spot) < 1e-3 for c in centres)
+
+            drawn = H.drawn_copy_centres(chain)
+            assert len(drawn) == record["shown"], (len(drawn), record)
+            assert not near(drawn), "the hidden subunit is drawn after reopening"
+            subunit_colors.sync_roster(filament)
+            row = filament.object.pb_filament.subunits[record["key"]]
+            assert row.hide
+            row.hide = False
+            drawn = H.drawn_copy_centres(chain)
+            assert len(drawn) == record["shown"] + 1 and near(drawn), (
+                "showing the hidden subunit did not bring it back where it stood")
+            # Put back as saved, for the resave generation.
+            row.hide = True
+            out["filament_hidden_checked"] = record["key"]
 
         if WANT_RENDER:
             try:

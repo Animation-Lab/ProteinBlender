@@ -357,6 +357,122 @@ def invoke_and_cancel_protein_visuals_dialog():
             f"seeded grey for {len(carbons)} chain colours, and cancelled")
 
 
+def _style_tree_name(obj):
+    """The MolecularNodes Style group an object wears, read off its nodes."""
+    for modifier in obj.modifiers:
+        if modifier.type != "NODES" or not modifier.node_group:
+            continue
+        for node in modifier.node_group.nodes:
+            if (node.type == "GROUP" and node.node_tree
+                    and "Style" in node.node_tree.name):
+                return node.node_tree.name
+    return None
+
+
+def invoke_mixed_style_protein_dialog():
+    """Reported 2026-11-03 (Janet, 1STM assembly): restyle one chain, press the
+    protein row's pencil, and Blender raised ``enum "" not found`` from
+    ``load_visual_state`` instead of opening the dialog.
+
+    Here the real pencil path runs: invoke() seeds the dropdown in a real
+    window. The dialog must open on "Multiple"; closing it untouched must leave
+    the chains as they were. The steps after this one pick a style inside it
+    and reopen it.
+    """
+    protein = next(row for row in bpy.context.scene.outliner_items
+                   if row.item_type == "PROTEIN")
+    molecule = H.sm().molecules[protein.item_id]
+    domains = [d for d in molecule.domains.values() if d.object]
+    domain_id = next(did for did, d in molecule.domains.items() if d.object)
+    assert bpy.ops.proteinblender.rename_domain(
+        target_item_id=domain_id, item_type="DOMAIN",
+        new_name=molecule.domains[domain_id].name,
+        vs_style="cartoon") == {"FINISHED"}
+    worn = {d.object.name: _style_tree_name(d.object) for d in domains}
+    assert len(set(worn.values())) > 1, f"fixture chains must differ in style: {worn}"
+    state["mixed_protein"], state["mixed_worn"] = protein.item_id, worn
+
+    dialog = _open_protein_pencil(protein.item_id)
+    assert dialog.vs_style not in _REAL_STYLES, (
+        f"the dropdown opened on {dialog.vs_style!r} for chains that disagree")
+    assert _worn_styles() == worn, "opening the dialog changed the chains' styles"
+    _press_escape()
+    return f"mixed-style protein dialog opened on Multiple over {len(domains)} chains"
+
+
+_REAL_STYLES = {"spheres", "cartoon", "surface", "ribbon", "sticks", "ball_and_stick"}
+
+
+def _worn_styles():
+    return {name: _style_tree_name(bpy.data.objects[name]) for name in state["mixed_worn"]}
+
+
+def _open_protein_pencil(item_id):
+    with ui_override("PROPERTIES"):
+        result = bpy.ops.proteinblender.edit_protein_visuals(
+            "INVOKE_DEFAULT", item_id=item_id)
+    assert result == {"RUNNING_MODAL"}, result
+    from proteinblender.operators import visual_edit
+    dialog = visual_edit.active_dialog()
+    assert dialog is not None, "the protein dialog did not open"
+    return dialog
+
+
+def _press_escape():
+    active_window().event_simulate(type="ESC", value="PRESS")
+    active_window().event_simulate(type="ESC", value="RELEASE")
+
+
+def assert_pencil_dialog_let_go():
+    """Escape must release the dialog, so no later callback reaches a stale one."""
+    from proteinblender.operators import visual_edit
+    assert visual_edit.active_dialog() is None, "Escape left the protein dialog active"
+    assert visual_edit._state["seeded"] is None, "Escape left the dialog's seed behind"
+
+
+def assert_untouched_mixed_close():
+    assert_pencil_dialog_let_go()
+    assert _worn_styles() == state["mixed_worn"], (
+        "opening and closing the dialog untouched restyled the chains: "
+        f"{_worn_styles()} != {state['mixed_worn']}")
+    return f"closed untouched: {len(set(state['mixed_worn'].values()))} styles kept"
+
+
+def pick_spheres_in_the_mixed_dialog():
+    dialog = _open_protein_pencil(state["mixed_protein"])
+    assert dialog.vs_style not in _REAL_STYLES, (
+        f"reopened untouched, the dropdown showed {dialog.vs_style!r}")
+    # The dropdown, as the open dialog writes it: the live callback applies it.
+    dialog.vs_style = "spheres"
+    after = set(_worn_styles().values())
+    assert after == {"Style Spheres"}, f"picking Spheres left {after}"
+    _press_escape()
+    return "Spheres reached every chain"
+
+
+def assert_picked_style_kept():
+    """A style picked in the dialog is applied as it is picked; Escape keeps it."""
+    assert_pencil_dialog_let_go()
+    after = set(_worn_styles().values())
+    assert after == {"Style Spheres"}, f"Escape took the picked style back: {after}"
+    return "Spheres kept after Escape"
+
+
+def reopen_the_pencil_on_spheres():
+    dialog = _open_protein_pencil(state["mixed_protein"])
+    assert dialog.vs_style == "spheres", (
+        f"the reopened dialog showed {dialog.vs_style!r}, not the Spheres every "
+        "chain now wears")
+    _press_escape()
+    return "reopened on Spheres"
+
+
+def assert_reopened_close():
+    assert_pencil_dialog_let_go()
+    assert set(_worn_styles().values()) == {"Style Spheres"}
+    return "closed again, still Spheres"
+
+
 def _carbon_rgb(obj):
     """An object's Color Common Carbon socket, read straight off the node."""
     for modifier in obj.modifiers:
@@ -1490,6 +1606,15 @@ steps = [
     ("settle puppet modal", lambda: "modal cancellation processed"),
     ("protein visuals invoke dialog", invoke_and_cancel_protein_visuals_dialog),
     ("settle protein visuals modal", lambda: "modal cancellation processed"),
+    ("mixed-style protein pencil", invoke_mixed_style_protein_dialog),
+    ("settle mixed-style modal", lambda: "modal cancellation processed"),
+    ("mixed-style pencil closed untouched", assert_untouched_mixed_close),
+    ("mixed-style pencil picks Spheres", pick_spheres_in_the_mixed_dialog),
+    ("settle mixed-style pick", lambda: "modal cancellation processed"),
+    ("mixed-style pick kept after Escape", assert_picked_style_kept),
+    ("pencil reopens on Spheres", reopen_the_pencil_on_spheres),
+    ("settle pencil reopen", lambda: "modal cancellation processed"),
+    ("pencil reopen closed", assert_reopened_close),
     ("symmetry dialog live preview", symmetry_dialog_live_preview),
     ("settle symmetry modal", lambda: "modal cancellation processed"),
     ("assert symmetry preview reverted", assert_symmetry_preview_was_reverted),

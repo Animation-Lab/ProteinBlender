@@ -52,6 +52,36 @@ def _row_objects(scene):
 
 
 # --------------------------------------------------------------------------
+# A file of several models that does not say what they are
+# --------------------------------------------------------------------------
+
+def _offered(prop):
+    """The name and choice labels the import dialog shows for an option."""
+    rna = bpy.ops.molecule.import_local.get_rna_type().properties[prop]
+    return rna.name, {item.identifier: item.name for item in rna.enum_items}
+
+
+@pytest.mark.integration
+def test_a_morph_file_names_the_choices_that_import_it(tmp_path, scene, sm):
+    """Reported 2026-11-03: a morph saved from ChimeraX would not import, and
+    the error asked for a "Conformations" choice the dialog does not show."""
+    path = H.chimera_like_ensemble(tmp_path / "morph.pdb")
+    name, labels = _offered("model_interpretation")
+
+    with pytest.raises(RuntimeError) as raised:
+        _import(path)
+    message = str(raised.value)
+    assert f'"{name}"' in message, message
+    for choice in ("CONFORMATIONS", "ASSEMBLY"):
+        assert f'"{labels[choice]}"' in message, (labels[choice], message)
+    assert not sm.molecules
+
+    # The choice it names does import it.
+    assert _import(path, model_interpretation="CONFORMATIONS") == {"FINISHED"}
+    assert len(sm.molecules) == 1
+
+
+# --------------------------------------------------------------------------
 # Importing the same file more than once
 # --------------------------------------------------------------------------
 

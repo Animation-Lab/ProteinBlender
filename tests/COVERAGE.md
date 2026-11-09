@@ -1646,6 +1646,45 @@ on a membrane whose typical gap was 0.28 nm.
   The run dispatched to repair it then died with "Disk quota exceeded": `generate_index.py` kept every release's zips on disk until the end, about 1 GB more per release; it now deletes each zip as soon as it is hashed and its manifest read.
   `test_repository_contracts.py::test_workflows_that_deploy_gh_pages_never_overlap` and `::test_index_generator_keeps_one_release_zip_on_disk_at_a_time` were red before the fix.
 
+- **A protein's pencil failed when its chains or domains wore different styles** (2026-11-03).
+  The dialog seeded its style dropdown with an empty identifier, which Blender treats as a heading, so `invoke` raised `enum "" not found`.
+  Mixed styles now seed a real "Multiple" item that applies nothing until a style is chosen.
+  `test_visual_edit_dialogs.py::test_protein_pencil_opens_when_its_chains_differ_in_style` and `::test_chain_pencil_opens_when_its_domains_differ_in_style` run the registered `load_visual_state` against real operator properties; the UI lane's "mixed-style protein pencil" step invokes it in a window and picks Spheres. Both were red with the reported traceback.
+  The UI lane also closes the pencil with Escape three ways (untouched, after picking Spheres, reopened): each time the dialog lets go of itself and its seed, untouched leaves the chains' different styles alone, a picked style stays (edits apply live; Escape does not roll back), and reopening seeds the style now worn. The filament lane does the same on the filament's pencil.
+
+- **A puppet made from 1STM's assembly put its controller off the copies' centre** (2026-11-03).
+  The centre came from `bound_box`, which ignores geometry-nodes instances, so it was the asymmetric unit's box rather than the 60-copy shell.
+  It now comes from the evaluated instances (`core/evaluated_bounds.py`), with exact sphere reach under rotation and non-uniform scale.
+  `test_puppet_center.py` compares the controller with the evaluated atom box (moved, turned and stretched); it was 33-41% of the diagonal off before the fix. A hand-computed sphere case pins the bounds maths.
+
+- **Linkers could not end on a Morphset's chains** (2026-11-03).
+  The endpoint list stopped at the Morphset row, and a linker end read the Basis shape, so it stayed behind as the morph played.
+  `test_morph_linkers.py` builds a ChimeraX-like 2BBN morph, links chains A and B and checks each end against the alpha carbon Blender draws at several frames and after the puppet moves and turns; the `morph_linkers` roundtrip repeats it after a fresh-process reopen and checks the sources come back where the puppet carried them.
+
+- **Filament subunits could not be hidden, and only painted rows had a swatch** (2026-11-03, Dillon's notes).
+  Each Subunits row now has an eye and a swatch at its right; the eye drops the copy in the node tree (`pb_hidden`), and the swatch paints that subunit alone, then hands over to its keyable `pb_filament.colors` entry.
+  `test_filament_colors.py` judges which copy went by the copies' order from the pointed end read off the structure, including painted, grown, shrunk-and-restored, microtubule and pre-existing builds; Realize Copies keeps hidden copies hidden (both realize branches) and the PB Outliner eye shows them again. All were red before the fix (realize drew 10 of 10 actins with one hidden).
+  The `bent_filament` roundtrip checks a hidden subunit stays hidden after a fresh-process reopen and returns where it stood; the filament UI lane clicks the real eye, checks the swatch hand-over and presses I over it.
+  It also clicks the swatch to open Blender's own colour picker (seen as a screenshot change of 40,000-odd pixels around the swatch), presses Escape, and checks the colour, and the list of painted subunits, did not change; on a painted swatch twice and on an unpainted one, which must not become painted by a cancelled picker.
+
+- **The Cytoskeleton Subunits Strength slider is gone** (2026-11-03, Dillon's notes: "Take strength out but make sure color of individual actin (etc.) are keyframable").
+  Stored and keyed strengths still play back (`test_a_keyed_strength_fades_a_subunit_back`, the `bent_filament` roundtrip); the UI lane checks the panel no longer draws it and was red before.
+
+- **A morph saved from ChimeraX would not import, and the error named a choice that does not exist** (2026-11-03).
+  The error asked for "Conformations"; the dialog says "States for Morphsets". The file browser's side panel also cut "Multiple models" to "Multiple mod...".
+  `test_local_file_import.py::test_a_morph_file_names_the_choices_that_import_it` reads the labels from the operator's RNA; the local-import UI lane checks the options draw as a heading and full-width choices that fit the panel. Both were red before the fix.
+  The browser's confirm button, cut to "Import Local Structu...", now reads "Import Structure": the UI lane checks the registered name and the open browser's button title, and screenshots it.
+  The UI lane also picks an option and presses Cancel (nothing imports, the browser closes), then reopens the browser and checks it starts from "Detect from file" again.
+
+- **Foreground UI runs overwrote the developer's session-recovery file** (2026-11-08).
+  A windowed Blender saves `quit.blend` to its temp, the system Temp, on quit.
+  `run_ui_tests.py` now gives each run a private temp, refuses to start unless a headless probe of the same Blender reports it, and fails a run that saves recovery elsewhere; `tests/unit/test_ui_runner_temp.py`.
+
+- **One save/load builder's verifier note failed every builder after it** (2026-11-08).
+  `bent_filament` records the subunit it hid in `scene["pb_rt_hidden_subunit"]`; `reset_scene` did not clear scene custom properties, so the next builders' files carried it and their verifiers looked for a filament that was not there (22 `StopIteration` failures per Blender version).
+  `reset_scene` now clears `pb_rt_*`, the note names its molecule, and the verifier fails with "leaked" if that molecule is missing.
+  `test_saveload.py::test_a_builders_verifier_notes_do_not_reach_the_next_scene` builds the filament, scrubs, builds `domains` and reopens it; it was red before the fix.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

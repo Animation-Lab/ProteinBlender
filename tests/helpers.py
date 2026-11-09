@@ -45,6 +45,104 @@ def data_path(name: str) -> str:
     return str(DATA_DIR / name)
 
 
+def drawn_copy_centres(obj):
+    """World centre of every piece of geometry Blender draws through ``obj``.
+
+    One entry per instance (an assembly's copy) and one for what ``obj``
+    draws itself (a filament's realized painted copies), read off the
+    evaluated depsgraph with each entry's own matrix.
+    """
+    import bpy
+    import numpy as np
+
+    bpy.context.view_layer.update()
+    centres = []
+    for entry in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = entry.parent.original if entry.is_instance else entry.object.original
+        data = entry.object.data
+        count = len(getattr(data, 'points', ()) or getattr(data, 'vertices', ()))
+        if owner.name != obj.name or not count or 'position' not in data.attributes:
+            continue
+        position = np.empty(count * 3)
+        data.attributes['position'].data.foreach_get('vector', position)
+        matrix = np.array(entry.matrix_world)
+        world = position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+        centres.append(world.mean(axis=0))
+    return centres
+
+
+def visible_alpha_carbon(owner_names, residue):
+    """World position of a residue's alpha carbon as Blender draws it.
+
+    Read from the evaluated depsgraph: the point cloud geometry nodes emit for
+    ``owner_names`` (Spheres style, one point per atom), mapped by each
+    instance's own matrix. Nothing here goes through add-on helpers. Exactly
+    one visible alpha carbon must match.
+    """
+    import bpy
+    import numpy as np
+
+    owners = set(owner_names)
+    bpy.context.view_layer.update()
+    found = []
+    for instance in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = (instance.parent.original if instance.is_instance
+                 else instance.object.original)
+        if owner.name not in owners or instance.object.type != 'POINTCLOUD':
+            continue
+        data = instance.object.data
+        attrs = data.attributes
+        if 'res_id' not in attrs or 'is_alpha_carbon' not in attrs:
+            continue
+        count = len(data.points)
+        res = np.empty(count, dtype=np.int32)
+        alpha = np.empty(count, dtype=bool)
+        pos = np.empty(count * 3)
+        attrs['res_id'].data.foreach_get('value', res)
+        attrs['is_alpha_carbon'].data.foreach_get('value', alpha)
+        attrs['position'].data.foreach_get('vector', pos)
+        matrix = np.array(instance.matrix_world)
+        for index in np.flatnonzero((res == residue) & alpha):
+            found.append(matrix[:3, :3] @ pos.reshape(-1, 3)[index] + matrix[:3, 3])
+    assert len(found) == 1, f"{sorted(owners)} residue {residue}: {len(found)} visible CAs"
+    return found[0]
+
+
+def morph_output_named(member_name):
+    """The one Morphset output object drawing the member called ``member_name``."""
+    import bpy
+    owners = [o.name for o in bpy.context.scene.objects
+              if o.get('pb_morphset_output') and o.name.endswith(member_name)]
+    assert len(owners) == 1, f"expected one output drawing {member_name}: {owners}"
+    return owners[0]
+
+
+def chimera_like_ensemble(target, source='2bbn.pdb.gz', models=3):
+    """Write ``source``'s first models with only MODEL/ATOM records.
+
+    That is what a ChimeraX morph looks like to the importer: several models
+    of the same atoms and no experiment record, so "Detect from file" refuses
+    it and the user has to choose "States for Morphsets". Bundled 2BBN gives
+    two chains, A and B, that both change shape between models.
+    """
+    import gzip
+    from pathlib import Path
+
+    keep = ('MODEL ', 'ATOM  ', 'TER', 'ENDMDL')
+    lines, model = [], 0
+    with gzip.open(data_path(source), 'rt') as handle:
+        for line in handle:
+            if line.startswith('MODEL '):
+                model += 1
+            if model > models:
+                break
+            if line.startswith(keep):
+                lines.append(line)
+    target = Path(target)
+    target.write_text(''.join(lines) + 'END\n')
+    return target
+
+
 # --------------------------------------------------------------------------
 # Scene reset  (headless Blender is one long-lived process — every test must
 # tear the scene + addon registry down or state bleeds between tests)
@@ -81,7 +179,11 @@ def reset_scene():
         bpy.context, False, False, False)
     scene.compositing_node_group = None
     for key in list(scene.keys()):
-        if key.startswith('pb_lighting_') or key == 'pb_scene_lighting':
+        # pb_rt_*: what a save/load builder records for its own verifier.
+        # Left behind, the next builder's file carries it and its verifier
+        # looks for a scene that is not there.
+        if (key.startswith('pb_lighting_') or key == 'pb_scene_lighting'
+                or key.startswith('pb_rt_')):
             del scene[key]
     # Transient pickers whose enum items are computed from the active molecule.
     # A value left behind by the previous test is meaningless against the next

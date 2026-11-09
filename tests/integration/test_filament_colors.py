@@ -611,6 +611,269 @@ def test_a_ray_at_a_subunit_picks_that_subunit():
 
 
 # --------------------------------------------------------------------------
+# Hiding a subunit: the eye on its row
+# Reported 2026-11-03 (Dillon's notes): "make it so you can hide individual
+# actin or microtubules". Which copy went is judged against the copies'
+# order up the filament from its pointed end, read off the structure.
+# --------------------------------------------------------------------------
+
+def _row(molecule, name):
+    _colors().sync_roster(molecule)
+    return molecule.object.pb_filament.subunits[name]
+
+
+def _centres(drawn):
+    return [centre for centre, _colour in drawn]
+
+
+def test_hiding_the_fourth_actin_from_the_pointed_end_takes_only_it_away():
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule)
+    assert len(ordered) == 10
+
+    _row(molecule, "3:A").hide = True
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (9, 0)
+    assert not _near(ordered[3], _centres(instances)), "the fourth actin is still drawn"
+    for index in set(range(10)) - {3}:
+        assert _near(ordered[index], _centres(instances)), f"actin {index + 1} went too"
+
+    _row(molecule, "3:A").hide = False
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 10 and _near(ordered[3], _centres(instances))
+
+
+def test_a_hidden_subunit_is_not_drawn_even_when_painted():
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule)
+    _paint(molecule, ["3:A"])
+    _row(molecule, "3:A").hide = True
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (9, 0)
+    assert not _near(ordered[3], _centres(instances))
+
+    # Shown again, it is still its own colour.
+    _row(molecule, "3:A").hide = False
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (9, 1)
+    assert _near(painted[0][0], [ordered[3]])
+    assert np.allclose(painted[0][1], RED, atol=1e-3)
+
+
+def test_a_hidden_subunit_stays_hidden_when_the_filament_grows():
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule)
+    _row(molecule, "5:A").hide = True
+
+    _edit(molecule, count=20)
+
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 19
+    assert not _near(ordered[5], _centres(instances))
+    assert _near(ordered[4], _centres(instances)) and _near(ordered[6], _centres(instances))
+    assert _row(molecule, "5:A").hide
+
+
+def test_a_subunit_hidden_then_shrunk_away_is_still_hidden_when_it_comes_back():
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule)
+    _row(molecule, "1:A").hide = True
+    _edit(molecule, shrink_minus=2)                 # takes 0:A and 1:A away
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 8
+    assert not _near(ordered[0], _centres(instances))
+
+    _edit(molecule, shrink_minus=0)
+
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 9, "the hidden subunit came back shown"
+    assert _near(ordered[0], _centres(instances))
+    assert not _near(ordered[1], _centres(instances))
+    assert _row(molecule, "1:A").hide
+
+
+def test_hiding_one_tubulin_leaves_its_partner():
+    chains = F.tubulin_chains()
+    molecule = _build("MICROTUBULE", 9.0)
+    _row(molecule, f"5:{chains['beta']}").hide = True
+    assert len(_drawn(molecule, chains["beta"])[0]) == 12
+    assert len(_drawn(molecule, chains["alpha"])[0]) == 13
+
+
+def test_a_ray_at_a_hidden_subunit_does_not_pick_it():
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule) * WORLD_SCALE
+    axis = _path_axis(molecule)
+    target = ordered[3]
+    radial = (target - ordered.mean(axis=0))
+    radial -= (radial @ axis) * axis
+    radial /= np.linalg.norm(radial)
+    _row(molecule, "3:A").hide = True
+    assert _colors().subunit_on_ray(molecule, target + radial * 5.0, -radial) != "3:A"
+
+
+def _drawn_anywhere(chain="A"):
+    """``(centre, colour)`` of every copy of a chain drawn anywhere in the scene,
+    as the evaluated scene draws it: one entry per object or instance that
+    draws atoms of that chain (meshes, as a filament's Surface style draws)."""
+    names = {d.object.name for m in H.sm().molecules.values()
+             for d in m.domains.values() if d.object and str(d.chain_id) == chain}
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    found = []
+    for entry in depsgraph.object_instances:
+        owner = entry.parent if entry.is_instance and entry.parent is not None else entry.object
+        data = entry.object.data
+        if (owner.original.name not in names or not isinstance(data, bpy.types.Mesh)
+                or not len(data.vertices) or "Color" not in data.attributes):
+            continue
+        count = len(data.vertices)
+        position = np.zeros(count * 3)
+        data.attributes["position"].data.foreach_get("vector", position)
+        colour = np.zeros(count * 4)
+        data.attributes["Color"].data.foreach_get("color", colour)
+        matrix = np.array(entry.matrix_world)
+        world = position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+        found.append((world.mean(axis=0) / WORLD_SCALE,
+                      colour.reshape(-1, 4)[:, :3].mean(axis=0)))
+    return found
+
+
+@pytest.mark.parametrize("painted", [False, True])
+def test_realizing_keeps_a_hidden_actin_hidden(painted):
+    """Hide the fourth actin from the pointed end and realize: nine actins are
+    drawn, none where the fourth stood, and none red."""
+    molecule = _build("ACTIN", 27.5)
+    ordered = _from_the_pointed_end(molecule)
+    if painted:
+        _paint(molecule, ["3:A"])
+    _row(molecule, "3:A").hide = True
+
+    made = F.realize(molecule)
+
+    drawn = _drawn_anywhere()
+    assert len(drawn) == 9, f"{len(drawn)} actins drawn after realizing"
+    assert not _near(ordered[3], _centres(drawn), 1.0), "the hidden actin came back"
+    for index in set(range(10)) - {3}:
+        assert _near(ordered[index], _centres(drawn), 1.0), f"actin {index + 1} is missing"
+    for _centre, colour in drawn:
+        assert not np.allclose(colour, RED, atol=0.05), colour
+
+    # Still made, as a protein of its own whose PB Outliner eye shows it again.
+    assert len(made) == 9
+    hidden = [mid for mid in [molecule.identifier, *made]
+              if _object(H.sm().molecules[mid], "A").hide_get()]
+    assert len(hidden) == 1, hidden
+    assert bpy.ops.proteinblender.toggle_visibility(
+        'EXEC_DEFAULT', item_id=hidden[0]) == {'FINISHED'}
+    centre, colour = _drawn_protein(hidden[0])
+    assert _near(centre, [ordered[3]], 1.0)
+    assert np.allclose(colour, RED, atol=0.02) == painted, colour
+
+
+def test_realizing_keeps_a_hidden_tubulin_hidden_and_its_partner_shown():
+    chains = F.tubulin_chains()
+    molecule = _build("MICROTUBULE", 9.0)
+    _row(molecule, f"5:{chains['beta']}").hide = True
+    assert (len(_drawn(molecule, chains["beta"])[0]),
+            len(_drawn(molecule, chains["alpha"])[0])) == (12, 13)
+
+    F.realize(molecule)
+
+    assert len(_drawn_anywhere(chains["beta"])) == 12
+    assert len(_drawn_anywhere(chains["alpha"])) == 13
+
+
+def _chain_centres(obj):
+    """World centre (Angstrom) of every copy Blender draws through ``obj``."""
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    centres = []
+    for entry in depsgraph.object_instances:
+        owner = entry.parent if entry.is_instance and entry.parent is not None else entry.object
+        data = entry.object.data
+        count = len(getattr(data, "points", ()) or getattr(data, "vertices", ()))
+        if owner.original.name != obj.name or not count:
+            continue
+        position = np.zeros(count * 3)
+        data.attributes["position"].data.foreach_get("vector", position)
+        matrix = np.array(entry.matrix_world)
+        world = position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+        centres.append(world.mean(axis=0) / WORLD_SCALE)
+    return centres
+
+
+def test_realizing_copies_of_one_chain_keeps_its_hidden_copies_hidden():
+    """The other realize branch: copies of one chain, made beside it in the
+    same protein. Hidden there are the original's own copy and one other; the
+    copies to keep and to hide are told apart by where Blender drew them
+    before and after hiding, not by their numbering."""
+    from proteinblender.core import assembly, subunit_colors, symmetry_builder
+    from proteinblender.operators.assembly_realize import realize_assembly
+
+    molecule = H.sm().molecules[H.import_local("1atn.pdb", "atn")]
+    chain_a = _object(molecule, "A")
+    other = next(d.object for d in molecule.domains.values() if str(d.chain_id) != "A")
+    assert assembly.apply_operators(
+        molecule, symmetry_builder.build_operators("C", order=4), "generated:C",
+        targets=[chain_a])
+    every = _chain_centres(chain_a)
+    assert len(every) == 4
+
+    # The data the eye on a Subunits row writes; only a filament lists rows.
+    assert subunit_colors.set_hidden(molecule, ["0:A", "2:A"], True) == 2
+    shown = _chain_centres(chain_a)
+    assert len(shown) == 2
+    gone = [c for c in every if not _near(c, shown)]
+    assert len(gone) == 2
+
+    made = realize_assembly(bpy.context, molecule)
+    assert made and len(made.domains) == 3 and not made.proteins
+
+    copies = [d.object for d in molecule.domains.values()
+              if str(d.chain_id) == "A" and d.object is not None]
+    assert len(copies) == 4
+    visible = [c for obj in copies if not obj.hide_get() for c in _chain_centres(obj)]
+    assert len(visible) == 2
+    assert all(_near(c, visible) for c in shown)
+    hidden = [obj for obj in copies if obj.hide_get()]
+    assert len(hidden) == 2 and chain_a.name in {obj.name for obj in hidden}, (
+        "the original's own copy was hidden; it should still be")
+    assert not other.hide_get() and _chain_centres(other)
+
+    # Kept so that its PB Outliner eye shows it again where it stood.
+    for obj in hidden:
+        row = next(item for item in bpy.context.scene.outliner_items
+                   if item.object_name == obj.name)
+        assert bpy.ops.proteinblender.toggle_visibility(
+            'EXEC_DEFAULT', item_id=row.item_id) == {'FINISHED'}
+        assert not obj.hide_get()
+        (centre,) = _chain_centres(obj)
+        assert _near(centre, gone)
+
+
+def test_a_build_from_before_hiding_can_still_hide():
+    """A filament saved before the eye existed has no hide stage; hiding adds it."""
+    from proteinblender.core import assembly
+    molecule = _build("ACTIN", 27.5)
+    for tree in bpy.data.node_groups:
+        hide = [n for n in tree.nodes if n.name.startswith("PB Hide")]
+        if not hide:
+            continue
+        for node in hide:
+            tree.nodes.remove(node)
+        copies = next(n for n in tree.nodes if n.name == "PB Instance Copies")
+        realize = next(n for n in tree.nodes if n.name == assembly.TINT_NODE_NAME)
+        tree.links.new(copies.outputs[0], realize.inputs["Geometry"])
+    assert not any(n.name.startswith("PB Hide")
+                   for t in bpy.data.node_groups for n in t.nodes)
+    assert len(_drawn(molecule)[0]) == 10
+
+    _row(molecule, "1:A").hide = True
+    assert len(_drawn(molecule)[0]) == 9
+
+
+# --------------------------------------------------------------------------
 # Highlights: the list's pointed-at row and the viewport picker
 # --------------------------------------------------------------------------
 
@@ -838,3 +1101,78 @@ def test_the_same_colour_again_paints_the_next_subunits():
     assert len(painted) == 2
     for _centre, colour in painted:
         assert np.allclose(colour, RED, atol=1e-3), colour
+
+
+# --------------------------------------------------------------------------
+# Each row's own colour, at its right-hand side
+# Reported 2026-11-03 (Dillon's notes): "make it so the color is on the
+# right-hand side where the actin filiment individual pieces are", and "make
+# sure color of individual actin (etc.) are keyframable".
+# --------------------------------------------------------------------------
+
+def test_every_rows_swatch_shows_the_colour_its_subunit_is_drawn():
+    molecule = _ticked_actin()
+    own = _drawn(molecule)[0][0][1]
+    assert np.allclose(_row(molecule, "2:A").color, own, atol=0.02)
+    _select(molecule, ["5:A"])
+    bpy.context.scene.pb_subunit_color = GREEN
+    assert np.allclose(_row(molecule, "5:A").color, GREEN, atol=1e-3)
+    assert np.allclose(_row(molecule, "2:A").color, own, atol=0.02)
+
+
+def test_a_rows_swatch_paints_only_its_own_subunit():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    _select(molecule, ["6:A"])
+
+    _row(molecule, "3:A").color = GREEN
+
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (9, 1)
+    assert _near(painted[0][0], [ordered[3]])
+    assert np.allclose(painted[0][1], GREEN, atol=1e-3)
+    # The selection is the selection's business; the swatch did not touch it.
+    assert _colors().selected_keys(molecule) == ["6:A"]
+    assert list(molecule.object.pb_filament.colors.keys()) == ["3:A"]
+
+
+def test_a_rows_swatch_hands_over_to_the_colour_it_made():
+    """Unpainted, a row's swatch is a view through the disposable roster row,
+    which cannot be keyed. Painted, the list draws the subunit's colour entry
+    instead - the one Create Keyframe keys, and I over the swatch keys."""
+    molecule = _ticked_actin()
+    row = _row(molecule, "3:A")
+    assert not row.bl_rna.properties["color"].is_animatable
+    assert not row.bl_rna.properties["hide"].is_animatable
+
+    row.color = GREEN
+    entry = molecule.object.pb_filament.colors["3:A"]
+    assert entry.bl_rna.properties["color"].is_animatable
+    # Keyed where I over the swatch keys it: the entry's own path.
+    index = list(molecule.object.pb_filament.colors.keys()).index("3:A")
+    assert molecule.object.keyframe_insert(
+        data_path=f"pb_filament.colors[{index}].color", frame=1)
+    entry.color = RED
+    bpy.context.scene.frame_set(1)
+    assert np.allclose(_drawn(molecule)[1][0][1], GREEN, atol=1e-3)
+    # The row shows the same colour the entry holds, whichever is drawn.
+    assert np.allclose(row.color, entry.color, atol=1e-6)
+
+
+def test_a_colour_set_on_its_row_can_be_keyed():
+    scene = bpy.context.scene
+    molecule = _ticked_actin()
+    scene.frame_set(1)
+    _row(molecule, "3:A").color = RED
+    assert _key(molecule, 1) == {'FINISHED'}
+    scene.frame_set(21)
+    _row(molecule, "3:A").color = (0.0, 0.0, 1.0)
+    assert _key(molecule, 21) == {'FINISHED'}
+
+    scene.frame_set(1)
+    assert np.allclose(_drawn(molecule)[1][0][1], RED, atol=1e-3)
+    scene.frame_set(11)
+    middle = _drawn(molecule)[1][0][1]
+    assert 0.2 < middle[0] < 0.8 and 0.2 < middle[2] < 0.8, middle
+    scene.frame_set(21)
+    assert np.allclose(_drawn(molecule)[1][0][1], (0, 0, 1), atol=1e-3)

@@ -25,6 +25,71 @@ def _for_blender(path, blender):
     return value
 
 
+def private_temp_env(run_dir, blender):
+    """The environment that gives Blender ``run_dir/blender-temp`` as its temp.
+
+    A windowed Blender saves quit.blend (File > Recover > Last Session) and
+    autosaves into its temp directory, which is the system Temp under
+    --factory-startup. Each UI run gets its own, or every run overwrites the
+    developer's real session-recovery file.
+    """
+    blender_temp = Path(run_dir) / 'blender-temp'
+    blender_temp.mkdir(exist_ok=True)
+    env = dict(os.environ)
+    env['TEMP'] = env['TMP'] = _for_blender(blender_temp, blender)
+    env['TMPDIR'] = str(blender_temp)
+    if os.name == "posix" and str(blender).lower().endswith(".exe"):
+        # A Windows exe launched from WSL only sees the variables WSLENV names.
+        env['WSLENV'] = ':'.join(filter(None, (os.environ.get('WSLENV', ''), 'TEMP', 'TMP')))
+    return env
+
+
+def _inside(path, folder):
+    """Whether Blender's ``path`` lies in ``folder`` (both as Blender spells them)."""
+    norm = lambda p: str(p).replace('/', '\\').rstrip('\\').lower()  # noqa: E731
+    return norm(path) == norm(folder) or norm(path).startswith(norm(folder) + '\\')
+
+
+def assert_private_temp(blender, env, profile_args, expected=None):
+    """Ask a headless Blender, launched as the UI run will be, where its temp is.
+
+    The environment alone is not proof: a normal profile's preferences can name
+    a temp directory of their own, and a Windows Blender started from WSL only
+    sees what WSLENV forwards. Refuses to go on unless ``bpy.app.tempdir`` is
+    inside ``expected`` (this run's own directory, ``env['TEMP']``). Returns it.
+    """
+    expected = expected or env['TEMP']
+    probe = subprocess.run(
+        [blender, '-b', *profile_args, '--python-expr',
+         "import bpy; print('PB_TEMPDIR=' + bpy.app.tempdir)"],
+        env=env, text=True, capture_output=True, timeout=120)
+    found = next((line.split('=', 1)[1].strip() for line in probe.stdout.splitlines()
+                  if line.startswith('PB_TEMPDIR=')), None)
+    print(f"[ui] Blender temp directory: {found} (expected inside {expected})", flush=True)
+    # A probe that crashed proves nothing, whatever it printed first.
+    if probe.returncode:
+        raise SystemExit(
+            f"The temp-directory probe Blender exited with {probe.returncode}; not "
+            f"starting a foreground run whose temp is unverified.\n{probe.stdout}{probe.stderr}")
+    if found is None or not _inside(found, expected):
+        raise SystemExit(
+            f"Blender's temp directory is {found!r}, not inside {expected!r}: a "
+            "foreground run would overwrite the shared session-recovery file "
+            "(quit.blend). Not starting it.")
+    return expected
+
+
+def assert_recovery_saved_privately(output, folder):
+    """Fail if Blender's log says it saved session recovery anywhere else."""
+    marker = 'Saved session recovery to "'
+    for line in output.splitlines():
+        if marker in line:
+            path = line.split(marker, 1)[1].rsplit('"', 1)[0]
+            if not _inside(path, folder):
+                raise SystemExit(f"Blender saved session recovery to {path}, "
+                                 f"outside this run's temp {folder}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--blender", default=os.environ.get("BLENDER_PATH", "blender"))
@@ -73,10 +138,13 @@ def main():
         # Keep Blender output readable while a scenario is running, and retain
         # it on timeout. A stopped timer otherwise leaves only a timeout error.
         log_path = Path(tmp) / 'blender.log'
+        env = private_temp_env(Path(tmp), args.blender)
+        private_temp = assert_private_temp(
+            args.blender, env, [] if args.normal_profile else ["--factory-startup"])
         timed_out = None
         try:
             with log_path.open('w', encoding='utf-8') as log:
-                proc = subprocess.run(command, cwd=ROOT, text=True,
+                proc = subprocess.run(command, cwd=ROOT, text=True, env=env,
                                       stdout=log, stderr=subprocess.STDOUT,
                                       timeout=args.timeout)
         except subprocess.TimeoutExpired as exc:
@@ -88,6 +156,7 @@ def main():
             for path in Path(tmp).iterdir():
                 if path.is_file():
                     shutil.copy2(path, args.artifact_dir / path.name)
+        assert_recovery_saved_privately(output, private_temp)
         if timed_out:
             raise SystemExit(f"Blender UI scenarios timed out after {args.timeout} seconds")
         if proc.returncode:

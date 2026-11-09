@@ -123,6 +123,99 @@ def check_browser_listing():
     return 'lists ' + ', '.join(listed)
 
 
+def observe_import_options():
+    """Watch the importer's options draw in the file browser's side panel.
+
+    Reported 2026-11-03: the panel showed "Multiple mod..." squeezed beside
+    "Detect from file", and nothing said what the choices were.
+    """
+    from proteinblender.operators.operator_import_local import MOLECULE_OT_import_local as Op
+    original = Op.__dict__.get('draw')
+    assert original is not None, (
+        'the import dialog draws no options of its own, so Blender squeezes '
+        '"Multiple models" beside its value in the narrow side panel')
+
+    def draw(self, context):
+        original(self, context)
+        data['options'] = str(self.layout.introspect())
+        data['options_width'] = context.region.width
+    Op.draw = draw
+    data['options_class'], data['options_draw'] = Op, original
+    window, area = browser()
+    for region in area.regions:
+        region.tag_redraw()
+
+
+def check_import_options():
+    import blf
+    data['options_class'].draw = data['options_draw']
+    assert 'options' in data, 'the side panel never drew the import options'
+    rna = bpy.ops.molecule.import_local.get_rna_type().properties['model_interpretation']
+    labels = [item.name for item in rna.enum_items]
+    texts = ['Multiple models in the file', *labels]
+    for text in texts:
+        assert text in data['options'], (text, data['options'][:400])
+    # Each is drawn on a line of its own, the panel's full width; Blender's
+    # own font says whether the words fit in it, margins and all.
+    scale = bpy.context.preferences.system.ui_scale
+    blf.size(0, 11 * scale)
+    room = data['options_width'] - 40 * scale
+    for text in texts:
+        width = blf.dimensions(0, text)[0]
+        assert width < room, f'"{text}" is {width:.0f}px in a {room:.0f}px line'
+    # The file browser is a window of its own; shoot that one.
+    window, area = browser()
+    with bpy.context.temp_override(window=window, area=area):
+        bpy.ops.screen.screenshot(
+            filepath=str(Path(g['report_path']).parent / 'local-import-options.png'))
+    return f'{len(texts)} lines fit {room:.0f}px'
+
+
+def check_confirm_label():
+    """The browser's confirm button reads the importer's name, whole.
+
+    Reported 2026-11-03: it read "Import Local Structure File", clipped to
+    "Import Local Structu..." in the narrow button.
+    """
+    name = bpy.ops.molecule.import_local.get_rna_type().name
+    assert name == 'Import Structure', f'the importer is registered as {name!r}'
+    window, area = browser()
+    params = area.spaces.active.params
+    assert params.title == name, f'the browser button reads {params.title!r}, not {name!r}'
+    with bpy.context.temp_override(window=window, area=area):
+        bpy.ops.screen.screenshot(
+            filepath=str(Path(g['report_path']).parent / 'local-import-confirm.png'))
+    return f'the browser confirm button reads "{params.title}"'
+
+
+def change_the_option_and_cancel():
+    """Pick an option, then Cancel: nothing imports, the browser goes."""
+    data['before_cancel'] = molecules()
+    window, area = browser()
+    assert area is not None, 'file browser is not open'
+    area.spaces.active.params.filename = 'ensemble.pdb'
+    area.spaces.active.active_operator.model_interpretation = 'ASSEMBLY'
+    region = next(r for r in area.regions if r.type == 'EXECUTE')
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        assert bpy.ops.file.cancel() == {'FINISHED'}
+
+
+def expect_cancel_imported_nothing():
+    window, area = browser()
+    assert area is None, 'Cancel left the file browser open'
+    assert molecules() == data['before_cancel'], (molecules(), data['before_cancel'])
+    return 'Cancel closed the browser and imported nothing'
+
+
+def expect_reopened_fresh():
+    """A reopened browser starts from Detect from file, not the cancelled choice."""
+    window, area = browser()
+    assert area is not None, 'Import Local File did not open the browser again'
+    chosen = area.spaces.active.active_operator.model_interpretation
+    assert chosen == 'AUTO', f'the reopened browser kept the cancelled choice {chosen!r}'
+    return 'reopened on Detect from file'
+
+
 def choose(name, interpretation=None):
     def step():
         window, area = browser()
@@ -257,9 +350,18 @@ g['steps'][:] = [
     ('point the file browser at the folder again', point_browser_at_folder), *settle(20, 'file list'),
     ('choose the same 4hhb.pdb and press Import', choose('4hhb.pdb')), *settle(8, 'import'),
     ('same file twice gives two independent proteins', expect_second_copy),
+    ('click Import Local File to cancel', click_import_local_file), *settle(3, 'browser open'),
+    ('point the file browser at the folder to cancel', point_browser_at_folder),
+    *settle(20, 'file list'),
+    ('the confirm button reads Import Structure', check_confirm_label),
+    ('pick Assembly copies, then Cancel', change_the_option_and_cancel), *settle(4, 'cancel'),
+    ('Cancel imported nothing', expect_cancel_imported_nothing),
     ('click Import Local File for an ensemble', click_import_local_file), *settle(3, 'browser open'),
+    ('the reopened browser forgot the cancelled choice', expect_reopened_fresh),
     ('point the file browser at the folder for the ensemble', point_browser_at_folder),
     *settle(20, 'file list'),
+    ('watch the import options draw', observe_import_options), *settle(4, 'options redraw'),
+    ('the import options are readable in the side panel', check_import_options),
     ('choose ensemble.pdb, set Multiple models to Assembly copies, Import',
      choose('ensemble.pdb', 'ASSEMBLY')), *settle(8, 'import'),
     ('Assembly copies option is honoured', expect_ensemble_read_as_assembly),

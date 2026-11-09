@@ -98,6 +98,13 @@ def _build_chain_items_for_puppet(context, puppet_id: str):
             if member.item_type == 'CHAIN' and domain_children:
                 for dom in domain_children:
                     _add(dom.item_id, dom.name)
+            elif member.item_type == 'MORPHSET':
+                # A Morphset joins a puppet whole, but its chains still have to
+                # be linkable one by one: two morphing chains A and B are
+                # exactly what a linker joins (Janet, 2026-11-03).
+                for row in outliner:
+                    if row.item_type == 'MORPH_MEMBER' and row.parent_id == member_id:
+                        _add(row.item_id, row.name)
             else:
                 _add(member_id, member.name)
         break

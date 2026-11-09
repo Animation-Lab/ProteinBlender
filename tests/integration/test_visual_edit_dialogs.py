@@ -686,8 +686,141 @@ def test_style_seeds_multiple_only_when_the_parts_disagree(scene, sm,
         vs_style='cartoon') == {'FINISHED'}
 
     _color, _mixed, style = _seed(scene, multi_chain)
-    assert style == '', (
+    assert style not in _REAL_STYLES, (
         f"a protein whose domains disagree must show Multiple, got {style!r}")
+    assert style in _settable_styles('PROTEINBLENDER_OT_edit_protein_visuals'), (
+        f"the Multiple entry {style!r} is not a value the dropdown can hold")
+
+
+# Hand-written, not imported: the six styles a user can actually pick.
+_REAL_STYLES = {'spheres', 'cartoon', 'surface', 'ribbon', 'sticks',
+                'ball_and_stick'}
+
+
+def _settable_styles(class_name):
+    """The identifiers Blender itself will accept for a dialog's ``vs_style``.
+
+    Read from the registered operator's RNA, not from the add-on's item list:
+    Blender drops an item whose identifier is empty from the settable set (it
+    becomes a heading), and that is exactly the difference that matters here.
+    """
+    idname = getattr(bpy.types, class_name).bl_idname
+    props = bpy.context.window_manager.operator_properties_last(idname)
+    return {item.identifier
+            for item in props.bl_rna.properties['vs_style'].enum_items}
+
+
+class _DialogOn:
+    """Stands in for a dialog instance so its own ``load_visual_state`` runs.
+
+    Headless Blender has no window event, so INVOKE_DEFAULT goes straight to
+    execute() and the pencil's seeding path never runs. This drives that path
+    directly: the methods are the registered operator class's own, and the
+    fields live on that operator's real ``OperatorProperties``, so every
+    ``self.vs_style = ...`` is the same RNA write the open dialog makes and
+    fails the same way.
+    """
+
+    def __init__(self, class_name, **fields):
+        cls = getattr(bpy.types, class_name)
+        props = bpy.context.window_manager.operator_properties_last(
+            cls.bl_idname)
+        assert props is not None, f"no properties for {cls.bl_idname}"
+        object.__setattr__(self, '_cls', cls)
+        object.__setattr__(self, '_props', props)
+        for name, value in fields.items():
+            setattr(props, name, value)
+
+    def __getattr__(self, name):
+        attr = getattr(self._cls, name, None)
+        if callable(attr) and not isinstance(attr, type):
+            return attr.__get__(self)
+        return getattr(self._props, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._props, name, value)
+
+
+def _restyle_first_domain(molecule, style):
+    """Give one domain of ``molecule`` its own style from its own row."""
+    domain_id = next(did for did, d in molecule.domains.items() if d.object)
+    assert bpy.ops.proteinblender.rename_domain(
+        target_item_id=domain_id, item_type='DOMAIN',
+        new_name=molecule.domains[domain_id].name,
+        vs_style=style) == {'FINISHED'}
+    return domain_id
+
+
+def _worn_styles(domains):
+    return {_style_node_tree_name(d.object) for d in domains if d.object}
+
+
+@pytest.mark.integration
+def test_protein_pencil_opens_when_its_chains_differ_in_style(scene, sm,
+                                                              multi_chain):
+    """Reported 2026-11-03 (Janet, 1STM assembly): restyle some chains, press
+    the protein row's pencil, and Blender raises
+    ``enum "" not found in ('spheres', 'cartoon', ...)`` from
+    ``load_visual_state`` instead of opening the dialog.
+
+    Seeding a protein whose chains disagree wrote the empty "Multiple"
+    identifier, and Blender treats an empty enum identifier as a heading, not a
+    value. The real click is covered by the foreground UI lane
+    (``invoke_mixed_style_protein_dialog`` in tests/ui/run_ui_scenarios.py).
+
+    Ground truth that the chains disagree is the Style node tree each domain
+    actually wears, read directly.
+    """
+    _build_outliner()
+    molecule = sm.molecules[multi_chain]
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=multi_chain, vs_style='surface') == {'FINISHED'}
+    _restyle_first_domain(molecule, 'cartoon')
+    worn = _worn_styles(molecule.domains.values())
+    assert len(worn) > 1, f"fixture must leave the chains disagreeing, got {worn}"
+
+    dialog = _DialogOn('PROTEINBLENDER_OT_edit_protein_visuals',
+                       item_id=multi_chain)
+    dialog.load_visual_state(bpy.context)
+    assert dialog.vs_style not in _REAL_STYLES, (
+        f"the dropdown claimed one style, {dialog.vs_style!r}, for chains that disagree")
+
+    # Seeding is suspended: opening the dialog must not flatten the variety.
+    assert _worn_styles(molecule.domains.values()) == worn
+
+    # And a real choice made from that state still reaches every chain.
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=multi_chain, vs_style='spheres') == {'FINISHED'}
+    final = _worn_styles(molecule.domains.values())
+    assert final == {'Style Spheres'}, final
+
+
+@pytest.mark.integration
+def test_chain_pencil_opens_when_its_domains_differ_in_style(scene, sm,
+                                                             single_chain):
+    """The chain dialog seeds the same way, so a chain split into domains of
+    different styles hit the same empty-enum error from its own pencil."""
+    molecule = sm.molecules[single_chain]
+    letter = sorted(molecule.chain_mapping.values())[0]
+    assert H.split_domain_from_outliner(single_chain, letter, 1, 38) == {'FINISHED'}
+    domains = [d for d in molecule.domains.values() if d.object]
+    assert len(domains) >= 2, "the split did not leave two domains"
+
+    _build_outliner()
+    current = _style_node_tree_name(domains[0].object)
+    other = 'cartoon' if 'Cartoon' not in (current or '') else 'sticks'
+    _restyle_first_domain(molecule, other)
+    worn = _worn_styles(domains)
+    assert len(worn) > 1, f"fixture must leave the domains disagreeing, got {worn}"
+
+    _build_outliner()
+    chain_row = next(r for r in scene.outliner_items
+                     if r.item_type == 'CHAIN' and r.parent_id == single_chain)
+    dialog = _DialogOn('PROTEINBLENDER_OT_edit_chain_domains',
+                       item_id=chain_row.item_id)
+    dialog.load_visual_state(bpy.context)
+    assert dialog.vs_style not in _REAL_STYLES, dialog.vs_style
+    assert _worn_styles(domains) == worn
 
 
 @pytest.mark.integration

@@ -364,8 +364,12 @@ def verify_hidden_and_tick():
 def inspect_subunits_panel():
     text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
     assert 'Cytoskeleton Subunits' in text, 'the Subunits panel was not drawn'
-    for label in ('Pick in Viewport', 'Strength', 'Clear', 'Nothing selected'):
+    for label in ('Pick in Viewport', 'Clear', 'Nothing selected'):
         assert label in text, (label, text[:400])
+    # Dillon, 2026-11-03: "Take strength out but make sure color of individual
+    # actin (etc.) are keyframable". The colour is keyed on its own.
+    assert 'pb_subunit_strength' not in text and 'Strength' not in text, (
+        'the Subunits panel still draws the Strength slider', text[:600])
     # The select buttons sit above the list, a microtubule's tubulins below Select All.
     order = [text.find(label) for label in (
         'Select All', 'All Alpha Tubulin', 'All Beta Tubulin', 'Pick in Viewport')]
@@ -559,6 +563,313 @@ def verify_row_dark():
     return 'cleared'
 
 
+def hovered_path():
+    """The data path of the button under the mouse in the Properties editor."""
+    area, region = properties_region()
+    with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
+        found = bpy.context.property
+    return (found[1] or '') if found else ''
+
+
+def drawn_vertices(mol, chain):
+    """``(all vertices drawn for one chain, vertices of one copy)``, from the depsgraph.
+
+    Instanced copies and the realized painted ones alike, so hiding any copy
+    takes exactly one copy's worth away.
+    """
+    domain = next(d.object for d in mol.domains.values() if str(d.chain_id) == chain)
+    bpy.context.view_layer.update()
+    total, per_copy = 0, None
+    for entry in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = entry.parent.original if entry.is_instance else entry.object.original
+        if owner.name != domain.name or entry.object.type != 'MESH':
+            continue
+        count = len(entry.object.data.vertices)
+        total += count
+        if entry.is_instance and count:
+            per_copy = count
+    return total, per_copy
+
+
+def find_the_eye():
+    """Walk the mouse right to left along the lit row, past its swatch, to its eye."""
+    area, region = properties_region()
+    y = data['row_xy'][1]
+    data['passed'] = []
+    steps = []
+    for x in range(region.x + region.width - 4, region.x + region.width // 2, -3):
+        steps.append((f'point at x={x}', lambda x=x: move(x, y)))
+        steps.append(('settle', idle))
+        steps.append((f'check x={x}', lambda x=x: check_eye(x, y)))
+    g['steps'][:0] = steps
+    return f'{len(steps) // 3} spots'
+
+
+def check_eye(x, y):
+    if 'eye_xy' in data:
+        return 'found already'
+    path = hovered_path()
+    if path and (not data['passed'] or data['passed'][-1] != path):
+        data['passed'].append(path)
+    if path.endswith('.color') and 'swatch_xy' not in data:
+        data['swatch_xy'] = (x, y)
+    if not path.endswith('.hide'):
+        return path or None
+    data['eye_xy'] = (x, y)
+    data['eye_row'] = int(path.split('[', 1)[1].split(']', 1)[0])
+    steps = g['steps']
+    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'click the eye')
+    del steps[:rest]
+    return path
+
+
+def click_at(xy, value):
+    g['active_window']().event_simulate(type='LEFTMOUSE', value=value,
+                                        x=int(xy[0]), y=int(xy[1]))
+
+
+def click_the_eye():
+    assert 'eye_xy' in data, f"no eye on the row; passed over {data.get('passed')}"
+    # The swatch sits at the row's right edge, beside the eye.
+    assert any(p.endswith('.color') for p in data['passed']), data['passed']
+    mol = filament()
+    row = mol.object.pb_filament.subunits[data['eye_row']]
+    data['eye_name'], data['eye_chain'] = row.name, row.chain
+    data['before_hide'] = drawn_vertices(mol, row.chain)
+    assert not row.hide
+    click_at(data['eye_xy'], 'PRESS')
+
+
+def verify_hidden_by_the_eye():
+    mol = filament()
+    row = mol.object.pb_filament.subunits[data['eye_name']]
+    assert row.hide, f"clicking the eye did not hide {row.label}"
+    (total, per_copy), (after, _per) = data['before_hide'], drawn_vertices(mol, row.chain)
+    assert per_copy and after == total - per_copy, (total, per_copy, after)
+    capture('subunits-hidden.png')
+    click_at(data['eye_xy'], 'PRESS')
+    return f'{row.label} hidden: {total} -> {after} vertices'
+
+
+def verify_shown_by_the_eye():
+    mol = filament()
+    row = mol.object.pb_filament.subunits[data['eye_name']]
+    assert not row.hide, f"clicking the eye again did not show {row.label}"
+    assert drawn_vertices(mol, row.chain)[0] == data['before_hide'][0]
+    return f'{row.label} shown again'
+
+
+def unpaint_the_row():
+    """Start the swatch checks from a subunit with no colour of its own."""
+    mol = filament()
+    name = data['eye_name']
+    if name in mol.object.pb_filament.colors:
+        SC.clear(mol, [name])
+    g['protein_workspace_panel_area']().tag_redraw()
+    move(*data['swatch_xy'])
+
+
+def verify_the_swatch_reads_through_the_row():
+    mol = filament()
+    path = hovered_path()
+    assert path == f"pb_filament.subunits[{data['eye_row']}].color", path
+    row = mol.object.pb_filament.subunits[data['eye_name']]
+    assert np.allclose(row.color, SC.own_colour(mol, row.chain), atol=1e-6)
+    # What the colour picker does with a new colour: the row's setter.
+    row.color = (0.1, 0.2, 0.95)
+    g['protein_workspace_panel_area']().tag_redraw()
+    return path
+
+
+def point_at_the_swatch_again():
+    # Away and back, so the region looks up the button under the mouse anew.
+    x, y = data['swatch_xy']
+    move(x - 200, y)
+
+
+def verify_handoff_and_press_i():
+    mol = filament()
+    colors = mol.object.pb_filament.colors
+    index = colors.find(data['eye_name'])
+    assert index >= 0, 'painting through the swatch made no colour entry'
+    path = hovered_path()
+    assert path == f'pb_filament.colors[{index}].color', (
+        f'the painted swatch is not its colour entry: {path}')
+    data['swatch_entry'] = index
+    data['frame'] = bpy.context.scene.frame_current
+    key('I')                       # Insert Keyframe on the button under the mouse
+    return path
+
+
+def verify_keyed_from_the_swatch():
+    from proteinblender.utils.animation import get_fcurves_from_action
+    obj = filament().object
+    path = f"pb_filament.colors[{data['swatch_entry']}].color"
+    curves = [c for c in get_fcurves_from_action(obj.animation_data.action, obj.animation_data)
+              if c.data_path == path]
+    assert sorted(c.array_index for c in curves) == [0, 1, 2], [c.data_path for c in curves]
+    for curve in curves:
+        assert any(abs(k.co[0] - data['frame']) < 1e-6 for k in curve.keyframe_points)
+    assert not any('subunits' in c.data_path for c in get_fcurves_from_action(
+        obj.animation_data.action, obj.animation_data)), 'a roster row was keyed'
+    capture('subunits-swatch-keyed.png')
+    return f'keyed {path} at frame {data["frame"]}'
+
+
+def _drawn_kinds(mol):
+    """Non-empty meshes and point clouds the filament draws, from the depsgraph."""
+    names = {d.object.name for d in mol.domains.values() if d.object}
+    bpy.context.view_layer.update()
+    kinds = {'MESH': 0, 'POINTCLOUD': 0}
+    for entry in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = entry.parent.original if entry.is_instance else entry.object.original
+        if owner.name not in names:
+            continue
+        data = entry.object.data
+        if entry.object.type == 'MESH' and len(data.vertices):
+            kinds['MESH'] += 1
+        elif entry.object.type == 'POINTCLOUD' and len(data.points):
+            kinds['POINTCLOUD'] += 1
+    return kinds
+
+
+def restyle_from_the_pencil():
+    """The filament row's pencil, in a real window: pick Spheres inside it.
+
+    Dillon, 2026-11-03: "make it so actin style is updatable too". The row's
+    pencil is the protein Visual Set-up dialog; invoke() seeds it and the
+    dropdown's live callback restyles every subunit, painted ones included.
+    """
+    mol = filament()
+    before = _drawn_kinds(mol)
+    assert before['MESH'] and not before['POINTCLOUD'], before
+    with g['ui_override']('PROPERTIES'):
+        result = bpy.ops.proteinblender.edit_protein_visuals(
+            'INVOKE_DEFAULT', item_id=mol.identifier)
+    assert result == {'RUNNING_MODAL'}, result
+    from proteinblender.operators.visual_edit import active_dialog
+    dialog = active_dialog()
+    assert dialog is not None and dialog.vs_style == 'surface', (
+        getattr(dialog, 'vs_style', None))
+    dialog.vs_style = 'spheres'
+    data['restyled'] = _drawn_kinds(mol)
+    return str(data['restyled'])
+
+
+def verify_restyled():
+    assert data['restyled']['POINTCLOUD'] and not data['restyled']['MESH'], data['restyled']
+    g['_press_escape']()
+    return 'every subunit drawn as Spheres from the pencil dialog'
+
+
+def _assert_spheres_after_escape():
+    g['assert_pencil_dialog_let_go']()
+    kinds = _drawn_kinds(filament())
+    assert kinds['POINTCLOUD'] and not kinds['MESH'], f'Escape took Spheres back: {kinds}'
+    return kinds
+
+
+def verify_restyle_kept_and_reopen():
+    """Escape closes the pencil; the style picked in it stays, and so does the dialog's seed."""
+    kinds = _assert_spheres_after_escape()
+    dialog = g['_open_protein_pencil'](filament().identifier)
+    assert dialog.vs_style == 'spheres', (
+        f'the reopened pencil showed {dialog.vs_style!r}, not the Spheres it is drawn in')
+    g['_press_escape']()
+    return f'kept after Escape {kinds}; reopened on Spheres'
+
+
+def verify_reopened_restyle_closed():
+    return str(_assert_spheres_after_escape())
+
+
+# ---------------------------------------------------------------------------
+# The swatch's own colour picker, opened by clicking it
+# ---------------------------------------------------------------------------
+
+def _pixels(path):
+    image = bpy.data.images.load(path, check_existing=False)
+    try:
+        width, height = image.size
+        values = np.empty(width * height * 4, dtype=np.float32)
+        image.pixels.foreach_get(values)
+        return values.reshape(height, width, 4)[..., :3]
+    finally:
+        bpy.data.images.remove(image)
+
+
+def _changed_near_the_swatch(before, after):
+    """How many pixels within reach of the swatch differ between two screenshots."""
+    x, y = (int(v) for v in data['swatch_xy'])
+    reach = int(260 * scale())
+    a, b = _pixels(before), _pixels(after)
+    rows = slice(max(0, y - reach), y + reach)
+    cols = slice(max(0, x - reach), x + reach)
+    return int((np.abs(a[rows, cols] - b[rows, cols]).max(axis=-1) > 0.05).sum())
+
+
+def _swatch_state():
+    mol = filament()
+    colors = mol.object.pb_filament.colors
+    item = colors.get(data['eye_name'])
+    return (len(colors), None if item is None else tuple(round(c, 5) for c in item.color))
+
+
+def press_the_swatch():
+    move(*data['swatch_xy'])
+    data['picker_before'] = capture('picker-closed.png')
+    data['picker_state'] = _swatch_state()
+    click_at(data['swatch_xy'], 'PRESS')
+
+
+def verify_the_picker_opened():
+    """Clicking a swatch opens Blender's colour picker over it, changing nothing yet."""
+    opened = capture(f"picker-open-{data.setdefault('picker_opens', 0)}.png")
+    data['picker_opens'] += 1
+    changed = _changed_near_the_swatch(data['picker_before'], opened)
+    # The picker is a 200 x 250-odd block: far more than a hover highlight.
+    assert changed > 15000 * scale() ** 2, (
+        f'clicking the swatch did not open a picker: {changed} pixels changed')
+    assert _swatch_state() == data['picker_state'], (
+        f"opening the picker changed the colour: {_swatch_state()} != {data['picker_state']}")
+    key('ESC')
+    return f'{changed} pixels of picker'
+
+
+def verify_the_picker_cancelled():
+    """Escape closes the picker and leaves the colour, and the list of painted ones, alone."""
+    assert _swatch_state() == data['picker_state'], (
+        f"cancelling the picker changed the colours: {_swatch_state()} != {data['picker_state']}")
+    closed = capture('picker-cancelled.png')
+    left = _changed_near_the_swatch(data['picker_before'], closed)
+    assert left < 3000 * scale() ** 2, f'the picker stayed open: {left} pixels still differ'
+    return f'closed; {_swatch_state()}'
+
+
+def unpaint_for_the_picker():
+    SC.clear(filament(), [data['eye_name']])
+    g['protein_workspace_panel_area']().tag_redraw()
+    point_at_the_swatch_again()
+
+
+def verify_the_unpainted_swatch():
+    path = hovered_path()
+    assert path == f"pb_filament.subunits[{data['eye_row']}].color", path
+    assert _swatch_state()[1] is None, 'the subunit is still painted'
+    return path
+
+
+def picker_steps(label):
+    return [
+        (f'press the {label} swatch', press_the_swatch), ('settle', idle),
+        ('release', lambda: click_at(data['swatch_xy'], 'RELEASE')),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        (f'verify the {label} picker opened, and press Esc', verify_the_picker_opened),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        (f'verify the {label} picker cancelled', verify_the_picker_cancelled), ('settle', idle),
+    ]
+
+
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', idle),
     ('prepare an empty scene', prepare), ('settle', idle),
@@ -595,8 +906,36 @@ g['steps'][:] = [
     ('find a Subunits row', find_a_row),
     ('point at the row again', wait_for_the_watch), ('settle', idle), ('settle', idle),
     ('verify the row is lit', verify_row_lit), ('settle', idle),
+    ('find the eye on the row', find_the_eye),
+    ('click the eye', click_the_eye), ('settle', idle),
+    ('release', lambda: click_at(data['eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
+    ('verify the eye hid the subunit, and click it again', verify_hidden_by_the_eye),
+    ('settle', idle),
+    ('release', lambda: click_at(data['eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
+    ('verify the eye showed it again', verify_shown_by_the_eye), ('settle', idle),
+    ('take the row back to its own colour', unpaint_the_row), ('settle', idle), ('settle', idle),
+    ('verify the swatch reads through the row, and paint it', verify_the_swatch_reads_through_the_row),
+    ('settle', idle), ('settle', idle),
+    ('point away from the swatch', point_at_the_swatch_again), ('settle', idle),
+    ('point at the swatch again', lambda: move(*data['swatch_xy'])), ('settle', idle), ('settle', idle),
+    ('verify the swatch is its colour entry, and press I', verify_handoff_and_press_i),
+    ('settle', idle), ('settle', idle),
+    ('verify the swatch keyed its colour entry', verify_keyed_from_the_swatch), ('settle', idle),
+    *picker_steps('painted'),
+    *picker_steps('painted, reopened,'),
+    ('take the row back to its own colour for the picker', unpaint_for_the_picker),
+    ('settle', idle),
+    ('point at the swatch once more', lambda: move(*data['swatch_xy'])),
+    ('settle', idle), ('settle', idle),
+    ('verify the swatch is the row again', verify_the_unpainted_swatch),
+    *picker_steps('unpainted'),
     ('leave the list', leave_the_list), ('settle', idle), ('settle', idle), ('settle', idle),
     ('verify the row is dark again', verify_row_dark), ('settle', idle),
     ('select all alpha tubulin', select_all_alpha), ('settle', idle), ('settle', idle),
     ('verify only alpha tubulin is selected', verify_all_alpha), ('settle', idle),
+    ('restyle from the pencil', restyle_from_the_pencil), ('settle', idle),
+    ('verify the restyle', verify_restyled), ('settle', idle),
+    ('verify the restyle stayed, and reopen the pencil', verify_restyle_kept_and_reopen),
+    ('settle', idle),
+    ('verify the reopened pencil closed', verify_reopened_restyle_closed), ('settle', idle),
 ]

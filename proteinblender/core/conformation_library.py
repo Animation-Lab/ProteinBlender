@@ -42,9 +42,12 @@ def prepare_import(parsed, interpretation='AUTO', *, deposited=False):
         elif deposited or 'NMR' in method.upper():
             interpretation = 'CONFORMATIONS'
         else:
-            raise ValueError('This file has multiple models with no ensemble provenance. '
-                             'Import it with Import Local File or File > Import and set '
-                             '"Multiple models" to Conformations or Assembly copies.')
+            # The choices are named as the import dialog labels them.
+            raise ValueError('This file has several models and does not say what they are. '
+                             'Import it with Import Local File or File > Import and, under '
+                             '"Multiple models", choose "States for Morphsets" if they are '
+                             'states of one protein (a morph or a trajectory), or '
+                             '"Assembly copies" if they are copies drawn together.')
     if interpretation == 'ASSEMBLY' and count > 1:
         # A legacy assembly file repeats chain labels in each MODEL. Distinct
         # labels keep the physical copies separate in domains and atom identity.

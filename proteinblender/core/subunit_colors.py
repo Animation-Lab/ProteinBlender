@@ -22,6 +22,11 @@ transient overlay sits on top to highlight a subunit without touching anyone's
 colours: one layer for the row the mouse is over in the Subunits list, one for
 the viewport picker, which is drawn over it.
 
+**Hiding** a monomer lists it in ``Object.pb_filament.hidden``, by the same
+name, and marks its copy's point ``pb_hidden`` (``assembly.write_hidden``),
+which the node tree drops before anything is realized
+(``assembly._hide_stage``). Its point stays, so it comes back where it was.
+
 **The roster** (``Object.pb_filament.subunits``) is every monomer of the
 filament as a row the Subunits list can show and select: disposable, rebuilt
 when the lattice changes, and never keyed.
@@ -96,8 +101,50 @@ class PBSubunitColor(PropertyGroup):
         min=0.0, max=1.0, default=1.0, subtype="FACTOR", update=_changed)
 
 
+class PBSubunitHidden(PropertyGroup):
+    """One monomer taken out of the drawing. Named by :func:`key`."""
+
+    site: IntProperty(name="Site", min=0)
+    chain: StringProperty(name="Chain")
+
+
+def _row_molecule(row):
+    return molecule_of_object(row.id_data)
+
+
+def _get_row_hidden(self):
+    params = getattr(self.id_data, "pb_filament", None)
+    return params is not None and self.name in params.hidden
+
+
+def _set_row_hidden(self, value):
+    molecule = _row_molecule(self)
+    if molecule is not None:
+        set_hidden(molecule, [self.name], bool(value))
+
+
+def _get_row_colour(self):
+    molecule = _row_molecule(self)
+    if molecule is None:
+        return (0.8, 0.8, 0.8)
+    return shown(molecule, self.name)[0]
+
+
+def _set_row_colour(self, value):
+    molecule = _row_molecule(self)
+    if molecule is not None:
+        recolour(molecule, [self.name], tuple(value)[:3])
+
+
 class PBSubunitRow(PropertyGroup):
-    """One monomer as a row of the Subunits list. Named by :func:`key`."""
+    """One monomer as a row of the Subunits list. Named by :func:`key`.
+
+    ``hide`` and ``color`` are views onto ``pb_filament.hidden`` and
+    ``pb_filament.colors``, which outlive the roster: changing one writes
+    there, so it stays with the subunit when the list is rebuilt. Neither is
+    keyed here - a row's place in the list is not its subunit's - so a colour
+    is keyed on its ``pb_filament.colors`` entry by Create Keyframe.
+    """
 
     site: IntProperty()
     chain: StringProperty()
@@ -106,9 +153,18 @@ class PBSubunitRow(PropertyGroup):
         name="Select",
         description=("Select this subunit. Point at the row to see where the "
                      "subunit is: it lights up yellow in the 3D Viewport"))
+    hide: BoolProperty(
+        name="Hide", description="Hide this subunit in the viewport and renders",
+        get=_get_row_hidden, set=_set_row_hidden, options=set())
+    color: FloatVectorProperty(
+        name="Colour",
+        description=("This subunit's colour. Changing it paints this subunit "
+                     "alone; key it with the filament's row in Create Keyframe"),
+        size=3, subtype="COLOR", min=0.0, max=1.0,
+        get=_get_row_colour, set=_set_row_colour, options=set())
 
 
-CLASSES = (PBSubunitColor, PBSubunitRow)
+CLASSES = (PBSubunitColor, PBSubunitHidden, PBSubunitRow)
 
 
 # ---------------------------------------------------------------------------
@@ -342,33 +398,81 @@ def tints_for(molecule, obj, sites, frame=None, values=None):
     return tints if painted else None
 
 
+def hidden_keys(molecule) -> set:
+    """The keys of the monomers taken out of the drawing."""
+    params = _params(molecule)
+    return set(params.hidden.keys()) if params is not None else set()
+
+
+def hidden_for(molecule, obj, sites, hidden=None):
+    """Which of the copies ``sites`` of ``obj`` are hidden, as a bool array, or None."""
+    chain = chain_of(molecule, obj)
+    if chain is None:
+        return None
+    if hidden is None:
+        hidden = hidden_keys(molecule)
+    if not hidden:
+        return None
+    flags = np.fromiter((key(site, chain) in hidden for site in sites),
+                        dtype=bool, count=len(sites))
+    return flags if flags.any() else None
+
+
+def set_hidden(molecule, keys: Iterable[str], hidden: bool) -> int:
+    """Hide or show these monomers. Returns how many changed."""
+    params = _params(molecule)
+    if params is None:
+        return 0
+    changed = 0
+    for name in keys:
+        index = params.hidden.find(name)
+        if hidden and index < 0:
+            item = params.hidden.add()
+            item.name = name
+            item.site, item.chain = parse_key(name)
+            changed += 1
+        elif not hidden and index >= 0:
+            params.hidden.remove(index)
+            changed += 1
+    if changed:
+        refresh(molecule)
+    return changed
+
+
 def refresh(molecule, frame=None) -> bool:
-    """Write the filament's colours into the copies it draws. Returns True if any."""
+    """Write the filament's colours, and which subunits are hidden, into the
+    copies it draws. Returns True if any copy is painted."""
     from . import assembly
 
     clouds = assembly.point_clouds_of(molecule)
     if not clouds:
         return False
     values = colour_values(molecule, frame)
-    if values or overlay(molecule):
+    hidden = hidden_keys(molecule)
+    if values or hidden or overlay(molecule):
         ensure_paintable(molecule)
     painted = False
     for obj, points in clouds:
         mesh = points.data
         sites = assembly.point_sites(mesh)
         tints = tints_for(molecule, obj, sites, values=values)
-        if tints is None and mesh.attributes.get(assembly.TINT_ATTRIBUTE) is None:
+        flags = hidden_for(molecule, obj, sites, hidden)
+        if (tints is None and flags is None
+                and mesh.attributes.get(assembly.TINT_ATTRIBUTE) is None
+                and mesh.attributes.get(assembly.HIDDEN_ATTRIBUTE) is None):
             continue
         assembly.write_tints(mesh, tints)
+        assembly.write_hidden(mesh, flags)
         mesh.update()
         painted = painted or tints is not None
     return painted
 
 
 def ensure_paintable(molecule) -> None:
-    """Give a build made before subunits could be coloured the means to be."""
+    """Give a build made before subunits could be coloured or hidden the means."""
     from . import assembly
     assembly.ensure_tint_stage(molecule)
+    assembly.ensure_hide_stage(molecule)
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +707,8 @@ def selected_keys(molecule) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def subunit_spheres(molecule) -> List[Tuple[str, np.ndarray, float]]:
-    """``(key, world centre, radius)`` for every monomer the filament draws.
+    """``(key, world centre, radius)`` for every monomer the filament draws,
+    the hidden ones left out.
 
     Each monomer as a sphere about the centre of its chain's atoms, sized to
     them, carried to where each copy stands. Enough to tell which one a ray
@@ -630,6 +735,7 @@ def subunit_spheres(molecule) -> List[Tuple[str, np.ndarray, float]]:
 
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
+    hidden = hidden_keys(molecule)
     spheres = []
     for obj, points in assembly.point_clouds_of(molecule):
         chain = chain_of(molecule, obj)
@@ -652,6 +758,8 @@ def subunit_spheres(molecule) -> List[Tuple[str, np.ndarray, float]]:
         placements = assembly._operators_from_points(points, factor, stagger)
         sites = assembly.point_sites(points.data)
         for site, (rotation, offset) in zip(sites, placements):
+            if key(int(site), chain) in hidden:
+                continue    # not drawn, so not there to be clicked
             matrix = assembly.placement_matrix(rotation, offset)
             spheres.append((key(int(site), chain),
                             np.array(matrix @ local_centre), radius * scale))

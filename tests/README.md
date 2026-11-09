@@ -72,6 +72,15 @@ python tests/artifact/run_artifact_tests.py --prepare-wheels
 python tests/run_tests.py --blender "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe"
 ```
 
+## Foreground runs keep their temp files private
+
+A windowed Blender saves `quit.blend` (File > Recover > Last Session) into its temp directory when it quits, and autosaves there too.
+Left alone that is the system Temp, so every foreground UI run would overwrite the developer's own session-recovery file.
+`run_ui_tests.py` therefore gives each run a temp directory of its own (`TEMP`/`TMP`, forwarded through `WSLENV` when a Windows Blender is started from WSL).
+Before it opens the window it starts the same Blender headless, with the same profile flags, and asks for `bpy.app.tempdir`.
+It refuses to start the run unless that probe exits cleanly and its answer is inside the run's own directory, and it fails the run if the log shows session recovery saved anywhere else.
+`tests/unit/test_ui_runner_temp.py` holds both checks to a real Blender.
+
 ## Mandatory normal-profile deployment
 
 After every product-code change, deploy the tested working tree into both

@@ -457,7 +457,7 @@ _POINT_LAYOUT = (("axis", "FLOAT_VECTOR"), ("trans", "FLOAT_VECTOR"),
 SITE_ATTRIBUTE = "site"
 
 
-def _write_points(mesh, operators, pivot, sites=None, tints=None) -> None:
+def _write_points(mesh, operators, pivot, sites=None, tints=None, hidden=None) -> None:
     """Make ``mesh`` one point per operator, carrying that operator.
 
     Resizes the mesh in place when the count has changed, so the object, its
@@ -466,7 +466,8 @@ def _write_points(mesh, operators, pivot, sites=None, tints=None) -> None:
     Each point also carries its ``site``: which copy of the build it is. That
     is its place in the operator list unless ``sites`` says otherwise, as it
     does for a filament with its ends shrunk, whose first point may be its
-    tenth subunit. ``tints`` is written as :func:`write_tints` takes it.
+    tenth subunit. ``tints`` and ``hidden`` are written as
+    :func:`write_tints` and :func:`write_hidden` take them.
     """
     axes, angles, translations, delays = _point_attributes(operators)
     count = len(operators)
@@ -496,7 +497,27 @@ def _write_points(mesh, operators, pivot, sites=None, tints=None) -> None:
             "vector" if kind == "FLOAT_VECTOR" else "value",
             np.ascontiguousarray(values[name], dtype=dtype).ravel())
     write_tints(mesh, tints)
+    write_hidden(mesh, hidden)
     mesh.update()
+
+
+def write_hidden(mesh, hidden) -> None:
+    """Mark the copies a cloud's points should not draw: a bool array, or None.
+
+    None leaves a cloud with no hidden attribute at all, or clears the one it
+    has, as :func:`write_tints` does. Does not call ``mesh.update()``.
+    """
+    attribute = mesh.attributes.get(HIDDEN_ATTRIBUTE)
+    if hidden is None:
+        if attribute is None:
+            return
+        hidden = np.zeros(len(mesh.vertices), dtype=bool)
+    if (attribute is None or attribute.domain != "POINT"
+            or attribute.data_type != "BOOLEAN"):
+        if attribute is not None:
+            mesh.attributes.remove(attribute)
+        attribute = mesh.attributes.new(HIDDEN_ATTRIBUTE, "BOOLEAN", "POINT")
+    attribute.data.foreach_set("value", np.ascontiguousarray(hidden, dtype=bool))
 
 
 def write_tints(mesh, tints) -> None:
@@ -534,6 +555,11 @@ def point_sites(mesh) -> np.ndarray:
 def _tints(molecule, obj, sites):
     from . import subunit_colors
     return subunit_colors.tints_for(molecule, obj, sites)
+
+
+def _hidden(molecule, obj, sites):
+    from . import subunit_colors
+    return subunit_colors.hidden_for(molecule, obj, sites)
 
 
 def point_clouds_of(molecule):
@@ -604,7 +630,7 @@ def update_operator_points(molecule, operators, sites=None) -> bool:
     numbered = list(sites) if sites is not None else list(range(len(operators)))
     for obj, mesh in meshes:
         _write_points(mesh, operators, _cloud_pivot(mesh), sites,
-                      _tints(molecule, obj, numbered))
+                      _tints(molecule, obj, numbered), _hidden(molecule, obj, numbered))
     return True
 
 
@@ -831,7 +857,8 @@ def _build_points_object(obj, molecule, assembly_id, operators, sites=None):
 
     mesh = bpy.data.meshes.new(name)
     numbered = list(sites) if sites is not None else list(range(len(operators)))
-    _write_points(mesh, operators, pivot, sites, _tints(molecule, obj, numbered))
+    _write_points(mesh, operators, pivot, sites, _tints(molecule, obj, numbered),
+                  _hidden(molecule, obj, numbered))
 
     points = bpy.data.objects.new(name, mesh)
     points[_ASSEMBLY_OWNER_KEY] = molecule.object
@@ -1051,6 +1078,80 @@ TINT_ATTRIBUTE = "pb_tint"
 #: Name of the node that starts the tint stage, to find it again.
 TINT_NODE_NAME = "PB Tint Realize"
 
+#: The per-copy flag that takes a copy out of the drawing (``write_hidden``).
+HIDDEN_ATTRIBUTE = "pb_hidden"
+
+#: Name of the node that drops the hidden copies, to find it again.
+HIDE_NODE_NAME = "PB Hide"
+
+
+def _hide_stage(tree, copies_from):
+    """Drop the copies whose point is marked hidden, before any is realized.
+
+    The flag rides from the point to its instance, as the tint does, and a
+    cloud without it hides nothing. The points stay where they are, so a
+    hidden copy keeps its place in the arrival order and comes back where it
+    was. Returns ``(node name, output index)`` of what is left.
+    """
+    made = {}
+    for name, kind, location in (
+            ("PB Hide Flag", "GeometryNodeInputNamedAttribute", (700, -300)),
+            (HIDE_NODE_NAME, "GeometryNodeDeleteGeometry", (900, 120))):
+        created = tree.nodes.new(kind)
+        created.name = name
+        created.location = location
+        made[name] = created.name
+    flag, drop = tree.nodes[made["PB Hide Flag"]], tree.nodes[made[HIDE_NODE_NAME]]
+    flag.data_type = "BOOLEAN"
+    flag.inputs["Name"].default_value = HIDDEN_ATTRIBUTE
+    drop.domain = "INSTANCE"
+    source_name, source_index = copies_from
+    tree.links.new(tree.nodes[source_name].outputs[source_index], drop.inputs["Geometry"])
+    tree.links.new(_socket(flag, "Attribute", outputs=True), drop.inputs["Selection"])
+    return drop.name, 0
+
+
+def has_hide_stage(tree) -> bool:
+    """Whether an assembly tree can hide its copies (older builds cannot)."""
+    return any(n.name == HIDE_NODE_NAME for n in tree.nodes)
+
+
+def ensure_hide_stage(molecule) -> int:
+    """Splice the hide stage into painting trees built before it existed.
+
+    It goes in front of the tint stage's realize, so a hidden copy is neither
+    drawn nor painted. Returns how many trees were given one.
+    """
+    added = 0
+    for tree in _tint_trees(molecule):
+        if has_hide_stage(tree):
+            continue
+        realize = tree.nodes[TINT_NODE_NAME]
+        links = realize.inputs["Geometry"].links
+        if not links:
+            continue
+        source = links[0].from_socket
+        index = list(source.node.outputs).index(source)
+        name, out = _hide_stage(tree, (source.node.name, index))
+        tree.links.new(tree.nodes[name].outputs[out],
+                       tree.nodes[TINT_NODE_NAME].inputs["Geometry"])
+        added += 1
+    return added
+
+
+def _tint_trees(molecule):
+    """The assembly trees of ``molecule`` that have a tint stage."""
+    for obj in _target_objects(molecule):
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        for node in _existing_assembly_nodes(group):
+            if node.node_tree is None:
+                continue
+            for tree in _point_trees(node.node_tree):
+                if has_tint_stage(tree):
+                    yield tree
+
 
 def _socket(node, name, kind=None, outputs=False):
     """A node's socket by name - the active one, where a type has several.
@@ -1074,11 +1175,13 @@ def _tint_stage(tree, copies_from):
     from the point to its instance and from the instance to the atoms it
     realizes.
 
-    ``copies_from`` is ``(node name, output index)`` of the instanced copies.
+    ``copies_from`` is ``(node name, output index)`` of the instanced copies;
+    the hidden ones are dropped first (:func:`_hide_stage`).
     Every node is made first and wired by name afterwards: ``nodes.new()``
     can reallocate the collection under any pointer held across it.
     Returns the stage's output socket.
     """
+    copies_from = _hide_stage(tree, copies_from)
     made = {}
     for name, kind, location in (
             ("PB Tint", "GeometryNodeInputNamedAttribute", (700, -500)),

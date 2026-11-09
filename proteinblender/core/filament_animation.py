@@ -71,6 +71,8 @@ class PBFilamentParameters(PropertyGroup):
                               max=symmetry_builder.MAX_COUNT, default=0)
     #: Monomers with a colour of their own (``core.subunit_colors``).
     colors: CollectionProperty(type=subunit_colors.PBSubunitColor)
+    #: Monomers taken out of the drawing, by the eye on their row.
+    hidden: CollectionProperty(type=subunit_colors.PBSubunitHidden)
     #: Every monomer, as rows of the Subunits list, and what they were made
     #: from. Rebuilt whenever the lattice changes; never keyed.
     subunits: CollectionProperty(type=subunit_colors.PBSubunitRow)

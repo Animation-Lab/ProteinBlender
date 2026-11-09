@@ -40,9 +40,10 @@ This method provides automatic update notifications when new versions are releas
 
 **Option 2: Manual Installation**
 
-1. Download the `.zip` for your platform from the [latest stable release](https://github.com/Animation-Lab/ProteinBlender/releases/latest) (alpha test builds are marked *Pre-release* and are excluded from that link)
+1. Download the `.zip` for your platform from the **Assets** of the [latest stable release](https://github.com/Animation-Lab/ProteinBlender/releases/latest) (alpha test builds are marked *Pre-release* and are excluded from that link).
+   Not **Source code (zip)** or **Source code (tar.gz)**: GitHub adds those automatically, and Blender cannot install them.
 2. In Blender: `Edit` → `Preferences` → `Get Extensions` → `Install from Disk`
-3. Select the downloaded zip file
+3. Select the downloaded zip file as it is, without extracting it
 4. Restart Blender
 
 ### Basic Usage
