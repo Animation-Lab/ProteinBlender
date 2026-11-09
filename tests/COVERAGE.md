@@ -1723,6 +1723,12 @@ on a membrane whose typical gap was 0.28 nm.
 
 - **A Subunits row put its eye before its swatch, unlike every PB Outliner row** (2026-11-09).
   It now draws the swatch, then the eye at the right edge; the filament UI lane walks the row from the right and fails unless the eye comes first from that edge.
+  The lane then points at the middle of the eye before pressing it, since a press goes to the button under the mouse and the walk ends on the swatch.
+
+- **The assembly-conformations UI lane could pass only on Blender 5.2** (2026-11-09).
+  It found the dialog's dropdowns by Ctrl+C, which copies nothing from a dropdown before 5.2, so on 5.0 and 5.1 it walked the whole dialog and failed (alpha too).
+  It now marks the dialog's own settings with `ui.reset_default_button.poll()` where `context.property` is None, and maps them in order onto the dialog's introspected layout, failing if the counts disagree.
+  The UI harness also writes its report with `repr` for values JSON cannot hold and quits Blender even if writing fails, so a step returning an odd value can no longer hang a lane.
 
 - **Undo of a states import and of removing a Morphset that a linker joins had no window-level check** (2026-11-09).
   The local-import UI lane now imports a file as "States for Morphsets", checks the Morphset was made, and presses Ctrl+Z once: the protein and its Morphset both go.

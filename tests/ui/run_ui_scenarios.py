@@ -1330,12 +1330,16 @@ def biological_assembly_edit_dialog():
 
 def save_report_and_quit():
     ok = all(item["ok"] for item in results)
-    Path(report_path).write_text(json.dumps({
-        "ok": ok,
-        "blender": bpy.app.version_string,
-        "results": results,
-    }, indent=2), encoding="utf-8")
-    bpy.ops.wm.quit_blender()
+    try:
+        # A step may return any value as its detail; repr keeps the report
+        # writable, and Blender quits regardless, so a lane cannot hang here.
+        Path(report_path).write_text(json.dumps({
+            "ok": ok,
+            "blender": bpy.app.version_string,
+            "results": results,
+        }, indent=2, default=repr), encoding="utf-8")
+    finally:
+        bpy.ops.wm.quit_blender()
     return None
 
 

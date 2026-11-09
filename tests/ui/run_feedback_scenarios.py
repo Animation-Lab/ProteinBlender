@@ -65,38 +65,65 @@ def prepare():
         bpy.ops.molecule.symmetry_dialog('INVOKE_DEFAULT', molecule_id_to_update=data['mid'])
 
 
-def seek(where, wanted):
-    """Walk the cursor down the dialog until Ctrl+C reports ``wanted``.
+def over_dialog_setting(window, popup):
+    """Whether the cursor is on one of the dialog's own settings.
 
-    Blender copies what is under the cursor, and for a dropdown that is the
-    identifier it is showing. That finds a control wherever the dialog has
-    put it, which a fixed coordinate stops doing the day a row is added.
+    Resetting to the default is offered over any editable property, but
+    ``context.property`` names only those an ID owns, like the Scene's. So
+    the two together mark the operator's settings, on every Blender version,
+    without the clipboard (before 5.2 Ctrl+C copies nothing from a dropdown).
+    """
+    with bpy.context.temp_override(window=window, screen=window.screen, region=popup):
+        return bpy.ops.ui.reset_default_button.poll() and bpy.context.property is None
+
+
+def seek(where, prop, wanted):
+    """Walk the cursor down the dialog to find where it draws ``prop``.
+
+    Each stretch of the walk that is over a dialog setting is one of its
+    controls, in the order the dialog's layout lists them. That finds a
+    dropdown wherever the dialog has put it, which a fixed coordinate stops
+    doing the day a row is added. ``wanted`` is what the dropdown must show.
     """
     def run():
-        wm = bpy.context.window_manager
         popup = data['popup']
         window = g['active_window']()
         step = 6 * bpy.context.preferences.system.ui_scale
-        text = wanted() if callable(wanted) else wanted
-        at = data.get('seek')
-        if at is None:
-            at = (round(popup.x + popup.width * .75), round(popup.y + popup.height - step))
-        elif wm.clipboard == text:
-            data.pop('seek')
-            # One step further in than the edge the probe has just crossed.
-            data[where] = (at[0], round(at[1] - step))
-            return f'{text} at {data[where]}'
+        walk = data.setdefault('walk', {'at': None, 'spans': [], 'inside': False})
+        if walk['at'] is None:
+            walk['x'] = round(popup.x + popup.width * .75)
+            at = round(popup.y + popup.height - step)
         else:
-            at = (at[0], round(at[1] - step))
-        assert at[1] > popup.y, f'No control showing {text} in the dialog'
-        data['seek'] = at
-        wm.clipboard = ''
-        window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=at[0], y=at[1])
-        def copy():
-            for value in ('PRESS', 'RELEASE'):
-                window.event_simulate(type='C', value=value, ctrl=True, x=at[0], y=at[1])
-        g['steps'][:0] = [('hover', lambda: None), ('copy hovered control', copy),
-                          ('settle', lambda: None), (f'seek {text}', run)]
+            if over_dialog_setting(window, popup):
+                if not walk['inside']:
+                    walk['spans'].append([walk['at'], walk['at']])
+                walk['spans'][-1][1] = walk['at']
+                walk['inside'] = True
+            else:
+                walk['inside'] = False
+            at = round(walk['at'] - step)
+        if at > popup.y:
+            walk['at'] = at
+            def hover():
+                window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=walk['x'], y=at)
+            g['steps'][:0] = [('hover', hover), ('settle', lambda: None),
+                              ('settle', lambda: None), (f'seek {prop}', run)]
+            return None
+        data.pop('walk')
+        # The layout names the dialog's settings as MOLECULE_OT_symmetry_dialog.<prop>.
+        group, name = S.bl_idname.split('.')
+        owner = f'{group.upper()}_OT_{name}.'
+        names = [item['rna'][len(owner):].split('[')[0]
+                 for item in flatten(data[S.__name__ + '_layout'])
+                 if item.get('rna', '').startswith(owner)]
+        assert len(names) == len(walk['spans']), (
+            f'the walk at x={walk["x"]} crossed {len(walk["spans"])} dialog settings '
+            f'{walk["spans"]}, the layout has {names}')
+        top, bottom = walk['spans'][names.index(prop)]
+        data[where] = (walk['x'], round((top + bottom) / 2))
+        text = wanted() if callable(wanted) else wanted
+        assert getattr(data[S.__name__], prop) == text, (getattr(data[S.__name__], prop), text)
+        return f'{prop} showing {text} at {data[where]} (settings {names})'
     return run
 
 
@@ -239,7 +266,7 @@ def verify_cycle_entry_and_cancel():
 g['steps'][:] = [
     ('workspace', g['setup_morphset_workspace']), ('settle', lambda: None),
     ('open assembly dialog', prepare), ('settle', lambda: None),
-    ('find the source dropdown', seek('source_xy', 'GENERATED')), ('settle', lambda: None),
+    ('find the source dropdown', seek('source_xy', 'source', 'GENERATED')), ('settle', lambda: None),
     ('switch generated to PDB-defined', switch_to_deposited), ('settle', choose_pdb_source),
     ('settle', lambda: None),
     ('choose assembly 4', lambda: choose_assembly('4')), ('settle', lambda: None),
@@ -270,5 +297,6 @@ for index, (name, function) in reversed(list(enumerate(g['steps']))):
         # The dropdown shows the assembly currently chosen, whichever that is.
         g['steps'][index:index] = [
             ('find the assembly dropdown',
-             seek('assembly_xy', lambda: data[S.__name__].assembly_choice)),
+             seek('assembly_xy', 'assembly_choice',
+                  lambda: data[S.__name__].assembly_choice)),
             ('settle', lambda: None)]

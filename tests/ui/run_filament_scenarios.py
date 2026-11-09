@@ -613,17 +613,21 @@ def check_eye(x, y):
         data['passed'].append(path)
     if path.endswith('.color') and 'swatch_xy' not in data:
         data['swatch_xy'] = (x, y)
-        data['swatch_after_eye'] = 'eye_xy' in data
+        data['swatch_after_eye'] = 'eye_span' in data
     if path.endswith('.hide') and 'eye_xy' not in data:
-        data['eye_xy'] = (x, y)
+        # Track the eye's whole width; its edge pixels can miss a click.
+        span = data.setdefault('eye_span', [x, x])
+        span[1] = x
         data['eye_row'] = int(path.split('[', 1)[1].split(']', 1)[0])
+    elif 'eye_span' in data and 'eye_xy' not in data:
+        data['eye_xy'] = (sum(data['eye_span']) // 2, y)
     if 'eye_xy' not in data or 'swatch_xy' not in data:
         return path or None
     # As the PB Outliner draws its rows: the swatch, then the eye at the edge.
     assert data['swatch_after_eye'], (
         f"the eye is not at the row's right edge, after its swatch: {data['passed']}")
     steps = g['steps']
-    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'click the eye')
+    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'point at the eye')
     del steps[:rest]
     return path
 
@@ -642,6 +646,9 @@ def click_the_eye():
     data['eye_name'], data['eye_chain'] = row.name, row.chain
     data['before_hide'] = drawn_vertices(mol, row.chain)
     assert not row.hide
+    # A press goes to the button under the mouse, and the walk ended on the swatch.
+    path = hovered_path()
+    assert path.endswith(f'subunits[{data["eye_row"]}].hide'), f'not over the eye: {path}'
     click_at(data['eye_xy'], 'PRESS')
 
 
@@ -912,6 +919,7 @@ g['steps'][:] = [
     ('point at the row again', wait_for_the_watch), ('settle', idle), ('settle', idle),
     ('verify the row is lit', verify_row_lit), ('settle', idle),
     ('find the eye on the row', find_the_eye),
+    ('point at the eye', lambda: move(*data['eye_xy'])), ('settle', idle), ('settle', idle),
     ('click the eye', click_the_eye), ('settle', idle),
     ('release', lambda: click_at(data['eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
     ('verify the eye hid the subunit, and click it again', verify_hidden_by_the_eye),
