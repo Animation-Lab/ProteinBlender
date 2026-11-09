@@ -1724,6 +1724,10 @@ on a membrane whose typical gap was 0.28 nm.
 - **A Subunits row put its eye before its swatch, unlike every PB Outliner row** (2026-11-09).
   It now draws the swatch, then the eye at the right edge; the filament UI lane walks the row from the right and fails unless the eye comes first from that edge.
 
+- **Undo of a states import and of removing a Morphset that a linker joins had no window-level check** (2026-11-09).
+  The local-import UI lane now imports a file as "States for Morphsets", checks the Morphset was made, and presses Ctrl+Z once: the protein and its Morphset both go.
+  The new `morph-linkers` UI lane removes a Morphset joined by a linker, then Ctrl+Z brings both back with the linker on the drawn alpha carbons, and Ctrl+Shift+Z leaves the linker on the returned chains.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

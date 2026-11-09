@@ -321,6 +321,53 @@ def expect_drop_detects_models_itself():
     return 'dropped ensemble detected as conformations (1 chain)'
 
 
+def morphset_names():
+    from proteinblender.core import morphsets
+    return sorted(root.name for root in morphsets.sets(bpy.context.scene))
+
+
+def remember_before_states():
+    data['before_states'] = (molecules(), morphset_names())
+    # The drops above were scripted from a timer, which pushes no undo step;
+    # mark this state as a user's last action would, so one Ctrl+Z after the
+    # import has a known place to return to.
+    with g['ui_override']('VIEW_3D'):
+        assert bpy.ops.ed.undo_push(message='PB UI before states import') == {'FINISHED'}
+    return f"{len(data['before_states'][0])} proteins, Morphsets {data['before_states'][1]}"
+
+
+def expect_states_made_a_morphset():
+    """Janet, 2026-11-03: choosing "States for Morphsets" should leave a
+    Morphset ready, not one more thing to make by hand."""
+    proteins, sets = data['before_states']
+    added = sorted(set(molecules()) - set(proteins))
+    assert len(added) == 1, added
+    made = sorted(set(morphset_names()) - set(sets))
+    assert len(made) == 1, f'expected one new Morphset, got {made}'
+    data['states_import'] = added[0]
+    return f'{added[0]} -> Morphset {made[0]}'
+
+
+def press_ctrl_z():
+    """Ctrl+Z as a user presses it, over the 3D Viewport."""
+    window = g['active_window']()
+    area = next(a for a in window.screen.areas if a.type == 'VIEW_3D')
+    x, y = area.x + area.width // 2, area.y + area.height // 2
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    window.event_simulate(type='Z', value='PRESS', ctrl=True, x=x, y=y)
+    window.event_simulate(type='Z', value='RELEASE', ctrl=True, x=x, y=y)
+
+
+def expect_one_undo_took_both_away():
+    proteins, sets = data['before_states']
+    H.scene_manager_module().sync_molecule_list_after_undo()
+    assert molecules() == proteins, (
+        f"after one Ctrl+Z: {molecules()}; before the import: {proteins}")
+    assert morphset_names() == sets, (
+        f"after one Ctrl+Z the Morphsets are {morphset_names()}; before: {sets}")
+    return 'one Ctrl+Z removed the protein and its Morphset'
+
+
 def expect_everything():
     # 4hhb: button, button again, multi-select. 4ins and assembly: dropped, then
     # multi-select. ensemble: button (Assembly copies), dropped, multi-select.
@@ -378,6 +425,15 @@ g['steps'][:] = [
     *settle(4, 'drop'),
     ('drop ensemble.pdb on the 3D viewport', drop('VIEW_3D', 'ensemble.pdb')), *settle(4, 'drop'),
     ('a drop does not inherit the earlier Multiple models choice', expect_drop_detects_models_itself),
+    ('note what is loaded before a states import', remember_before_states),
+    ('click Import Local File for a morph', click_import_local_file), *settle(3, 'browser open'),
+    ('point the file browser at the folder for the morph', point_browser_at_folder),
+    *settle(20, 'file list'),
+    ('choose ensemble.pdb, set Multiple models to States for Morphsets, Import',
+     choose('ensemble.pdb', 'CONFORMATIONS')), *settle(8, 'import'),
+    ('States for Morphsets made the Morphset', expect_states_made_a_morphset),
+    ('press Ctrl+Z once', press_ctrl_z), *settle(8, 'undo'),
+    ('one Ctrl+Z took the protein and its Morphset away', expect_one_undo_took_both_away),
     ('click Import Local File for a multi-select', click_import_local_file), *settle(3, 'browser open'),
     ('point the file browser at the folder for multi-select', point_browser_at_folder),
     *settle(20, 'file list'),

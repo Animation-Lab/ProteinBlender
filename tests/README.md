@@ -55,6 +55,9 @@ python tests/run_ui_tests.py --scenario filament-nodes --blender "<path-to-blend
 # Create New Membrane twice, a different shape each time; a cancelled one; then Edit Membrane resizing one
 python tests/run_ui_tests.py --scenario membrane --blender "<path-to-blender>"
 
+# A linker between two Morphset chains: remove the Morphset, Ctrl+Z, Ctrl+Shift+Z
+python tests/run_ui_tests.py --scenario morph-linkers --blender "<path-to-blender>"
+
 # Create New Assembly on an empty scene: type a PDB ID, press OK, get the import and its assembly
 python tests/run_ui_tests.py --scenario assembly-from-id --blender "<path-to-blender>"
 
