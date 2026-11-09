@@ -293,7 +293,7 @@ def set_pivot_world(obj, world_pos) -> bool:
 # Coordinate mapping
 # --------------------------------------------------------------------------
 
-def local_to_world(obj, co) -> Vector:
+def local_to_world(obj, co, matrix_world=None) -> Vector:
     """Map a raw mesh coordinate of *obj* into world space.
 
     Use this instead of ``obj.matrix_world @ co`` anywhere you read
@@ -302,8 +302,13 @@ def local_to_world(obj, co) -> Vector:
 
     Coordinates read from an *evaluated* object already have the pivot applied
     and must not be passed through here.
+
+    ``matrix_world`` stands in for ``obj.matrix_world`` when the object's
+    transform has to come from elsewhere, such as a render's depsgraph.
     """
-    return obj.matrix_world @ (Vector(co) - get_pivot(obj))
+    if matrix_world is None:
+        matrix_world = obj.matrix_world
+    return matrix_world @ (Vector(co) - get_pivot(obj))
 
 
 def world_to_local(obj, world_co) -> Vector:

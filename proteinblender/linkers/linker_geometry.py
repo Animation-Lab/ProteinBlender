@@ -93,28 +93,31 @@ def _objects_for_item(item_id: str) -> List[bpy.types.Object]:
 
 
 def _resolve_residue(item_id: str, chain_id: str,
-                     residue_num: int) -> tuple:
+                     residue_num: int, depsgraph=None) -> tuple:
     """Return ``(object, world_position)`` for a residue, or ``(None, None)``.
 
     Searches every object the item can resolve to (its own, or - for a split
     chain - its domain objects), preferring the alpha carbon, and falling back
     to the parent molecule object when a domain object lacks the residue.
+    ``depsgraph``: see :func:`_world_matrix`.
     """
     numeric_chain_id = _get_numeric_chain_id_from_item(item_id)
     for obj in _objects_for_item(item_id):
         pos = _get_residue_position_from_object(
-            obj, chain_id, residue_num, numeric_chain_id=numeric_chain_id)
+            obj, chain_id, residue_num, numeric_chain_id=numeric_chain_id,
+            depsgraph=depsgraph)
         if pos is None and obj.parent:
             pos = _get_residue_position_from_object(
                 obj.parent, chain_id, residue_num,
-                numeric_chain_id=numeric_chain_id)
+                numeric_chain_id=numeric_chain_id, depsgraph=depsgraph)
         if pos is not None:
             return obj, pos
     return None, None
 
 
 def get_residue_position_from_item(item_id: str, chain_id: str,
-                                    residue_num: int) -> Optional[Vector]:
+                                    residue_num: int,
+                                    depsgraph=None) -> Optional[Vector]:
     """Get world position of a residue from an outliner item.
 
     Resolves the outliner item to a Blender object (or, for a split chain, its
@@ -124,11 +127,13 @@ def get_residue_position_from_item(item_id: str, chain_id: str,
         item_id: Outliner item_id (e.g., "mol123_chain_A")
         chain_id: Chain letter (e.g., 'A')
         residue_num: Residue number at the binding point
+        depsgraph: A render's depsgraph to read transforms and morphs from
+            (see :func:`_world_matrix`); None for the scene as it stands.
 
     Returns:
         World position Vector or None if not found
     """
-    _obj, pos = _resolve_residue(item_id, chain_id, residue_num)
+    _obj, pos = _resolve_residue(item_id, chain_id, residue_num, depsgraph)
     if pos is None:
         logger.warning(f"No residue position for item {item_id} "
                        f"chain {chain_id} res {residue_num}")
@@ -136,14 +141,15 @@ def get_residue_position_from_item(item_id: str, chain_id: str,
 
 
 def get_backbone_object_for_item(item_id: str, chain_id: str,
-                                 residue_num: int) -> Optional[bpy.types.Object]:
+                                 residue_num: int,
+                                 depsgraph=None) -> Optional[bpy.types.Object]:
     """The object that actually contains the residue, for backbone direction.
 
     Resolves split chains to the specific domain object holding the residue, so
     the rigid binding zone aligns correctly even when the endpoint is a chain
     whose row owns no object.
     """
-    obj, _pos = _resolve_residue(item_id, chain_id, residue_num)
+    obj, _pos = _resolve_residue(item_id, chain_id, residue_num, depsgraph)
     return obj
 
 
@@ -200,43 +206,82 @@ def get_object_for_item(item_id: str) -> Optional[bpy.types.Object]:
     return None
 
 
-def _shaped_vertex_co(mesh, index: int) -> Vector:
-    """A vertex where its shape keys currently put it, in mesh space.
+def _world_matrix(obj, depsgraph=None):
+    """``obj.matrix_world`` as the frame being drawn has it.
+
+    Normally the original object's: the viewport writes each frame's animated
+    transforms back to it. A render does not. Render Animation evaluates every
+    frame in a depsgraph of its own and leaves the originals where the scene
+    was left, so a linker rebuilt from them stood still for the whole render
+    (2026-11-09). Pass that depsgraph and the transform comes from it.
+    """
+    if depsgraph is None:
+        return obj.matrix_world
+    return obj.evaluated_get(depsgraph).matrix_world
+
+
+def _shape_offsets(mesh, depsgraph=None):
+    """The shape keys moving ``mesh`` now, as ``[(value, block, reference)]``.
 
     ``mesh.vertices[i].co`` is the Basis key only. A Morphset output keeps
     every state as a relative shape key and morphs by animating their values,
     so reading the Basis pinned a linker to the first state for the whole
-    animation. Key values on the original datablock are the animated values
-    for the current frame (frame changes write them back before the frame
-    handlers run).
+    animation. Only the keys with a value now count: a morph between many
+    states has two at most. Values come from ``depsgraph`` when given, as
+    transforms do (:func:`_world_matrix`).
     """
-    co = Vector(mesh.vertices[index].co)
     keys = mesh.shape_keys
-    if not keys or not keys.use_relative:
-        return co
-    for block in keys.key_blocks[1:]:
-        if block.mute or not block.value:
-            continue
-        reference = block.relative_key
-        co += block.value * (Vector(block.data[index].co)
-                             - Vector(reference.data[index].co))
+    if not keys or not keys.use_relative or len(keys.key_blocks) < 2:
+        return []
+    blocks = keys.key_blocks
+    animated = keys.evaluated_get(depsgraph).key_blocks if depsgraph is not None else blocks
+    count = len(blocks)
+    values = np.empty(count, dtype=np.float32)
+    muted = np.empty(count, dtype=bool)
+    animated.foreach_get('value', values)
+    blocks.foreach_get('mute', muted)
+    active = np.flatnonzero((values != 0.0) & ~muted)
+    return [(float(values[i]), blocks[int(i)], blocks[int(i)].relative_key)
+            for i in active if i > 0]
+
+
+def _shaped_vertex_co(mesh, index: int, offsets) -> Vector:
+    """A vertex where its shape keys (:func:`_shape_offsets`) put it, in mesh space."""
+    co = Vector(mesh.vertices[index].co)
+    for value, block, reference in offsets:
+        co += value * (Vector(block.data[index].co) - Vector(reference.data[index].co))
     return co
+
+
+def _attribute_values(mesh, name, dtype):
+    attribute = mesh.attributes.get(name)
+    if attribute is None or attribute.domain != 'POINT':
+        return None
+    values = np.empty(len(mesh.vertices), dtype=dtype)
+    attribute.data.foreach_get('value', values)
+    return values
 
 
 def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
                                        residue_num: int,
-                                       numeric_chain_id: Optional[int] = None) -> Optional[Vector]:
+                                       numeric_chain_id: Optional[int] = None,
+                                       depsgraph=None) -> Optional[Vector]:
     """Get residue position from a specific Blender mesh object.
 
     Searches mesh attributes for the target residue, preferring alpha
     carbon (CA) atoms. Uses the numeric chain ID from the outliner item
     for reliable chain filtering on multi-chain mesh objects.
 
+    The attributes are read whole: this runs for every linker end on every
+    frame, and a per-atom loop through Python cost milliseconds per call on a
+    small protein.
+
     Args:
         obj: Blender mesh object to search
         chain_id: Chain letter (e.g., 'A')
         residue_num: Residue number
         numeric_chain_id: Numeric chain_id from the outliner item (most reliable)
+        depsgraph: see :func:`_world_matrix`
 
     Returns:
         World position Vector or None if not found
@@ -248,12 +293,12 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
         return None
 
     if "res_id" not in mesh.attributes:
-        return obj.matrix_world @ Vector((0, 0, 0))
+        return _world_matrix(obj, depsgraph) @ Vector((0, 0, 0))
 
-    res_ids = mesh.attributes["res_id"].data
-    positions = mesh.vertices
-    has_chain_id_attr = "chain_id" in mesh.attributes
-    has_is_alpha = "is_alpha_carbon" in mesh.attributes
+    res_ids = _attribute_values(mesh, "res_id", np.int32)
+    if res_ids is None:
+        return None
+    chains = _attribute_values(mesh, "chain_id", np.int32)
 
     # Determine the numeric chain_id to filter by.
     # Priority: 1) numeric_chain_id from outliner item (most reliable)
@@ -270,55 +315,38 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
                     chain_numeric = num_id
                     break
 
-    # If still no match, try additional strategies
-    if chain_numeric is None and has_chain_id_attr:
-        chain_attr = mesh.attributes["chain_id"].data
-        unique_chains = set()
-        for c in chain_attr:
-            unique_chains.add(c.value)
-
+    # If still no match, a single-chain object is that chain.
+    if chain_numeric is None and chains is not None:
+        unique_chains = np.unique(chains)
         if len(unique_chains) == 1:
-            chain_numeric = unique_chains.pop()
-            logger.info(f"  Single-chain object '{obj.name}' has chain_id={chain_numeric}")
-        else:
-            logger.info(f"  Multi-chain object '{obj.name}' has chain_ids={unique_chains}, "
-                        f"no numeric_chain_id provided, looking for '{chain_id}'")
+            chain_numeric = int(unique_chains[0])
 
-    logger.info(f"  Searching obj='{obj.name}' for chain_numeric={chain_numeric} "
-                f"res={residue_num} (has_chain_attr={has_chain_id_attr})")
+    match = res_ids == residue_num
+    if chains is not None and chain_numeric is not None:
+        match &= chains == chain_numeric
+    found = np.flatnonzero(match)
+    if not len(found):
+        return None
 
-    best_pos = None
-    for i, res in enumerate(res_ids):
-        if res.value != residue_num:
-            continue
+    # Prefer the alpha carbon; otherwise the residue's first atom.
+    alphas = _attribute_values(mesh, "is_alpha_carbon", bool)
+    if alphas is not None and alphas[found].any():
+        index = int(found[alphas[found]][0])
+    else:
+        index = int(found[0])
 
-        # Check chain if available
-        if has_chain_id_attr and chain_numeric is not None:
-            chain_attr = mesh.attributes["chain_id"].data
-            if chain_attr[i].value != chain_numeric:
-                continue
-
-        # Raw mesh coordinate: the object's pivot is applied inside geometry
-        # nodes, so mapping with matrix_world alone would miss it and land the
-        # linker endpoint off by exactly the pivot. Shape keys are applied,
-        # though: a Morphset output morphs through them.
-        pos = _shaped_vertex_co(mesh, i)
-
-        # Prefer alpha carbons
-        if has_is_alpha:
-            is_alpha = mesh.attributes["is_alpha_carbon"].data
-            if is_alpha[i].value:
-                return domain_space.local_to_world(obj, pos)
-
-        if best_pos is None:
-            best_pos = domain_space.local_to_world(obj, pos)
-
-    return best_pos
+    # Raw mesh coordinate: the object's pivot is applied inside geometry
+    # nodes, so mapping with matrix_world alone would miss it and land the
+    # linker endpoint off by exactly the pivot. Shape keys are applied,
+    # though: a Morphset output morphs through them.
+    pos = _shaped_vertex_co(mesh, index, _shape_offsets(mesh, depsgraph))
+    return domain_space.local_to_world(obj, pos, _world_matrix(obj, depsgraph))
 
 
 def get_backbone_direction(obj: bpy.types.Object, chain_id: str,
                             residue_num: int,
-                            numeric_chain_id: Optional[int] = None) -> Optional[Vector]:
+                            numeric_chain_id: Optional[int] = None,
+                            depsgraph=None) -> Optional[Vector]:
     """Get backbone direction at a residue by finding CA positions of neighbors.
 
     Computes the vector from CA(residue-1) to CA(residue+1) to get the
@@ -335,11 +363,14 @@ def get_backbone_direction(obj: bpy.types.Object, chain_id: str,
         Normalized direction vector in world space, or None
     """
     pos_prev = _get_residue_position_from_object(obj, chain_id, residue_num - 1,
-                                                  numeric_chain_id=numeric_chain_id)
+                                                  numeric_chain_id=numeric_chain_id,
+                                                  depsgraph=depsgraph)
     pos_next = _get_residue_position_from_object(obj, chain_id, residue_num + 1,
-                                                  numeric_chain_id=numeric_chain_id)
+                                                  numeric_chain_id=numeric_chain_id,
+                                                  depsgraph=depsgraph)
     pos_curr = _get_residue_position_from_object(obj, chain_id, residue_num,
-                                                  numeric_chain_id=numeric_chain_id)
+                                                  numeric_chain_id=numeric_chain_id,
+                                                  depsgraph=depsgraph)
 
     if pos_prev and pos_next:
         direction = (pos_next - pos_prev).normalized()
@@ -1029,13 +1060,15 @@ def create_linker_curve(linker_def, start_pos: Vector, end_pos: Vector,
         return None
 
 
-def update_linker_curve(linker_def) -> bool:
+def update_linker_curve(linker_def, depsgraph=None) -> bool:
     """Update linker curve geometry based on current endpoint positions.
 
     Recomputes the catenary and updates the existing spline points.
 
     Args:
         linker_def: PB2_LinkerDefinition PropertyGroup
+        depsgraph: A render's depsgraph, to draw the frame it is rendering
+            (see :func:`_world_matrix`); None for the scene as it stands.
 
     Returns:
         True if update succeeded
@@ -1048,12 +1081,14 @@ def update_linker_curve(linker_def) -> bool:
     start_pos = get_residue_position_from_item(
         linker_def.endpoint_a_item_id,
         linker_def.endpoint_a_chain,
-        linker_def.endpoint_a_residue
+        linker_def.endpoint_a_residue,
+        depsgraph
     )
     end_pos = get_residue_position_from_item(
         linker_def.endpoint_b_item_id,
         linker_def.endpoint_b_chain,
-        linker_def.endpoint_b_residue
+        linker_def.endpoint_b_residue,
+        depsgraph
     )
 
     if start_pos is None or end_pos is None:
@@ -1074,10 +1109,10 @@ def update_linker_curve(linker_def) -> bool:
     # (whose chain row owns no object) lands on the domain object that holds it.
     obj_a = get_backbone_object_for_item(
         linker_def.endpoint_a_item_id, linker_def.endpoint_a_chain,
-        linker_def.endpoint_a_residue)
+        linker_def.endpoint_a_residue, depsgraph)
     obj_b = get_backbone_object_for_item(
         linker_def.endpoint_b_item_id, linker_def.endpoint_b_chain,
-        linker_def.endpoint_b_residue)
+        linker_def.endpoint_b_residue, depsgraph)
 
     # Pass numeric_chain_id like every other get_backbone_direction call site
     # (add_linker, edit_linker, linker_handlers). It is the resolver's most
@@ -1089,12 +1124,14 @@ def update_linker_curve(linker_def) -> bool:
     if obj_a:
         start_dir = get_backbone_direction(
             obj_a, linker_def.endpoint_a_chain, linker_def.endpoint_a_residue,
-            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_a_item_id)
+            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_a_item_id),
+            depsgraph=depsgraph
         )
     if obj_b:
         end_dir = get_backbone_direction(
             obj_b, linker_def.endpoint_b_chain, linker_def.endpoint_b_residue,
-            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_b_item_id)
+            numeric_chain_id=_get_numeric_chain_id_from_item(linker_def.endpoint_b_item_id),
+            depsgraph=depsgraph
         )
 
     # Compute new curve points based on behavior
@@ -1129,7 +1166,7 @@ def update_linker_curve(linker_def) -> bool:
     # The curve is parented to the puppet controller, so bp.co must be in
     # local space — not world space — otherwise the linker won't follow
     # when the parent moves.
-    inv_matrix = obj.matrix_world.inverted()
+    inv_matrix = _world_matrix(obj, depsgraph).inverted()
 
     for i, pos in enumerate(catenary_points):
         bp = spline.bezier_points[i]

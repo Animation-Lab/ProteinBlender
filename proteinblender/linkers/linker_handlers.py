@@ -396,14 +396,21 @@ def linker_load_post_handler(dummy):
 # ---------------------------------------------------------------------------
 
 @persistent
-def linker_frame_change_handler(scene):
-    """Update all valid linker curves on frame change."""
+def linker_frame_change_handler(scene, depsgraph=None):
+    """Update all valid linker curves on frame change.
+
+    A render's frame comes with the render's own depsgraph, which is the only
+    place that frame's transforms and morphs exist: the original objects stay
+    where the viewport left them. The curves are rebuilt from it, and Blender
+    evaluates the frame again before rendering it, so the render sees them.
+    """
     if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
         return
 
+    rendering = depsgraph is not None and depsgraph.mode == 'RENDER'
     for linker in scene.pb2_linkers:
         if linker.is_valid:
-            update_linker_curve(linker)
+            update_linker_curve(linker, depsgraph if rendering else None)
 
 
 # ---------------------------------------------------------------------------
