@@ -285,11 +285,10 @@ def _set_symmetry_length(self, nanometres):
         self.pb_symmetry_count = min(count, builder.MAX_COUNT)
 
 
-# The Subunits panel's colour and strength fields show the first selected
-# subunit and, edited, apply to every selected one at once. With no filament
-# ticked or nothing selected they keep the last value given.
+# The Subunits panel's colour field shows the first selected subunit and,
+# edited, applies to every selected one at once. With no filament ticked or
+# nothing selected it keeps the last value given.
 _SUBUNIT_COLOR_KEY = "pb_subunit_color_value"
-_SUBUNIT_STRENGTH_KEY = "pb_subunit_strength_value"
 
 
 def _subunit_selection():
@@ -319,22 +318,6 @@ def _set_subunit_color(scene, value):
     if keys:
         from ..core import subunit_colors
         subunit_colors.recolour(molecule, keys, value)
-
-
-def _get_subunit_strength(scene):
-    molecule, keys = _subunit_selection()
-    if keys:
-        from ..core import subunit_colors
-        return subunit_colors.shown(molecule, keys[0])[1]
-    return float(scene.get(_SUBUNIT_STRENGTH_KEY, 1.0))
-
-
-def _set_subunit_strength(scene, value):
-    scene[_SUBUNIT_STRENGTH_KEY] = float(value)
-    molecule, keys = _subunit_selection()
-    if keys:
-        from ..core import subunit_colors
-        subunit_colors.restrength(molecule, keys, value)
 
 
 def _subunit_filament_items(self, context):
@@ -465,14 +448,9 @@ def register():
                      "every selected subunit at once"),
         size=3, subtype="COLOR", min=0.0, max=1.0, default=(0.9, 0.2, 0.2),
         get=_get_subunit_color, set=_set_subunit_color,
-    )
-    bpy.types.Scene.pb_subunit_strength = FloatProperty(
-        name="Strength",
-        description=("How strongly the selected subunits show their colour: 0 "
-                     "is the filament's own colour, 1 entirely their paint. "
-                     "Key it with Create Keyframe to fade"),
-        min=0.0, max=1.0, default=1.0, subtype="FACTOR",
-        get=_get_subunit_strength, set=_set_subunit_strength,
+        # Not keyable: played back, it would paint whatever is selected on
+        # each frame. A subunit's colour is keyed on the subunit itself.
+        options=set(),
     )
     bpy.types.Scene.pb_subunit_filament = EnumProperty(
         name="Filament",

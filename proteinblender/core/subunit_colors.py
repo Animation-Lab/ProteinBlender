@@ -525,11 +525,6 @@ def recolour(molecule, keys: Iterable[str], color) -> int:
     return _set_entries(molecule, keys, color=color)
 
 
-def restrength(molecule, keys: Iterable[str], strength: float) -> int:
-    """Set how strongly the painted ones of these monomers show their colour."""
-    return _set_entries(molecule, keys, strength=strength, add=False)
-
-
 def own_colour(molecule, chain: str) -> Tuple[float, float, float]:
     """The colour a chain is drawn in when none of its monomers is painted."""
     for domain in molecule.domains.values():
@@ -562,6 +557,23 @@ def clear(molecule, keys: Iterable[str]) -> int:
     return len(gone)
 
 
+def forget(molecule) -> None:
+    """Drop every subunit colour, its keys, and every hidden subunit.
+
+    For a filament whose copies were realized: each realized protein now
+    carries its own colour and visibility, and the subunit list they were
+    read from must not reach an assembly built later, whose copies would
+    otherwise come up painted or missing with no Subunits list to undo it.
+    """
+    params = _params(molecule)
+    if params is None:
+        return
+    _renumber_keys(owner(molecule), list(range(len(params.colors))))
+    params.colors.clear()
+    params.hidden.clear()
+    params.subunits.clear()
+
+
 def _renumber_keys(obj, gone) -> None:
     """Drop the keys of removed entries and move the rest down with their entry."""
     animation = obj.animation_data if obj is not None else None
@@ -588,7 +600,11 @@ def _renumber_keys(obj, gone) -> None:
 # ---------------------------------------------------------------------------
 
 def keyframe(molecule, frame: int) -> int:
-    """Key every coloured monomer's colour and strength. Returns how many keyed."""
+    """Key every coloured monomer's colour and strength. Returns how many keyed.
+
+    Strength has had no control since 2026-11-03, but it is still keyed with
+    the colour, so a fade made before then keeps its shape.
+    """
     params, obj = _params(molecule), owner(molecule)
     if params is None or obj is None:
         return 0

@@ -97,7 +97,7 @@ def realize_assembly(context, molecule):
         _realize_within_the_protein(context, molecule, drawn, groups, world,
                                     own_atoms, result, hidden)
 
-    _retire_what_followed_the_assembly(context, molecule)
+    _retire_what_followed_the_assembly(context, molecule, result)
     return result
 
 
@@ -421,12 +421,19 @@ def _realize_within_the_protein(context, molecule, drawn, groups, world,
 # Afterwards
 # ---------------------------------------------------------------------------
 
-def _retire_what_followed_the_assembly(context, molecule) -> None:
-    """A bend rig and symmetry axes belong to an assembly that is now gone."""
-    from ..core import symmetry_axes, symmetry_bend
-    from ..utils.scene_manager import build_outliner_hierarchy
+def _retire_what_followed_the_assembly(context, molecule, result) -> None:
+    """A bend rig, symmetry axes and subunit colours and hiding belong to an
+    assembly that is now gone. The colours and hiding live on in the realized
+    copies; the realized proteins were copied from this one, so they are
+    cleared too."""
+    from ..core import subunit_colors, symmetry_axes, symmetry_bend
+    from ..utils.scene_manager import ProteinBlenderScene, build_outliner_hierarchy
 
     if symmetry_bend.has_bend(molecule):
         symmetry_bend.remove_bend(molecule)
     symmetry_axes.clear_symmetry_axes(molecule)
+    molecules = ProteinBlenderScene.get_instance().molecules
+    for done in [molecule, *(molecules.get(uid) for uid in result.proteins)]:
+        if done is not None:
+            subunit_colors.forget(done)
     build_outliner_hierarchy(context)

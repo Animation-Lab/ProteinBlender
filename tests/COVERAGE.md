@@ -1685,6 +1685,21 @@ on a membrane whose typical gap was 0.28 nm.
   `reset_scene` now clears `pb_rt_*`, the note names its molecule, and the verifier fails with "leaked" if that molecule is missing.
   `test_saveload.py::test_a_builders_verifier_notes_do_not_reach_the_next_scene` builds the filament, scrubs, builds `domains` and reopens it; it was red before the fix.
 
+- **A realized filament's hidden and painted subunits reached later assemblies** (2026-11-09).
+  Realize Copies handed each copy its colour and visibility but left the filament's subunit list behind, so a ring built afterwards on the original or a realized copy came up with a copy missing or painted, and no Subunits list to undo it.
+  Realize now clears the list, its keys and its hidden subunits from the filament and every protein it made.
+  `test_filament_colors.py::test_a_realized_filament_hands_on_no_hidden_or_painted_subunits` was red before the fix (5 of 6 copies drawn).
+
+- **Pressing I over the Subunits panel's colour field keyed something that repainted the wrong subunits** (2026-11-09).
+  Played back, the keyed field set itself each frame and painted whatever was selected then.
+  The field is no longer animatable; a subunit's colour is keyed on the subunit (Create Keyframe, or I over its row's swatch).
+  The scene-level Strength property, whose slider was removed on 2026-11-03, is gone too; stored and keyed strengths still play back.
+  `test_filament_colors.py::test_pressing_i_over_the_panels_colour_field_keys_nothing_that_repaints` was red before the fix.
+
+- **The local-import UI lane crashed Blender 5.1.0** (2026-11-09).
+  A scripted `screen.screenshot` while a file browser window is open, then Import closing it, crashes 5.1.0 in the NVIDIA OpenGL driver (`nvoglv64.dll`); Blender's own OBJ importer crashes the same way, so it is not the add-on's.
+  The lane skips that one screenshot on 5.1 and now runs to the end there.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

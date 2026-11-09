@@ -35,6 +35,12 @@ def settle(count=1, label='event loop'):
 
 
 def capture(name):
+    if bpy.app.version[:2] == (5, 1) and browser()[1] is not None:
+        # Blender 5.1.0 crashes in the NVIDIA OpenGL driver (nvoglv64.dll)
+        # when a file browser window that screen.screenshot has drawn is then
+        # closed by Import. Its own OBJ importer crashes the same way, so it
+        # is Blender's, and no user takes a scripted screenshot there.
+        return None
     path = str(Path(g['report_path']).parent / name)
     bpy.ops.screen.screenshot(filepath=path)
     return path

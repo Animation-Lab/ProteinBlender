@@ -247,7 +247,9 @@ def build_bent_filament():
     subunit_colors.sync_roster(molecule)
     molecule.object.pb_filament.subunits["2:A"].select = True
     scene.pb_subunit_color = (0.1, 0.7, 0.3)
-    scene.pb_subunit_strength = 0.6
+    # A strength below full, as files made before its slider was taken out
+    # (2026-11-03) can hold: it still has to come back.
+    molecule.object.pb_filament.colors["2:A"].strength = 0.6
     assert list(molecule.object.pb_filament.colors.keys()) == ["2:A"]
 
     # And another hidden by the eye on its row: a reload must leave it hidden.
