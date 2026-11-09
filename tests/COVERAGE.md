@@ -1688,6 +1688,10 @@ on a membrane whose typical gap was 0.28 nm.
   The browser's confirm button, cut to "Import Local Structu...", now reads "Import Structure": the UI lane checks the registered name and the open browser's button title, and screenshots it.
   The UI lane also picks an option and presses Cancel (nothing imports, the browser closes), then reopens the browser and checks it starts from "Detect from file" again.
 
+- **Importing with "States for Morphsets" still left the user to press Create Morphset** (2026-11-03, Janet).
+  The explicit choice now makes the Morphset of every chain on import, in the same undo step; Detect from file (an NMR ensemble) and PDB-ID imports make none, as before.
+  `test_local_file_import.py::test_choosing_states_for_morphsets_makes_the_morphset` checks the model count and chain letters read from the file text; it was red before the fix (`expected one Morphset, got []`).
+
 - **Foreground UI runs overwrote the developer's session-recovery file** (2026-11-08).
   A windowed Blender saves `quit.blend` to its temp, the system Temp, on quit.
   `run_ui_tests.py` now gives each run a private temp, refuses to start unless a headless probe of the same Blender reports it, and fails a run that saves recovery elsewhere; `tests/unit/test_ui_runner_temp.py`.

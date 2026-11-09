@@ -93,6 +93,28 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
             return self.execute(context)
         return super().invoke(context, event)
 
+    def _make_morphset(self, context, identifier) -> None:
+        """Group a states import into a Morphset, as Create Morphset would.
+
+        Only for an explicit "States for Morphsets": that choice says the
+        models are a morph to animate. A file Detect from file reads as states
+        (an NMR ensemble) is left alone, as the same structure fetched by PDB
+        ID is, so its chains can still be split before they are grouped.
+        """
+        from ..core import model_morphsets
+        molecule = ProteinBlenderScene.get_instance().molecules.get(identifier)
+        if molecule is None or len(molecule.object.pb_conformations.states) < 2:
+            return
+        ids = [uid for uid, domain in molecule.domains.items()
+               if not model_morphsets.member_issue(context, molecule, domain)]
+        try:
+            model_morphsets.create(
+                context, f'{getattr(molecule, "name", identifier)} conformations',
+                identifier, ids)
+        except ValueError as exc:
+            # The protein imported; only the grouping failed. Say why.
+            self.report({'WARNING'}, f"{identifier}: imported, but no Morphset was made: {exc}")
+
     def _paths(self) -> List[str]:
         if self.files:
             return [os.path.join(self.directory, item.name) for item in self.files]
@@ -143,6 +165,8 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
                 problems.append(f"Failed to import {filepath}")
                 continue
             imported.append(identifier)
+            if self.model_interpretation == 'CONFORMATIONS':
+                self._make_morphset(context, identifier)
 
         if imported:
             self.report({'INFO'}, f"Successfully imported {', '.join(imported)}")

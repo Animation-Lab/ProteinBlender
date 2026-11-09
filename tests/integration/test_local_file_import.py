@@ -81,6 +81,63 @@ def test_a_morph_file_names_the_choices_that_import_it(tmp_path, scene, sm):
     assert len(sm.molecules) == 1
 
 
+def _file_models_and_chains(path):
+    """Model count and chain letters straight from the file text."""
+    text = path.read_text().splitlines()
+    models = sum(line.startswith("MODEL ") for line in text)
+    chains = {line[21] for line in text if line.startswith("ATOM")}
+    return models, chains
+
+
+def _morphsets_of(scene, molecule):
+    from proteinblender.core import model_morphsets as M, morphsets as C
+    return [root for root in C.sets(scene)
+            if root.get("pb_model_source") == molecule.object]
+
+
+@pytest.mark.integration
+def test_choosing_states_for_morphsets_makes_the_morphset(tmp_path, scene, sm):
+    """Reported 2026-11-03 (Janet): after importing a morph with "States for
+    Morphsets" she still had to press Create Morphset. The choice now makes
+    it: one Morphset of every chain, holding every model in the file."""
+    from proteinblender.core import model_morphsets as M, morphsets as C
+
+    path = H.chimera_like_ensemble(tmp_path / "morph.pdb", models=3)
+    models, chains = _file_models_and_chains(path)
+    assert models == 3 and chains == {"A", "B"}
+
+    assert _import(path, model_interpretation="CONFORMATIONS") == {"FINISHED"}
+    (molecule,) = sm.molecules.values()
+    roots = _morphsets_of(scene, molecule)
+    assert len(roots) == 1, f"expected one Morphset, got {[r.name for r in roots]}"
+    root = roots[0]
+    assert root.get(M.MANAGED), "the Morphset should be the imported-models kind"
+    assert len(C.states(M.subject(root, scene))) == models
+
+    members = [r for r in scene.outliner_items
+               if r.item_type == "MORPH_MEMBER" and r.parent_id == root[C.TAG]]
+    assert sorted(r.name.split()[-1] for r in members) == sorted(chains), (
+        [r.name for r in members])
+
+    # Exactly what Create Morphset would have made, so pressing it again finds
+    # every chain already taken.
+    assert bpy.ops.proteinblender.create_morphset(
+        source=molecule.identifier, members=[]) == {"CANCELLED"}
+    assert len(_morphsets_of(scene, molecule)) == 1
+
+
+@pytest.mark.integration
+def test_detected_nmr_ensemble_is_left_for_the_user_to_group(tmp_path, scene, sm):
+    """Detect from file reads 1D3Z's NMR models as states but makes no
+    Morphset: the same structure fetched by PDB ID makes none either, and the
+    user may want to split domains before grouping them."""
+    path = _copy(tmp_path, "1d3z.pdb.gz", "1d3z.pdb")
+    assert _import(path) == {"FINISHED"}
+    (molecule,) = sm.molecules.values()
+    assert len(molecule.object.pb_conformations.states) > 1
+    assert not _morphsets_of(scene, molecule)
+
+
 # --------------------------------------------------------------------------
 # Importing the same file more than once
 # --------------------------------------------------------------------------

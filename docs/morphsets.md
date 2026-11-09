@@ -19,6 +19,16 @@ Start/End pairs or add individual morphs.
 5. Click **OK**. The Morphset appears **under that protein**, with the selected
    chains/domains beneath it. Its models are immediately available in keyframes.
 
+### A morph or trajectory file is grouped for you
+
+A morph saved from ChimeraX, or any file whose models do not say what they are, is imported with **Import Local File** (or File > Import).
+Under **Multiple models in the file**, choose **States for Morphsets**.
+ProteinBlender then makes the Morphset for you, named after the protein (for example **morph conformations**), with every chain as a member.
+Its models are ready to choose in keyframes, so you can skip steps 2 to 5.
+Use **Edit Morphset** to rename it or change its members.
+
+**Detect from file** reads an NMR ensemble such as 1D3Z as states too, but makes no Morphset, so you can split domains before grouping them.
+
 Members in one Morphset use the same model and timing. Use separate Morphsets
 for chains/domains that need independent timing. Each member can belong to one
 Morphset; selecting a chain and an overlapping domain is not allowed.

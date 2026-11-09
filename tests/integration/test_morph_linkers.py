@@ -73,9 +73,8 @@ def morph_ab(scene, tmp_path):
     """Janet's scene: a two-chain morph made into a keyed Morphset, puppeted."""
     path = _chimera_like_morph(tmp_path)
     mid = _import_states(path)
-    assert bpy.ops.proteinblender.create_morphset(
-        name='Morph', source=mid, members=[]) == {'FINISHED'}
-    root = next(r for r in C.sets(scene) if r.name == 'Morph')
+    # "States for Morphsets" makes the Morphset of both chains on import.
+    (root,) = C.sets(scene)
     (morph,) = C.morphs(scene, root)
     assert len(C.states(morph)) == MODELS
     assert _key(morph, 1, 0) == {'FINISHED'}
@@ -187,10 +186,8 @@ def test_linker_ends_sit_on_the_visible_alpha_carbons(morph_ab):
 def test_a_linker_made_before_the_morph_is_keyed_follows_it_once_keyed(scene, tmp_path):
     """The other order: Morphset, puppet and linker first, keys afterwards."""
     path = _chimera_like_morph(tmp_path)
-    mid = _import_states(path)
-    assert bpy.ops.proteinblender.create_morphset(
-        name='Morph', source=mid, members=[]) == {'FINISHED'}
-    root = next(r for r in C.sets(scene) if r.name == 'Morph')
+    _import_states(path)
+    (root,) = C.sets(scene)
     (morph,) = C.morphs(scene, root)
     names = {r.item_id: r.name for r in scene.outliner_items}
     members = [r.item_id for r in scene.outliner_items

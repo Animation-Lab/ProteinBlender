@@ -10,7 +10,7 @@ MODEL_INTERPRETATIONS = [
      'Any other file with several models asks you to choose'),
     ('CONFORMATIONS', 'States for Morphsets',
      'Each model is another state of the same protein, such as a morph or trajectory '
-     'saved from ChimeraX, to animate between with Morphsets'),
+     'saved from ChimeraX. A Morphset of all its chains is made, ready to key'),
     ('ASSEMBLY', 'Assembly copies',
      'Each model is another copy in the same structure, all drawn together'),
 ]

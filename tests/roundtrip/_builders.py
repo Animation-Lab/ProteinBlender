@@ -604,9 +604,8 @@ def build_morph_linkers():
     centroids = {obj.name: Vector(H.evaluated_atom_positions([obj]).mean(axis=0))
                  for obj in sources}
 
-    assert bpy.ops.proteinblender.create_morphset(
-        source='saved_morph_ab', name='Morph AB') == {'FINISHED'}
-    root = C.sets(scene)[0]
+    # "States for Morphsets" made the Morphset of both chains on import.
+    (root,) = C.sets(scene)
     morph = M.subject(root)
     for frame, index in ((1, 0), (50, 2)):
         assert bpy.ops.proteinblender.create_keyframe(frame_number=frame, morph_items=[dict(
