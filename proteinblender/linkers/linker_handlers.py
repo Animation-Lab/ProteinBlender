@@ -47,6 +47,12 @@ def _get_object_name_for_endpoint(linker, endpoint: str, scene=None) -> str:
 
     for item in scene.outliner_items:
         if item.item_id == item_id:
+            if item.item_type == 'MORPH_MEMBER':
+                # The chain the user sees and drags is the Morphset's output
+                # once it has keys; its row names the hidden source.
+                from ..core import morphsets
+                obj = morphsets.row_object(scene, item)
+                return obj.name if obj is not None else ""
             return item.object_name
     return ""
 
@@ -449,11 +455,17 @@ def _endpoint_root_molecule(scene, item_id: str):
 
     Chain/domain outliner items chain up to their PROTEIN item, whose item_id
     is the molecule identifier. Returns None if the item can't be resolved.
+
+    A Morphset's chain belongs to its Morphset, not to the protein its row sits
+    under: deleting that protein keeps the Morphset, with copies of the chains
+    (``morphsets.preserve_for_source``), so the walk stops there.
     """
     items = {it.item_id: it for it in scene.outliner_items}
     cur = items.get(item_id)
     seen = set()
     while cur is not None and cur.parent_id and cur.item_id not in seen:
+        if cur.item_type == 'MORPHSET':
+            return cur.item_id
         seen.add(cur.item_id)
         cur = items.get(cur.parent_id)
     return cur.item_id if cur is not None else None
@@ -490,6 +502,34 @@ def on_molecule_deleted(molecule_id: str):
         if root_a == molecule_id or root_b == molecule_id:
             indices.append(i)
     _remove_linker_indices(scene, indices, f"molecule '{molecule_id}' deleted")
+
+
+def reattach_released_endpoints(scene, released):
+    """Move linker ends off Morphset rows that are gone, onto their chains.
+
+    ``released`` maps a removed MORPH_MEMBER row id to the name of the object
+    it stood for, which is back in its protein as a chain or domain. A linker
+    ending on it ends on that chain's row instead; one whose chain is gone
+    with the Morphset is removed. Called after the outliner is rebuilt.
+    """
+    if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
+        return
+    rows = {}
+    for item in scene.outliner_items:
+        if (item.item_type in {'CHAIN', 'DOMAIN'} and item.object_name
+                and not item.reference_target_id):
+            rows.setdefault(item.object_name, item.item_id)
+    for linker in scene.pb2_linkers:
+        moved = False
+        for side in ('a', 'b'):
+            attribute = f'endpoint_{side}_item_id'
+            name = released.get(getattr(linker, attribute))
+            if name in rows:
+                setattr(linker, attribute, rows[name])
+                moved = True
+        if moved:
+            update_linker_curve(linker)
+    prune_dangling_linkers(scene, "Morphset removed")
 
 
 def prune_dangling_linkers(scene=None, reason="dangling"):

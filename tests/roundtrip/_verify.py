@@ -348,6 +348,26 @@ def main():
                     f"{name} came back at {drawn}, expected {list(centroid)}")
             out["morph_sources_restored"] = sorted(expected)
 
+            # The linker stays, now joining the revealed chains: each end on an
+            # atom Blender draws for its chain.
+            assert len(scene.pb2_linkers) == 1, "the linker went with the Morphset"
+            linker = scene.pb2_linkers[0]
+            scene.frame_set(30)
+            rows = {r.item_id: r for r in scene.outliner_items}
+            curve = bpy.data.objects[linker.curve_object_name]
+            points = curve.data.splines[0].bezier_points
+            ends = (np.array(curve.matrix_world @ points[0].co),
+                    np.array(curve.matrix_world @ points[-1].co))
+            for end, item_id in zip(ends, (linker.endpoint_a_item_id,
+                                           linker.endpoint_b_item_id)):
+                row = rows.get(item_id)
+                assert row is not None and row.object_name in expected, (
+                    f"linker end {item_id!r} does not name a revealed chain")
+                atoms = H.evaluated_atom_positions([bpy.data.objects[row.object_name]])
+                gap = np.linalg.norm(atoms - end, axis=1).min()
+                assert gap < 1e-4, f"linker end is {gap} off {row.object_name}'s atoms"
+            out["morph_linker_kept_on_chains"] = True
+
         hidden_subunit = bpy.context.scene.get("pb_rt_hidden_subunit")
         if hidden_subunit is not None:
             # The reopened filament must still leave its hidden subunit out,

@@ -185,6 +185,7 @@ def test_saveload_roundtrip(name, tmp_path):
         # been skipped by a scene they failed to recognise.
         assert payload.get("morph_linker_frames_checked") == [50, 10], payload.keys()
         assert len(payload.get("morph_sources_restored", ())) == 2, payload.keys()
+        assert payload.get("morph_linker_kept_on_chains"), payload.keys()
     if name == "bent_filament":
         assert payload.get("filament_hidden_checked"), payload.keys()
 

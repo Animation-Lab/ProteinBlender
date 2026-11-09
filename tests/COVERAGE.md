@@ -1661,6 +1661,18 @@ on a membrane whose typical gap was 0.28 nm.
   The endpoint list stopped at the Morphset row, and a linker end read the Basis shape, so it stayed behind as the morph played.
   `test_morph_linkers.py` builds a ChimeraX-like 2BBN morph, links chains A and B and checks each end against the alpha carbon Blender draws at several frames and after the puppet moves and turns; the `morph_linkers` roundtrip repeats it after a fresh-process reopen and checks the sources come back where the puppet carried them.
 
+- **A linker between Morphset chains did not survive the Morphset's life** (2026-11-09).
+  Remove Morphset left the linker pointing at rows that were gone, with its curve still in the scene; deleting the source protein removed the linker although the Morphset (and its chains, as copies) stays; dragging a morphing chain neither moved its linker end nor was held back at the linker's reach, because the handler watched the hidden source object.
+  Removing a Morphset now moves its linkers onto the chains it gives back and removes only those whose chain is gone; the source's deletion stops at the Morphset; the handler watches the output the user drags.
+  `test_morph_linker_lifecycle.py` (5 checks against the alpha carbons Blender draws) was red before the fix; the `morph_linkers` roundtrip now also removes the Morphset in the reopened file and checks the linker ends on the revealed chains' drawn atoms.
+  Undo of these steps is not covered headless (`ed.undo` does not poll in background mode).
+
+- **Render Animation drew every linker where the scene was left, not where each frame put it** (2026-11-09).
+  Linkers are rebuilt in a frame-change handler that read the original objects' `matrix_world` and a morph's shape-key values, which only the viewport keeps in step with the frame; a render evaluates frames in its own depsgraph.
+  The handler now reads transforms and shape-key values from the render's depsgraph, and Blender re-evaluates the frame before rendering it.
+  `test_linker_render_animation.py` compares Render Animation's image of frame 49 with a still render after jumping to frame 49, for a linker between keyed plain chains and one between morphing chains: 557 and 389 pixels differed before the fix, none after.
+  The residue lookup behind it is also vectorised (a whole-attribute read instead of a per-atom Python loop): `update_linker_curve` on a 20-state 2BBN morph went from 10.2 ms to 5.2 ms, and no longer grows with atom count in Python.
+
 - **Filament subunits could not be hidden, and only painted rows had a swatch** (2026-11-03, Dillon's notes).
   Each Subunits row now has an eye and a swatch at its right; the eye drops the copy in the node tree (`pb_hidden`), and the swatch paints that subunit alone, then hands over to its keyable `pb_filament.colors` entry.
   `test_filament_colors.py` judges which copy went by the copies' order from the pointed end read off the structure, including painted, grown, shrunk-and-restored, microtubule and pre-existing builds; Realize Copies keeps hidden copies hidden (both realize branches) and the PB Outliner eye shows them again. All were red before the fix (realize drew 10 of 10 actins with one hidden).

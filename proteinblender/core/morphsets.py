@@ -769,6 +769,10 @@ def sync_color(scene, source, color):
 
 def remove_morph(context, morph):
     uid = morph[MORPH]
+    # Linkers ending on this morph's chains follow them back to their rows.
+    released = {f'{uid}:{slot}': member['object'].name
+                for slot, member in enumerate(records(morph))
+                if member.get('object') and not member.get('generated')}
     keys = {f: {k: v for k, v in rows.items() if k != uid}
             for f, rows in keyframes(context.scene).items()}
     keys = {f: rows for f, rows in keys.items() if rows}
@@ -806,6 +810,8 @@ def remove_morph(context, morph):
         if not mesh.users:
             bpy.data.meshes.remove(mesh)
     rebuild(context)
+    from ..linkers.linker_handlers import reattach_released_endpoints
+    reattach_released_endpoints(context.scene, released)
 
 
 def remove(context, root):
