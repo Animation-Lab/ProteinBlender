@@ -1739,11 +1739,11 @@ on a membrane whose typical gap was 0.28 nm.
   The local-import UI lane now imports a file as "States for Morphsets", checks the Morphset was made, and presses Ctrl+Z once: the protein and its Morphset both go.
   The new `morph-linkers` UI lane removes a Morphset joined by a linker, then Ctrl+Z brings both back with the linker on the drawn alpha carbons, and Ctrl+Shift+Z leaves the linker on the returned chains.
 
-- **A dropped ChimeraX morph failed with nowhere to choose States for Morphsets** (2026-11-10).
-  Dillon dropped Janet's `morph.pdb` on Blender 5.2: a drop imported at once with "Detect from file", which refuses a file whose models say nothing, and the error pointed at a choice the drop never offered.
-  A drop now opens an **Import Structure** dialog (States for Morphsets chosen, or Assembly copies) for exactly the files `conformation_library.models_need_choosing` flags, reading only their MODEL/EXPDTA or `exptl`/`pdbx_PDB_model_num` records with the same rule Detect from file applies; every other drop still imports at once.
-  The local-import UI lane drops a ChimeraX-like morph, checks the dialog and presses Enter for the Morphset (red with the reported error before the fix), and now chooses States for Morphsets in the file browser with real clicks instead of setting the property.
-  `test_local_file_import.py::test_a_drop_asks_only_about_files_whose_models_say_nothing` checks which files ask against their own text.
+- **A ChimeraX morph failed to import unless States for Morphsets was found and chosen** (2026-11-10).
+  Dillon imported Janet's `morph.pdb` on Blender 5.2 by Import Local File and by dropping it: Detect from file refused a file whose models say nothing ("This file has several models and does not say what they are"), and a drop offered nowhere to choose.
+  Detect from file now reads such a file as states and makes its Morphset, as States for Morphsets does; `conformation_library.models_say_nothing` reads only its MODEL/EXPDTA or `exptl`/`pdbx_PDB_model_num` records with the rule Detect from file applies, so NMR ensembles keep no Morphset and `.pdb1` files stay copies.
+  `test_local_file_import.py::test_a_morph_imports_as_states_with_its_morphset_untold` (.pdb, .pdb.gz, .cif) was red with the reported error; `::test_files_whose_models_say_what_they_are_keep_their_reading` keeps NMR ensembles and a chosen Assembly copies as they were.
+  The local-import UI lane presses Enter on the morph with nothing chosen and gets the Morphset (red before), clicks Assembly copies in the side panel with real clicks and gets copies, and drops the morph for a Morphset.
 
 - **Dragging in a subunit's colour wheel left the filament its old look until the picker closed** (2026-11-10).
   Pointing at a Cytoskeleton Subunits row lights its subunit yellow, and the highlight is drawn instead of the subunit's colour; Blender keeps naming the swatch as the button under the mouse while its picker is open, so every colour picked stayed hidden under the yellow until the picker closed.

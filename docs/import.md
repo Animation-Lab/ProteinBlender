@@ -49,7 +49,7 @@ This opens the same file browser as the button.
 ### Drag and drop
 
 Drag one or more structure files from your file manager onto the Blender window.
-They are imported straight away, unless a file has several models that it does not explain (see below).
+They are imported straight away.
 Compressed files (such as `.cif.gz`) can't be dropped.
 Open those with the button or **File > Import**.
 
@@ -67,8 +67,8 @@ A file that holds several models (for example an NMR ensemble or a molecular dyn
 Models that are alternative states of one protein are loaded as states for Morphsets.
 Models that are simultaneous copies forming one assembly are loaded as assembly copies.
 ProteinBlender detects NMR ensembles and `.pdb1`-style assembly files by itself.
-For any other multi-model file, such as a morph saved from ChimeraX, set **Multiple models** in the file browser's options panel before clicking **Import**.
-Dropping such a file opens a small **Import Structure** dialog that asks the same question, with **States for Morphsets** already chosen; press **Import**.
+Any other multi-model file, such as a morph saved from ChimeraX, is read as states, and a Morphset of all its chains is made for you.
+If its models are really copies drawn together, set **Multiple models** to **Assembly copies** in the file browser's options panel before clicking **Import**.
 
 ### Supported File Formats
 

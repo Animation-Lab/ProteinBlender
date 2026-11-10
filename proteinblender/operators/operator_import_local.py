@@ -73,9 +73,6 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
     # import's files are never replayed.
     directory: StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'})
     files: CollectionProperty(type=OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
-    # The dropped files a drop's dialog asks about, one name a line. Worked
-    # out once when it opens, so drawing it does not read the files again.
-    asked_about: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
     identifier_override: StringProperty(
         options={'HIDDEN'},
         description="Optional stable identifier for scripted public imports",
@@ -87,41 +84,14 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         # choices, each a full-width button, keeps every word readable.
         layout = self.layout
         layout.use_property_split = False
-        if self.asked_about:
-            self._draw_drop_question(layout)
-            return
         column = layout.column(align=True)
         column.label(text="Multiple models in the file")
         column.prop(self, "model_interpretation", expand=True)
 
-    def _draw_drop_question(self, layout):
-        """The dialog a drop opens: which file, and what its models are.
-
-        Detect from file is not offered, since it is what cannot tell.
-        """
-        asked = self.asked_about.split("\n")
-        layout.label(text=asked[0] if len(asked) == 1 else f"{len(asked)} files",
-                     icon='FILE_BLANK')
-        column = layout.column(align=True)
-        column.label(text="Multiple models in the file" if len(asked) == 1
-                     else "Multiple models in each file")
-        for choice in ('CONFORMATIONS', 'ASSEMBLY'):
-            column.prop_enum(self, "model_interpretation", choice)
-
     def invoke(self, context, event):
-        # Dropped files arrive already chosen, so import them at once, unless
-        # one has several models and does not say what they are (a morph
-        # saved from ChimeraX). Then ask, as a file browser would let you
-        # choose, instead of failing with nowhere to choose.
+        # Dropped files arrive already chosen. Only ask when there are none.
         if self.files:
-            asked = [os.path.basename(path) for path in self._paths()
-                     if conformation_library.models_need_choosing(path)]
-            if not asked:
-                return self.execute(context)
-            self.asked_about = "\n".join(asked)
-            self.model_interpretation = 'CONFORMATIONS'
-            return context.window_manager.invoke_props_dialog(
-                self, title=self.bl_label, confirm_text="Import")
+            return self.execute(context)
         return super().invoke(context, event)
 
     def _make_morphset(self, context, identifier) -> None:
@@ -185,9 +155,16 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
                 # never replace the first one's wrapper.
                 identifier = manager.free_identifier(identifier_from_filename(filename))
 
+            interpretation = self.model_interpretation
+            if (interpretation == 'AUTO'
+                    and conformation_library.models_say_nothing(filepath)):
+                # A morph or trajectory saved from ChimeraX: several models
+                # and no word on what they are. Read it as the states it
+                # nearly always is, Morphset and all, rather than refuse it.
+                interpretation = 'CONFORMATIONS'
             try:
                 success = manager.import_molecule_from_file(
-                    filepath, identifier, self.model_interpretation)
+                    filepath, identifier, interpretation)
             except Exception as e:
                 logger.error(f"Error importing file {filepath}: {e}")
                 problems.append(f"{filename}: {e}")
@@ -196,7 +173,7 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
                 problems.append(f"Failed to import {filepath}")
                 continue
             imported.append(identifier)
-            if self.model_interpretation == 'CONFORMATIONS':
+            if interpretation == 'CONFORMATIONS':
                 self._make_morphset(context, identifier)
 
         if imported:

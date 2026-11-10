@@ -6,8 +6,9 @@ from bpy.types import PropertyGroup
 
 MODEL_INTERPRETATIONS = [
     ('AUTO', 'Detect from file',
-     'An NMR ensemble is read as states and a numbered assembly file (.pdb1) as copies. '
-     'Any other file with several models asks you to choose'),
+     'A numbered assembly file (.pdb1) is read as copies and an NMR ensemble as states. '
+     'Any other file with several models, such as a morph saved from ChimeraX, '
+     'is read as states with a Morphset of all its chains'),
     ('CONFORMATIONS', 'States for Morphsets',
      'Each model is another state of the same protein, such as a morph or trajectory '
      'saved from ChimeraX. A Morphset of all its chains is made, ready to key'),

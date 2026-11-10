@@ -63,12 +63,12 @@ def _read_header(path):
         return SimpleNamespace(file=reader.read(handle))
 
 
-def models_need_choosing(path) -> bool:
-    """Whether a local file has several models that "Detect from file" cannot place.
+def models_say_nothing(path) -> bool:
+    """Whether a local file has several models and nothing saying what they are.
 
-    Reads only the records that say so, not the structure, so a dropped file
-    can be asked about before it is imported. An unreadable file is not asked
-    about; importing it reports what is wrong with it.
+    That is how ChimeraX saves a morph, so "Detect from file" reads such a
+    file as states. Reads only the records that would say, not the structure.
+    An unreadable file says False; importing it reports what is wrong.
     """
     try:
         method, numbers = model_metadata(_read_header(path))

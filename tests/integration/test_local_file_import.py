@@ -55,32 +55,6 @@ def _row_objects(scene):
 # A file of several models that does not say what they are
 # --------------------------------------------------------------------------
 
-def _offered(prop):
-    """The name and choice labels the import dialog shows for an option."""
-    rna = bpy.ops.molecule.import_local.get_rna_type().properties[prop]
-    return rna.name, {item.identifier: item.name for item in rna.enum_items}
-
-
-@pytest.mark.integration
-def test_a_morph_file_names_the_choices_that_import_it(tmp_path, scene, sm):
-    """Reported 2026-11-03: a morph saved from ChimeraX would not import, and
-    the error asked for a "Conformations" choice the dialog does not show."""
-    path = H.chimera_like_ensemble(tmp_path / "morph.pdb")
-    name, labels = _offered("model_interpretation")
-
-    with pytest.raises(RuntimeError) as raised:
-        _import(path)
-    message = str(raised.value)
-    assert f'"{name}"' in message, message
-    for choice in ("CONFORMATIONS", "ASSEMBLY"):
-        assert f'"{labels[choice]}"' in message, (labels[choice], message)
-    assert not sm.molecules
-
-    # The choice it names does import it.
-    assert _import(path, model_interpretation="CONFORMATIONS") == {"FINISHED"}
-    assert len(sm.molecules) == 1
-
-
 def _strip_cif_experiment(source, target):
     """Write ``source`` mmCIF without its experiment record, as ChimeraX saves a morph."""
     from biotite.structure.io import pdbx
@@ -98,51 +72,67 @@ def _text(path):
         return handle.read().splitlines()
 
 
+def _morph_file(tmp_path, kind):
+    """A morph as ChimeraX saves one - models, no experiment record - and its
+    model count and chains, read from the file itself."""
+    from biotite.structure.io import pdbx
+    if kind == "cif":
+        path = _strip_cif_experiment("1d3z.cif.gz", tmp_path / "morph.cif")
+        atoms = pdbx.CIFFile.read(str(path)).block["atom_site"]
+        models = len(set(atoms["pdbx_PDB_model_num"].as_array(str)))
+        chains = set(atoms["auth_asym_id"].as_array(str))
+        assert not any(line.startswith("_exptl.") for line in _text(path))
+        return path, models, chains
+    path = H.chimera_like_ensemble(tmp_path / "morph.pdb")
+    models, chains = _file_models_and_chains(path)
+    assert not any(line.startswith("EXPDTA") for line in _text(path))
+    if kind == "pdb.gz":
+        packed = tmp_path / "morph.pdb.gz"
+        packed.write_bytes(gzip.compress(path.read_bytes()))
+        path.unlink()
+        path = packed
+    return path, models, chains
+
+
 @pytest.mark.integration
-def test_a_drop_asks_only_about_files_whose_models_say_nothing(tmp_path):
-    """Reported 2026-11-10: a ChimeraX morph dropped on Blender failed with
-    "This file has several models and does not say what they are", since a
-    drop offered nowhere to choose. A drop now asks about exactly the files
-    "Detect from file" cannot place, and imports the rest at once."""
-    from proteinblender.core.conformation_library import models_need_choosing
+@pytest.mark.parametrize("kind", ["pdb", "pdb.gz", "cif"])
+def test_a_morph_imports_as_states_with_its_morphset_untold(tmp_path, scene, sm, kind):
+    """Reported 2026-11-03 (Janet) and 2026-11-10 (Dillon, with her morph.pdb):
+    a morph saved from ChimeraX failed with "This file has several models and
+    does not say what they are" unless States for Morphsets was found and
+    chosen first. Detect from file now reads a file whose models say nothing
+    as states and makes its Morphset, as States for Morphsets does."""
+    from proteinblender.core import model_morphsets as M, morphsets as C
 
-    morph = H.chimera_like_ensemble(tmp_path / "morph.pdb")
-    packed = tmp_path / "morph.pdb.gz"
-    packed.write_bytes(gzip.compress(morph.read_bytes()))
-    cif_morph = _strip_cif_experiment("1d3z.cif.gz", tmp_path / "morph.cif")
-    junk = tmp_path / "notes.pdb"
-    junk.write_text("not a structure\n")
+    path, models, chains = _morph_file(tmp_path, kind)
+    assert models > 1
 
-    # What each file really holds, read from its text, not through the add-on.
-    nmr = H.data_path("1d3z.pdb.gz")
-    assembly = H.data_path("1out.pdb1.gz")
-    assert sum(line.startswith("MODEL ") for line in _text(morph)) == 3
-    assert not any(line.startswith("EXPDTA") for line in _text(morph))
-    nmr_text = _text(nmr)
-    assert sum(line.startswith("MODEL ") for line in nmr_text) > 1
+    assert _import(path) == {"FINISHED"}
+    (molecule,) = sm.molecules.values()
+    roots = _morphsets_of(scene, molecule)
+    assert len(roots) == 1, f"expected one Morphset, got {[r.name for r in roots]}"
+    assert len(C.states(M.subject(roots[0], scene))) == models
+    members = [r for r in scene.outliner_items
+               if r.item_type == "MORPH_MEMBER" and r.parent_id == roots[0][C.TAG]]
+    assert len(members) == len(chains), ([r.name for r in members], chains)
+
+
+@pytest.mark.integration
+def test_files_whose_models_say_what_they_are_keep_their_reading(tmp_path, scene, sm):
+    """Only a file that says nothing is read as a morph: an NMR ensemble stays
+    states without a Morphset, so its chains can be split before grouping, and
+    choosing Assembly copies for a morph still draws its models as copies."""
+    nmr_text = _text(H.data_path("1d3z.pdb.gz"))
     assert any(line.startswith("EXPDTA") and "NMR" in line for line in nmr_text)
-    assert sum(line.startswith("MODEL ") for line in _text(assembly)) > 1
-    assert not any(line.startswith("MODEL ") for line in _text(H.data_path("4hhb.pdb")))
-    assert not any(line.startswith("_exptl.") for line in _text(cif_morph))
-    assert any("NMR" in line for line in _text(H.data_path("1d3z.cif.gz"))
-               if line.startswith("_exptl.method"))
+    nmr = _copy(tmp_path, "1d3z.pdb.gz", "nmr.pdb")
+    assert _import(nmr) == {"FINISHED"}
+    assert not _morphsets_of(scene, sm.molecules["nmr"])
 
-    asked = {
-        "a ChimeraX morph": morph,
-        "the same morph, gzipped": packed,
-        "an mmCIF morph": cif_morph,
-    }
-    not_asked = {
-        "an NMR ensemble": nmr,
-        "an mmCIF NMR ensemble": H.data_path("1d3z.cif.gz"),
-        "a numbered assembly file": assembly,
-        "a single model": H.data_path("4hhb.pdb"),
-        "an unreadable file": junk,
-    }
-    for label, path in asked.items():
-        assert models_need_choosing(path), f"a drop of {label} would not ask"
-    for label, path in not_asked.items():
-        assert not models_need_choosing(path), f"a drop of {label} would ask needlessly"
+    path, models, chains = _morph_file(tmp_path, "pdb")
+    assert _import(path, model_interpretation="ASSEMBLY") == {"FINISHED"}
+    copies = sm.molecules["morph"]
+    assert not _morphsets_of(scene, copies)
+    assert len(copies.domains) == models * len(chains)
 
 
 def _file_models_and_chains(path):

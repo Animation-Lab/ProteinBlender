@@ -21,10 +21,8 @@ Start/End pairs or add individual morphs.
 
 ### A morph or trajectory file is grouped for you
 
-A morph saved from ChimeraX, or any file whose models do not say what they are, is imported with **Import Local File** (or File > Import).
-Under **Multiple models in the file**, choose **States for Morphsets**.
-You can also drag the file onto Blender: a dialog asks what its models are, with **States for Morphsets** already chosen.
-ProteinBlender then makes the Morphset for you, named after the protein (for example **morph conformations**), with every chain as a member.
+A morph saved from ChimeraX, or any file whose models do not say what they are, can be imported any way you like: **Import Local File**, File > Import, or dragging it onto Blender.
+It is read as states (as if you chose **States for Morphsets** under **Multiple models in the file**), and ProteinBlender makes the Morphset for you, named after the protein (for example **morph conformations**), with every chain as a member.
 Its models are ready to choose in keyframes, so you can skip steps 2 to 5.
 Use **Edit Morphset** to rename it or change its members.
 
