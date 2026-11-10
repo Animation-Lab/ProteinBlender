@@ -871,6 +871,116 @@ def verify_the_unpainted_swatch():
     return path
 
 
+def drawn_tint(name):
+    """The tint the filament's copies draw subunit ``name`` with, read off its point cloud."""
+    mol = filament()
+    site, chain = SC.parse_key(name)
+    for obj, points in A.point_clouds_of(mol):
+        if SC.chain_of(mol, obj) != chain:
+            continue
+        mesh = points.data
+        attribute = mesh.attributes.get(A.TINT_ATTRIBUTE)
+        if attribute is None:
+            return None
+        values = np.empty(len(mesh.vertices) * 4, dtype=np.float32)
+        attribute.data.foreach_get('color', values)
+        rows = np.flatnonzero(A.point_sites(mesh) == site)
+        return tuple(round(float(v), 4) for v in values.reshape(-1, 4)[rows[0]])
+    return None
+
+
+def open_the_picker_to_drag():
+    move(*data['swatch_xy'])
+    data['picker_before'] = capture('drag-picker-closed.png')
+    data['drag_start'] = _swatch_state()[1]
+    click_at(data['swatch_xy'], 'PRESS')
+
+
+def find_the_wheel():
+    """Find the picker's colour wheel: the many-hued disc the open picker added."""
+    opened = capture('drag-picker-open.png')
+    before, after = _pixels(data['picker_before']), _pixels(opened)
+    changed = np.abs(after - before).max(axis=-1) > 0.05
+    top, low = after.max(axis=-1), after.min(axis=-1)
+    saturated = (top > 0.3) & ((top - low) / np.maximum(top, 1e-6) > 0.5)
+    ys, xs = np.nonzero(changed & saturated)
+    assert len(xs) > 2000 * scale() ** 2, f'no colour wheel opened: {len(xs)} hued pixels'
+    centre = (int(xs.mean()), int(ys.mean()))
+    radius = (len(xs) / np.pi) ** 0.5
+    data['wheel'] = (centre, radius)
+    return f'wheel at {centre}, radius {radius:.0f}px'
+
+
+def drag_in_the_wheel(fraction, angle):
+    def step():
+        (cx, cy), radius = data['wheel']
+        x = cx + fraction * radius * np.cos(angle)
+        y = cy + fraction * radius * np.sin(angle)
+        data['mouse_in_wheel'] = (int(x), int(y))
+        g['active_window']().event_simulate(type='MOUSEMOVE', value='NOTHING', x=int(x), y=int(y))
+    return step
+
+
+def press_in_the_wheel():
+    (cx, cy), _radius = data['wheel']
+    window = g['active_window']()
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=cx, y=cy)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=cx, y=cy)
+
+
+def check_the_drag(label):
+    """Reported 2026-11-10: dragging in a subunit's colour wheel left the
+    filament its old look until the picker closed."""
+    def step():
+        mol = filament()
+        entry = mol.object.pb_filament.colors.get(data['eye_name'])
+        chosen = tuple(round(c, 4) for c in entry.color)
+        assert chosen != data['drag_start'], (
+            f'{label}: the picker has not changed the colour yet ({chosen})')
+        drawn = drawn_tint(data['eye_name'])
+        lit = SC.overlay(mol, SC.LIST_LAYER)
+        capture(f"drag-{label.replace(' ', '-')}.png")
+        assert drawn is not None and np.allclose(drawn[:3], chosen, atol=1e-3), (
+            f'{label}: the picker chose {chosen} but the subunit is drawn {drawn} '
+            f'(highlight over it: {lit})')
+        data.setdefault('dragged', []).append(chosen)
+        return f'{label}: drawn {drawn[:3]}'
+    return step
+
+
+def release_and_close_the_picker():
+    x, y = data['mouse_in_wheel']
+    window = g['active_window']()
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+    key('ESC')
+
+
+def verify_the_drag_cancelled():
+    assert _swatch_state()[1] == data['drag_start'], (
+        f"Esc did not give the subunit back its colour: {_swatch_state()} vs {data['drag_start']}")
+    move(*data['swatch_xy'])
+    return f"two colours drawn while dragging: {data['dragged']}; Esc restored it"
+
+
+def drag_steps():
+    return [
+        ('open the picker to drag', open_the_picker_to_drag), ('settle', idle),
+        ('release', lambda: click_at(data['swatch_xy'], 'RELEASE')),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        ('find the colour wheel', find_the_wheel), ('settle', idle),
+        ('press in the middle of the wheel', press_in_the_wheel), ('settle', idle),
+        ('drag towards one hue', drag_in_the_wheel(0.7, 0.3)),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        ('the subunit shows the first colour mid-drag', check_the_drag('first hue')),
+        ('drag on to another hue', drag_in_the_wheel(0.7, 2.4)),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        ('the subunit shows the second colour mid-drag', check_the_drag('second hue')),
+        ('release and press Esc', release_and_close_the_picker),
+        ('settle', idle), ('settle', idle), ('settle', idle),
+        ('Esc restored the colour', verify_the_drag_cancelled), ('settle', idle),
+    ]
+
+
 def picker_steps(label):
     return [
         (f'press the {label} swatch', press_the_swatch), ('settle', idle),
@@ -936,6 +1046,7 @@ g['steps'][:] = [
     ('verify the swatch keyed its colour entry', verify_keyed_from_the_swatch), ('settle', idle),
     *picker_steps('painted'),
     *picker_steps('painted, reopened,'),
+    *drag_steps(),
     ('take the row back to its own colour for the picker', unpaint_for_the_picker),
     ('settle', idle),
     ('point at the swatch once more', lambda: move(*data['swatch_xy'])),

@@ -1745,6 +1745,11 @@ on a membrane whose typical gap was 0.28 nm.
   The local-import UI lane drops a ChimeraX-like morph, checks the dialog and presses Enter for the Morphset (red with the reported error before the fix), and now chooses States for Morphsets in the file browser with real clicks instead of setting the property.
   `test_local_file_import.py::test_a_drop_asks_only_about_files_whose_models_say_nothing` checks which files ask against their own text.
 
+- **Dragging in a subunit's colour wheel left the filament its old look until the picker closed** (2026-11-10).
+  Pointing at a Cytoskeleton Subunits row lights its subunit yellow, and the highlight is drawn instead of the subunit's colour; Blender keeps naming the swatch as the button under the mouse while its picker is open, so every colour picked stayed hidden under the yellow until the picker closed.
+  A row's swatch no longer lights the highlight (its name, checkbox and eye still do).
+  The filament UI lane opens a painted subunit's picker, finds the colour wheel in the screenshot, drags to two hues and checks the subunit's drawn tint matches each colour mid-drag, then that Esc restores it; it was red with the yellow highlight drawn over the picked colour.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

@@ -4,8 +4,13 @@ Blender tells no one which list row the mouse is over, but it does know which
 button is under the mouse in a region: ``context.property``, read with that
 region as the context, is the property of the button there. Each row of the
 list is one wide button (its checkbox and name), so the property names the
-row: ``pb_filament.subunits[12].select``, or ``pb_filament.colors[3].color``
-for its swatch.
+row: ``pb_filament.subunits[12].select``, or ``.hide`` for its eye.
+
+Its colour swatch (``subunits[12].color``, or ``pb_filament.colors[3].color``
+once painted) lights nothing. That is where a colour is chosen, and the
+highlight is drawn instead of the subunit's colour; Blender keeps naming the
+swatch for as long as its colour picker is open, so a lit swatch hid every
+colour picked in it until the picker closed.
 
 While the panel is on screen a light timer reads that and lays a highlight
 over the subunit (``subunit_colors.LIST_LAYER``). The panel's draw starts the
@@ -23,7 +28,7 @@ from ..core import subunit_colors
 INTERVAL = 0.05
 IDLE_LOOKS = 40
 
-_ROW = re.compile(r"^pb_filament\.(subunits|colors)\[(\d+)\]")
+_ROW = re.compile(r"^pb_filament\.subunits\[(\d+)\]\.(\w+)$")
 
 #: ``(molecule id, key)`` lit now, and how many looks found nothing.
 _STATE = {"lit": None, "idle": 0}
@@ -56,10 +61,10 @@ def row_under_mouse():
         owner, path, _index = found
         match = _ROW.match(path or "")
         params = getattr(owner, "pb_filament", None)
-        if match is None or params is None:
+        if match is None or params is None or match.group(2) == "color":
             continue
-        rows = getattr(params, match.group(1))
-        index = int(match.group(2))
+        rows = params.subunits
+        index = int(match.group(1))
         if index >= len(rows):
             continue
         molecule = subunit_colors.molecule_of_object(owner)
