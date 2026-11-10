@@ -81,6 +81,70 @@ def test_a_morph_file_names_the_choices_that_import_it(tmp_path, scene, sm):
     assert len(sm.molecules) == 1
 
 
+def _strip_cif_experiment(source, target):
+    """Write ``source`` mmCIF without its experiment record, as ChimeraX saves a morph."""
+    from biotite.structure.io import pdbx
+    with gzip.open(H.data_path(source), "rt") as handle:
+        cif = pdbx.CIFFile.read(handle)
+    block = cif.block
+    del block["exptl"]
+    cif.write(str(target))
+    return target
+
+
+def _text(path):
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as handle:
+        return handle.read().splitlines()
+
+
+@pytest.mark.integration
+def test_a_drop_asks_only_about_files_whose_models_say_nothing(tmp_path):
+    """Reported 2026-11-10: a ChimeraX morph dropped on Blender failed with
+    "This file has several models and does not say what they are", since a
+    drop offered nowhere to choose. A drop now asks about exactly the files
+    "Detect from file" cannot place, and imports the rest at once."""
+    from proteinblender.core.conformation_library import models_need_choosing
+
+    morph = H.chimera_like_ensemble(tmp_path / "morph.pdb")
+    packed = tmp_path / "morph.pdb.gz"
+    packed.write_bytes(gzip.compress(morph.read_bytes()))
+    cif_morph = _strip_cif_experiment("1d3z.cif.gz", tmp_path / "morph.cif")
+    junk = tmp_path / "notes.pdb"
+    junk.write_text("not a structure\n")
+
+    # What each file really holds, read from its text, not through the add-on.
+    nmr = H.data_path("1d3z.pdb.gz")
+    assembly = H.data_path("1out.pdb1.gz")
+    assert sum(line.startswith("MODEL ") for line in _text(morph)) == 3
+    assert not any(line.startswith("EXPDTA") for line in _text(morph))
+    nmr_text = _text(nmr)
+    assert sum(line.startswith("MODEL ") for line in nmr_text) > 1
+    assert any(line.startswith("EXPDTA") and "NMR" in line for line in nmr_text)
+    assert sum(line.startswith("MODEL ") for line in _text(assembly)) > 1
+    assert not any(line.startswith("MODEL ") for line in _text(H.data_path("4hhb.pdb")))
+    assert not any(line.startswith("_exptl.") for line in _text(cif_morph))
+    assert any("NMR" in line for line in _text(H.data_path("1d3z.cif.gz"))
+               if line.startswith("_exptl.method"))
+
+    asked = {
+        "a ChimeraX morph": morph,
+        "the same morph, gzipped": packed,
+        "an mmCIF morph": cif_morph,
+    }
+    not_asked = {
+        "an NMR ensemble": nmr,
+        "an mmCIF NMR ensemble": H.data_path("1d3z.cif.gz"),
+        "a numbered assembly file": assembly,
+        "a single model": H.data_path("4hhb.pdb"),
+        "an unreadable file": junk,
+    }
+    for label, path in asked.items():
+        assert models_need_choosing(path), f"a drop of {label} would not ask"
+    for label, path in not_asked.items():
+        assert not models_need_choosing(path), f"a drop of {label} would ask needlessly"
+
+
 def _file_models_and_chains(path):
     """Model count and chain letters straight from the file text."""
     text = path.read_text().splitlines()
@@ -90,7 +154,7 @@ def _file_models_and_chains(path):
 
 
 def _morphsets_of(scene, molecule):
-    from proteinblender.core import model_morphsets as M, morphsets as C
+    from proteinblender.core import morphsets as C
     return [root for root in C.sets(scene)
             if root.get("pb_model_source") == molecule.object]
 

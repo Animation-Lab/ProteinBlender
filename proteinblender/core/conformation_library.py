@@ -30,6 +30,53 @@ def model_metadata(parsed):
     return method, numbers
 
 
+def detected_interpretation(method, path, *, deposited=False):
+    """What "Detect from file" reads several models as, or None if the file does not say.
+
+    A numbered assembly file (``.pdb1``) holds copies; an NMR ensemble, or any
+    entry fetched from the PDB, holds states. Anything else - a morph or a
+    trajectory saved from ChimeraX - has to be told.
+    """
+    if re.search(r'\.pdb\d+(?:\.gz)?$', str(path), re.I):
+        return 'ASSEMBLY'
+    if deposited or 'NMR' in method.upper():
+        return 'CONFORMATIONS'
+    return None
+
+
+def _read_header(path):
+    """The structure file at ``path``, read as text records only, for :func:`model_metadata`."""
+    import gzip
+    from types import SimpleNamespace
+    from biotite.structure.io import pdb, pdbx
+
+    name = Path(path).name.lower()
+    packed = name.endswith('.gz')
+    suffix = Path(name[:-3] if packed else name).suffix
+    if suffix == '.bcif':
+        reader, mode = pdbx.BinaryCIFFile, 'rb'
+    elif suffix in ('.cif', '.mmcif', '.pdbx'):
+        reader, mode = pdbx.CIFFile, 'rt'
+    else:
+        reader, mode = pdb.PDBFile, 'rt'
+    with (gzip.open(path, mode) if packed else open(path, mode)) as handle:
+        return SimpleNamespace(file=reader.read(handle))
+
+
+def models_need_choosing(path) -> bool:
+    """Whether a local file has several models that "Detect from file" cannot place.
+
+    Reads only the records that say so, not the structure, so a dropped file
+    can be asked about before it is imported. An unreadable file is not asked
+    about; importing it reports what is wrong with it.
+    """
+    try:
+        method, numbers = model_metadata(_read_header(path))
+    except Exception:
+        return False
+    return len(numbers) > 1 and detected_interpretation(method, path) is None
+
+
 def prepare_import(parsed, interpretation='AUTO', *, deposited=False):
     import biotite.structure as struc
     array = parsed.array
@@ -37,11 +84,8 @@ def prepare_import(parsed, interpretation='AUTO', *, deposited=False):
     method, numbers = model_metadata(parsed)
     path = str(getattr(parsed, 'pb_import_path', '') or getattr(parsed, 'file_path', ''))
     if interpretation == 'AUTO' and count > 1:
-        if re.search(r'\.pdb\d+(?:\.gz)?$', path, re.I):
-            interpretation = 'ASSEMBLY'
-        elif deposited or 'NMR' in method.upper():
-            interpretation = 'CONFORMATIONS'
-        else:
+        interpretation = detected_interpretation(method, path, deposited=deposited)
+        if interpretation is None:
             # The choices are named as the import dialog labels them.
             raise ValueError('This file has several models and does not say what they are. '
                              'Import it with Import Local File or File > Import and, under '

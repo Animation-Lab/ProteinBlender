@@ -1739,6 +1739,12 @@ on a membrane whose typical gap was 0.28 nm.
   The local-import UI lane now imports a file as "States for Morphsets", checks the Morphset was made, and presses Ctrl+Z once: the protein and its Morphset both go.
   The new `morph-linkers` UI lane removes a Morphset joined by a linker, then Ctrl+Z brings both back with the linker on the drawn alpha carbons, and Ctrl+Shift+Z leaves the linker on the returned chains.
 
+- **A dropped ChimeraX morph failed with nowhere to choose States for Morphsets** (2026-11-10).
+  Dillon dropped Janet's `morph.pdb` on Blender 5.2: a drop imported at once with "Detect from file", which refuses a file whose models say nothing, and the error pointed at a choice the drop never offered.
+  A drop now opens an **Import Structure** dialog (States for Morphsets chosen, or Assembly copies) for exactly the files `conformation_library.models_need_choosing` flags, reading only their MODEL/EXPDTA or `exptl`/`pdbx_PDB_model_num` records with the same rule Detect from file applies; every other drop still imports at once.
+  The local-import UI lane drops a ChimeraX-like morph, checks the dialog and presses Enter for the Morphset (red with the reported error before the fix), and now chooses States for Morphsets in the file browser with real clicks instead of setting the property.
+  `test_local_file_import.py::test_a_drop_asks_only_about_files_whose_models_say_nothing` checks which files ask against their own text.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after

@@ -77,6 +77,14 @@ def prepare():
     for name in HIDDEN:
         (folder / name).write_text('not a structure\n')
     data['folder'] = folder
+    # A ChimeraX morph (Janet's morph.pdb, 2026-11-10): models and atoms, no
+    # experiment record, so Detect from file cannot tell what the models are.
+    # Kept apart so the multi-select below does not pick it up.
+    morphs = folder.parent / 'local-import-morph'
+    shutil.rmtree(morphs, ignore_errors=True)
+    morphs.mkdir()
+    H.chimera_like_ensemble(morphs / 'morph.pdb')
+    data['morphs'] = morphs
     assert not molecules()
     return str(folder)
 
@@ -108,10 +116,10 @@ def click_import_local_file():
         assert bpy.ops.molecule.import_local('INVOKE_DEFAULT') == {'RUNNING_MODAL'}
 
 
-def point_browser_at_folder():
+def point_browser_at_folder(where='folder'):
     window, area = browser()
     assert area is not None, 'Import Local File did not open a file browser'
-    area.spaces.active.params.directory = str(data['folder']).encode()
+    area.spaces.active.params.directory = str(data[where]).encode()
     return f'file browser filter: {area.spaces.active.params.filter_glob}'
 
 
@@ -358,6 +366,181 @@ def press_ctrl_z():
     window.event_simulate(type='Z', value='RELEASE', ctrl=True, x=x, y=y)
 
 
+def _over_a_setting(window, area, region):
+    """Whether the cursor is on one of the importer's own settings.
+
+    Resetting to the default is offered over any editable property, while
+    ``context.property`` names only those an ID owns; together they mark an
+    operator's settings on every Blender version.
+    """
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        return bpy.ops.ui.reset_default_button.poll() and bpy.context.property is None
+
+
+def find_the_choices(locate, done):
+    """Walk the cursor down a region, recording each stretch over a setting.
+
+    ``locate()`` gives ``(window, area, region)``; ``done(window, x, spans)``
+    runs at the bottom. Only the cursor moves, so nothing is clicked by mistake.
+    """
+    def run():
+        window, area, region = locate()
+        assert region is not None, 'the region to walk is not on screen'
+        step = max(3, round(4 * bpy.context.preferences.system.ui_scale))
+        walk = data.setdefault('walk', {'at': None, 'spans': [], 'inside': False})
+        if walk['at'] is None:
+            walk['x'] = region.x + region.width // 2
+            at = region.y + region.height - step
+        else:
+            if _over_a_setting(window, area, region):
+                if not walk['inside']:
+                    walk['spans'].append([walk['at'], walk['at']])
+                walk['spans'][-1][1] = walk['at']
+                walk['inside'] = True
+            else:
+                walk['inside'] = False
+            at = walk['at'] - step
+        if at > region.y:
+            walk['at'] = at
+            def hover():
+                window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=walk['x'], y=at)
+            g['steps'][:0] = [('hover', hover), *settle(2, 'hover'), ('walk on', run)]
+            return None
+        data.pop('walk')
+        return done(window, walk['x'], walk['spans'])
+    return run
+
+
+def _choice_labels():
+    rna = bpy.ops.molecule.import_local.get_rna_type().properties['model_interpretation']
+    return [(item.identifier, item.name) for item in rna.enum_items]
+
+
+def _side_panel():
+    window, area = browser()
+    if area is None:
+        return None, None, None
+    region = next((r for r in area.regions if r.type == 'TOOL_PROPS'), None)
+    return window, area, region
+
+
+def expect_the_side_panel():
+    window, area, region = _side_panel()
+    assert region is not None and region.width > 1, (
+        'the file browser shows no side panel, so Multiple models cannot be chosen')
+    area.spaces.active.params.filename = 'morph.pdb'
+    chosen = area.spaces.active.active_operator.model_interpretation
+    assert chosen == 'AUTO', f'the browser opened on {chosen!r}'
+    return f'side panel {region.width}px wide, on Detect from file'
+
+
+def found_side_panel_choices(window, x, spans):
+    labels = _choice_labels()
+    names = [name for _i, name in labels]
+    # Expanded in an aligned column, the choices are one button each, in the
+    # enum's order and touching, so the walk crosses them as one stretch.
+    assert len(spans) == 1, (
+        f'walking the side panel at x={x} crossed {len(spans)} settings {spans}; '
+        f'expected the column of {names}')
+    top, bottom = spans[0]
+    step = max(3, round(4 * bpy.context.preferences.system.ui_scale))
+    height = (top - bottom + step) / len(labels)
+    unit = 20 * bpy.context.preferences.system.ui_scale
+    assert abs(height - unit) <= step, (
+        f'the column {spans[0]} is not {len(labels)} buttons of {unit:.0f}px')
+    slot = [i for i, _n in labels].index('CONFORMATIONS')
+    data['states_xy'] = (x, round(top + step / 2 - height * (slot + 0.5)))
+    return f'States for Morphsets at {data["states_xy"]}, buttons {height:.0f}px'
+
+
+def click_states():
+    window, _area, _region = _side_panel()
+    x, y = data['states_xy']
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
+    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x, y=y)
+
+
+def expect_states_chosen():
+    window, area, _region = _side_panel()
+    chosen = area.spaces.active.active_operator.model_interpretation
+    assert chosen == 'CONFORMATIONS', (
+        f'clicking "States for Morphsets" in the side panel left the importer on {chosen!r}')
+    capture('local-import-states-chosen.png')
+    return 'the click chose States for Morphsets'
+
+
+def press_import():
+    """Enter over the file list, as a user confirms a chosen file."""
+    window, area = browser()
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    x, y = region.x + region.width // 2, region.y + region.height // 3
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    window.event_simulate(type='RET', value='PRESS', x=x, y=y)
+    window.event_simulate(type='RET', value='RELEASE', x=x, y=y)
+
+
+def observe_drop_dialog():
+    """Note the importer's dialog if a drop opens one."""
+    from proteinblender.operators.operator_import_local import MOLECULE_OT_import_local as Op
+    original = Op.__dict__.get('draw')
+
+    def draw(self, context):
+        original(self, context)
+        popup = getattr(context, 'region_popup', None)
+        if popup is not None:
+            data['drop_dialog'] = {'choice': self.model_interpretation, 'region': popup,
+                                   'layout': str(self.layout.introspect())}
+    Op.draw = draw
+    data['drop_class'], data['drop_draw'] = Op, original
+    data['before_drop'] = (molecules(), morphset_names())
+
+
+def drop_the_morph():
+    """Drag the ChimeraX morph onto the 3D Viewport, as Blender delivers a drop."""
+    with g['ui_override']('VIEW_3D'):
+        bpy.ops.wm.drop_import_file(
+            'EXEC_DEFAULT', directory=str(data['morphs']), files=[{'name': 'morph.pdb'}])
+
+
+def expect_the_drop_asks():
+    """Reported 2026-11-10: a dropped morph failed with "This file has several
+    models and does not say what they are", with nowhere to say it."""
+    assert molecules() == data['before_drop'][0], (
+        f'the drop imported {sorted(set(molecules()) - set(data["before_drop"][0]))} '
+        'without asking what the models are')
+    assert 'drop_dialog' in data, (
+        'dropping a morph opened no dialog: it was imported as Detect from file and '
+        'failed, with no way to choose States for Morphsets')
+    shown = data['drop_dialog']
+    assert shown['choice'] == 'CONFORMATIONS', f"the dialog offers {shown['choice']!r} first"
+    for _identifier, name in _choice_labels():
+        if _identifier != 'AUTO':
+            assert name in shown['layout'], (name, shown['layout'][:400])
+    assert 'morph.pdb' in shown['layout'], 'the dialog does not say which file it asks about'
+    capture('local-import-drop-dialog.png')
+    return 'the drop asks, offering States for Morphsets'
+
+
+def confirm_the_drop():
+    region = data['drop_dialog']['region']
+    x, y = region.x + region.width // 2, region.y + region.height // 2
+    window = g['active_window']()
+    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+    window.event_simulate(type='RET', value='PRESS', x=x, y=y)
+    window.event_simulate(type='RET', value='RELEASE', x=x, y=y)
+
+
+def expect_the_drop_made_a_morphset():
+    data['drop_class'].draw = data['drop_draw']
+    proteins, sets = data['before_drop']
+    added = sorted(set(molecules()) - set(proteins))
+    assert len(added) == 1 and added[0].startswith('morph'), added
+    made = sorted(set(morphset_names()) - set(sets))
+    assert len(made) == 1, f'expected one new Morphset, got {made}'
+    return f'{added[0]} -> Morphset {made[0]}'
+
+
 def expect_one_undo_took_both_away():
     proteins, sets = data['before_states']
     H.scene_manager_module().sync_molecule_list_after_undo()
@@ -427,10 +610,15 @@ g['steps'][:] = [
     ('a drop does not inherit the earlier Multiple models choice', expect_drop_detects_models_itself),
     ('note what is loaded before a states import', remember_before_states),
     ('click Import Local File for a morph', click_import_local_file), *settle(3, 'browser open'),
-    ('point the file browser at the folder for the morph', point_browser_at_folder),
+    ('point the file browser at the morph folder', lambda: point_browser_at_folder('morphs')),
     *settle(20, 'file list'),
-    ('choose ensemble.pdb, set Multiple models to States for Morphsets, Import',
-     choose('ensemble.pdb', 'CONFORMATIONS')), *settle(8, 'import'),
+    ('choose morph.pdb; the side panel is there, on Detect from file', expect_the_side_panel),
+    *settle(3, 'side panel'),
+    ('find the Multiple models choices in the side panel',
+     find_the_choices(_side_panel, found_side_panel_choices)),
+    ('click States for Morphsets', click_states), *settle(4, 'click'),
+    ('the click chose States for Morphsets', expect_states_chosen),
+    ('press Enter to import', press_import), *settle(12, 'import'),
     ('States for Morphsets made the Morphset', expect_states_made_a_morphset),
     ('press Ctrl+Z once', press_ctrl_z), *settle(8, 'undo'),
     ('one Ctrl+Z took the protein and its Morphset away', expect_one_undo_took_both_away),
@@ -439,5 +627,10 @@ g['steps'][:] = [
     *settle(20, 'file list'),
     ('select every listed file and press Import', execute_selection), *settle(12, 'import'),
     ('every selected file imported once', expect_everything),
+    ('watch for a dialog on the drop', observe_drop_dialog),
+    ('drop the ChimeraX morph on the 3D viewport', drop_the_morph), *settle(6, 'drop'),
+    ('the drop asks what the models are', expect_the_drop_asks),
+    ('press Enter to import as states', confirm_the_drop), *settle(12, 'import'),
+    ('the dropped morph has its Morphset', expect_the_drop_made_a_morphset),
     ('save', save),
 ]
