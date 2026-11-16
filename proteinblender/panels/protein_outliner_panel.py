@@ -145,7 +145,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
         # Add some space before the controls
         row.separator()
 
-        # Colour swatch — click it to recolour the protein, chain or domain
+        # Color swatch — click it to recolor the protein, chain or domain
         # on the spot, without opening its edit dialog. Seeded from what the
         # item currently looks like; mixed colors appear as a segmented swatch.
         controls = row.row(align=True)
@@ -269,7 +269,7 @@ class PROTEINBLENDER_UL_outliner(UIList):
                 # yet.
                 PROTEINBLENDER_UL_outliner._draw_custom_pivot_toggle(context, row, item, menu=menu)
 
-                # Edit pencil — the protein's own Visual Set-up: colour, style,
+                # Edit pencil — the protein's own Visual Set-up: color, style,
                 # and representation for the whole molecule at once.
                 edit_op = action(
                     "proteinblender.edit_protein_visuals",

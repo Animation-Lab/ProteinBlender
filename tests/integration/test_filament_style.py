@@ -3,7 +3,7 @@
 Reported 2026-11-03 (Dillon's notes): "make it so actin style is updatable
 too". A new filament is drawn as Surface; its row's pencil is the protein
 Visual Set-up dialog, and choosing another style there must restyle every
-subunit - plain copies and copies that carry their own colour alike.
+subunit - plain copies and copies that carry their own color alike.
 
 Observed from the evaluated scene: Surface draws each copy as a mesh, Spheres
 as a point cloud of atoms. That is Blender's output, not the add-on's record

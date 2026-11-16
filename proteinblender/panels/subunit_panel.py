@@ -1,16 +1,16 @@
-"""Cytoskeleton Subunits panel: every monomer of a filament, to pick and colour.
+"""Cytoskeleton Subunits panel: every monomer of a filament, to pick and color.
 
 Shown only while a filament's own row is ticked in the PB Outliner, and
 showing that filament; with several ticked, a picker chooses between them.
 Its list has one row per monomer - "Actin 12", "Beta Tubulin 3 - Strand 5" -
 counted up each strand from the minus end, with a checkbox to select it and,
-at its right, an eye to hide it and its colour, which paints it alone.
+at its right, an eye to hide it and its color, which paints it alone.
 Pointing at a row lights its subunit up yellow in the viewport
 (``subunit_hover``). Above the list: select all, none or the rest, and on
 a filament of more than one chain - a microtubule's alpha and beta tubulin -
 every subunit of one chain. Below it: pick subunits by clicking them in the 3D
-Viewport; a colour that applies to the selected subunits as soon as it
-changes, and Clear. Colours are keyed with the filament's row in Create
+Viewport; a color that applies to the selected subunits as soon as it
+changes, and Clear. Colors are keyed with the filament's row in Create
 Keyframe, or with I over a painted subunit's swatch.
 """
 
@@ -36,15 +36,15 @@ class PROTEINBLENDER_UL_subunits(UIList):
         # pointing anywhere on it tells the hover watch which subunit it is.
         row.prop(item, "select", text=item.label)
         # At the right edge, as the PB Outliner draws its rows: the
-        # subunit's colour, then the eye. A painted subunit shows its colour
+        # subunit's color, then the eye. A painted subunit shows its color
         # entry itself, so I over the swatch keys it; any other shows the
-        # colour it is drawn and, changed, is painted that.
+        # color it is drawn and, changed, is painted that.
         controls = row.row(align=True)
         controls.alignment = 'RIGHT'
         swatch = controls.row(align=True)
         swatch.ui_units_x = 1.0
-        colour = data.colors.get(item.name)
-        swatch.prop(colour if colour is not None else item, "color", text="")
+        color = data.colors.get(item.name)
+        swatch.prop(color if color is not None else item, "color", text="")
         controls.separator(factor=0.5)
         controls.prop(item, "hide", text="", emboss=True,
                       icon="HIDE_ON" if item.hide else "HIDE_OFF")
@@ -99,7 +99,7 @@ def _chains_in_list_order(params):
 
 
 class PROTEINBLENDER_PT_subunits(Panel):
-    """Every monomer of a filament, to select, pick and colour."""
+    """Every monomer of a filament, to select, pick and color."""
 
     bl_label = "Cytoskeleton Subunits"
     bl_idname = "PROTEINBLENDER_PT_subunits"
@@ -163,7 +163,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
         selected = len(subunit_colors.selected_keys(molecule))
         # The field shows the first selected subunit and, changed, paints
         # every selected one at once. There is no Strength slider (taken out
-        # 2026-11-03): a colour is keyed on its own. Strengths already set or
+        # 2026-11-03): a color is keyed on its own. Strengths already set or
         # keyed in a file still play back.
         paint = box.row(align=True)
         paint.enabled = selected > 0
@@ -176,7 +176,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
         note.enabled = False
         note.label(text=f"{selected} selected" if selected else "Nothing selected",
                    icon="INFO")
-        note.label(text="Key colours with Create Keyframe", icon="BLANK1")
+        note.label(text="Key colors with Create Keyframe", icon="BLANK1")
 
 
 CLASSES = (

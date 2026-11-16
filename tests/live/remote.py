@@ -106,9 +106,9 @@ def reset():
     Resetting the property groups is not housekeeping, it is a correctness
     requirement unique to this lane. Every other lane runs in a throwaway
     Blender, but this one drives the *developer's own session*: a test that
-    sets ``membrane_builder_props.color_head`` and walks away leaves that colour
+    sets ``membrane_builder_props.color_head`` and walks away leaves that color
     in the panel, and the next membrane the user builds by hand comes out
-    wrong. That happened - a colour test left head and tail at (0.05, 0.05,
+    wrong. That happened - a color test left head and tail at (0.05, 0.05,
     0.95) and (0.15, 0.15, 0.15), and the resulting blue-and-grey membrane was
     reported as a product bug.
     """
@@ -154,7 +154,7 @@ def reset_addon_settings():
                 pass
         restored.append(prop.identifier)
 
-    # Scene-level singles the add-on registers directly (colour pickers, style
+    # Scene-level singles the add-on registers directly (color pickers, style
     # dropdowns, split bounds) rather than inside a group.
     for name in ("molecule_style", "visual_setup_color", "visual_setup_style",
                  "temp_domain_color", "temp_domain_start", "temp_domain_end",

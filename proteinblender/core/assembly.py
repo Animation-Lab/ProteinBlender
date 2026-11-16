@@ -1071,8 +1071,8 @@ def _assembly_node_tree(points):
     return tree
 
 
-#: The per-copy colour each point carries, as (red, green, blue, strength).
-#: Strength 0 leaves a copy its own colour; 1 paints it this colour.
+#: The per-copy color each point carries, as (red, green, blue, strength).
+#: Strength 0 leaves a copy its own color; 1 paints it this color.
 TINT_ATTRIBUTE = "pb_tint"
 
 #: Name of the node that starts the tint stage, to find it again.
@@ -1167,7 +1167,7 @@ def _socket(node, name, kind=None, outputs=False):
 def _tint_stage(tree, copies_from):
     """Paint the copies that carry a tint, and leave the rest as instances.
 
-    A copy is an instance of the one styled geometry, so it cannot be a colour
+    A copy is an instance of the one styled geometry, so it cannot be a color
     of its own while it stays one. The copies with a tint are realized - only
     those, so a filament of hundreds with three subunits picked out realizes
     three - and their ``Color`` attribute, which every style's material reads,
@@ -1538,7 +1538,7 @@ def copy_placements(molecule):
     cutaway, a bend and an assembly caught part-way through assembling, rather
     than what the build was asked for. ``chain`` is set where a placement draws
     one chain of the object and not all of it; ``site`` is which copy of the
-    lattice it is, as a filament's subunit colours name it.
+    lattice it is, as a filament's subunit colors name it.
     """
     if built_assembly_id(molecule) is None:
         return []

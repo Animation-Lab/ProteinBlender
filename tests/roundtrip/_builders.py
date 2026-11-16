@@ -101,7 +101,7 @@ def build_multi_chain():
 
 def build_domains():
     """Split a chain, rename the pieces, and give every domain a distinct
-    colour and style - the state a user spends real time building."""
+    color and style - the state a user spends real time building."""
     mid = H.import_local("4hhb.pdb", "4hhb")
     scene = bpy.context.scene
     scene.selected_molecule_id = mid
@@ -124,7 +124,7 @@ def build_domains():
         except (TypeError, ValueError):
             pass
         renamed += 1
-    assert renamed >= 5, "expected to colour at least five domain objects"
+    assert renamed >= 5, "expected to color at least five domain objects"
 
     # Rename a real DOMAIN row through the public operator.
     dom_row = next(it for it in scene.outliner_items if it.item_type == "DOMAIN")
@@ -239,7 +239,7 @@ def build_bent_filament():
 
     # One subunit painted, at less than full strength, through the Subunits
     # panel's fields with the filament ticked in the PB Outliner and its row
-    # selected: a reload must draw it the same colour and keep the list.
+    # selected: a reload must draw it the same color and keep the list.
     from proteinblender.core import subunit_colors
     _build_outliner()
     for item in scene.outliner_items:
@@ -766,7 +766,7 @@ def build_brownian():
 
 
 def build_visual_style():
-    """Molecule-level style and colour, which write through to node trees and
+    """Molecule-level style and color, which write through to node trees and
     materials rather than to a property the outliner shows."""
     mid = H.import_local("1ubq.pdb", "1ubq")
     scene = bpy.context.scene

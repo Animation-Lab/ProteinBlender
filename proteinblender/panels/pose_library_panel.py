@@ -110,7 +110,7 @@ def capture_puppet(context, pose, puppet_id):
     """Record one puppet in ``pose``.
 
     Each member object is stored relative to the puppet's controller (or as
-    its own transform when there is no controller), with its colour, and the
+    its own transform when there is no controller), with its color, and the
     controller itself relative to its protein.
     """
     from ..core.visual_style import get_object_color

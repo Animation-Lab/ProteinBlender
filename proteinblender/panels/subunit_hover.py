@@ -6,11 +6,11 @@ region as the context, is the property of the button there. Each row of the
 list is one wide button (its checkbox and name), so the property names the
 row: ``pb_filament.subunits[12].select``, or ``.hide`` for its eye.
 
-Its colour swatch (``subunits[12].color``, or ``pb_filament.colors[3].color``
-once painted) lights nothing. That is where a colour is chosen, and the
-highlight is drawn instead of the subunit's colour; Blender keeps naming the
-swatch for as long as its colour picker is open, so a lit swatch hid every
-colour picked in it until the picker closed.
+Its color swatch (``subunits[12].color``, or ``pb_filament.colors[3].color``
+once painted) lights nothing. That is where a color is chosen, and the
+highlight is drawn instead of the subunit's color; Blender keeps naming the
+swatch for as long as its color picker is open, so a lit swatch hid every
+color picked in it until the picker closed.
 
 While the panel is on screen a light timer reads that and lays a highlight
 over the subunit (``subunit_colors.LIST_LAYER``). The panel's draw starts the

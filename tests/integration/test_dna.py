@@ -224,7 +224,7 @@ def test_length_does_not_clobber_a_typed_sequence(scene):
 
 
 # ---------------------------------------------------------------------------
-# Colour / style updates on an existing strand
+# Color / style updates on an existing strand
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -232,13 +232,13 @@ def test_update_dna_colors_applies(scene):
     obj = H.build_dna(seq="ATCGATCG", name_prefix="DNA_COL", ds=True,
                       style="ball_and_stick")
     # Selecting the strand first triggers the msgbus prop-sync (copies the
-    # object's stored colours INTO props); only then do we override color_a
+    # object's stored colors INTO props); only then do we override color_a
     # so it isn't clobbered by the sync.
     H.select_only(obj)
     scene.dna_builder_props.color_a = (0.9, 0.1, 0.1, 1.0)
     bpy.ops.proteinblender.update_dna_colors()
     stored = obj.get("pb_color_a")
-    assert stored is not None, "colours were not stored on the object"
+    assert stored is not None, "colors were not stored on the object"
     assert abs(stored[0] - 0.9) < 0.05
     assert abs(stored[1] - 0.1) < 0.05
 

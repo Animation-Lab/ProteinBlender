@@ -177,7 +177,7 @@ actual viewport and, uniquely in this suite, assert on **color**. See
 ## Design goal these tests protect
 
 ProteinBlender must stay a **self-contained UI**.
-Every capability a user needs - select, colour, style, puppet, pose, DNA, keyframe - is exercised through the addon's own `proteinblender.*` / `molecule.*` operators and the PB outliner, never through `bpy.ops.object.*` or Blender's native outliner/timeline.
+Every capability a user needs - select, color, style, puppet, pose, DNA, keyframe - is exercised through the addon's own `proteinblender.*` / `molecule.*` operators and the PB outliner, never through `bpy.ops.object.*` or Blender's native outliner/timeline.
 If a capability can only be reached through Blender-native UI, that is drift, and these tests are where it should surface.
 Prefer driving a new test through the addon's own operator over reaching for a Blender-native fallback, even when the fallback is shorter.
 
@@ -271,7 +271,7 @@ The suite has deliberately separate trust boundaries:
 - **Live viewport** — attaches to an open, windowed Blender running the
   *deployed* add-on and observes its 3D viewport directly. This is the only lane
   that can see the shading path a user looks at, and the only one that asserts
-  on colour rather than an alpha mask. Skips when no Blender is listening; set
+  on color rather than an alpha mask. Skips when no Blender is listening; set
   `PB_LIVE_REQUIRED=1` to make that a failure instead.
 
 Set `PB_STRICT_CONTEXT=1` in a canonical environment. Context-sensitive tests

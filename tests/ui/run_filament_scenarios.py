@@ -367,7 +367,7 @@ def inspect_subunits_panel():
     for label in ('Pick in Viewport', 'Clear', 'Nothing selected'):
         assert label in text, (label, text[:400])
     # Dillon, 2026-11-03: "Take strength out but make sure color of individual
-    # actin (etc.) are keyframable". The colour is keyed on its own.
+    # actin (etc.) are keyframable". The color is keyed on its own.
     assert 'pb_subunit_strength' not in text and 'Strength' not in text, (
         'the Subunits panel still draws the Strength slider', text[:600])
     # The select buttons sit above the list, a microtubule's tubulins below Select All.
@@ -382,25 +382,25 @@ def inspect_subunits_panel():
     return f'{len(rows)} rows'
 
 
-def colour_three():
+def color_three():
     mol = filament()
     present = SC.present_sites(mol)
     rows = [row for row in mol.object.pb_filament.subunits if row.site in present]
     for row in rows[:3]:
         row.select = True
-    data['coloured'] = [row.name for row in rows[:3]]
-    # Changing the colour field paints them; there is no button to press.
+    data['colored'] = [row.name for row in rows[:3]]
+    # Changing the color field paints them; there is no button to press.
     bpy.context.scene.pb_subunit_color = (0.1, 0.9, 0.2)
-    return ', '.join(data['coloured'])
+    return ', '.join(data['colored'])
 
 
-def verify_coloured():
+def verify_colored():
     mol = filament()
-    assert sorted(mol.object.pb_filament.colors.keys()) == sorted(data['coloured'])
+    assert sorted(mol.object.pb_filament.colors.keys()) == sorted(data['colored'])
     text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
     assert '3 selected' in text, text[:400]
-    capture('subunits-coloured.png')
-    return '3 coloured'
+    capture('subunits-colored.png')
+    return '3 colored'
 
 
 def select_all_alpha():
@@ -437,7 +437,7 @@ def aim_at_a_subunit():
     eye = np.array(view.view_matrix.inverted().translation)
     best = None
     for name, centre, _radius in SC.subunit_spheres(mol):
-        if name in data['coloured']:
+        if name in data['colored']:
             continue
         where = view3d_utils.location_3d_to_region_2d(region, view, centre.tolist())
         if where is None or not (40 < where.x < region.width - 40
@@ -465,7 +465,7 @@ def verify_hover():
     mol = filament()
     tints = SC.overlay(mol)
     assert tints.get(data['target']) == SC.HOVER_TINT, (data['target'], sorted(tints)[:6])
-    for name in data['coloured']:
+    for name in data['colored']:
         assert tints.get(name) == SC.SELECTED_TINT, name
     capture('pick-hover.png')
     return data['target']
@@ -486,7 +486,7 @@ def verify_picked_and_finish():
 def verify_picking_finished():
     mol = filament()
     assert SC.overlay(mol) == {}, 'Esc left the pick highlight on the filament'
-    assert sorted(SC.selected_keys(mol)) == sorted(data['coloured'] + [data['target']])
+    assert sorted(SC.selected_keys(mol)) == sorted(data['colored'] + [data['target']])
     capture('pick-finished.png')
     return 'four selected'
 
@@ -672,7 +672,7 @@ def verify_shown_by_the_eye():
 
 
 def unpaint_the_row():
-    """Start the swatch checks from a subunit with no colour of its own."""
+    """Start the swatch checks from a subunit with no color of its own."""
     mol = filament()
     name = data['eye_name']
     if name in mol.object.pb_filament.colors:
@@ -686,8 +686,8 @@ def verify_the_swatch_reads_through_the_row():
     path = hovered_path()
     assert path == f"pb_filament.subunits[{data['eye_row']}].color", path
     row = mol.object.pb_filament.subunits[data['eye_name']]
-    assert np.allclose(row.color, SC.own_colour(mol, row.chain), atol=1e-6)
-    # What the colour picker does with a new colour: the row's setter.
+    assert np.allclose(row.color, SC.own_color(mol, row.chain), atol=1e-6)
+    # What the color picker does with a new color: the row's setter.
     row.color = (0.1, 0.2, 0.95)
     g['protein_workspace_panel_area']().tag_redraw()
     return path
@@ -703,10 +703,10 @@ def verify_handoff_and_press_i():
     mol = filament()
     colors = mol.object.pb_filament.colors
     index = colors.find(data['eye_name'])
-    assert index >= 0, 'painting through the swatch made no colour entry'
+    assert index >= 0, 'painting through the swatch made no color entry'
     path = hovered_path()
     assert path == f'pb_filament.colors[{index}].color', (
-        f'the painted swatch is not its colour entry: {path}')
+        f'the painted swatch is not its color entry: {path}')
     data['swatch_entry'] = index
     data['frame'] = bpy.context.scene.frame_current
     key('I')                       # Insert Keyframe on the button under the mouse
@@ -796,7 +796,7 @@ def verify_reopened_restyle_closed():
 
 
 # ---------------------------------------------------------------------------
-# The swatch's own colour picker, opened by clicking it
+# The swatch's own color picker, opened by clicking it
 # ---------------------------------------------------------------------------
 
 def _pixels(path):
@@ -835,7 +835,7 @@ def press_the_swatch():
 
 
 def verify_the_picker_opened():
-    """Clicking a swatch opens Blender's colour picker over it, changing nothing yet."""
+    """Clicking a swatch opens Blender's color picker over it, changing nothing yet."""
     opened = capture(f"picker-open-{data.setdefault('picker_opens', 0)}.png")
     data['picker_opens'] += 1
     changed = _changed_near_the_swatch(data['picker_before'], opened)
@@ -843,15 +843,15 @@ def verify_the_picker_opened():
     assert changed > 15000 * scale() ** 2, (
         f'clicking the swatch did not open a picker: {changed} pixels changed')
     assert _swatch_state() == data['picker_state'], (
-        f"opening the picker changed the colour: {_swatch_state()} != {data['picker_state']}")
+        f"opening the picker changed the color: {_swatch_state()} != {data['picker_state']}")
     key('ESC')
     return f'{changed} pixels of picker'
 
 
 def verify_the_picker_cancelled():
-    """Escape closes the picker and leaves the colour, and the list of painted ones, alone."""
+    """Escape closes the picker and leaves the color, and the list of painted ones, alone."""
     assert _swatch_state() == data['picker_state'], (
-        f"cancelling the picker changed the colours: {_swatch_state()} != {data['picker_state']}")
+        f"cancelling the picker changed the colors: {_swatch_state()} != {data['picker_state']}")
     closed = capture('picker-cancelled.png')
     left = _changed_near_the_swatch(data['picker_before'], closed)
     assert left < 3000 * scale() ** 2, f'the picker stayed open: {left} pixels still differ'
@@ -897,14 +897,14 @@ def open_the_picker_to_drag():
 
 
 def find_the_wheel():
-    """Find the picker's colour wheel: the many-hued disc the open picker added."""
+    """Find the picker's color wheel: the many-hued disc the open picker added."""
     opened = capture('drag-picker-open.png')
     before, after = _pixels(data['picker_before']), _pixels(opened)
     changed = np.abs(after - before).max(axis=-1) > 0.05
     top, low = after.max(axis=-1), after.min(axis=-1)
     saturated = (top > 0.3) & ((top - low) / np.maximum(top, 1e-6) > 0.5)
     ys, xs = np.nonzero(changed & saturated)
-    assert len(xs) > 2000 * scale() ** 2, f'no colour wheel opened: {len(xs)} hued pixels'
+    assert len(xs) > 2000 * scale() ** 2, f'no color wheel opened: {len(xs)} hued pixels'
     centre = (int(xs.mean()), int(ys.mean()))
     radius = (len(xs) / np.pi) ** 0.5
     data['wheel'] = (centre, radius)
@@ -929,14 +929,14 @@ def press_in_the_wheel():
 
 
 def check_the_drag(label):
-    """Reported 2026-11-10: dragging in a subunit's colour wheel left the
+    """Reported 2026-11-10: dragging in a subunit's color wheel left the
     filament its old look until the picker closed."""
     def step():
         mol = filament()
         entry = mol.object.pb_filament.colors.get(data['eye_name'])
         chosen = tuple(round(c, 4) for c in entry.color)
         assert chosen != data['drag_start'], (
-            f'{label}: the picker has not changed the colour yet ({chosen})')
+            f'{label}: the picker has not changed the color yet ({chosen})')
         drawn = drawn_tint(data['eye_name'])
         lit = SC.overlay(mol, SC.LIST_LAYER)
         capture(f"drag-{label.replace(' ', '-')}.png")
@@ -957,9 +957,9 @@ def release_and_close_the_picker():
 
 def verify_the_drag_cancelled():
     assert _swatch_state()[1] == data['drag_start'], (
-        f"Esc did not give the subunit back its colour: {_swatch_state()} vs {data['drag_start']}")
+        f"Esc did not give the subunit back its color: {_swatch_state()} vs {data['drag_start']}")
     move(*data['swatch_xy'])
-    return f"two colours drawn while dragging: {data['dragged']}; Esc restored it"
+    return f"two colors drawn while dragging: {data['dragged']}; Esc restored it"
 
 
 def drag_steps():
@@ -967,17 +967,17 @@ def drag_steps():
         ('open the picker to drag', open_the_picker_to_drag), ('settle', idle),
         ('release', lambda: click_at(data['swatch_xy'], 'RELEASE')),
         ('settle', idle), ('settle', idle), ('settle', idle),
-        ('find the colour wheel', find_the_wheel), ('settle', idle),
+        ('find the color wheel', find_the_wheel), ('settle', idle),
         ('press in the middle of the wheel', press_in_the_wheel), ('settle', idle),
         ('drag towards one hue', drag_in_the_wheel(0.7, 0.3)),
         ('settle', idle), ('settle', idle), ('settle', idle),
-        ('the subunit shows the first colour mid-drag', check_the_drag('first hue')),
+        ('the subunit shows the first color mid-drag', check_the_drag('first hue')),
         ('drag on to another hue', drag_in_the_wheel(0.7, 2.4)),
         ('settle', idle), ('settle', idle), ('settle', idle),
-        ('the subunit shows the second colour mid-drag', check_the_drag('second hue')),
+        ('the subunit shows the second color mid-drag', check_the_drag('second hue')),
         ('release and press Esc', release_and_close_the_picker),
         ('settle', idle), ('settle', idle), ('settle', idle),
-        ('Esc restored the colour', verify_the_drag_cancelled), ('settle', idle),
+        ('Esc restored the color', verify_the_drag_cancelled), ('settle', idle),
     ]
 
 
@@ -1016,8 +1016,8 @@ g['steps'][:] = [
     ('verify the Subunits panel is hidden, and tick the filament', verify_hidden_and_tick),
     ('settle', idle), ('settle', idle),
     ('inspect the Subunits panel', inspect_subunits_panel), ('settle', idle),
-    ('colour three subunits', colour_three), ('settle', idle), ('settle', idle),
-    ('verify the colours', verify_coloured), ('settle', idle),
+    ('color three subunits', color_three), ('settle', idle), ('settle', idle),
+    ('verify the colors', verify_colored), ('settle', idle),
     ('aim at a subunit and start picking', aim_at_a_subunit), ('settle', idle),
     ('hover the subunit', hover), ('settle', idle), ('settle', idle),
     ('verify the hover highlight', verify_hover), ('settle', idle),
@@ -1036,18 +1036,18 @@ g['steps'][:] = [
     ('settle', idle),
     ('release', lambda: click_at(data['eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
     ('verify the eye showed it again', verify_shown_by_the_eye), ('settle', idle),
-    ('take the row back to its own colour', unpaint_the_row), ('settle', idle), ('settle', idle),
+    ('take the row back to its own color', unpaint_the_row), ('settle', idle), ('settle', idle),
     ('verify the swatch reads through the row, and paint it', verify_the_swatch_reads_through_the_row),
     ('settle', idle), ('settle', idle),
     ('point away from the swatch', point_at_the_swatch_again), ('settle', idle),
     ('point at the swatch again', lambda: move(*data['swatch_xy'])), ('settle', idle), ('settle', idle),
-    ('verify the swatch is its colour entry, and press I', verify_handoff_and_press_i),
+    ('verify the swatch is its color entry, and press I', verify_handoff_and_press_i),
     ('settle', idle), ('settle', idle),
-    ('verify the swatch keyed its colour entry', verify_keyed_from_the_swatch), ('settle', idle),
+    ('verify the swatch keyed its color entry', verify_keyed_from_the_swatch), ('settle', idle),
     *picker_steps('painted'),
     *picker_steps('painted, reopened,'),
     *drag_steps(),
-    ('take the row back to its own colour for the picker', unpaint_for_the_picker),
+    ('take the row back to its own color for the picker', unpaint_for_the_picker),
     ('settle', idle),
     ('point at the swatch once more', lambda: move(*data['swatch_xy'])),
     ('settle', idle), ('settle', idle),

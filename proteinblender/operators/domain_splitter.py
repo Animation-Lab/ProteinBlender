@@ -29,11 +29,11 @@ longer than any sane debounce. Operator properties have no such problem.
 While a range is being edited the viewport ghosts everything except the domain
 being sized, so the user can see the piece they are defining instead of
 guessing at residue numbers. The domain under the cursor is drawn solid, in
-the colour its row carries; the rest of the chain - and the rest of the scene,
+the color its row carries; the rest of the chain - and the rest of the scene,
 the whole protein included - stays visible but ghosted, so the piece being
 sized is read against everything it lives amongst rather than floating on its
 own. Only objects that cannot wear a ghost material are hidden instead. The
-residue ranges, materials, colours and visibility this touches are all
+residue ranges, materials, colors and visibility this touches are all
 restored when the dialog closes, whether it is confirmed or cancelled.
 
 Nothing here mutates the domain model. `draw()` only reads, the row buttons
@@ -245,14 +245,14 @@ def _style_material_socket(obj):
 
 
 def _color_sockets(obj):
-    """The sockets holding a domain's colour, on whichever node drives it.
+    """The sockets holding a domain's color, on whichever node drives it.
 
-    Two node layouts reach "Set Color", and they store the colour differently.
+    Two node layouts reach "Set Color", and they store the color differently.
     Import wires it from a per-domain copy of the "Color Common" group, which
-    holds an RGBA "Carbon" socket. The Visual Set-up colour picker instead
+    holds an RGBA "Carbon" socket. The Visual Set-up color picker instead
     relinks it to a "Custom Combine Color" node holding three float channels.
-    Both are handled, so a domain the user has already recoloured still
-    highlights - and, more importantly, still gets its colour back afterwards.
+    Both are handled, so a domain the user has already recolored still
+    highlights - and, more importantly, still gets its color back afterwards.
 
     Links are compared with ``==``: Blender hands back a fresh wrapper on every
     access, so ``is`` would never match.
@@ -278,11 +278,11 @@ def _color_sockets(obj):
                 for channel in ("Red", "Green", "Blue")
                 if channel in driver.inputs]
     # Prefix match: a range update rebuilds the selection nodes and the
-    # re-added colour node comes back name-collided as "Color Common.001".
+    # re-added color node comes back name-collided as "Color Common.001".
     if driver.name.startswith("Color Common"):
         # Import gives every domain its own copy of this group. Should one ever
-        # be shared, highlighting through it would recolour the domain's
-        # neighbours too, so leave that domain uncoloured rather than repaint
+        # be shared, highlighting through it would recolor the domain's
+        # neighbours too, so leave that domain uncolored rather than repaint
         # the wrong thing.
         if driver.node_tree is None or driver.node_tree.users > 1:
             return None
@@ -292,7 +292,7 @@ def _color_sockets(obj):
 
 
 def _read_color(obj):
-    """The domain's current colour as RGBA, or None if nothing drives it."""
+    """The domain's current color as RGBA, or None if nothing drives it."""
     sockets = _color_sockets(obj)
     if not sockets:
         return None
@@ -302,7 +302,7 @@ def _read_color(obj):
 
 
 def _write_color(obj, color):
-    """Set the domain's colour, skipping sockets that already hold it.
+    """Set the domain's color, skipping sockets that already hold it.
 
     The skip matters: this runs on every keystroke in the dialog's Start and
     End fields, and re-assigning an unchanged socket still tags the shader for
@@ -326,7 +326,7 @@ def _ghost_material(original):
 
     A *copy of the domain's own material*, not a material of our own. A
     hand-built stand-in does not reproduce how MolecularNodes shades: it reads
-    colour through its own node group off the instancer, and a plain Attribute
+    color through its own node group off the instancer, and a plain Attribute
     node fed into a fresh Principled BSDF renders the chain effectively opaque
     in the Material Preview viewport however low its alpha is set. Copying the
     real material and dialling alpha down changes exactly one thing, which is
@@ -429,10 +429,10 @@ def _show(scene, obj, start, end, ghosted, color=None):
     """Reveal ``obj`` showing residues ``start``-``end``, solid or ghosted.
 
     Exactly one domain is un-ghosted at a time - the one being sized - and the
-    ghost/solid contrast alone is what picks it out. ``color`` is the colour
+    ghost/solid contrast alone is what picks it out. ``color`` is the color
     the dialog's row carries for this domain; when given it is previewed here,
     which is how a swatch edit shows up live. Without one the domain keeps the
-    colour it already had.
+    color it already had.
     """
     entry = _capture(scene, obj)
 
@@ -479,7 +479,7 @@ def _current_domain_color(molecule, domain_id):
     """The RGBA a domain currently renders with, or None without an object.
 
     Read off the node graph (`_read_color`), falling back to the broader
-    `visual_style.get_object_color` for a domain whose colour tree this module
+    `visual_style.get_object_color` for a domain whose color tree this module
     refuses to write to (a still-shared Color Common group).
     """
     obj = _domain_object(molecule, domain_id)
@@ -494,36 +494,36 @@ def _current_domain_color(molecule, domain_id):
 
 
 def _same_color(a, b, places=4):
-    """Whether two colours agree, on the RGB channels the pickers share."""
+    """Whether two colors agree, on the RGB channels the pickers share."""
     return all(round(float(x), places) == round(float(y), places)
                for x, y in zip(tuple(a)[:3], tuple(b)[:3]))
 
 
 def _color_key(spec):
-    """How a layout spec is matched to the colour chosen for it."""
+    """How a layout spec is matched to the color chosen for it."""
     return (spec.start, spec.end, spec.domain_id or "")
 
 
 def _fresh_color(index):
-    """A distinct colour for the ``index``-th new domain.
+    """A distinct color for the ``index``-th new domain.
 
     The same golden-ratio walk domain creation itself uses, so a piece added
-    in this dialog is colour-separated from its siblings the way every other
+    in this dialog is color-separated from its siblings the way every other
     new domain is - but chosen here, deterministically, so the swatch shows
-    the colour the domain will actually get before OK is pressed.
+    the color the domain will actually get before OK is pressed.
     """
     hue = (index * 0.618033988749895) % 1.0
     return (*colorsys.hsv_to_rgb(hue, 0.8, 0.9), 1.0)
 
 
 def _apply_layout_colors(context, molecule, specs, colors_by_key, result):
-    """Paint each domain of a just-committed layout with its chosen colour.
+    """Paint each domain of a just-committed layout with its chosen color.
 
-    Runs after ``apply_layout`` so the colours reach domains the commit
+    Runs after ``apply_layout`` so the colors reach domains the commit
     created; those are resolved by their (start, end) range, which is exactly
-    what their spec asked for. A colour the domain already shows is skipped -
+    what their spec asked for. A color the domain already shows is skipped -
     pressing OK without touching a swatch must change nothing, including for a
-    domain whose colour tree is still shared and would be forked by a write.
+    domain whose color tree is still shared and would be forked by a write.
     """
     if not colors_by_key:
         return
@@ -608,8 +608,8 @@ def _temp_object(scene, source, index):
         modifier.node_group = modifier.node_group.copy()
         trees.append(modifier.node_group.name)
         # Copying a node group leaves its *group nodes* pointing at the
-        # original's sub-trees, and the colour lives in one of those. A shared
-        # colour tree is one this module refuses to write to, since writing
+        # original's sub-trees, and the color lives in one of those. A shared
+        # color tree is one this module refuses to write to, since writing
         # would repaint every domain sharing it - so leaving it shared silently
         # costs the highlight on the twin *and* on the domain it was copied
         # from, which is a much worse bug than it looks.
@@ -650,8 +650,8 @@ def preview_layout(context, molecule, chain_token, specs, edited_index,
     objects that cannot wear a ghost material (no Style node to hang it on)
     are hidden instead.
 
-    ``colors`` is an optional per-spec list of RGBA row colours; entries are
-    previewed on their domains, ``None`` entries keep the domain's own colour.
+    ``colors`` is an optional per-spec list of RGBA row colors; entries are
+    previewed on their domains, ``None`` entries keep the domain's own color.
 
     The original scene state is captured once, on the first call, so dragging
     a boundary never re-captures the previewed scene as if the user had
@@ -856,7 +856,7 @@ class PROTEINBLENDER_DomainLayoutRow(PropertyGroup):
     name: StringProperty(name="Name", description="Name for this domain")
     color: FloatVectorProperty(
         name="Color",
-        description="This domain's colour. Changing it recolours the domain "
+        description="This domain's color. Changing it recolors the domain "
                     "when the dialog is confirmed, and previews live in the "
                     "viewport",
         subtype='COLOR', size=4, min=0.0, max=1.0,
@@ -941,7 +941,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         update=_on_edge_end_edited)
     head_color: FloatVectorProperty(
         name="Color",
-        description="Colour for the domain that will be created for the "
+        description="Color for the domain that will be created for the "
                     "start of the chain",
         subtype='COLOR', size=4, min=0.0, max=1.0,
         default=(0.8, 0.8, 0.8, 1.0),
@@ -955,7 +955,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         update=_on_edge_start_edited)
     tail_color: FloatVectorProperty(
         name="Color",
-        description="Colour for the domain that will be created for the "
+        description="Color for the domain that will be created for the "
                     "end of the chain",
         subtype='COLOR', size=4, min=0.0, max=1.0,
         default=(0.8, 0.8, 0.8, 1.0),
@@ -1016,22 +1016,22 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         return self._chain_row(context)
 
     def before_visual_edit(self, context):
-        """Drop any live preview before a colour or style lands.
+        """Drop any live preview before a color or style lands.
 
-        The preview ghosts the chain and re-colours the domain being sized,
-        remembering the real colours so it can put them back on close. A
-        colour set while that is in flight would be restored straight back
+        The preview ghosts the chain and re-colors the domain being sized,
+        remembering the real colors so it can put them back on close. A
+        color set while that is in flight would be restored straight back
         off again on the way out. Clearing first makes the edit the real
         state; the preview rebuilds itself on the next boundary drag.
         """
         restore_preview(context)
 
     def apply_visual_color(self, context):
-        """A chain-wide colour pick also repaints every row's swatch.
+        """A chain-wide color pick also repaints every row's swatch.
 
-        Without this the rows keep their seeded colours, and committing the
-        dialog would paint those straight back over the colour the user just
-        chose - the per-row apply skips only colours the domain already shows.
+        Without this the rows keep their seeded colors, and committing the
+        dialog would paint those straight back over the color the user just
+        chose - the per-row apply skips only colors the domain already shows.
         """
         super().apply_visual_color(context)
         with _Suspend():
@@ -1102,9 +1102,9 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                 row.start = start
                 row.end = end
                 # A name the user typed survives a re-divide; an auto-generated
-                # one is re-derived from the row's new range. The colour rides
+                # one is re-derived from the row's new range. The color rides
                 # with the domain the row is re-assigned to; a brand-new row
-                # gets a fresh, distinct colour of its own.
+                # gets a fresh, distinct color of its own.
                 if i < len(previous):
                     row.domain_id, kept, color = previous[i]
                     row.name = "" if is_default_domain_name(kept) else kept
@@ -1182,7 +1182,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         self._preview_layout(retiled, new_index)
 
     def row_color_edited(self, row):
-        """Show a colour just picked on a row, live, on its domain."""
+        """Show a color just picked on a row, live, on its domain."""
         if _state["suspended"]:
             return
         index = self._index_of(row)
@@ -1191,7 +1191,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         self.select_row(index)
 
     def edge_color_edited(self, head):
-        """Show a colour just picked on an edge adjuster, on its domain-to-be."""
+        """Show a color just picked on an edge adjuster, on its domain-to-be."""
         if _state["suspended"]:
             return
         if (head and not self.has_head()) or (not head and not self.has_tail()):
@@ -1208,7 +1208,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                 return
 
     def _next_fresh_color(self):
-        """A distinct colour for a row that stands for a brand-new domain.
+        """A distinct color for a row that stands for a brand-new domain.
 
         The counter lives in module ``_state`` (an operator instance behind a
         props dialog cannot be trusted to keep plain attributes - see the note
@@ -1219,7 +1219,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         return _fresh_color(index)
 
     def _seed_row_colors(self, molecule, specs):
-        """Paint each row with the colour its domain currently renders with."""
+        """Paint each row with the color its domain currently renders with."""
         _state["fresh_color_index"] = len(specs)
         for row, spec in zip(self.rows, specs):
             color = _current_domain_color(molecule, spec.domain_id)
@@ -1306,7 +1306,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
         The whole layout is handed over, not just the edited row: the domains
         either side of a boundary move with it, and seeing them move is the
         point of previewing the chain rather than the one domain. Each spec is
-        previewed in its row's colour, so a swatch edit shows up too.
+        previewed in its row's color, so a swatch edit shows up too.
         """
         context = bpy.context
         chain_row = self._chain_row(context)
@@ -1317,12 +1317,12 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                        specs, edited_index, colors=self._spec_colors(specs))
 
     def _spec_colors(self, specs):
-        """The dialog's colours, matched to ``specs`` for the preview.
+        """The dialog's colors, matched to ``specs`` for the preview.
 
         Matched by domain identity first and by span second. A spec no row
         backs yet - a boundary dragged off the end of the chain - takes the
-        matching edge adjuster's colour, so the domain forming at the chain's
-        edge previews in the colour it will be created with.
+        matching edge adjuster's color, so the domain forming at the chain's
+        edge previews in the color it will be created with.
         """
         rows = list(self.rows)
         taken = set()
@@ -1440,7 +1440,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
     _COL_TOOLS = 2.4
 
     def _draw_columns(self, line, row=None, index=0, header=False):
-        """Draw one grid line: index, colour, name, start, end, tools.
+        """Draw one grid line: index, color, name, start, end, tools.
 
         Exactly one control per intent: the count spinner re-divides the whole
         chain evenly, the row's split button cuts that row in two, and its
@@ -1587,7 +1587,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
                         start=int(entry["start"]), end=int(entry["end"]),
                         domain_id=entry.get("domain_id") or None)
                     specs.append(spec)
-                    # Optional per-domain colour, the scripted counterpart of
+                    # Optional per-domain color, the scripted counterpart of
                     # the dialog rows' swatches.
                     if entry.get("color") is not None:
                         colors_by_key[_color_key(spec)] = [
@@ -1606,7 +1606,7 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             colors_by_key = {
                 (row.start, row.end, row.domain_id or ""): tuple(row.color)
                 for row in self.rows}
-            # The gap fillers at the chain's ends are created with the colour
+            # The gap fillers at the chain's ends are created with the color
             # their edge adjuster shows, like every other row.
             for spec in specs:
                 key = _color_key(spec)
@@ -1642,14 +1642,14 @@ class PROTEINBLENDER_OT_edit_chain_domains(VisualEditMixin, Operator):
             self.end_visual_edit()
             return {'CANCELLED'}
 
-        # After the layout, so a colour or style the user picked also reaches
+        # After the layout, so a color or style the user picked also reaches
         # the domains this run just created. Untouched fields apply nothing —
         # see VisualEditMixin.commit_visual_edit.
         self.commit_visual_edit(context)
         self.end_visual_edit()
 
-        # Per-domain colours last: they are the most specific choice, so they
-        # win over the chain-wide Visual Set-up colour (whose pick also
+        # Per-domain colors last: they are the most specific choice, so they
+        # win over the chain-wide Visual Set-up color (whose pick also
         # rewrote the row swatches - see apply_visual_color).
         _apply_layout_colors(context, molecule, specs, colors_by_key, result)
 

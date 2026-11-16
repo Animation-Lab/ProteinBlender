@@ -310,7 +310,7 @@ def invoke_and_cancel_protein_visuals_dialog():
     """The protein row's edit pencil must open and draw in a real window.
 
     Its Visual Set-up block seeds itself from the protein's objects in
-    invoke() and lays out colour, style, pivot and force-field controls in
+    invoke() and lays out color, style, pivot and force-field controls in
     draw(). Neither runs headless - background Blender sends INVOKE_DEFAULT
     straight to execute() - so a draw() that raises would go unnoticed by the
     offline lane entirely.
@@ -332,14 +332,14 @@ def invoke_and_cancel_protein_visuals_dialog():
     assert objects, "the protein dialog resolved no objects to style"
 
     # The fields must arrive seeded from what is on screen. 4hhb imports with a
-    # different colour per chain, so the swatch has no single colour to show:
+    # different color per chain, so the swatch has no single color to show:
     # it must be the neutral grey placeholder, flagged, with the shared style
     # still reported properly. Only invoke() seeds - headless never runs it -
     # so this wiring exists nowhere but here.
     carbons = {tuple(round(c, 4) for c in _carbon_rgb(obj))
                for obj in dialog.appearance_objects(bpy.context)
                if _carbon_rgb(obj) is not None}
-    assert len(carbons) > 1, f"fixture chains must differ in colour: {carbons}"
+    assert len(carbons) > 1, f"fixture chains must differ in color: {carbons}"
 
     seeded = tuple(round(c, 4) for c in dialog.vs_color)
     assert dialog.vs_color_is_mixed, (
@@ -354,7 +354,7 @@ def invoke_and_cancel_protein_visuals_dialog():
     active_window().event_simulate(type="ESC", value="PRESS")
     active_window().event_simulate(type="ESC", value="RELEASE")
     return (f"protein visuals dialog opened over {len(objects)} object(s), "
-            f"seeded grey for {len(carbons)} chain colours, and cancelled")
+            f"seeded grey for {len(carbons)} chain colors, and cancelled")
 
 
 def _style_tree_name(obj):

@@ -1,25 +1,25 @@
-"""Colouring a filament's subunits one by one, and animating those colours.
+"""Coloring a filament's subunits one by one, and animating those colors.
 
 A filament draws every subunit as an instance of one styled geometry, so all
-of them share its colour. A subunit coloured on its own is picked out in the
+of them share its color. A subunit colored on its own is picked out in the
 assembly's node tree instead (``assembly._tint_stage``): each copy's point
 carries a tint, and the copies with one are realized and painted. A filament
 of hundreds with three subunits picked out realizes three.
 
-**Where a colour lives.** On the filament's molecule object, in
-``Object.pb_filament.colors``, one entry per coloured monomer, named
+**Where a color lives.** On the filament's molecule object, in
+``Object.pb_filament.colors``, one entry per colored monomer, named
 ``"<site>:<chain>"`` - its place in the whole lattice
-(``symmetry_builder.kept_sites``) and its chain letter - so the colour stays
+(``symmetry_builder.kept_sites``) and its chain letter - so the color stays
 with that subunit as the filament grows, shrinks from either end or bends.
 Blender keys an entry by its position (``pb_filament.colors[3].color``), not
 its name, so entries are only ever appended, and removing one renumbers the
 keys of those after it (:func:`clear`).
 
 **What is drawn** is written into the point clouds as the ``pb_tint``
-attribute (``assembly.write_tints``), whenever a colour changes, whenever the
-copies are re-placed, and on every frame for colours that are keyframed. A
+attribute (``assembly.write_tints``), whenever a color changes, whenever the
+copies are re-placed, and on every frame for colors that are keyframed. A
 transient overlay sits on top to highlight a subunit without touching anyone's
-colours: one layer for the row the mouse is over in the Subunits list, one for
+colors: one layer for the row the mouse is over in the Subunits list, one for
 the viewport picker, which is drawn over it.
 
 **Hiding** a monomer lists it in ``Object.pb_filament.hidden``, by the same
@@ -46,11 +46,11 @@ from bpy.types import PropertyGroup
 
 logger = logging.getLogger(__name__)
 
-#: Where the colours live on the molecule object, under ``Object.pb_filament``.
+#: Where the colors live on the molecule object, under ``Object.pb_filament``.
 COLORS_PATH = "pb_filament.colors"
 
-#: The action group colour keys are filed under in the Graph Editor.
-GROUP = "Subunit Colours"
+#: The action group color keys are filed under in the Graph Editor.
+GROUP = "Subunit Colors"
 
 #: What the picker paints the subunit under the mouse, and the ones selected.
 HOVER_TINT = (1.0, 0.85, 0.1, 1.0)
@@ -63,7 +63,7 @@ _LAYERS = (LIST_LAYER, PICK_LAYER)
 
 
 def key(site: int, chain: str) -> str:
-    """The name a monomer's colour and roster row go by: ``"<site>:<chain>"``."""
+    """The name a monomer's color and roster row go by: ``"<site>:<chain>"``."""
     return f"{int(site)}:{chain}"
 
 
@@ -77,7 +77,7 @@ _QUIET = False
 
 
 def _changed(self, context):
-    """A colour was edited: draw it."""
+    """A color was edited: draw it."""
     if _QUIET:
         return
     molecule = molecule_of_object(self.id_data)
@@ -86,18 +86,18 @@ def _changed(self, context):
 
 
 class PBSubunitColor(PropertyGroup):
-    """One monomer's own colour. Named by :func:`key`."""
+    """One monomer's own color. Named by :func:`key`."""
 
     site: IntProperty(name="Site", min=0)
     chain: StringProperty(name="Chain")
     color: FloatVectorProperty(
-        name="Colour", description="This subunit's own colour",
+        name="Color", description="This subunit's own color",
         size=3, subtype="COLOR", min=0.0, max=1.0, default=(0.9, 0.2, 0.2),
         update=_changed)
     strength: FloatProperty(
         name="Strength",
-        description=("How far this subunit is painted its own colour: 0 is "
-                     "the filament's colour, 1 entirely its own. Key it to fade"),
+        description=("How far this subunit is painted its own color: 0 is "
+                     "the filament's color, 1 entirely its own. Key it to fade"),
         min=0.0, max=1.0, default=1.0, subtype="FACTOR", update=_changed)
 
 
@@ -123,17 +123,17 @@ def _set_row_hidden(self, value):
         set_hidden(molecule, [self.name], bool(value))
 
 
-def _get_row_colour(self):
+def _get_row_color(self):
     molecule = _row_molecule(self)
     if molecule is None:
         return (0.8, 0.8, 0.8)
     return shown(molecule, self.name)[0]
 
 
-def _set_row_colour(self, value):
+def _set_row_color(self, value):
     molecule = _row_molecule(self)
     if molecule is not None:
-        recolour(molecule, [self.name], tuple(value)[:3])
+        recolor(molecule, [self.name], tuple(value)[:3])
 
 
 class PBSubunitRow(PropertyGroup):
@@ -142,7 +142,7 @@ class PBSubunitRow(PropertyGroup):
     ``hide`` and ``color`` are views onto ``pb_filament.hidden`` and
     ``pb_filament.colors``, which outlive the roster: changing one writes
     there, so it stays with the subunit when the list is rebuilt. Neither is
-    keyed here - a row's place in the list is not its subunit's - so a colour
+    keyed here - a row's place in the list is not its subunit's - so a color
     is keyed on its ``pb_filament.colors`` entry by Create Keyframe.
     """
 
@@ -157,11 +157,11 @@ class PBSubunitRow(PropertyGroup):
         name="Hide", description="Hide this subunit in the viewport and renders",
         get=_get_row_hidden, set=_set_row_hidden, options=set())
     color: FloatVectorProperty(
-        name="Colour",
-        description=("This subunit's colour. Changing it paints this subunit "
+        name="Color",
+        description=("This subunit's color. Changing it paints this subunit "
                      "alone; key it with the filament's row in Create Keyframe"),
         size=3, subtype="COLOR", min=0.0, max=1.0,
-        get=_get_row_colour, set=_set_row_colour, options=set())
+        get=_get_row_color, set=_set_row_color, options=set())
 
 
 CLASSES = (PBSubunitColor, PBSubunitHidden, PBSubunitRow)
@@ -233,7 +233,7 @@ def chain_labels(molecule) -> Dict[str, str]:
 # What is drawn
 # ---------------------------------------------------------------------------
 
-#: Highlights laid over the colours, per molecule object and layer:
+#: Highlights laid over the colors, per molecule object and layer:
 #: ``{object session uid: {layer: {key: rgba}}}``. Never saved; never keyed.
 #: Keyed by the object's session uid, not its name: a filament deleted while
 #: lit must not light the next one built under the same name.
@@ -242,7 +242,7 @@ _OVERLAY: Dict[int, Dict[str, Dict[str, Tuple[float, float, float, float]]]] = {
 
 def set_overlay(molecule, tints: Dict[str, Tuple[float, float, float, float]],
                 layer: str = PICK_LAYER) -> None:
-    """Lay ``{key: rgba}`` over the filament's colours until cleared, and draw it."""
+    """Lay ``{key: rgba}`` over the filament's colors until cleared, and draw it."""
     obj = owner(molecule)
     if obj is None:
         return
@@ -293,7 +293,7 @@ def _molecules_drawn_by(uids):
 
 @persistent
 def overlays_off_for_save(*_args) -> None:
-    """A highlight is never saved: write the colours without it first.
+    """A highlight is never saved: write the colors without it first.
 
     The tints live in the point clouds, so a file saved with the mouse over
     a row would otherwise keep that subunit yellow.
@@ -328,8 +328,8 @@ HANDLERS = (("save_pre", overlays_off_for_save),
             ("load_pre", overlays_off_for_load))
 
 
-def _colour_curves(obj) -> dict:
-    """``{(data path, index): fcurve}`` for the colours keyed on ``obj``."""
+def _color_curves(obj) -> dict:
+    """``{(data path, index): fcurve}`` for the colors keyed on ``obj``."""
     animation = obj.animation_data if obj is not None else None
     if animation is None or animation.action is None:
         return {}
@@ -348,13 +348,13 @@ _KEYED = re.compile(r"^pb_filament\.colors\[(\d+)\]\.(\w+)$")
 
 
 def _keyed_entry(path: str):
-    """``(index, property)`` of a colour key's data path, or None."""
+    """``(index, property)`` of a color key's data path, or None."""
     match = _KEYED.match(path)
     return (int(match.group(1)), match.group(2)) if match else None
 
 
-def colour_values(molecule, frame=None) -> Dict[str, Tuple[float, float, float, float]]:
-    """``{key: (r, g, b, strength)}`` for every coloured monomer.
+def color_values(molecule, frame=None) -> Dict[str, Tuple[float, float, float, float]]:
+    """``{key: (r, g, b, strength)}`` for every colored monomer.
 
     At ``frame``, read off the keys where they are keyed: an animation render
     evaluates into a depsgraph of its own and leaves the properties wherever
@@ -363,7 +363,7 @@ def colour_values(molecule, frame=None) -> Dict[str, Tuple[float, float, float, 
     params = _params(molecule)
     if params is None or not len(params.colors):
         return {}
-    curves = _colour_curves(owner(molecule)) if frame is not None else {}
+    curves = _color_curves(owner(molecule)) if frame is not None else {}
 
     def value(path, index, fallback):
         curve = curves.get((path, index))
@@ -383,7 +383,7 @@ def tints_for(molecule, obj, sites, frame=None, values=None):
     if chain is None:
         return None
     if values is None:
-        values = colour_values(molecule, frame)
+        values = color_values(molecule, frame)
     on_top = overlay(molecule)
     if not values and not on_top:
         return None
@@ -440,14 +440,14 @@ def set_hidden(molecule, keys: Iterable[str], hidden: bool) -> int:
 
 
 def refresh(molecule, frame=None) -> bool:
-    """Write the filament's colours, and which subunits are hidden, into the
+    """Write the filament's colors, and which subunits are hidden, into the
     copies it draws. Returns True if any copy is painted."""
     from . import assembly
 
     clouds = assembly.point_clouds_of(molecule)
     if not clouds:
         return False
-    values = colour_values(molecule, frame)
+    values = color_values(molecule, frame)
     hidden = hidden_keys(molecule)
     if values or hidden or overlay(molecule):
         ensure_paintable(molecule)
@@ -469,19 +469,19 @@ def refresh(molecule, frame=None) -> bool:
 
 
 def ensure_paintable(molecule) -> None:
-    """Give a build made before subunits could be coloured or hidden the means."""
+    """Give a build made before subunits could be colored or hidden the means."""
     from . import assembly
     assembly.ensure_tint_stage(molecule)
     assembly.ensure_hide_stage(molecule)
 
 
 # ---------------------------------------------------------------------------
-# Changing colours
+# Changing colors
 # ---------------------------------------------------------------------------
 
 def _set_entries(molecule, keys: Iterable[str], color=None, strength=None,
                  add: bool = True) -> int:
-    """Write the colour and/or strength of these monomers, then draw them once.
+    """Write the color and/or strength of these monomers, then draw them once.
 
     A monomer with no entry yet gets one (painted at full strength) when
     ``add``; otherwise it is left as it is. Returns how many were written.
@@ -502,7 +502,7 @@ def _set_entries(molecule, keys: Iterable[str], color=None, strength=None,
                 item = params.colors.add()
                 item.name = name
                 item.site, item.chain = site, chain
-                item.color = own_colour(molecule, chain)
+                item.color = own_color(molecule, chain)
                 item.strength = 1.0
             if color is not None:
                 item.color = tuple(color)[:3]
@@ -516,17 +516,17 @@ def _set_entries(molecule, keys: Iterable[str], color=None, strength=None,
 
 
 def paint(molecule, keys: Iterable[str], color, strength: float = 1.0) -> int:
-    """Colour these monomers. Returns how many."""
+    """Color these monomers. Returns how many."""
     return _set_entries(molecule, keys, color=color, strength=strength)
 
 
-def recolour(molecule, keys: Iterable[str], color) -> int:
-    """Give these monomers this colour, each keeping its strength."""
+def recolor(molecule, keys: Iterable[str], color) -> int:
+    """Give these monomers this color, each keeping its strength."""
     return _set_entries(molecule, keys, color=color)
 
 
-def own_colour(molecule, chain: str) -> Tuple[float, float, float]:
-    """The colour a chain is drawn in when none of its monomers is painted."""
+def own_color(molecule, chain: str) -> Tuple[float, float, float]:
+    """The color a chain is drawn in when none of its monomers is painted."""
     for domain in molecule.domains.values():
         if str(domain.chain_id) == chain and not getattr(domain, "is_copy", False):
             return tuple(domain.color)[:3]
@@ -534,16 +534,16 @@ def own_colour(molecule, chain: str) -> Tuple[float, float, float]:
 
 
 def shown(molecule, name: str) -> Tuple[Tuple[float, float, float], float]:
-    """``(colour, strength)`` a monomer's row shows: its paint, else its chain's colour."""
+    """``(color, strength)`` a monomer's row shows: its paint, else its chain's color."""
     params = _params(molecule)
     item = params.colors.get(name) if params is not None else None
     if item is not None:
         return tuple(item.color), float(item.strength)
-    return own_colour(molecule, parse_key(name)[1]), 1.0
+    return own_color(molecule, parse_key(name)[1]), 1.0
 
 
 def clear(molecule, keys: Iterable[str]) -> int:
-    """Give these monomers back the filament's colour, keys and all."""
+    """Give these monomers back the filament's color, keys and all."""
     params = _params(molecule)
     obj = owner(molecule)
     if params is None:
@@ -558,10 +558,10 @@ def clear(molecule, keys: Iterable[str]) -> int:
 
 
 def forget(molecule) -> None:
-    """Drop every subunit colour, its keys, and every hidden subunit.
+    """Drop every subunit color, its keys, and every hidden subunit.
 
     For a filament whose copies were realized: each realized protein now
-    carries its own colour and visibility, and the subunit list they were
+    carries its own color and visibility, and the subunit list they were
     read from must not reach an assembly built later, whose copies would
     otherwise come up painted or missing with no Subunits list to undo it.
     """
@@ -600,10 +600,10 @@ def _renumber_keys(obj, gone) -> None:
 # ---------------------------------------------------------------------------
 
 def keyframe(molecule, frame: int) -> int:
-    """Key every coloured monomer's colour and strength. Returns how many keyed.
+    """Key every colored monomer's color and strength. Returns how many keyed.
 
     Strength has had no control since 2026-11-03, but it is still keyed with
-    the colour, so a fade made before then keeps its shape.
+    the color, so a fade made before then keeps its shape.
     """
     params, obj = _params(molecule), owner(molecule)
     if params is None or obj is None:
@@ -630,11 +630,11 @@ def delete_keyframes(obj, frame: int) -> None:
 
 
 def is_animated(molecule) -> bool:
-    return bool(_colour_curves(owner(molecule)))
+    return bool(_color_curves(owner(molecule)))
 
 
 def follow(molecule, frame) -> bool:
-    """Bring keyed colours to ``frame``. Does nothing when none are keyed."""
+    """Bring keyed colors to ``frame``. Does nothing when none are keyed."""
     if not is_animated(molecule):
         return False
     return refresh(molecule, frame)

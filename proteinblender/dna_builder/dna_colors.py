@@ -20,8 +20,8 @@ _RNA_U = 43   # U
 
 
 def apply_base_colors(obj, colors: dict) -> None:
-    """Overwrite the ``Color`` attribute on *obj* with per-base colours and
-    push the backbone colour into the Style Cartoon/Ribbon node's
+    """Overwrite the ``Color`` attribute on *obj* with per-base colors and
+    push the backbone color into the Style Cartoon/Ribbon node's
     ``Backbone Color`` socket.
 
     Parameters
@@ -39,7 +39,7 @@ def apply_base_colors(obj, colors: dict) -> None:
     # the original per-atom residue type) if present — uniform-rungs
     # mode overrides the mesh's res_name attribute to all DT so MN's
     # Cartoon style draws every base with the same pyrimidine block,
-    # but we still need the *real* base identity to colour correctly.
+    # but we still need the *real* base identity to color correctly.
     rn_attr = mesh.attributes.get("pb_real_res_name") or mesh.attributes.get("res_name")
     if rn_attr is None:
         return
@@ -47,8 +47,8 @@ def apply_base_colors(obj, colors: dict) -> None:
     rn_attr.data.foreach_get("value", res_names)
 
     # is_backbone is written by the MN pipeline (bool per atom). Used to
-    # exclude sugar/phosphate atoms from the per-base recolouring so the
-    # backbone keeps its own colour in styles that read the Color attribute
+    # exclude sugar/phosphate atoms from the per-base recoloring so the
+    # backbone keeps its own color in styles that read the Color attribute
     # directly (ball-and-stick, sticks, spheres, surface).
     bb_attr = mesh.attributes.get("is_backbone")
     is_backbone = np.zeros(n, dtype=bool)
@@ -60,7 +60,7 @@ def apply_base_colors(obj, colors: dict) -> None:
 
     base_mask = ~is_backbone
 
-    # Backbone colour everywhere, then overwrite only base-ring atoms
+    # Backbone color everywhere, then overwrite only base-ring atoms
     bb = np.array(colors.get("backbone", [0.75, 0.75, 0.75, 1.0]), dtype=np.float32)
     color_data = np.tile(bb, (n, 1))
 
@@ -94,7 +94,7 @@ def apply_base_colors(obj, colors: dict) -> None:
 
     # The cartoon/ribbon style's backbone tube does NOT read the per-atom
     # Color attribute — it has its own Backbone Color socket. Push the user
-    # colour into any matching socket on the object's modifier node tree.
+    # color into any matching socket on the object's modifier node tree.
     _apply_backbone_color_to_style(obj, bb)
 
 
@@ -128,7 +128,7 @@ def colors_from_props(props) -> dict:
 
 
 def colors_from_object(obj) -> dict:
-    """Read stored per-base colours from an object's custom properties."""
+    """Read stored per-base colors from an object's custom properties."""
     def _get(key, default):
         val = obj.get(key)
         if val is not None:
@@ -146,7 +146,7 @@ def colors_from_object(obj) -> dict:
 
 
 def store_colors_on_object(obj, colors: dict) -> None:
-    """Persist per-base colours as custom properties on *obj*."""
+    """Persist per-base colors as custom properties on *obj*."""
     obj["pb_color_a"] = list(colors["A"])
     obj["pb_color_t"] = list(colors["T"])
     obj["pb_color_g"] = list(colors["G"])

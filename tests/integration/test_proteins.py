@@ -184,12 +184,12 @@ def test_change_style_updates_list_item(scene, sm, single_chain, style):
 
 
 # --------------------------------------------------------------------------
-# Colour
+# Color
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
 def test_domain_color_property_sticks(scene, sm, multi_chain):
-    """Setting a domain object's `domain_color` (the live colour path used by
+    """Setting a domain object's `domain_color` (the live color path used by
     the UI) takes effect and reads back."""
     mol = sm.molecules[multi_chain]
     did = sorted(mol.domains.keys())[0]

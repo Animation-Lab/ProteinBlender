@@ -1,11 +1,11 @@
-"""Colour, observed on screen. The reason this lane exists.
+"""Color, observed on screen. The reason this lane exists.
 
 Every pixel assertion in the rest of the suite reduces a render to an alpha mask
 (``px[:, 3] > 0.01``) and throws the RGB channels away. That is a deliberate,
 sensible choice for the questions those tests ask - "is anything drawn", "did
-the geometry move" - and it means the entire colour dimension of this add-on is
-currently unasserted. A domain drawn in the wrong colour, every domain drawn
-identically, a colour picker wired to a property nothing reads, a material that
+the geometry move" - and it means the entire color dimension of this add-on is
+currently unasserted. A domain drawn in the wrong color, every domain drawn
+identically, a color picker wired to a property nothing reads, a material that
 records a value and never binds: all of them render a perfectly healthy alpha
 mask, and all of them pass the existing suite.
 
@@ -24,7 +24,7 @@ Two pieces of setup are load-bearing and neither is optional:
 Assertions here are relationships, never the literal numbers a current build
 produces. Setting the picker to red must make red the dominant channel and must
 move the image substantially away from the blue version; that is a property of
-"the colour reached the renderer" and is true on any GPU, driver and Blender
+"the color reached the renderer" and is true on any GPU, driver and Blender
 build. Recording ``mean_rgb == [0.918, 0.186, 0.177]`` would instead be a
 fingerprint of one machine on one day.
 
@@ -42,7 +42,7 @@ RED = (1.0, 0.0, 0.0, 1.0)
 BLUE = (0.0, 0.0, 1.0, 1.0)
 GREEN = (0.0, 1.0, 0.0, 1.0)
 
-# Channel index each colour must dominate. Independent of the add-on: it is what
+# Channel index each color must dominate. Independent of the add-on: it is what
 # "red" and "blue" mean in an RGB buffer.
 CHANNEL = {"red": 0, "green": 1, "blue": 2}
 
@@ -52,7 +52,7 @@ CHANNEL = {"red": 0, "green": 1, "blue": 2}
 # ---------------------------------------------------------------------------
 
 # Select exactly one outliner row through the public checkbox operator, clearing
-# any prior selection first so the colour applies where the test intends.
+# any prior selection first so the color applies where the test intends.
 _SELECT_ONLY = """
 scene = bpy.context.scene
 H.scene_manager_module().build_outliner_hierarchy(bpy.context)
@@ -65,13 +65,13 @@ assert row is not None and row.is_selected, "row %r did not select" % item_id
 return item_id
 """
 
-# Drive the Visual Set-up colour picker. Assigning the whole FloatVector fires
+# Drive the Visual Set-up color picker. Assigning the whole FloatVector fires
 # its ``update=`` callback once, which is the same path a user's click takes.
 # The override supplies the window/screen the callback walks to tag redraws.
-_SET_PICKER_COLOUR = """
+_SET_PICKER_COLOR = """
 scene = bpy.context.scene
 with R.view3d_override():
-    scene.visual_setup_color = colour
+    scene.visual_setup_color = color
 bpy.context.view_layer.update()
 return [float(c) for c in scene.visual_setup_color]
 """
@@ -84,11 +84,11 @@ bpy.context.view_layer.update()
 return scene.visual_setup_style
 """
 
-# Per-pixel colour populations, for "are there two different colours on screen".
+# Per-pixel color populations, for "are there two different colors on screen".
 #
 # ``distinct_colors`` alone cannot answer that: shading gradients across a single
-# red surface already produce dozens of quantised colours. What distinguishes one
-# colour from two is whether pixels exist that are *dominated by different
+# red surface already produce dozens of quantised colors. What distinguishes one
+# color from two is whether pixels exist that are *dominated by different
 # channels*. ``lead`` (top channel minus middle channel) filters out neutral
 # greys and antialiased edges, which would otherwise be assigned a dominant
 # channel essentially at random.
@@ -96,7 +96,7 @@ return scene.visual_setup_style
 # This reaches into ``R._render_viewport`` because remote.py is shared lane
 # infrastructure and must not accumulate a helper per test module; the
 # lane's rule is that Blender-side logic for one module lives inline.
-_COLOUR_POPULATIONS = """
+_COLOR_POPULATIONS = """
 import numpy as np
 
 rgba = R._render_viewport(resolution, True, True)
@@ -134,7 +134,7 @@ return {
 
 
 def _material_shading(blender):
-    """Colour is only measurable in MATERIAL shading; SOLID renders flat grey."""
+    """Color is only measurable in MATERIAL shading; SOLID renders flat grey."""
     return blender.call(
         "return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
 
@@ -148,20 +148,20 @@ def _compare(blender, left: str, right: str) -> dict:
 
 
 def _populations(blender, resolution: int = 480) -> dict:
-    return blender.call(_COLOUR_POPULATIONS, resolution=resolution)
+    return blender.call(_COLOR_POPULATIONS, resolution=resolution)
 
 
-def _assert_dominant(metrics, colour_name, context=""):
-    """The requested colour must be the one leading the rendered mean."""
-    expected = CHANNEL[colour_name]
+def _assert_dominant(metrics, color_name, context=""):
+    """The requested color must be the one leading the rendered mean."""
+    expected = CHANNEL[color_name]
     actual = metrics["dominant_channel"]
     assert actual == expected, (
-        f"{context}asked for {colour_name} (channel {expected}) but the render "
+        f"{context}asked for {color_name} (channel {expected}) but the render "
         f"is dominated by channel {actual}; mean_rgb={metrics['mean_rgb']}")
     mean = metrics["mean_rgb"]
     others = [value for index, value in enumerate(mean) if index != expected]
     assert mean[expected] > max(others), (
-        f"{context}{colour_name} channel ({mean[expected]}) does not lead the "
+        f"{context}{color_name} channel ({mean[expected]}) does not lead the "
         f"others in mean_rgb={mean}")
 
 
@@ -171,24 +171,24 @@ def _assert_dominant(metrics, colour_name, context=""):
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_visual_setup_colour_picker_repaints_the_molecule(blender,
+def test_visual_setup_color_picker_repaints_the_molecule(blender,
                                                           single_chain):
     """Setting the picker red then blue must move what is rendered.
 
-    This is the add-on's primary colouring path - the swatch in the Visual
+    This is the add-on's primary coloring path - the swatch in the Visual
     Set-up panel, applied live to the current outliner selection through a
     property ``update=`` callback - and it is the control that every other
-    colour assertion in this module is measured against.
+    color assertion in this module is measured against.
 
     Three independent claims, each of which a different bug breaks:
 
       * red renders red-dominant, and blue renders blue-dominant. A picker wired
-        to the wrong socket typically produces *some* colour, just not the one
+        to the wrong socket typically produces *some* color, just not the one
         asked for, and would satisfy "the render changed" while failing this.
       * the two images differ substantially. A picker that records the value and
         never reaches the renderer produces two identical frames.
       * both frames actually contain geometry. Comparing two empty renders is
-        the classic way a colour test passes while showing nothing.
+        the classic way a color test passes while showing nothing.
 
     The thresholds are shape, not magnitude: which channel leads is a strict
     ordering, and "substantially different" is set far below a red-to-blue swing
@@ -204,14 +204,14 @@ return next(i.item_id for i in scene.outliner_items if i.item_type == 'PROTEIN')
     blender.call(_SELECT_ONLY, item_id=protein)
     blender.call("return R.frame_all()")
 
-    blender.call(_SET_PICKER_COLOUR, colour=list(RED))
+    blender.call(_SET_PICKER_COLOR, color=list(RED))
     red = _capture(blender, "red")
-    blender.call(_SET_PICKER_COLOUR, colour=list(BLUE))
+    blender.call(_SET_PICKER_COLOR, color=list(BLUE))
     blue = _capture(blender, "blue")
 
     assert red["covered"] > 0 and blue["covered"] > 0, (
         f"nothing rendered (red={red['covered']}, blue={blue['covered']}); a "
-        f"colour comparison over an empty frame proves nothing")
+        f"color comparison over an empty frame proves nothing")
 
     _assert_dominant(red, "red")
     _assert_dominant(blue, "blue")
@@ -219,27 +219,27 @@ return next(i.item_id for i in scene.outliner_items if i.item_type == 'PROTEIN')
     diff = _compare(blender, "red", "blue")
     assert diff["rgb_delta"] > 0.05, (
         f"a red molecule and a blue molecule rendered near-identically "
-        f"(rgb_delta={diff['rgb_delta']}). The colour picker is not reaching "
+        f"(rgb_delta={diff['rgb_delta']}). The color picker is not reaching "
         f"the renderer.")
     assert diff["xor"] == 0, (
-        f"recolouring moved {diff['xor']} pixels of geometry; changing a "
-        f"colour must not change the shape of what is drawn")
+        f"recoloring moved {diff['xor']} pixels of geometry; changing a "
+        f"color must not change the shape of what is drawn")
 
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_visual_setup_colour_reaches_a_single_selected_chain(blender,
+def test_visual_setup_color_reaches_a_single_selected_chain(blender,
                                                             multi_chain):
     """The picker applies to the *selection*, not to everything loaded.
 
     With one chain of a tetramer selected, red must appear on screen and the
     other three chains must not become red. Asserting only "the render changed"
     would pass an implementation that repainted all four - a bug a user notices
-    immediately and no state assertion catches, since each chain's stored colour
+    immediately and no state assertion catches, since each chain's stored color
     would look plausible in isolation.
 
     The invariant used is population-based rather than positional: after
-    colouring one chain of four red on a default-coloured protein, red-dominant
+    coloring one chain of four red on a default-colored protein, red-dominant
     pixels must exist *and* non-red-dominant pixels must still exist. Both
     "nothing turned red" and "everything turned red" fail it.
     """
@@ -253,35 +253,35 @@ return next(i.item_id for i in scene.outliner_items if i.item_type == 'CHAIN')
     blender.call(_SELECT_ONLY, item_id=chain)
     blender.call("return R.frame_all()")
 
-    blender.call(_SET_PICKER_COLOUR, colour=list(RED))
+    blender.call(_SET_PICKER_COLOR, color=list(RED))
     populations = _populations(blender)
 
     assert populations["covered"] > 0, "the tetramer rendered nothing"
     counts = populations["channel_counts"]
     assert counts[0] > 0, (
-        f"colouring one chain red produced no red-dominant pixels "
-        f"(channel counts {counts}); the selection did not receive the colour")
+        f"coloring one chain red produced no red-dominant pixels "
+        f"(channel counts {counts}); the selection did not receive the color")
     assert sum(counts) - counts[0] > 0, (
-        f"colouring one chain of four red left the entire frame red-dominant "
+        f"coloring one chain of four red left the entire frame red-dominant "
         f"(channel counts {counts}); the picker ignored the selection and "
         f"repainted the whole protein")
 
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_chains_can_hold_different_colours_at_the_same_time(blender,
+def test_chains_can_hold_different_colors_at_the_same_time(blender,
                                                             multi_chain):
-    """Two chains, two colours, one frame.
+    """Two chains, two colors, one frame.
 
     The failure this catches is the one the lane README calls out as invisible
     to the existing suite: every object drawn identically. Each chain's stored
-    colour would read back correctly while a single shared material or a single
-    shared node group flattened them all to one colour on screen.
+    color would read back correctly while a single shared material or a single
+    shared node group flattened them all to one color on screen.
 
     Ground truth is that red and blue are different: the frame must contain
     pixels dominated by channel 0 *and* pixels dominated by channel 2. That is
     unsatisfiable by any implementation that paints both chains the same,
-    whatever colour it picks.
+    whatever color it picks.
     """
     _material_shading(blender)
 
@@ -290,33 +290,33 @@ scene = bpy.context.scene
 H.scene_manager_module().build_outliner_hierarchy(bpy.context)
 return [i.item_id for i in scene.outliner_items if i.item_type == 'CHAIN']
 """)
-    assert len(chains) >= 2, f"need two chains to colour differently: {chains}"
+    assert len(chains) >= 2, f"need two chains to color differently: {chains}"
 
     blender.call("return R.frame_all()")
 
     blender.call(_SELECT_ONLY, item_id=chains[0])
-    blender.call(_SET_PICKER_COLOUR, colour=list(RED))
-    one_colour = _populations(blender)
+    blender.call(_SET_PICKER_COLOR, color=list(RED))
+    one_color = _populations(blender)
 
     blender.call(_SELECT_ONLY, item_id=chains[1])
-    blender.call(_SET_PICKER_COLOUR, colour=list(BLUE))
-    two_colours = _populations(blender)
-    both = _capture(blender, "two-chain-colours")
+    blender.call(_SET_PICKER_COLOR, color=list(BLUE))
+    two_colors = _populations(blender)
+    both = _capture(blender, "two-chain-colors")
 
-    assert two_colours["covered"] > 0, "the tetramer rendered nothing"
+    assert two_colors["covered"] > 0, "the tetramer rendered nothing"
 
-    counts = two_colours["channel_counts"]
+    counts = two_colors["channel_counts"]
     assert counts[0] > 0 and counts[2] > 0, (
         f"a red chain and a blue chain do not both appear on screen "
-        f"(channel counts {counts}). Either the second colour overwrote the "
+        f"(channel counts {counts}). Either the second color overwrote the "
         f"first, or both chains share one material.")
 
     assert both["distinct_colors"] > 1, (
-        "the whole frame quantises to a single colour")
-    assert two_colours["strong"] >= one_colour["strong"], (
-        f"adding a second strongly-coloured chain reduced the strongly-coloured "
-        f"pixel count ({one_colour['strong']} -> {two_colours['strong']}); the "
-        f"second colour displaced the first instead of joining it")
+        "the whole frame quantises to a single color")
+    assert two_colors["strong"] >= one_color["strong"], (
+        f"adding a second strongly-colored chain reduced the strongly-colored "
+        f"pixel count ({one_color['strong']} -> {two_colors['strong']}); the "
+        f"second color displaced the first instead of joining it")
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +424,8 @@ def test_update_domain_color_repaints_the_domain(blender, single_chain):
     clicking it sees nothing happen, and a test that quietly tolerates that is
     worse than no test.
 
-    **The evidence.** The operator records the colour on the domain model and
-    builds a per-domain colour node tree, and both of those succeed - which is
+    **The evidence.** The operator records the color on the domain model and
+    builds a per-domain color node tree, and both of those succeed - which is
     exactly why the existing suite stays green, since it asserts on
     ``mol.domains[id].color``. But neither ``obj.domain_color`` nor the rendered
     pixels change. Driving it red and then blue over a molecule that fills the
@@ -434,7 +434,7 @@ def test_update_domain_color_repaints_the_domain(blender, single_chain):
 
     **The control is in this test.** The same molecule, the same frame, the same
     capture path is first driven through ``scene.visual_setup_color``, which
-    moves the mean colour and flips the dominant channel (README records
+    moves the mean color and flips the dominant channel (README records
     ``[0.918, 0.186, 0.177]`` to ``[0.186, 0.186, 0.920]``, ``rgb_delta`` about
     0.49). So a 0.0 delta here cannot be blamed on shading mode, view transform,
     GPU or framing - those are all held identical and demonstrably working
@@ -447,7 +447,7 @@ def test_update_domain_color_repaints_the_domain(blender, single_chain):
     Implementation note for whoever fixes this: the operator reads
     ``scene.temp_domain_color``, but its own ``color`` operator property
     overrides that whenever it is passed (domain_operators.py, around line 579,
-    guarded by ``self.color[0] >= 0`` - which is true for every legal colour, so
+    guarded by ``self.color[0] >= 0`` - which is true for every legal color, so
     the argument always wins). This test passes ``color`` explicitly, so the
     value reaching ``molecule.update_domain_color`` is unambiguous.
     """
@@ -469,9 +469,9 @@ return {"domain_id": domain_id, "object_name": domain.object.name,
     blender.call("return R.frame_all()")
 
     # --- control: the path that is known to work -------------------------
-    blender.call(_SET_PICKER_COLOUR, colour=list(RED))
+    blender.call(_SET_PICKER_COLOR, color=list(RED))
     control_red = _capture(blender, "control-red")
-    blender.call(_SET_PICKER_COLOUR, colour=list(BLUE))
+    blender.call(_SET_PICKER_COLOR, color=list(BLUE))
     control_blue = _capture(blender, "control-blue")
     control = _compare(blender, "control-red", "control-blue")
 
@@ -479,16 +479,16 @@ return {"domain_id": domain_id, "object_name": domain.object.name,
     assert control["rgb_delta"] > 0.05, (
         f"the CONTROL failed (rgb_delta={control['rgb_delta']}). "
         f"scene.visual_setup_color did not move the render either, so this "
-        f"session cannot measure colour at all and the domain-colour result "
+        f"session cannot measure color at all and the domain-color result "
         f"below is not interpretable. Check MATERIAL shading and the view "
         f"transform before reading anything else into this run.")
 
     # --- the operator under test -----------------------------------------
-    def recolour(colour):
+    def recolor(color):
         return blender.call("""
 with R.view3d_override():
     outcome = bpy.ops.molecule.update_domain_color(
-        domain_id=domain_id, color=colour)
+        domain_id=domain_id, color=color)
 bpy.context.view_layer.update()
 obj = bpy.data.objects[object_name]
 return {
@@ -496,14 +496,14 @@ return {
     "domain_color": [float(c) for c in (obj.get("domain_color") or [])],
 }
 """, domain_id=setup["domain_id"], object_name=setup["object_name"],
-             colour=list(colour))
+             color=list(color))
 
-    applied_red = recolour(RED)
+    applied_red = recolor(RED)
     assert applied_red["result"] == ["FINISHED"], (
         "update_domain_color did not even report success")
     domain_red = _capture(blender, "domain-red")
 
-    applied_blue = recolour(BLUE)
+    applied_blue = recolor(BLUE)
     assert applied_blue["result"] == ["FINISHED"]
     domain_blue = _capture(blender, "domain-blue")
 
@@ -513,7 +513,7 @@ return {
         "update_domain_color blanked the render")
 
     assert diff["rgb_delta"] > 0.05, (
-        f"molecule.update_domain_color did not repaint the domain: recolouring "
+        f"molecule.update_domain_color did not repaint the domain: recoloring "
         f"it red and then blue changed the render by rgb_delta="
         f"{diff['rgb_delta']}, while the control (scene.visual_setup_color, "
         f"same molecule, same frame, same capture) moved it by "
@@ -529,25 +529,25 @@ return {
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_split_domains_can_hold_different_colours(blender, actin):
+def test_split_domains_can_hold_different_colors(blender, actin):
     """EXPECTED TO FAIL, for the same root cause as the test above.
 
-    Splitting a chain and colouring the two halves differently must put two
-    colours in one frame. It goes through the *picker*, not the operator, but
+    Splitting a chain and coloring the two halves differently must put two
+    colors in one frame. It goes through the *picker*, not the operator, but
     ``update_color`` routes a DOMAIN row to ``apply_domain_color_direct``, which
     resolves the parent molecule and calls ``molecule.update_domain_color`` -
     the same method that does not reach a pixel. Chains take the other branch
     (``apply_color_to_object``), which is why
-    ``test_chains_can_hold_different_colours_at_the_same_time`` passes and this
+    ``test_chains_can_hold_different_colors_at_the_same_time`` passes and this
     does not.
 
     It is kept as a separate test rather than folded into the one above because
-    it is the user-facing symptom - "I split a chain and cannot colour the
+    it is the user-facing symptom - "I split a chain and cannot color the
     halves differently" - and because it is the assertion that should turn green
-    when the domain-colour path is fixed, confirming the fix reached the picker
+    when the domain-color path is fixed, confirming the fix reached the picker
     route as well as the operator route.
 
-    The invariant is unfakeable by any single-colour implementation: pixels
+    The invariant is unfakeable by any single-color implementation: pixels
     dominated by channel 0 and pixels dominated by channel 2 must both exist.
     """
     _material_shading(blender)
@@ -573,12 +573,12 @@ return [item_id for _, item_id in sorted(rows)]
     blender.call("return R.frame_all()")
 
     blender.call(_SELECT_ONLY, item_id=domains[0])
-    blender.call(_SET_PICKER_COLOUR, colour=list(RED))
+    blender.call(_SET_PICKER_COLOR, color=list(RED))
     blender.call(_SELECT_ONLY, item_id=domains[1])
-    blender.call(_SET_PICKER_COLOUR, colour=list(BLUE))
+    blender.call(_SET_PICKER_COLOR, color=list(BLUE))
 
     populations = _populations(blender)
-    frame = _capture(blender, "split-domain-colours")
+    frame = _capture(blender, "split-domain-colors")
 
     assert populations["covered"] > 0, "the split molecule rendered nothing"
     counts = populations["channel_counts"]
@@ -587,23 +587,23 @@ return [item_id for _, item_id in sorted(rows)]
         f"(channel counts {counts}, left-half dominant "
         f"{populations['left_dominant']}, right-half dominant "
         f"{populations['right_dominant']}, distinct_colors="
-        f"{frame['distinct_colors']}). Domain colouring routes through "
-        f"molecule.update_domain_color, which records the colour and never "
+        f"{frame['distinct_colors']}). Domain coloring routes through "
+        f"molecule.update_domain_color, which records the color and never "
         f"repaints - see test_update_domain_color_repaints_the_domain.")
 
 
 # ---------------------------------------------------------------------------
-# Builders: does their colour configuration reach the render?
+# Builders: does their color configuration reach the render?
 # ---------------------------------------------------------------------------
 #
 # Structural coverage of the DNA and membrane builders lives in their own
-# modules. These two tests deliberately assert on nothing but the colour
+# modules. These two tests deliberately assert on nothing but the color
 # dimension, which is the axis only this lane can see.
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_dna_base_colours_reach_the_render(blender):
-    """The DNA builder's per-base colours must survive into the viewport.
+def test_dna_base_colors_reach_the_render(blender):
+    """The DNA builder's per-base colors must survive into the viewport.
 
     ``dna_builder_props`` carries ``color_a``/``color_t``/``color_g``/``color_c``
     and ``color_backbone``, none of which has an ``update=`` callback: they are
@@ -612,27 +612,27 @@ def test_dna_base_colours_reach_the_render(blender):
     whatever was set whether or not the builder ever consulted it.
 
     So the strand is built twice, from the same sequence, differing only in the
-    colour properties. Two builds of identical geometry that render the same
-    colour prove the builder ignored them.
+    color properties. Two builds of identical geometry that render the same
+    color prove the builder ignored them.
 
-    The comparison is on the *mean colour* rather than a pixel mask, because
+    The comparison is on the *mean color* rather than a pixel mask, because
     each build is framed independently and pixel-exact overlay is not
     guaranteed; which channel leads the mean is unaffected by framing.
     """
     _material_shading(blender)
 
-    def build(colour):
+    def build(color):
         return blender.call("""
 H.reset_scene()
 props = bpy.context.scene.dna_builder_props
 for key in ("color_a", "color_t", "color_g", "color_c", "color_u",
             "color_backbone"):
-    setattr(props, key, colour)
+    setattr(props, key, color)
 with R.view3d_override():
     obj = H.build_dna(seq="ATCGATCGATCG", name_prefix="DNA")
 bpy.context.view_layer.update()
 return obj.name
-""", colour=list(colour))
+""", color=list(color))
 
     build(RED)
     blender.call("return R.frame_all()")
@@ -652,30 +652,30 @@ return obj.name
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_membrane_head_tail_and_surface_colours_reach_the_render(blender):
-    """The membrane builder's three colours must survive into the viewport.
+def test_membrane_head_tail_and_surface_colors_reach_the_render(blender):
+    """The membrane builder's three colors must survive into the viewport.
 
     ``color_head`` and ``color_tail`` are read at build time; ``color_surface``
     additionally has an ``update=`` callback that writes through to the active
     membrane. All three are set together and the bilayer is built twice, so a
     builder that consults none of them renders the same membrane both times.
 
-    Only the colour axis is asserted here - shape, size, lipid packing and hole
+    Only the color axis is asserted here - shape, size, lipid packing and hole
     handling belong to the membrane module's own coverage.
     """
     _material_shading(blender)
 
-    def build(colour):
+    def build(color):
         return blender.call("""
 H.reset_scene()
 props = bpy.context.scene.membrane_builder_props
 for key in ("color_head", "color_tail", "color_surface"):
-    setattr(props, key, colour)
+    setattr(props, key, color)
 with R.view3d_override():
     created = H.build_membrane(shape="FLAT", width=20, height=20)
 bpy.context.view_layer.update()
 return created
-""", colour=list(colour))
+""", color=list(color))
 
     created = build(RED)
     assert created, "the membrane builder created no objects"

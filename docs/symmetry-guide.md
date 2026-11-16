@@ -58,7 +58,7 @@ The copies are **instances**: the atoms are stored once and drawn many times.
 A 60-copy capsid costs one copy's worth of memory.
 
 The tradeoff is that instances are anonymous.
-There is nothing to click on, and no way to colour one subunit differently.
+There is nothing to click on, and no way to color one subunit differently.
 
 **Realizing** converts them into proteins of their own in the PB Outliner, buying per-copy identity at the cost of a full protein per copy.
 ChimeraX makes exactly this tradeoff, and switches its default at twelve copies.
@@ -106,7 +106,7 @@ Every copy is an instance, so a micron of microtubule - about 1,600 tubulin dime
 To build a filament from your own structure instead, use **Create New Assembly** and choose Helical.
 The structure has to be in the filament's own frame for the radius to be right: the helix turns about the axis through the origin of the file's coordinates.
 
-### Colouring single subunits
+### Coloring single subunits
 
 Tick a filament's row in the PB Outliner and the **Cytoskeleton Subunits** panel appears below the outliner.
 It lists every monomer of that filament: "Actin 12", or "Beta Tubulin 3 - Strand 5" for a microtubule, where alpha and beta tubulin are listed apart.
@@ -118,17 +118,17 @@ Untick the filament and the panel goes away.
 - Tick rows to select subunits, or use **Select All**, **None** and **Invert** above the list.
 - On a microtubule, **All Alpha Tubulin** and **All Beta Tubulin** select every subunit of that tubulin and deselect the rest.
 - **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
-- Each row ends with the subunit's colour swatch and an eye, as PB Outliner rows do.
+- Each row ends with the subunit's color swatch and an eye, as PB Outliner rows do.
   Change a row's swatch to paint that subunit alone.
   Click its eye to hide that subunit in the viewport and in renders, and again to show it; it comes back where it was.
-- The colour field below the list shows the first selected subunit.
+- The color field below the list shows the first selected subunit.
   Change it and every selected subunit takes it at once; there is no button to press.
-- **Clear** gives the selected subunits back the filament's own colour.
+- **Clear** gives the selected subunits back the filament's own color.
 
-**Realize Copies** keeps every subunit's colour, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
+**Realize Copies** keeps every subunit's color, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
 
-A painted subunit keeps its colour while the filament changes: grow it, shrink it or bend it and the colour stays on the same subunit, and one shrunk away gets its colour back when it returns.
-Colours are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)), or one at a time by pointing at a painted subunit's swatch and pressing **I**.
+A painted subunit keeps its color while the filament changes: grow it, shrink it or bend it and the color stays on the same subunit, and one shrunk away gets its color back when it returns.
+Colors are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)), or one at a time by pointing at a painted subunit's swatch and pressing **I**.
 
 ## Create New Assembly
 
@@ -285,21 +285,21 @@ A cut assembly keeps the settings it was built with, so its dialog reopens on th
 ## Keyframing a filament
 
 A helical assembly is listed in Animate Scene's **Create Keyframe** under its protein's name.
-Ticking it keys where it stands, its bend nodes, its numbers (Subunits, Rise, Twist, Strands, Stagger, Strand Twist and how much is shrunk off each end) and the colours of its painted subunits, so a filament can grow, shrink, twist, bend and change colour over time.
+Ticking it keys where it stands, its bend nodes, its numbers (Subunits, Rise, Twist, Strands, Stagger, Strand Twist and how much is shrunk off each end) and the colors of its painted subunits, so a filament can grow, shrink, twist, bend and change color over time.
 The copies are re-placed on every frame, in the viewport and in a rendered animation alike.
 See [Keyframe Animation](keyframes.md#growing-twisting-and-bending-a-filament).
 
 ## Realize Copies
 
 In **Edit Assembly**.
-Replaces the assembly with real copies that the PB Outliner lists, so each one can be selected, coloured, hidden, moved and deleted with the same row buttons as anything else.
+Replaces the assembly with real copies that the PB Outliner lists, so each one can be selected, colored, hidden, moved and deleted with the same row buttons as anything else.
 
 - An assembly of the **whole protein** becomes that many proteins: the original, plus one new protein row per extra copy, each with its own chains beneath it.
 - An assembly made from **one chain or domain** becomes copies of that chain or domain inside the same protein, exactly as the chain row's Copy button makes them.
   A deposited assembly that places its chains differently from one another is realized the same way, chain by chain.
 
-Every copy stands where its instance was drawn, in the style and colour of what it copies.
-A filament's subunit colours go with them: a painted subunit becomes a protein in that colour, as it looks on the current frame.
+Every copy stands where its instance was drawn, in the style and color of what it copies.
+A filament's subunit colors go with them: a painted subunit becomes a protein in that color, as it looks on the current frame.
 The copies of an actin filament are named actin_1, actin_2 and so on, and a microtubule's tubulin_dimer_1, tubulin_dimer_2 and so on.
 If the original itself was not among the copies on screen - cut away, say - it becomes the first of the copies that were, rather than being left behind hidden.
 The assembly row, any bend and any symmetry axes go, since there is no longer an assembly for them to belong to.

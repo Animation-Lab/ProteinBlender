@@ -65,7 +65,7 @@ def test_multi_chain_protein_builds_a_protein_chain_hierarchy(blender,
     The parent links matter as much as the counts. A chain row whose
     ``parent_id`` does not point at its protein still draws, but every operator
     that resolves a molecule through the hierarchy - visibility cascades, pivot
-    chain-index lookup, colour application - silently targets nothing.
+    chain-index lookup, color application - silently targets nothing.
     """
     state = blender.call("""
 scene = bpy.context.scene
@@ -157,8 +157,8 @@ def test_outliner_select_toggles_and_cascades_to_chains(blender, multi_chain):
     """Clicking a PROTEIN checkbox selects its chains; clicking again clears.
 
     The cascade is the behaviour the Visual Set-up panel depends on - it applies
-    colour and style to whatever the selection resolves to - so a protein whose
-    click does not reach its chains makes the colour picker look broken.
+    color and style to whatever the selection resolves to - so a protein whose
+    click does not reach its chains makes the color picker look broken.
 
     Re-resolution matters here: ``outliner_select`` syncs Blender's own object
     selection and can rebuild rows, so the second read fetches rows fresh by id
@@ -197,7 +197,7 @@ return {
     still_on = [cid for cid in rows["chains"] if after_second.get(cid)]
     assert not still_on, (
         f"deselecting the protein left chains {still_on} selected; the next "
-        f"colour or style change will hit them by surprise")
+        f"color or style change will hit them by surprise")
 
 
 @pytest.mark.live

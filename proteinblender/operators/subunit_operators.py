@@ -1,8 +1,8 @@
-"""Choosing a filament's subunits and colouring them.
+"""Choosing a filament's subunits and coloring them.
 
 The Subunits list (``panels.subunit_panel``) shows every monomer of a filament.
 These are its buttons: select rows, pick subunits by clicking them in the 3D
-Viewport, and colour or clear the selected ones. What a colour *is* and how it
+Viewport, and color or clear the selected ones. What a color *is* and how it
 is drawn lives in ``core.subunit_colors``.
 """
 
@@ -87,29 +87,29 @@ def _redraw(context):
 
 
 class MOLECULE_PB_OT_color_subunits(Operator):
-    """Colour the selected subunits, or give them back the filament's colour"""
+    """Color the selected subunits, or give them back the filament's color"""
 
     bl_idname = "molecule.color_subunits"
-    bl_label = "Colour Selected"
+    bl_label = "Color Selected"
     bl_options = {"REGISTER", "UNDO"}
 
     molecule_id: StringProperty(options={"SKIP_SAVE"})
     clear: BoolProperty(
         name="Clear", default=False, options={"SKIP_SAVE"},
-        description="Give the subunits back the filament's own colour")
+        description="Give the subunits back the filament's own color")
 
     @classmethod
     def description(cls, context, properties):
         if getattr(properties, "clear", False):
             return ("Give the selected subunits back the filament's own "
-                    "colour, and drop their colour keyframes")
-        return ("Paint the selected subunits the colour beside this button. "
+                    "color, and drop their color keyframes")
+        return ("Paint the selected subunits the color beside this button. "
                 "Key it with Create Keyframe to animate it")
 
     def execute(self, context):
         molecule = subunit_filament(context, self.molecule_id)
         if molecule is None:
-            self.report({"ERROR"}, "No cytoskeleton filament to colour")
+            self.report({"ERROR"}, "No cytoskeleton filament to color")
             return {"CANCELLED"}
         subunit_colors.sync_roster(molecule)
         keys = subunit_colors.selected_keys(molecule)
@@ -118,10 +118,10 @@ class MOLECULE_PB_OT_color_subunits(Operator):
             return {"CANCELLED"}
         if self.clear:
             done = subunit_colors.clear(molecule, keys)
-            self.report({"INFO"}, f"Cleared the colour of {done} subunits")
+            self.report({"INFO"}, f"Cleared the color of {done} subunits")
         else:
             done = subunit_colors.paint(molecule, keys, context.scene.pb_subunit_color)
-            self.report({"INFO"}, f"Coloured {done} subunits")
+            self.report({"INFO"}, f"Colored {done} subunits")
         _redraw(context)
         return {"FINISHED"}
 

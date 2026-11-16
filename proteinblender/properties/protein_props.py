@@ -7,10 +7,10 @@ from bpy.types import PropertyGroup
 # This prevents confusion between row highlighting and actual selection state
 
 def _on_row_color_edited(item, context):
-    """A colour picked on an outliner row's swatch: apply it to the item.
+    """A color picked on an outliner row's swatch: apply it to the item.
 
     The logic lives in core.outliner_colors (with a guard that keeps swatch
-    *seeding* from re-applying colours); imported lazily because properties
+    *seeding* from re-applying colors); imported lazily because properties
     register before the rest of the package is importable.
     """
     from ..core.outliner_colors import apply_row_color
@@ -84,9 +84,9 @@ class ProteinOutlinerItem(PropertyGroup):
         default=True
     )
 
-    # The colour swatch on protein / chain / domain rows. Seeded from what the
+    # The color swatch on protein / chain / domain rows. Seeded from what the
     # item currently looks like (core.outliner_colors.sync_outliner_colors);
-    # editing it recolours the item live. Mixed rows expose the same binding
+    # editing it recolors the item live. Mixed rows expose the same binding
     # through up to four native color bands.
     row_color: FloatVectorProperty(
         name="Color",
@@ -285,7 +285,7 @@ def _set_symmetry_length(self, nanometres):
         self.pb_symmetry_count = min(count, builder.MAX_COUNT)
 
 
-# The Subunits panel's colour field shows the first selected subunit and,
+# The Subunits panel's color field shows the first selected subunit and,
 # edited, applies to every selected one at once. With no filament ticked or
 # nothing selected it keeps the last value given.
 _SUBUNIT_COLOR_KEY = "pb_subunit_color_value"
@@ -317,7 +317,7 @@ def _set_subunit_color(scene, value):
     molecule, keys = _subunit_selection()
     if keys:
         from ..core import subunit_colors
-        subunit_colors.recolour(molecule, keys, value)
+        subunit_colors.recolor(molecule, keys, value)
 
 
 def _subunit_filament_items(self, context):
@@ -443,13 +443,13 @@ def register():
         update=_symmetry_setting_changed,
     )
     bpy.types.Scene.pb_subunit_color = FloatVectorProperty(
-        name="Subunit Colour",
-        description=("The colour of the selected subunits. Change it to paint "
+        name="Subunit Color",
+        description=("The color of the selected subunits. Change it to paint "
                      "every selected subunit at once"),
         size=3, subtype="COLOR", min=0.0, max=1.0, default=(0.9, 0.2, 0.2),
         get=_get_subunit_color, set=_set_subunit_color,
         # Not keyable: played back, it would paint whatever is selected on
-        # each frame. A subunit's colour is keyed on the subunit itself.
+        # each frame. A subunit's color is keyed on the subunit itself.
         options=set(),
     )
     bpy.types.Scene.pb_subunit_filament = EnumProperty(

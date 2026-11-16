@@ -387,7 +387,7 @@ class MOLECULE_PB_OT_realize_copies(Operator):
     bl_label = "Realize Copies"
     bl_description = (
         "Replace the assembly with real copies listed in the PB Outliner, so "
-        "each one can be selected, coloured, hidden and moved on its own. An "
+        "each one can be selected, colored, hidden and moved on its own. An "
         "assembly of the whole protein becomes that many proteins; one made "
         "from a chain or domain becomes copies of it inside the protein")
     bl_options = {"REGISTER", "UNDO"}

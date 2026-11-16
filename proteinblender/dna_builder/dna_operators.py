@@ -27,10 +27,10 @@ def _snapshot_real_res_name(obj):
     """Copy the mesh's ``res_name`` attribute into ``pb_real_res_name``.
 
     ``apply_base_colors`` (and ``update_dna_colors``) read this attribute
-    in preference to ``res_name`` when assigning per-base colours, which
+    in preference to ``res_name`` when assigning per-base colors, which
     lets uniform-rungs mode overwrite ``res_name`` for cartoon's shape
     selection without losing the original base identity needed for
-    colour assignment.
+    color assignment.
     """
     import numpy as np
 
@@ -104,7 +104,7 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
     ``scene.dna_builder_props`` (passed in as ``props``) so the
     randomise / swap-to-complement sub-operators can keep mutating the
     same scene props they always have. If ``dna_obj`` is passed (edit
-    mode), the "Apply to Selected" button at the bottom of the colour
+    mode), the "Apply to Selected" button at the bottom of the color
     section is shown.
     """
     # Type toggle
@@ -175,7 +175,7 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
             # always A-form, and LADDER ignores form.
             wind_box.prop(props, "helix_form", expand=True)
 
-    # ---- Collapsible colour section ----------------------------------
+    # ---- Collapsible color section ----------------------------------
     color_box = layout.box()
     color_header = color_box.row()
     color_header.prop(
@@ -195,7 +195,7 @@ def _draw_dna_form(layout, props, *, dna_obj=None):
         col.prop(props, "color_c")
         col.separator(factor=0.3)
         col.prop(props, "color_backbone")
-        # Edit-mode: live "Apply to Selected" button to update colours
+        # Edit-mode: live "Apply to Selected" button to update colors
         # without rebuilding the strand.
         if dna_obj is not None:
             col.separator(factor=0.3)
@@ -352,7 +352,7 @@ def _draw_shape_section(layout, props, dna_obj):
 
 def _build_dna_from_props(operator, context, identifier):
     """Shared build path: read scene props, build the AtomArray, create the
-    Blender object via MN pipeline, apply colours and finalize.
+    Blender object via MN pipeline, apply colors and finalize.
 
     Returns (wrapper, info_dict) on success or (None, None) on failure
     (the operator's `report` will already have been called).
@@ -427,8 +427,8 @@ def _build_dna_from_props(operator, context, identifier):
         # attribute. Force every atom to look like DT so the cartoon
         # draws the same pyrimidine block for every rung. The original
         # residue type lives on in pb_real_res_name, which
-        # apply_base_colors prefers for the colour lookup so per-base
-        # colours stay correct.
+        # apply_base_colors prefers for the color lookup so per-base
+        # colors stay correct.
         _override_res_name_uniform(obj, _DT_CODE)
     colors = colors_from_props(props)
     store_colors_on_object(obj, colors)
@@ -731,7 +731,7 @@ class PROTEINBLENDER_OT_swap_to_complement(Operator):
 
 
 class PROTEINBLENDER_OT_update_dna_colors(Operator):
-    """Update per-base colours on the selected DNA/RNA molecule"""
+    """Update per-base colors on the selected DNA/RNA molecule"""
 
     bl_idname = "proteinblender.update_dna_colors"
     bl_label = "Update DNA Colors"
@@ -749,7 +749,7 @@ class PROTEINBLENDER_OT_update_dna_colors(Operator):
         colors = colors_from_props(props)
         store_colors_on_object(obj, colors)
         apply_base_colors(obj, colors)
-        self.report({"INFO"}, "Colours updated.")
+        self.report({"INFO"}, "Colors updated.")
         return {"FINISHED"}
 
 
@@ -777,7 +777,7 @@ class PROTEINBLENDER_OT_update_dna_style(Operator):
         change_style_node(obj, self.new_style)
         obj["pb_style"] = self.new_style
 
-        # Re-apply base colours (style change may reset Color attribute)
+        # Re-apply base colors (style change may reset Color attribute)
         colors = colors_from_object(obj)
         apply_base_colors(obj, colors)
 

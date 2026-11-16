@@ -1291,7 +1291,7 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
         else:
             self._rename_domain(target_id)
 
-        # Colour / style / force field, before the rebuild: the block resolves
+        # Color / style / force field, before the rebuild: the block resolves
         # its objects through the row, and the rebuild replaces every row.
         # Untouched fields apply nothing - see commit_visual_edit.
         self.commit_visual_edit(context)
@@ -1325,7 +1325,7 @@ class PROTEINBLENDER_OT_rename_domain(VisualEditMixin, Operator):
         return {'FINISHED'}
 
     def cancel(self, context):
-        # Colour and style edits were applied live and stay applied; this only
+        # Color and style edits were applied live and stay applied; this only
         # lets go of the dialog so a stale instance cannot take a later
         # property callback.
         self.end_visual_edit()

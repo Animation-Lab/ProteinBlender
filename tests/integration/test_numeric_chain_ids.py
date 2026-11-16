@@ -6,7 +6,7 @@ namespace - index 1 is chain "2", but "1" is also chain "1" - and the chain
 matcher accepted a domain under either reading at once. Every chain therefore
 picked up its neighbour's domain: importing 1CD3 showed four chains already
 split into two domains each, and every chain-level action (delete, copy,
-recolour, select) reached into the neighbouring chain as well.
+recolor, select) reached into the neighbouring chain as well.
 
 Ground truth is the fixture read as plain text - the chain id in column 22 of
 each coordinate record - so nothing here is derived from the add-on's own

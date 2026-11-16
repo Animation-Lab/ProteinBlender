@@ -1,4 +1,4 @@
-"""Colouring a filament's subunits one by one, and animating the colours.
+"""Coloring a filament's subunits one by one, and animating the colors.
 
 What is drawn is read out of the evaluated scene: every copy Blender draws,
 as an instance or as the geometry a painted copy is realized into, with the
@@ -33,10 +33,10 @@ def _object(molecule, chain):
 
 
 def _drawn(molecule, chain="A"):
-    """``(instances, painted)`` for one chain, each a list of ``(centre, colour)``.
+    """``(instances, painted)`` for one chain, each a list of ``(centre, color)``.
 
     ``centre`` is the mean of the copy's vertices in world space (Angstrom) and
-    ``colour`` the mean of its ``Color`` attribute.
+    ``color`` the mean of its ``Color`` attribute.
     """
     obj = _object(molecule, chain)
     bpy.context.view_layer.update()
@@ -56,15 +56,15 @@ def _drawn(molecule, chain="A"):
         count = len(data.vertices)
         position = np.zeros(count * 3)
         data.attributes["position"].data.foreach_get("vector", position)
-        colour = np.zeros(count * 4)
-        data.attributes["Color"].data.foreach_get("color", colour)
-        position, colour = position.reshape(-1, 3), colour.reshape(-1, 4)
+        color = np.zeros(count * 4)
+        data.attributes["Color"].data.foreach_get("color", color)
+        position, color = position.reshape(-1, 3), color.reshape(-1, 4)
         matrix = np.array(entry.matrix_world)
         world = position @ matrix[:3, :3].T + matrix[:3, 3]
         if is_copy:
-            instances.append((world.mean(axis=0) / WORLD_SCALE, colour[:, :3].mean(axis=0)))
+            instances.append((world.mean(axis=0) / WORLD_SCALE, color[:, :3].mean(axis=0)))
         else:
-            painted.append((world, colour))
+            painted.append((world, color))
     return instances, _split_painted(painted, instances, molecule, chain)
 
 
@@ -85,12 +85,12 @@ def _split_painted(painted, instances, molecule, chain):
     vertices after another; cut it back into copies."""
     if not painted:
         return []
-    world, colour = painted[0]
+    world, color = painted[0]
     per_copy = _vertices_per_copy(molecule, chain)
     if not per_copy or len(world) % per_copy:
         per_copy = len(world)
     return [(world[i:i + per_copy].mean(axis=0) / WORLD_SCALE,
-             colour[i:i + per_copy, :3].mean(axis=0))
+             color[i:i + per_copy, :3].mean(axis=0))
             for i in range(0, len(world), per_copy)]
 
 
@@ -115,18 +115,18 @@ def _from_the_pointed_end(molecule):
     pointing = float(np.mean([(lp - c) @ axis for lp, c in zip(loops, whole)]))
     towards_barbed = -np.sign(pointing) * axis
     instances, _painted = _drawn(molecule)
-    centres = np.array([centre for centre, _colour in instances])
+    centres = np.array([centre for centre, _color in instances])
     return centres[np.argsort(centres @ towards_barbed)]
 
 
-def _paint(molecule, names, colour=RED, strength=1.0):
-    """Select rows of the Subunits list and press Colour Selected."""
+def _paint(molecule, names, color=RED, strength=1.0):
+    """Select rows of the Subunits list and press Color Selected."""
     colors = _colors()
     colors.sync_roster(molecule)
     rows = molecule.object.pb_filament.subunits
     for row in rows:
         row.select = row.name in names
-    bpy.context.scene.pb_subunit_color = colour
+    bpy.context.scene.pb_subunit_color = color
     assert bpy.ops.molecule.color_subunits(
         'EXEC_DEFAULT', molecule_id=molecule.identifier) == {'FINISHED'}
     if strength != 1.0:
@@ -140,10 +140,10 @@ def _near(centre, centres, tolerance=0.5):
 
 
 # --------------------------------------------------------------------------
-# One subunit, its own colour
+# One subunit, its own color
 # --------------------------------------------------------------------------
 
-def test_colouring_the_fourth_actin_from_the_pointed_end_paints_only_it():
+def test_coloring_the_fourth_actin_from_the_pointed_end_paints_only_it():
     molecule = _build("ACTIN", 27.5)
     ordered = _from_the_pointed_end(molecule)
     assert len(ordered) == 10
@@ -153,11 +153,11 @@ def test_colouring_the_fourth_actin_from_the_pointed_end_paints_only_it():
 
     instances, painted = _drawn(molecule)
     assert len(instances) == 9 and len(painted) == 1
-    centre, colour = painted[0]
+    centre, color = painted[0]
     assert _near(centre, [ordered[3]]), "the painted copy is not the fourth from the pointed end"
-    assert np.allclose(colour, RED, atol=1e-3), colour
-    for other_centre, other_colour in instances:
-        assert not np.allclose(other_colour, RED, atol=0.05)
+    assert np.allclose(color, RED, atol=1e-3), color
+    for other_centre, other_color in instances:
+        assert not np.allclose(other_color, RED, atol=0.05)
         assert not _near(other_centre, [ordered[3]])
 
 
@@ -173,7 +173,7 @@ def test_a_microtubule_paints_one_monomer_of_a_dimer():
     assert np.allclose(beta_painted[0][1], RED, atol=1e-3)
 
 
-def test_strength_mixes_the_subunits_own_colour_with_its_paint():
+def test_strength_mixes_the_subunits_own_color_with_its_paint():
     molecule = _build("ACTIN", 27.5)
     instances, _painted = _drawn(molecule)
     own = instances[0][1]
@@ -182,7 +182,7 @@ def test_strength_mixes_the_subunits_own_colour_with_its_paint():
     assert np.allclose(painted[0][1], (own + np.array(RED)) / 2, atol=0.02)
 
 
-def test_clearing_a_colour_gives_the_subunit_back_to_the_filament():
+def test_clearing_a_color_gives_the_subunit_back_to_the_filament():
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["2:A", "4:A"])
     assert len(_drawn(molecule)[1]) == 2
@@ -196,7 +196,7 @@ def test_clearing_a_colour_gives_the_subunit_back_to_the_filament():
 
 
 # --------------------------------------------------------------------------
-# The colour stays with its subunit
+# The color stays with its subunit
 # --------------------------------------------------------------------------
 
 def _edit(molecule, **changes):
@@ -211,7 +211,7 @@ def _edit(molecule, **changes):
         source='GENERATED') == {'FINISHED'}
 
 
-def test_a_colour_stays_with_its_subunit_when_the_minus_end_shrinks():
+def test_a_color_stays_with_its_subunit_when_the_minus_end_shrinks():
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["5:A"])
     before = _drawn(molecule)[1][0][0]
@@ -223,7 +223,7 @@ def test_a_colour_stays_with_its_subunit_when_the_minus_end_shrinks():
     assert _near(painted[0][0], [before], tolerance=0.05)
 
 
-def test_a_colour_stays_with_its_subunit_when_the_filament_grows():
+def test_a_color_stays_with_its_subunit_when_the_filament_grows():
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["5:A"])
     before = _drawn(molecule)[1][0][0]
@@ -235,7 +235,7 @@ def test_a_colour_stays_with_its_subunit_when_the_filament_grows():
     assert _near(painted[0][0], [before], tolerance=0.05)
 
 
-def test_a_subunit_shrunk_away_takes_its_colour_out_of_sight_and_back():
+def test_a_subunit_shrunk_away_takes_its_color_out_of_sight_and_back():
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["0:A"])
     _edit(molecule, shrink_minus=1)
@@ -244,7 +244,7 @@ def test_a_subunit_shrunk_away_takes_its_colour_out_of_sight_and_back():
     assert len(_drawn(molecule)[1]) == 1
 
 
-def test_a_build_from_before_colours_can_still_be_painted():
+def test_a_build_from_before_colors_can_still_be_painted():
     """A filament saved before this existed has no tint stage; painting adds it."""
     from proteinblender.core import assembly
     molecule = _build("ACTIN", 27.5)
@@ -282,12 +282,12 @@ def _key(molecule, frame):
         }])
 
 
-def test_a_keyed_colour_plays_back():
+def test_a_keyed_color_plays_back():
     """Red at frame 1, blue at frame 21: half way between at frame 11."""
     scene = bpy.context.scene
     molecule = _build("ACTIN", 27.5)
     scene.frame_set(1)
-    _paint(molecule, ["3:A"], colour=RED)
+    _paint(molecule, ["3:A"], color=RED)
     assert _key(molecule, 1) == {'FINISHED'}
     scene.frame_set(21)
     molecule.object.pb_filament.colors["3:A"].color = (0.0, 0.0, 1.0)
@@ -318,7 +318,7 @@ def test_a_keyed_strength_fades_a_subunit_back():
     assert len(_drawn(molecule)[1]) == 1
 
 
-def test_clearing_a_keyed_colour_takes_its_keys_too():
+def test_clearing_a_keyed_color_takes_its_keys_too():
     scene = bpy.context.scene
     molecule = _build("ACTIN", 27.5)
     scene.frame_set(1)
@@ -336,13 +336,13 @@ def test_clearing_a_keyed_colour_takes_its_keys_too():
     assert _drawn(molecule)[1] == []
 
 
-def test_clearing_one_colour_leaves_the_others_keys_on_their_subunits():
+def test_clearing_one_color_leaves_the_others_keys_on_their_subunits():
     """Keys follow an entry by position; removing an earlier one must not shift them."""
     scene = bpy.context.scene
     molecule = _build("ACTIN", 27.5)
     scene.frame_set(1)
-    _paint(molecule, ["2:A"], colour=RED)
-    _paint(molecule, ["6:A"], colour=(0.0, 0.0, 1.0))
+    _paint(molecule, ["2:A"], color=RED)
+    _paint(molecule, ["6:A"], color=(0.0, 0.0, 1.0))
     assert _key(molecule, 1) == {'FINISHED'}
     scene.frame_set(11)
     molecule.object.pb_filament.colors["6:A"].color = (0.0, 1.0, 0.0)
@@ -354,26 +354,26 @@ def test_clearing_one_colour_leaves_the_others_keys_on_their_subunits():
         'EXEC_DEFAULT', molecule_id=molecule.identifier, clear=True) == {'FINISHED'}
 
     scene.frame_set(1)
-    (centre, colour), = _drawn(molecule)[1]
-    assert np.allclose(colour, (0, 0, 1), atol=1e-3), colour
+    (centre, color), = _drawn(molecule)[1]
+    assert np.allclose(color, (0, 0, 1), atol=1e-3), color
     scene.frame_set(11)
-    (centre_later, colour), = _drawn(molecule)[1]
-    assert np.allclose(colour, (0, 1, 0), atol=1e-3), colour
+    (centre_later, color), = _drawn(molecule)[1]
+    assert np.allclose(color, (0, 1, 0), atol=1e-3), color
     assert np.allclose(centre, centre_later)
 
 
 def _render(tmp_path, molecule, frames):
     """Render frames from the side under a sun; return each frame's pixels."""
     scene = bpy.context.scene
-    if "colour_sun" not in bpy.data.objects:
-        sun = bpy.data.objects.new("colour_sun", bpy.data.lights.new("colour_sun", 'SUN'))
+    if "color_sun" not in bpy.data.objects:
+        sun = bpy.data.objects.new("color_sun", bpy.data.lights.new("color_sun", 'SUN'))
         sun.data.energy = 4.0
         sun.rotation_euler = (math.pi / 2, 0.0, 0.0)
         scene.collection.objects.link(sun)
-    cam_data = bpy.data.cameras.get("colour_cam") or bpy.data.cameras.new("colour_cam")
+    cam_data = bpy.data.cameras.get("color_cam") or bpy.data.cameras.new("color_cam")
     cam_data.type = 'ORTHO'
     cam_data.ortho_scale = 4.0
-    cam = bpy.data.objects.get("colour_cam") or bpy.data.objects.new("colour_cam", cam_data)
+    cam = bpy.data.objects.get("color_cam") or bpy.data.objects.new("color_cam", cam_data)
     if cam.name not in scene.collection.objects:
         scene.collection.objects.link(cam)
     middle = molecule.object.matrix_world.translation
@@ -402,22 +402,22 @@ def _render(tmp_path, molecule, frames):
 
 def _green(px):
     covered = px[:, 3] > 0.5
-    # Lit, a green subunit is a pale green; actin's own colour is a pink.
+    # Lit, a green subunit is a pale green; actin's own color is a pink.
     return int((covered & (px[:, 1] > 1.3 * px[:, 0])
                 & (px[:, 1] > 1.3 * px[:, 2])).sum())
 
 
 @pytest.mark.slow
-def test_an_animation_render_draws_the_keyed_colour_at_each_frame(tmp_path):
+def test_an_animation_render_draws_the_keyed_color_at_each_frame(tmp_path):
     """Green at frame 1, faded out by frame 3, rendered with the viewport left at 3.
 
-    An animation render evaluates into a depsgraph of its own, so the colours
+    An animation render evaluates into a depsgraph of its own, so the colors
     have to come from the keys, not from the properties the viewport set.
     """
     scene = bpy.context.scene
     molecule = _build("ACTIN", 27.5)
     scene.frame_set(1)
-    _paint(molecule, ["4:A", "5:A"], colour=(0.0, 1.0, 0.0))
+    _paint(molecule, ["4:A", "5:A"], color=(0.0, 1.0, 0.0))
     assert _key(molecule, 1) == {'FINISHED'}
     scene.frame_set(3)
     for name in ("4:A", "5:A"):
@@ -430,24 +430,24 @@ def test_an_animation_render_draws_the_keyed_colour_at_each_frame(tmp_path):
 
 
 @pytest.mark.slow
-def test_a_painted_subunit_renders_in_its_colour(tmp_path):
+def test_a_painted_subunit_renders_in_its_color(tmp_path):
     """Cycles, from the side, under a sun: green pixels where there were none.
 
-    Green because actin's own colour is a red-brown, which red paint would
+    Green because actin's own color is a red-brown, which red paint would
     hide in.
     """
     molecule = _build("ACTIN", 27.5)
-    sun = bpy.data.objects.new("colour_sun", bpy.data.lights.new("colour_sun", 'SUN'))
+    sun = bpy.data.objects.new("color_sun", bpy.data.lights.new("color_sun", 'SUN'))
     sun.data.energy = 4.0
     sun.rotation_euler = (math.pi / 2, 0.0, 0.0)
     bpy.context.scene.collection.objects.link(sun)
 
     def green_pixels():
         scene = bpy.context.scene
-        cam_data = bpy.data.cameras.get("colour_cam") or bpy.data.cameras.new("colour_cam")
+        cam_data = bpy.data.cameras.get("color_cam") or bpy.data.cameras.new("color_cam")
         cam_data.type = 'ORTHO'
         cam_data.ortho_scale = 4.0
-        cam = bpy.data.objects.get("colour_cam") or bpy.data.objects.new("colour_cam", cam_data)
+        cam = bpy.data.objects.get("color_cam") or bpy.data.objects.new("color_cam", cam_data)
         if cam.name not in scene.collection.objects:
             scene.collection.objects.link(cam)
         middle = np.mean([c for c, _ in _drawn(molecule)[0]], axis=0) * WORLD_SCALE
@@ -474,7 +474,7 @@ def test_a_painted_subunit_renders_in_its_colour(tmp_path):
 
     covered, green = green_pixels()
     assert covered > 0 and green == 0, (covered, green)
-    _paint(molecule, ["4:A", "5:A"], colour=(0.0, 1.0, 0.0))
+    _paint(molecule, ["4:A", "5:A"], color=(0.0, 1.0, 0.0))
     covered, green = green_pixels()
     # Two of the ten subunits face the camera in green.
     assert green > covered // 20, (covered, green)
@@ -485,14 +485,14 @@ def test_a_painted_subunit_renders_in_its_colour(tmp_path):
 # --------------------------------------------------------------------------
 
 def _drawn_protein(molecule_id, chain="A"):
-    """``(centre, colour)`` one realized protein's chain is drawn with.
+    """``(centre, color)`` one realized protein's chain is drawn with.
 
     Read from what the evaluated scene draws for the chain's object, so it is
-    the colour on screen and not the one the domain model records.
+    the color on screen and not the one the domain model records.
     """
     obj = _object(H.sm().molecules[molecule_id], chain)
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    worlds, colours = [], []
+    worlds, colors = [], []
     for entry in depsgraph.object_instances:
         owner = entry.parent if entry.is_instance and entry.parent is not None else entry.object
         data = entry.object.data
@@ -502,23 +502,23 @@ def _drawn_protein(molecule_id, chain="A"):
         count = len(data.vertices)
         position = np.zeros(count * 3)
         data.attributes["position"].data.foreach_get("vector", position)
-        colour = np.zeros(count * 4)
-        data.attributes["Color"].data.foreach_get("color", colour)
+        color = np.zeros(count * 4)
+        data.attributes["Color"].data.foreach_get("color", color)
         matrix = np.array(entry.matrix_world)
         worlds.append(position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3])
-        colours.append(colour.reshape(-1, 4)[:, :3])
+        colors.append(color.reshape(-1, 4)[:, :3])
     assert worlds, f"nothing drawn for {molecule_id}"
     return (np.concatenate(worlds).mean(axis=0) / WORLD_SCALE,
-            np.concatenate(colours).mean(axis=0))
+            np.concatenate(colors).mean(axis=0))
 
 
-def test_a_realized_copy_keeps_its_subunit_colour():
+def test_a_realized_copy_keeps_its_subunit_color():
     """Paint the fourth actin from the pointed end, realize: the protein that
     stands there is drawn green, and no other is."""
     molecule = _build("ACTIN", 27.5)
     ordered = _from_the_pointed_end(molecule)
     green = (0.0, 1.0, 0.0)
-    _paint(molecule, ["3:A"], colour=green)
+    _paint(molecule, ["3:A"], color=green)
 
     made = F.realize(molecule)
     assert len(made) == 9
@@ -531,20 +531,20 @@ def test_a_realized_copy_keeps_its_subunit_colour():
     row = next(item for item in bpy.context.scene.outliner_items
                if item.item_type == 'PROTEIN' and item.item_id == at_fourth[0])
     assert np.allclose(tuple(row.row_color)[:3], green, atol=0.02), tuple(row.row_color)
-    for mid, (_centre, colour) in drawn.items():
+    for mid, (_centre, color) in drawn.items():
         if mid != at_fourth[0]:
-            assert not np.allclose(colour, green, atol=0.2), (mid, colour)
+            assert not np.allclose(color, green, atol=0.2), (mid, color)
 
 
-def test_the_original_keeps_its_own_subunit_colour_when_realized():
+def test_the_original_keeps_its_own_subunit_color_when_realized():
     """Copy 0 is the original itself: painted, it stays painted."""
     molecule = _build("ACTIN", 27.5)
     green = (0.0, 1.0, 0.0)
-    _paint(molecule, ["0:A"], colour=green)
+    _paint(molecule, ["0:A"], color=green)
     made = F.realize(molecule)
     assert len(made) == 9
-    _centre, colour = _drawn_protein(molecule.identifier)
-    assert np.allclose(colour, green, atol=0.02), colour
+    _centre, color = _drawn_protein(molecule.identifier)
+    assert np.allclose(color, green, atol=0.02), color
     for mid in made:
         assert not np.allclose(_drawn_protein(mid)[1], green, atol=0.2), mid
 
@@ -623,7 +623,7 @@ def _row(molecule, name):
 
 
 def _centres(drawn):
-    return [centre for centre, _colour in drawn]
+    return [centre for centre, _color in drawn]
 
 
 def test_hiding_the_fourth_actin_from_the_pointed_end_takes_only_it_away():
@@ -652,7 +652,7 @@ def test_a_hidden_subunit_is_not_drawn_even_when_painted():
     assert (len(instances), len(painted)) == (9, 0)
     assert not _near(ordered[3], _centres(instances))
 
-    # Shown again, it is still its own colour.
+    # Shown again, it is still its own color.
     _row(molecule, "3:A").hide = False
     instances, painted = _drawn(molecule)
     assert (len(instances), len(painted)) == (9, 1)
@@ -713,7 +713,7 @@ def test_a_ray_at_a_hidden_subunit_does_not_pick_it():
 
 
 def _drawn_anywhere(chain="A"):
-    """``(centre, colour)`` of every copy of a chain drawn anywhere in the scene,
+    """``(centre, color)`` of every copy of a chain drawn anywhere in the scene,
     as the evaluated scene draws it: one entry per object or instance that
     draws atoms of that chain (meshes, as a filament's Surface style draws)."""
     names = {d.object.name for m in H.sm().molecules.values()
@@ -730,12 +730,12 @@ def _drawn_anywhere(chain="A"):
         count = len(data.vertices)
         position = np.zeros(count * 3)
         data.attributes["position"].data.foreach_get("vector", position)
-        colour = np.zeros(count * 4)
-        data.attributes["Color"].data.foreach_get("color", colour)
+        color = np.zeros(count * 4)
+        data.attributes["Color"].data.foreach_get("color", color)
         matrix = np.array(entry.matrix_world)
         world = position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
         found.append((world.mean(axis=0) / WORLD_SCALE,
-                      colour.reshape(-1, 4)[:, :3].mean(axis=0)))
+                      color.reshape(-1, 4)[:, :3].mean(axis=0)))
     return found
 
 
@@ -756,8 +756,8 @@ def test_realizing_keeps_a_hidden_actin_hidden(painted):
     assert not _near(ordered[3], _centres(drawn), 1.0), "the hidden actin came back"
     for index in set(range(10)) - {3}:
         assert _near(ordered[index], _centres(drawn), 1.0), f"actin {index + 1} is missing"
-    for _centre, colour in drawn:
-        assert not np.allclose(colour, RED, atol=0.05), colour
+    for _centre, color in drawn:
+        assert not np.allclose(color, RED, atol=0.05), color
 
     # Still made, as a protein of its own whose PB Outliner eye shows it again.
     assert len(made) == 9
@@ -766,9 +766,9 @@ def test_realizing_keeps_a_hidden_actin_hidden(painted):
     assert len(hidden) == 1, hidden
     assert bpy.ops.proteinblender.toggle_visibility(
         'EXEC_DEFAULT', item_id=hidden[0]) == {'FINISHED'}
-    centre, colour = _drawn_protein(hidden[0])
+    centre, color = _drawn_protein(hidden[0])
     assert _near(centre, [ordered[3]], 1.0)
-    assert np.allclose(colour, RED, atol=0.02) == painted, colour
+    assert np.allclose(color, RED, atol=0.02) == painted, color
 
 
 def test_realizing_keeps_a_hidden_tubulin_hidden_and_its_partner_shown():
@@ -855,7 +855,7 @@ def test_realizing_copies_of_one_chain_keeps_its_hidden_copies_hidden():
 def test_a_realized_filament_hands_on_no_hidden_or_painted_subunits():
     """Realize a filament with one actin hidden and one painted, then build a
     new six-fold ring from each actin protein it left. Every ring is six
-    copies of one colour: the realized proteins took over the hiding and the
+    copies of one color: the realized proteins took over the hiding and the
     paint, so nothing of the old filament's subunit list may reach a new
     assembly (whose Subunits list does not even show, to undo it)."""
     molecule = _build("ACTIN", 27.5)
@@ -873,13 +873,13 @@ def test_a_realized_filament_hands_on_no_hidden_or_painted_subunits():
             'EXEC_DEFAULT', target_id=mid, source='GENERATED') == {'FINISHED'}
         centres = _chain_centres(obj)
         assert len(centres) == 6, f"{mid}: {len(centres)} of 6 copies drawn"
-        colours = [colour for owner, colour in _owner_colours(obj)]
-        assert colours and all(np.allclose(c, colours[0], atol=0.02) for c in colours), (
-            f"{mid}: the ring's copies differ in colour: {colours}")
+        colors = [color for owner, color in _owner_colors(obj)]
+        assert colors and all(np.allclose(c, colors[0], atol=0.02) for c in colors), (
+            f"{mid}: the ring's copies differ in color: {colors}")
 
 
-def _owner_colours(obj):
-    """``(centre, colour)`` of everything Blender draws through ``obj``."""
+def _owner_colors(obj):
+    """``(centre, color)`` of everything Blender draws through ``obj``."""
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
     found = []
@@ -890,9 +890,9 @@ def _owner_colours(obj):
                 or not len(data.vertices) or "Color" not in data.attributes):
             continue
         count = len(data.vertices)
-        colour = np.zeros(count * 4)
-        data.attributes["Color"].data.foreach_get("color", colour)
-        found.append((None, colour.reshape(-1, 4)[:, :3].mean(axis=0)))
+        color = np.zeros(count * 4)
+        data.attributes["Color"].data.foreach_get("color", color)
+        found.append((None, color.reshape(-1, 4)[:, :3].mean(axis=0)))
     return found
 
 
@@ -960,7 +960,7 @@ def test_the_picker_is_drawn_over_the_lists_highlight():
 
 
 def test_a_highlight_is_never_saved(tmp_path):
-    """Saved with a row pointed at, the file keeps the subunit's own colour."""
+    """Saved with a row pointed at, the file keeps the subunit's own color."""
     colors = _colors()
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["2:A"])
@@ -1064,7 +1064,7 @@ def test_the_subunits_list_shows_the_ticked_filament():
 
 
 # --------------------------------------------------------------------------
-# The colour and strength fields apply to the selected subunits as they change
+# The color and strength fields apply to the selected subunits as they change
 # --------------------------------------------------------------------------
 
 GREEN = (0.0, 1.0, 0.0)
@@ -1083,17 +1083,17 @@ def _select(molecule, names):
         row.select = row.name in names
 
 
-def test_changing_the_colour_paints_the_selected_subunits_at_once():
+def test_changing_the_color_paints_the_selected_subunits_at_once():
     molecule = _ticked_actin()
     _select(molecule, ["3:A", "6:A"])
     bpy.context.scene.pb_subunit_color = GREEN
     instances, painted = _drawn(molecule)
     assert (len(instances), len(painted)) == (8, 2)
-    for _centre, colour in painted:
-        assert np.allclose(colour, GREEN, atol=1e-3), colour
+    for _centre, color in painted:
+        assert np.allclose(color, GREEN, atol=1e-3), color
 
 
-def test_changing_the_colour_with_nothing_selected_paints_nothing():
+def test_changing_the_color_with_nothing_selected_paints_nothing():
     molecule = _ticked_actin()
     _select(molecule, [])
     bpy.context.scene.pb_subunit_color = GREEN
@@ -1102,7 +1102,7 @@ def test_changing_the_colour_with_nothing_selected_paints_nothing():
     assert np.allclose(bpy.context.scene.pb_subunit_color, GREEN)
 
 
-def test_the_colour_field_shows_the_first_selected_subunit():
+def test_the_color_field_shows_the_first_selected_subunit():
     molecule = _ticked_actin()
     own = _drawn(molecule)[0][0][1]
     _select(molecule, ["5:A"])
@@ -1116,7 +1116,7 @@ def test_the_colour_field_shows_the_first_selected_subunit():
     assert np.allclose(bpy.context.scene.pb_subunit_color, GREEN, atol=1e-3)
 
 
-def test_the_same_colour_again_paints_the_next_subunits():
+def test_the_same_color_again_paints_the_next_subunits():
     """Paint one red, select another, choose red again: both are red."""
     molecule = _ticked_actin()
     _select(molecule, ["2:A"])
@@ -1126,18 +1126,18 @@ def test_the_same_colour_again_paints_the_next_subunits():
     assert sorted(molecule.object.pb_filament.colors.keys()) == ["2:A", "7:A"]
     _instances, painted = _drawn(molecule)
     assert len(painted) == 2
-    for _centre, colour in painted:
-        assert np.allclose(colour, RED, atol=1e-3), colour
+    for _centre, color in painted:
+        assert np.allclose(color, RED, atol=1e-3), color
 
 
 # --------------------------------------------------------------------------
-# Each row's own colour, at its right-hand side
+# Each row's own color, at its right-hand side
 # Reported 2026-11-03 (Dillon's notes): "make it so the color is on the
 # right-hand side where the actin filiment individual pieces are", and "make
 # sure color of individual actin (etc.) are keyframable".
 # --------------------------------------------------------------------------
 
-def test_every_rows_swatch_shows_the_colour_its_subunit_is_drawn():
+def test_every_rows_swatch_shows_the_color_its_subunit_is_drawn():
     molecule = _ticked_actin()
     own = _drawn(molecule)[0][0][1]
     assert np.allclose(_row(molecule, "2:A").color, own, atol=0.02)
@@ -1163,9 +1163,9 @@ def test_a_rows_swatch_paints_only_its_own_subunit():
     assert list(molecule.object.pb_filament.colors.keys()) == ["3:A"]
 
 
-def test_a_rows_swatch_hands_over_to_the_colour_it_made():
+def test_a_rows_swatch_hands_over_to_the_color_it_made():
     """Unpainted, a row's swatch is a view through the disposable roster row,
-    which cannot be keyed. Painted, the list draws the subunit's colour entry
+    which cannot be keyed. Painted, the list draws the subunit's color entry
     instead - the one Create Keyframe keys, and I over the swatch keys."""
     molecule = _ticked_actin()
     row = _row(molecule, "3:A")
@@ -1182,15 +1182,15 @@ def test_a_rows_swatch_hands_over_to_the_colour_it_made():
     entry.color = RED
     bpy.context.scene.frame_set(1)
     assert np.allclose(_drawn(molecule)[1][0][1], GREEN, atol=1e-3)
-    # The row shows the same colour the entry holds, whichever is drawn.
+    # The row shows the same color the entry holds, whichever is drawn.
     assert np.allclose(row.color, entry.color, atol=1e-6)
 
 
-def test_pressing_i_over_the_panels_colour_field_keys_nothing_that_repaints():
-    """The panel's colour field paints whatever is selected when it changes.
+def test_pressing_i_over_the_panels_color_field_keys_nothing_that_repaints():
+    """The panel's color field paints whatever is selected when it changes.
     Keyed (I over it), playback would set it every frame and paint whatever
     is selected *then*: select another subunit, scrub, and it turns red too.
-    Colours are keyed per subunit (Create Keyframe, or I over a row swatch)."""
+    Colors are keyed per subunit (Create Keyframe, or I over a row swatch)."""
     molecule = _ticked_actin()
     _select(molecule, ["3:A"])
     scene = bpy.context.scene
@@ -1211,7 +1211,7 @@ def test_pressing_i_over_the_panels_colour_field_keys_nothing_that_repaints():
     assert "6:A" not in molecule.object.pb_filament.colors
 
 
-def test_a_colour_set_on_its_row_can_be_keyed():
+def test_a_color_set_on_its_row_can_be_keyed():
     scene = bpy.context.scene
     molecule = _ticked_actin()
     scene.frame_set(1)

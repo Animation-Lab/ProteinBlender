@@ -279,7 +279,7 @@ class MembraneBuilderProperties(PropertyGroup):
     # no live preview, and the object->props sync that fires whenever the
     # active object changes (in-dialog Add Hole / Edit Deformation / Select
     # Hole all change it) replaced the pick with the membrane's stale stored
-    # colour, which OK then re-applied. Tester report (Janet): "changing the
+    # color, which OK then re-applied. Tester report (Janet): "changing the
     # lipid colors can be buggy ... especially the head domains".
     color_head: FloatVectorProperty(
         name="Head Color",
@@ -301,7 +301,7 @@ class MembraneBuilderProperties(PropertyGroup):
         update=_sync_to_active_membrane,
     )
 
-    # Single colour for the SURFACE render style — head and tail share it,
+    # Single color for the SURFACE render style — head and tail share it,
     # which is the whole point of that style. Default off-white matches
     # the reference render the user picked the style from.
     color_surface: FloatVectorProperty(

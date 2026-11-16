@@ -532,7 +532,7 @@ def _row_types(scene, molecule_id):
 
 
 def test_realized_copies_are_proteins_in_the_outliner(scene, sm):
-    """Realize Copies exists so each copy can be selected, coloured and hidden.
+    """Realize Copies exists so each copy can be selected, colored and hidden.
 
     All of that is done from PB Outliner rows, so a copy the outliner does not
     list is a copy nothing can be done to. Each one has to arrive as a protein

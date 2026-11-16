@@ -133,12 +133,12 @@ def test_update_domain_name_operator(scene, sm, multi_chain):
 
 
 # --------------------------------------------------------------------------
-# Colour
+# Color
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
 def test_update_domain_color_object_property(scene, sm, multi_chain):
-    """The live colour path (setting obj.domain_color) drives the update
+    """The live color path (setting obj.domain_color) drives the update
     callback and the value sticks on the object."""
     mid = multi_chain
     mol = sm.molecules[mid]
@@ -154,7 +154,7 @@ def test_update_domain_color_object_property(scene, sm, multi_chain):
 
 @pytest.mark.integration
 def test_update_domain_color_operator_applies_color(scene, sm, multi_chain):
-    """molecule.update_domain_color applies the given colour to the domain.
+    """molecule.update_domain_color applies the given color to the domain.
 
     Regression guard: the operator used to read the unregistered
     `scene.domain_color` and crash with AttributeError; it now reads the

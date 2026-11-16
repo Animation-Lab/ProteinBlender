@@ -149,7 +149,7 @@ Rules, most of which the rest of the suite already follows:
 - **Never leave a setting behind.**
   This lane drives the developer's own Blender, not a disposable one, so a test that writes `membrane_builder_props.color_head` and walks away changes what the next membrane *they* build looks like - and gets reported as a product bug.
   `R.reset()` returns every ProteinBlender property group to its registered defaults before and after each test, discovered from the RNA so new groups are covered automatically.
-  That is a correctness requirement here, not housekeeping: a colour test once left head and tail at `#3F3FF9` and `#6C6C6C`, and the blue-and-grey membrane that produced was mistaken for a regression.
+  That is a correctness requirement here, not housekeeping: a color test once left head and tail at `#3F3FF9` and `#6C6C6C`, and the blue-and-grey membrane that produced was mistaken for a regression.
 
 ## Tests that crash Blender
 

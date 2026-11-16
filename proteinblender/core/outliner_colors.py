@@ -1,8 +1,8 @@
-"""The colour swatches on the Protein Outliner's rows.
+"""The color swatches on the Protein Outliner's rows.
 
 Every protein, chain and domain row carries a ``row_color`` swatch
-(`ProteinOutlinerItem.row_color`): click it, pick a colour, and the item is
-recoloured on the spot - no dialog to open. This module owns both directions
+(`ProteinOutlinerItem.row_color`): click it, pick a color, and the item is
+recolored on the spot - no dialog to open. This module owns both directions
 of that binding:
 
 * :func:`apply_row_color` - the property's update callback. Routes the pick
@@ -11,7 +11,7 @@ of that binding:
   whole molecule.
 * :func:`sync_outliner_colors` - reads what every row currently looks like
   back into its swatch. Called after an outliner rebuild and after anything
-  else recolours objects (the Visual Set-up dialogs, the Domain Splitter), so
+  else recolors objects (the Visual Set-up dialogs, the Domain Splitter), so
   the swatches track the viewport instead of going stale.
 
 A mixed row shows up to four bands of its actual domain colors. The complete
@@ -19,7 +19,7 @@ palette and domain count are refreshed alongside the solid swatch; a click
 opens a shared-color picker without changing any colors until the user picks.
 
 Seeding a swatch is a property write like any other, so it would fire the
-apply callback and repaint the item with its own colour - worse, a mixed row
+apply callback and repaint the item with its own color - worse, a mixed row
 would be flattened to grey. The module guard suspends the callback while
 swatches are being seeded, the same pattern the dialogs use.
 """
@@ -30,12 +30,12 @@ import bpy
 
 _state = {
     # True while sync_outliner_colors is writing swatches, so the writes do
-    # not re-enter apply_row_color and repaint items with their own colours.
+    # not re-enter apply_row_color and repaint items with their own colors.
     "suspended": False,
 }
 
-# Row types that carry a colour swatch. DNA/RNA strands and membranes colour
-# through their own builders; puppets have no colour of their own.
+# Row types that carry a color swatch. DNA/RNA strands and membranes color
+# through their own builders; puppets have no color of their own.
 COLORABLE_TYPES = ('PROTEIN', 'CHAIN', 'DOMAIN', 'MORPH_MEMBER')
 
 
@@ -49,10 +49,10 @@ class _Suspend:
 
 
 def row_has_swatch(item):
-    """Whether this outliner row gets a colour swatch.
+    """Whether this outliner row gets a color swatch.
 
     Reference rows (a chain shown again under a puppet) do not: their
-    original row is the canonical place to recolour them.
+    original row is the canonical place to recolor them.
     """
     return (item.item_type in COLORABLE_TYPES
             and "_ref_" not in item.item_id
@@ -90,7 +90,7 @@ def draw_row_swatch(layout, item):
 
 
 def apply_row_color(item, context):
-    """Recolour everything ``item`` covers with its swatch's colour."""
+    """Recolor everything ``item`` covers with its swatch's color."""
     if _state["suspended"] or not row_has_swatch(item):
         return
 
@@ -115,7 +115,7 @@ def apply_row_color(item, context):
         if obj is not None:
             apply_color_to_object(obj, color)
 
-    # Recolouring one row moves what its relatives look like too: a domain
+    # Recoloring one row moves what its relatives look like too: a domain
     # pick can turn its chain "mixed", a chain pick can un-mix its protein.
     sync_outliner_colors(context)
 
@@ -126,7 +126,7 @@ def apply_row_color(item, context):
 
 
 def sync_outliner_colors(context=None):
-    """Point every row's swatch at the colour its item currently shows."""
+    """Point every row's swatch at the color its item currently shows."""
     if context is None:
         context = bpy.context
     scene = getattr(context, "scene", None)

@@ -14,7 +14,7 @@ almost everything downstream keys off one of those two strings:
   * linker endpoints           -> domain id   (`linkers/linker_props.py`)
   * saved per-molecule poses   -> domain id   (`properties/molecule_props.py`)
   * the scene pose library     -> object name (`properties/pose_props.py`)
-  * pose/colour keyframes      -> the object itself
+  * pose/color keyframes      -> the object itself
   * the pivot                  -> the object's DomainNodes modifier
   * outliner selection/expand  -> domain id
 

@@ -1500,7 +1500,7 @@ def _deferred_reconstruct_on_load():
 
     reset_scene_manager_on_load clears the registry on load, but reconstruction
     was only ever wired to undo/redo — so without this a freshly opened file
-    shows proteins in the outliner yet has an EMPTY registry, and colour /
+    shows proteins in the outliner yet has an EMPTY registry, and color /
     split / centre / duplicate / pose all fail ("Molecule not found") until an
     undo happens to trigger a rebuild. Deferring to a timer guarantees this
     runs after every load_post handler (notably the reset) has finished,
@@ -2392,14 +2392,14 @@ def build_outliner_hierarchy(context=None):
     # Re-enable selection sync
     selection_sync._update_in_progress = old_in_progress
 
-    # Seed the rows' colour swatches from what their items currently look
-    # like. Guarded: a colour-sync failure must not take the whole outliner
+    # Seed the rows' color swatches from what their items currently look
+    # like. Guarded: a color-sync failure must not take the whole outliner
     # rebuild down with it.
     try:
         from ..core.outliner_colors import sync_outliner_colors
         sync_outliner_colors(context)
     except Exception as exc:
-        print(f"build_outliner_hierarchy: colour sync failed: {exc}")
+        print(f"build_outliner_hierarchy: color sync failed: {exc}")
 
     if context.area:
         context.area.tag_redraw()

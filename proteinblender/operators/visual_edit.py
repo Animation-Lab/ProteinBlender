@@ -1,6 +1,6 @@
 """The Visual Set-up block shared by the per-item edit dialogs.
 
-Colour, representation, membrane force field, B-factor motion and pivot
+Color, representation, membrane force field, B-factor motion and pivot
 used to live in one
 selection-driven panel: pick rows in the Protein Outliner, then reach across
 to a separate panel and hope it was talking about the rows you meant. They are now
@@ -46,8 +46,8 @@ _ACTIVE = {"dialog": None}
 _state = {
     # Guards the update callbacks while a dialog is loading its own initial
     # values off the objects it is about to edit. Without it, seeding the
-    # colour field from the first target immediately writes that colour back
-    # to every target, which quietly flattens a multi-coloured chain the
+    # color field from the first target immediately writes that color back
+    # to every target, which quietly flattens a multi-colored chain the
     # moment its dialog opens.
     "suspended": False,
     # The values the fields were seeded with, so execute() can tell an edit
@@ -57,20 +57,20 @@ _state = {
 }
 
 
-# What the colour swatch shows when the item's parts disagree. A swatch cannot
+# What the color swatch shows when the item's parts disagree. A swatch cannot
 # render "mixed" the way the style dropdown can, so it shows a neutral grey and
 # says so in a note beside it. Never applied on its own: see
 # VisualEditMixin.commit_visual_edit.
 MIXED_COLOR = (0.5, 0.5, 0.5, 1.0)
 
-# Colour channels are compared at this many decimals when deciding whether the
+# Color channels are compared at this many decimals when deciding whether the
 # parts of an item agree. Full float equality would call two domains painted
 # from the same picker "different" over a rounding bit.
 _COLOR_PLACES = 4
 
 
 def _rgba(color):
-    """A colour as a comparable 4-tuple, tolerating a 3-component read."""
+    """A color as a comparable 4-tuple, tolerating a 3-component read."""
     channels = tuple(color)
     if len(channels) == 3:
         channels += (1.0,)
@@ -84,9 +84,9 @@ def appearance_objects_for_row(context, row):
     :func:`pivot_operators.row_objects`). A protein's molecule object is
     written to, but it is no witness: it keeps its own untouched Color Common
     node, whose carbon grey (0.202) appears nowhere on screen, and after a
-    per-domain recolour its style is stale too. What draws a protein is its
+    per-domain recolor its style is stale too. What draws a protein is its
     domains. Reading the molecule object instead showed a freshly imported
-    4hhb - four chains in four distinct colours - as one dark grey.
+    4hhb - four chains in four distinct colors - as one dark grey.
 
     So a protein reads its domains, falling back to the molecule object only
     when it has none. A chain and a domain already resolve to what draws them.
@@ -110,8 +110,8 @@ def seed_from_objects(objects):
 
     Both fields are read across *every* object, not off the first one, and
     both have an answer for "they disagree": the style dropdown has its
-    "Multiple" entry, and the colour swatch - which cannot render "mixed" -
-    gets :data:`MIXED_COLOR` and a note. Showing one domain's colour as if it
+    "Multiple" entry, and the color swatch - which cannot render "mixed" -
+    gets :data:`MIXED_COLOR` and a note. Showing one domain's color as if it
     spoke for the rest is a lie the user then commits by pressing OK.
     """
     if not objects:
@@ -179,7 +179,7 @@ def _on_thermal_edited(_operator, context):
 
 
 class VisualEditMixin:
-    """Colour / style / force-field properties plus the block that draws them.
+    """Color / style / force-field properties plus the block that draws them.
 
     A dialog mixes this in, points ``visual_row()`` at the outliner row it is
     editing, and calls ``load_visual_state()`` from ``invoke()`` and
@@ -195,7 +195,7 @@ class VisualEditMixin:
 
     vs_color: FloatVectorProperty(
         name="Color",
-        description="Colour for every object this item covers",
+        description="Color for every object this item covers",
         subtype='COLOR', size=4, min=0.0, max=1.0,
         default=(0.8, 0.1, 0.8, 1.0),
         update=_on_color_edited,
@@ -222,7 +222,7 @@ class VisualEditMixin:
         default=1.5, min=0.0, soft_max=10.0,
         update=_on_force_field_edited,
     )
-    # Set while the swatch is showing MIXED_COLOR rather than a real colour, so
+    # Set while the swatch is showing MIXED_COLOR rather than a real color, so
     # draw() can say so. An operator property rather than module state because
     # Blender rebuilds the operator behind a props dialog and draw() has to be
     # able to ask the instance it is drawing.
@@ -253,10 +253,10 @@ class VisualEditMixin:
     def visual_objects(self, context):
         """Every Blender object the row draws through.
 
-        ``row_objects``, not ``row_pivot_objects``: a colour or a style has to
+        ``row_objects``, not ``row_pivot_objects``: a color or a style has to
         reach every domain of a protein, whereas its *pivot* may only be
         written to the molecule object. Using the pivot set here left a
-        protein's domains wearing their old colour.
+        protein's domains wearing their old color.
         """
         row = self.visual_row(context)
         if row is None:
@@ -271,7 +271,7 @@ class VisualEditMixin:
     def force_field_objects(self, context):
         """The objects the membrane force field is set on - a narrower set.
 
-        Colour, style and pivot are properties of *everything* a row draws,
+        Color, style and pivot are properties of *everything* a row draws,
         so they go to every object. A force field is not: it plants a hidden
         anchor Empty that the membrane parts around, and one protein wants one
         anchor at its centre, not one per domain. So a protein row owns its
@@ -299,9 +299,9 @@ class VisualEditMixin:
         off the first one, and both have an answer for "they disagree":
 
         * style falls back to the "Multiple" entry in the dropdown;
-        * colour falls back to :data:`MIXED_COLOR`, a neutral grey, with a
-          note beside it. A colour swatch has no way to render "mixed", and
-          showing one domain's colour as if it spoke for the rest is a lie the
+        * color falls back to :data:`MIXED_COLOR`, a neutral grey, with a
+          note beside it. A color swatch has no way to render "mixed", and
+          showing one domain's color as if it spoke for the rest is a lie the
           user then commits by pressing OK.
 
         Neither placeholder is ever applied on the way out: ``commit_visual_edit``
@@ -361,9 +361,9 @@ class VisualEditMixin:
     def before_visual_edit(self, context):
         """Hook for a dialog that has to get out of its own way first.
 
-        The Domain Splitter overrides it: it ghosts and re-colours the chain
-        while a boundary is being dragged, and restores those colours when it
-        closes. A colour set on top of a live preview would be restored right
+        The Domain Splitter overrides it: it ghosts and re-colors the chain
+        while a boundary is being dragged, and restores those colors when it
+        closes. A color set on top of a live preview would be restored right
         back off again, so the preview is dropped before the edit lands.
         """
 
@@ -447,7 +447,7 @@ class VisualEditMixin:
                     domain.style = self.vs_style
 
     def _after_visual_edit(self, context):
-        # Keep the outliner's colour swatches pointing at what the items now
+        # Keep the outliner's color swatches pointing at what the items now
         # look like - a dialog edit changes them out from under the rows.
         from ..core.outliner_colors import sync_outliner_colors
         sync_outliner_colors(context)
@@ -462,7 +462,7 @@ class VisualEditMixin:
     # ------------------------------------------------------------------
 
     def draw_visual_setup(self, layout, context, *, show_color=True, show_pivot=True):
-        """The Visual Set-up block: colour, representation, motion, pivot."""
+        """The Visual Set-up block: color, representation, motion, pivot."""
         _ACTIVE["dialog"] = self
 
         row = self.visual_row(context)
@@ -485,13 +485,13 @@ class VisualEditMixin:
         right.prop(self, "vs_style", text="")
 
         # The style dropdown says "Multiple" for itself; the swatch cannot, so
-        # the grey placeholder is spelled out rather than passing for a colour
+        # the grey placeholder is spelled out rather than passing for a color
         # the item actually has.
         if show_color and self.vs_color_is_mixed:
             box.label(text="Multiple colors: pick one to apply it to all.",
                       icon='INFO')
 
-        # Straight into the box, like the colour note: a label in a nested
+        # Straight into the box, like the color note: a label in a nested
         # column is drawn brighter than one in the box itself.
         box.separator()
         box.prop(self, 'bfactor_motion')
@@ -554,13 +554,13 @@ class VisualEditMixin:
         A field is only applied when the caller set it. Headless Blender
         routes INVOKE_DEFAULT straight to execute(), so a script never gets
         the seeding invoke() does, and applying unconditionally there would
-        paint the default purple over an object whose colour the caller never
+        paint the default purple over an object whose color the caller never
         mentioned.
 
         A field is also only applied when it *differs from what it was seeded
         with*. Opening a dialog writes every field, which marks them all set,
         so "set" alone cannot distinguish a choice from a default. A chain
-        whose domains are different colours shows the first domain's colour -
+        whose domains are different colors shows the first domain's color -
         the field has nowhere to display "mixed" - and re-applying that on the
         way out would repaint the whole chain in it. Pressing OK without
         touching anything has to change nothing.
@@ -585,7 +585,7 @@ class VisualEditMixin:
 
 
 class PROTEINBLENDER_OT_edit_protein_visuals(VisualEditMixin, Operator):
-    """Edit this protein's colour and representation"""
+    """Edit this protein's color and representation"""
     bl_idname = "proteinblender.edit_protein_visuals"
     bl_label = "Edit Protein"
     bl_options = {'REGISTER', 'UNDO'}

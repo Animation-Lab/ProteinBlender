@@ -25,7 +25,7 @@ def _resync_domain_colors_from_rna(*, log_prefix: str = "") -> int:
     registered ``FloatVectorProperty`` on ``bpy.types.Object``, which
     Blender persists), so on every file open we walk every chain object
     and re-push the RNA value into Carbon. Idempotent — re-applying the
-    same colour is a no-op."""
+    same color is a no-op."""
     n_synced = 0
     for obj in bpy.data.objects:
         # Only domain objects have the registered RNA domain_color prop +
@@ -51,7 +51,7 @@ def _resync_domain_colors_from_rna(*, log_prefix: str = "") -> int:
                         n_synced += 1
     if n_synced:
         print(f"ProteinBlender:{log_prefix} re-synced {n_synced} chain "
-              f"colour(s) from saved RNA domain_color props")
+              f"color(s) from saved RNA domain_color props")
     return n_synced
 
 
@@ -101,7 +101,7 @@ def create_workspace_on_load(dummy):
 def resync_domain_colors_on_load(dummy):
     """Re-push every domain's saved domain_color RNA prop into its
     Color Common Carbon socket. Defense-in-depth against the tester-
-    reported bug where multidomain chain colours appear to reset to
+    reported bug where multidomain chain colors appear to reset to
     green on reopen — see ``_resync_domain_colors_from_rna`` for the
     full rationale.
 
@@ -111,9 +111,9 @@ def resync_domain_colors_on_load(dummy):
     try:
         _resync_domain_colors_from_rna(log_prefix=" load_post:")
     except Exception as e:
-        # Best-effort — colour resync failure is never worth blocking
+        # Best-effort — color resync failure is never worth blocking
         # the load. Log and continue.
-        print(f"ProteinBlender: domain colour resync failed: {e}")
+        print(f"ProteinBlender: domain color resync failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -148,7 +148,7 @@ def register_load_handlers():
     _register_handler(bpy.app.handlers.load_post, reset_scene_manager_on_load)
     # Register workspace creation handler
     _register_handler(bpy.app.handlers.load_post, create_workspace_on_load)
-    # Re-sync chain colours from the RNA source-of-truth (runs last so
+    # Re-sync chain colors from the RNA source-of-truth (runs last so
     # any rebuild the prior handlers do is overwritten)
     _register_handler(bpy.app.handlers.load_post, resync_domain_colors_on_load)
     _register_handler(bpy.app.handlers.load_post, restore_temperature_motion_on_load)

@@ -1,7 +1,7 @@
 """DNA/RNA Builder module for ProteinBlender.
 
 Allows users to generate DNA and RNA structures from nucleotide sequences,
-with per-base colouring and full outliner integration.
+with per-base coloring and full outliner integration.
 """
 
 from . import dna_props

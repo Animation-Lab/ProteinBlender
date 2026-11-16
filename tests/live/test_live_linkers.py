@@ -16,7 +16,7 @@ So the assertions here start from pixels:
     protein behind it is on screen";
   * TUBE and BEADS render differently, so the style property reaches geometry
     rather than only the definition;
-  * the linker's colour survives into a MATERIAL-shaded viewport, the class of
+  * the linker's color survives into a MATERIAL-shaded viewport, the class of
     check this lane exists for and the one that already caught
     ``update_domain_color`` doing nothing.
 
@@ -536,17 +536,17 @@ def test_tube_and_beads_render_differently(blender, shot):
 @pytest.mark.live
 @pytest.mark.visual
 def test_linker_color_reaches_the_render(blender):
-    """A linker's colour must be visible, not merely recorded.
+    """A linker's color must be visible, not merely recorded.
 
     This is the failure mode this lane was built for and the one already caught
     in ``molecule.update_domain_color``: the property updates, the panel shows
     the new swatch, and the render never changes. Every pixel check in the
     headless suite reduces its render to an alpha mask and discards RGB, so
-    colour is invisible there by construction.
+    color is invisible there by construction.
 
     The molecule is hidden so the linker is the only thing on screen - otherwise
-    the protein's own colour dominates the frame-wide mean and a linker a few
-    pixels wide cannot move it. That leaves an unambiguous control: recolour red
+    the protein's own color dominates the frame-wide mean and a linker a few
+    pixels wide cannot move it. That leaves an unambiguous control: recolor red
     to blue and the dominant channel must follow. Measurements are taken first
     and the viewport shading restored before asserting, so a failure does not
     leave the session in MATERIAL shading for the next test.
@@ -566,7 +566,7 @@ def test_linker_color_reaches_the_render(blender):
             live = next(l for l in scene.pb2_linkers if l.uid == uid)
             return live.curve_object_name
 
-        # Isolate the linker: with the protein on screen its colour dominates
+        # Isolate the linker: with the protein on screen its color dominates
         # the mean over covered pixels and the linker cannot be measured.
         # Re-applied after every rebuild, since a freshly created curve object
         # starts visible and anything else new would pollute the measurement.
@@ -627,13 +627,13 @@ def test_linker_color_reaches_the_render(blender):
 
     red, blue = measured["red"], measured["blue"]
     assert red["covered"] > 0, (
-        "the linker rendered nothing with the protein hidden, so its colour "
+        "the linker rendered nothing with the protein hidden, so its color "
         "cannot be measured")
-    assert blue["covered"] > 0, "the linker vanished when it was recoloured"
+    assert blue["covered"] > 0, "the linker vanished when it was recolored"
 
     assert difference["rgb_delta"] > 0, (
-        "recolouring the linker from red to blue left the render "
-        "byte-identical; the colour is stored on the definition but never "
+        "recoloring the linker from red to blue left the render "
+        "byte-identical; the color is stored on the definition but never "
         "reaches the material that is drawn")
     assert red["dominant_channel"] == 0, (
         f"a red linker rendered with dominant channel {red['dominant_channel']} "

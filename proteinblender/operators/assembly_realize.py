@@ -1,9 +1,9 @@
 """Turning an assembly's instanced copies into things the PB Outliner lists.
 
 An instance is one set of atoms drawn many times: nothing to click, nothing to
-colour differently. Realizing trades that for per-copy identity - and identity
+color differently. Realizing trades that for per-copy identity - and identity
 in ProteinBlender means a row in the PB Outliner, because that is where a copy
-is selected, coloured, hidden and deleted. So a realized copy is never a bare
+is selected, colored, hidden and deleted. So a realized copy is never a bare
 Blender object if it can be helped:
 
 * an assembly that repeats the whole protein becomes that many proteins;
@@ -79,9 +79,9 @@ def realize_assembly(context, molecule):
     own_atoms = _draws_atoms(depsgraph, molecule.object)
     whole = _moves_of_the_whole_protein(molecule, drawn, own_atoms)
     # A filament's painted subunits, as they look on this frame: each copy
-    # keeps its colour once it is a protein of its own.
+    # keeps its color once it is a protein of its own.
     from ..core import subunit_colors
-    painted = subunit_colors.colour_values(molecule, context.scene.frame_current)
+    painted = subunit_colors.color_values(molecule, context.scene.frame_current)
     # And its hidden ones: realized, each is still made, and hidden as the PB
     # Outliner's eye hides a row, so it can be shown again.
     hidden = subunit_colors.hidden_keys(molecule)
@@ -118,7 +118,7 @@ class Move:
     matrix: object                 # mathutils.Matrix, applied before the world matrix
     chain: object = None           # set where only one chain of the object is drawn
     original: bool = False         # the copy that is the original, where it already is
-    site: int = 0                  # which copy of the lattice, as subunit colours name it
+    site: int = 0                  # which copy of the lattice, as subunit colors name it
 
 
 def _moves(placements, world):
@@ -215,9 +215,9 @@ def _stand(context, source, target, mapping, world, move) -> None:
 
 
 def _paint(target, mapping, source, site, painted) -> None:
-    """Give ``target``'s domains the subunit colours of copy ``site``.
+    """Give ``target``'s domains the subunit colors of copy ``site``.
 
-    A painted subunit's colour is mixed into its chain's own colour by its
+    A painted subunit's color is mixed into its chain's own color by its
     strength, as the filament drew it.
     """
     from ..core import subunit_colors
@@ -270,8 +270,8 @@ def _realize_as_proteins(context, molecule, moves, world, result, painted=None,
     # becomes the first of the ones that are left rather than a hidden extra.
     first = None if kept is not None else extras.pop(0)
     own = {i: i for i in molecule.domains}
-    # Read before any copy is coloured: each copy is coloured from the
-    # original's own colours, and the original is coloured last.
+    # Read before any copy is colored: each copy is colored from the
+    # original's own colors, and the original is colored last.
     original_site = (kept or first).site
 
     # A filament's copies are named for what each one is: tubulin_dimer_3,
@@ -422,8 +422,8 @@ def _realize_within_the_protein(context, molecule, drawn, groups, world,
 # ---------------------------------------------------------------------------
 
 def _retire_what_followed_the_assembly(context, molecule, result) -> None:
-    """A bend rig, symmetry axes and subunit colours and hiding belong to an
-    assembly that is now gone. The colours and hiding live on in the realized
+    """A bend rig, symmetry axes and subunit colors and hiding belong to an
+    assembly that is now gone. The colors and hiding live on in the realized
     copies; the realized proteins were copied from this one, so they are
     cleared too."""
     from ..core import subunit_colors, symmetry_axes, symmetry_bend

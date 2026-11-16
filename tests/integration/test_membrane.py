@@ -396,10 +396,10 @@ def test_stacked_force_fields_do_not_carve_a_hole_from_afar(scene):
 
 
 # --------------------------------------------------------------------------
-# Lipid colours
+# Lipid colors
 #
-# Head and tail colours are shared material datablocks. Ground truth for every
-# assertion below is the colour constant the test picks, read back off the
+# Head and tail colors are shared material datablocks. Ground truth for every
+# assertion below is the color constant the test picks, read back off the
 # Blender material's Principled BSDF - never from the membrane code's own
 # accessors.
 # --------------------------------------------------------------------------
@@ -413,7 +413,7 @@ BASELINE_PINK = (1.0, 0.5, 0.5, 1.0)
 
 
 def _material_base_color(name):
-    """The material's Principled BSDF base colour, or None if absent."""
+    """The material's Principled BSDF base color, or None if absent."""
     mat = bpy.data.materials.get(name)
     if mat is None or mat.node_tree is None:
         return None
@@ -429,7 +429,7 @@ def _only_membrane():
 
 @pytest.mark.integration
 def test_head_and_tail_colors_write_through_to_the_active_membrane(scene):
-    """Setting the head / tail colour must reach the membrane immediately, the
+    """Setting the head / tail color must reach the membrane immediately, the
     way every other membrane property does.
 
     Regression: ``color_head`` and ``color_tail`` were the only membrane props
@@ -437,7 +437,7 @@ def test_head_and_tail_colors_write_through_to_the_active_membrane(scene):
     scene props and never touched the membrane. Two consequences the tester
     hit: no live preview, and - because the value lived nowhere but the props -
     the object->props resync that fires on any active-object change silently
-    replaced the pick with the membrane's stale stored colour.
+    replaced the pick with the membrane's stale stored color.
     """
     H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0,
                      render_style="STYLIZED")
@@ -450,7 +450,7 @@ def test_head_and_tail_colors_write_through_to_the_active_membrane(scene):
         f"head material is {_material_base_color(HEAD_MATERIAL_NAME)}, "
         f"expected the picked {BLUE}")
     assert tuple(root["pb_mem_color_head"]) == BLUE, (
-        "the head colour never reached the membrane, so the next "
+        "the head color never reached the membrane, so the next "
         "object->props sync will overwrite the user's pick")
 
     props.color_tail = CYAN
@@ -460,13 +460,13 @@ def test_head_and_tail_colors_write_through_to_the_active_membrane(scene):
 
 @pytest.mark.integration
 def test_head_color_survives_an_in_dialog_action(scene):
-    """A head colour picked in the open Membrane dialog must survive using
+    """A head color picked in the open Membrane dialog must survive using
     another control in that same dialog before pressing OK.
 
     Regression: in-dialog buttons (Add Hole, Edit Deformation, Select Hole)
     change the active object, which fires the membrane msgbus object->props
     sync. With the pick living only in the scene props it was overwritten by
-    the membrane's stored colour, and OK then re-applied that stale value.
+    the membrane's stored color, and OK then re-applied that stale value.
     This is the "change representations, change colors, repeat" path the
     tester reported as buggy.
     """
@@ -474,10 +474,10 @@ def test_head_color_survives_an_in_dialog_action(scene):
         sync_props_from_object,
     )
 
-    # Build with an explicit baseline colour so the membrane's STORED colour
+    # Build with an explicit baseline color so the membrane's STORED color
     # is known and differs from the pick below. Without this the test would
-    # inherit whatever colour a previous test left in the scene props, and
-    # could pass vacuously when the stored colour already matched the pick.
+    # inherit whatever color a previous test left in the scene props, and
+    # could pass vacuously when the stored color already matched the pick.
     H.build_membrane(shape=SHAPE_FLAT, width=10.0, height=10.0,
                      render_style="STYLIZED", color_head=BASELINE_PINK)
     root = _only_membrane()
@@ -486,16 +486,16 @@ def test_head_color_survives_an_in_dialog_action(scene):
 
     sync_props_from_object(props, root)     # what the dialog's invoke() does
     assert tuple(root["pb_mem_color_head"]) == BASELINE_PINK, (
-        "test setup: the membrane did not store the baseline colour, so "
+        "test setup: the membrane did not store the baseline color, so "
         "there is nothing for the resync to clobber")
 
-    props.color_head = BLUE                 # the user picks a head colour
+    props.color_head = BLUE                 # the user picks a head color
 
     bpy.ops.proteinblender.membrane_add_hole()   # an in-dialog button
     sync_props_from_object(props, root)          # what the msgbus then does
 
     assert tuple(round(v, 3) for v in props.color_head) == BLUE, (
-        "the in-dialog action reverted the head colour the user had just "
+        "the in-dialog action reverted the head color the user had just "
         f"picked: props now {tuple(round(v, 3) for v in props.color_head)}")
 
     bpy.ops.proteinblender.build_membrane(

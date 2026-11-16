@@ -654,13 +654,13 @@ class MOLECULE_PB_OT_update_domain_color(Operator):
             self.report({'ERROR'}, "Domain not found")
             return {'CANCELLED'}
             
-        # Get color. The scene-level domain colour picker is registered as
+        # Get color. The scene-level domain color picker is registered as
         # `temp_domain_color` (there is no `scene.domain_color`; reading it
         # raised AttributeError and broke this operator). An explicit `color`
         # operator argument still overrides it below.
         # Snapshot to a plain tuple: assigning the live RNA property array would
         # store a reference that reverts to the operator default once execute()
-        # returns, so the domain would lose the colour just set.
+        # returns, so the domain would lose the color just set.
         color = tuple(scene.temp_domain_color)
         if hasattr(self, "color") and self.color[0] >= 0:  # Check if color parameter was provided
             color = tuple(self.color)

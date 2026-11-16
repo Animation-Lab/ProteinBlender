@@ -42,7 +42,7 @@ def test_transparent_material_is_built_without_deprecated_api():
     principled = nodes["BSDF_PRINCIPLED"]
     assert principled.inputs["Alpha"].default_value == 1.0
 
-    # The geometry's Color attribute tints the base colour, and the shader
+    # The geometry's Color attribute tints the base color, and the shader
     # reaches the material output.
     links = {(l.from_node.type, l.from_socket.name, l.to_node.type, l.to_socket.name)
              for l in material.node_tree.links}

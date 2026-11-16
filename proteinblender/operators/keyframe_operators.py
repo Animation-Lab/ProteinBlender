@@ -736,7 +736,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             mol_item.keyframe_rotation = existing.get('rotation', True) if existing else True
             mol_item.keyframe_scale = existing.get('scale', True) if existing else True
             mol_item.keyframe_pose = False    # nucleic acids have no domain poses
-            mol_item.keyframe_color = False   # per-base colour handled elsewhere
+            mol_item.keyframe_color = False   # per-base color handled elsewhere
             mol_item.brownian_enabled = False
 
         # Add membrane roots. Each membrane is one row; ticking it captures the
@@ -924,7 +924,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                 scale_row.enabled = item.use_puppet
                 scale_row.prop(item, "keyframe_scale", text="")
 
-                # Colour and Brownian are puppet-only (per-domain features).
+                # Color and Brownian are puppet-only (per-domain features).
                 color_row = row.row()
                 color_row.enabled = item.use_puppet and is_puppet
                 color_row.prop(item, "keyframe_color", text="")

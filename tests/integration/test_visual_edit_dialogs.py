@@ -1,6 +1,6 @@
 """The per-item Visual Set-up dialogs, and the pivot controls they expose.
 
-Colour, representation, membrane force field and pivot used to live in one
+Color, representation, membrane force field and pivot used to live in one
 selection-driven panel. They are now edited on the item itself, from the pencil
 button on its outliner row:
 
@@ -13,7 +13,7 @@ Headless Blender routes INVOKE_DEFAULT straight to ``execute()``, so these
 tests drive the dialogs the way a script would - by passing the fields as
 operator properties - which is the same code path OK runs.
 
-Ground truth is deliberately *not* the add-on's own readers. Colour is checked
+Ground truth is deliberately *not* the add-on's own readers. Color is checked
 by reading the geometry-nodes Combine Color node's channels, style by reading
 the Style group node's tree name, and the pivot residues come from parsing the
 PDB fixture with biotite. ``get_object_color`` / ``get_object_style`` are the
@@ -36,7 +36,7 @@ def _combine_color_rgb(obj):
     """The RGB the object's node tree actually paints with, or None.
 
     Read off the "Custom Combine Color" node's three channel sockets - the
-    node the colour writer creates - rather than through
+    node the color writer creates - rather than through
     ``visual_style.get_object_color``.
     """
     for modifier in obj.modifiers:
@@ -82,7 +82,7 @@ def _build_outliner():
 
 
 # --------------------------------------------------------------------------
-# Colour and style reach every object the item owns
+# Color and style reach every object the item owns
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -149,11 +149,11 @@ def test_style_changes_with_temperature_motion(scene, sm, single_chain, motion):
 @pytest.mark.integration
 def test_dialog_leaves_fields_the_caller_did_not_set_alone(scene, sm,
                                                            single_chain):
-    """Setting only the style must not repaint the colour.
+    """Setting only the style must not repaint the color.
 
     Every field on the dialog has a default, and applying them all
-    unconditionally would paint the default purple over an object whose colour
-    the caller never mentioned - silently, since a colour write cannot fail.
+    unconditionally would paint the default purple over an object whose color
+    the caller never mentioned - silently, since a color write cannot fail.
     """
     _build_outliner()
     molecule = sm.molecules[single_chain]
@@ -168,7 +168,7 @@ def test_dialog_leaves_fields_the_caller_did_not_set_alone(scene, sm,
 
     for obj in _protein_objects(molecule):
         assert _combine_color_rgb(obj) == (0.9, 0.1, 0.1), (
-            f"{obj.name} was recoloured by a call that only set the style")
+            f"{obj.name} was recolored by a call that only set the style")
 
 
 @pytest.mark.integration
@@ -181,9 +181,9 @@ def test_domain_dialog_renames_and_recolors_in_one_pass(scene, sm,
 
     assert bpy.ops.proteinblender.rename_domain(
         target_item_id=domain_id, item_type='DOMAIN',
-        new_name="Recoloured", vs_color=(0.1, 0.8, 0.2, 1.0)) == {'FINISHED'}
+        new_name="Recolored", vs_color=(0.1, 0.8, 0.2, 1.0)) == {'FINISHED'}
 
-    assert molecule.domains[domain_id].name == "Recoloured"
+    assert molecule.domains[domain_id].name == "Recolored"
     assert _combine_color_rgb(domain.object) == (0.1, 0.8, 0.2)
 
 
@@ -573,13 +573,13 @@ def test_edit_pivot_on_a_protein_moves_the_pivot_not_the_protein(scene, sm,
 # --------------------------------------------------------------------------
 
 def _carbon_rgb(obj):
-    """The colour an untouched object draws with, straight off its per-object
+    """The color an untouched object draws with, straight off its per-object
     "Color Common" node's Carbon socket.
 
     Independent of ``visual_style.get_object_color``, which is the reader the
     seeding goes through: asserting on that would pass whether it picked the
     right object or not. A freshly imported protein has no "Custom Combine
-    Color" node yet, so this is where its per-chain colours actually live.
+    Color" node yet, so this is where its per-chain colors actually live.
     """
     for modifier in obj.modifiers:
         if modifier.type != 'NODES' or not modifier.node_group:
@@ -606,7 +606,7 @@ def _seed(scene, item_id):
 @pytest.mark.integration
 def test_protein_with_differently_colored_chains_seeds_grey(scene, sm,
                                                             multi_chain):
-    """4hhb imports with a distinct colour per chain, so the swatch is grey.
+    """4hhb imports with a distinct color per chain, so the swatch is grey.
 
     Ground truth that the chains really do disagree is their own Color Common
     Carbon sockets, read directly - not the reader the seeding uses.
@@ -618,10 +618,10 @@ def test_protein_with_differently_colored_chains_seeds_grey(scene, sm,
     carbons = {_carbon_rgb(d.object) for d in molecule.domains.values()
                if d.object}
     assert len(carbons) > 1, (
-        f"fixture must import with several chain colours, got {carbons}")
+        f"fixture must import with several chain colors, got {carbons}")
 
     color, mixed, _style = _seed(scene, multi_chain)
-    assert mixed is True, "a multi-coloured protein did not report as mixed"
+    assert mixed is True, "a multi-colored protein did not report as mixed"
     assert color == MIXED_COLOR, (
         f"expected the neutral grey placeholder, got {color}")
 
@@ -629,15 +629,15 @@ def test_protein_with_differently_colored_chains_seeds_grey(scene, sm,
 @pytest.mark.integration
 def test_protein_seeds_the_real_color_once_its_chains_agree(scene, sm,
                                                             multi_chain):
-    """Paint the whole protein, reopen: the swatch shows that colour, not grey."""
+    """Paint the whole protein, reopen: the swatch shows that color, not grey."""
     _build_outliner()
     assert bpy.ops.proteinblender.edit_protein_visuals(
         item_id=multi_chain, vs_color=(0.3, 0.6, 0.9, 1.0)) == {'FINISHED'}
 
     color, mixed, _style = _seed(scene, multi_chain)
-    assert mixed is False, "a uniformly coloured protein reported as mixed"
+    assert mixed is False, "a uniformly colored protein reported as mixed"
     assert color == (0.3, 0.6, 0.9, 1.0), (
-        f"the dialog would open on {color}, not the protein's colour")
+        f"the dialog would open on {color}, not the protein's color")
 
 
 @pytest.mark.integration
@@ -646,7 +646,7 @@ def test_protein_seeding_ignores_the_molecule_object(scene, sm, multi_chain):
 
     It keeps its own untouched Color Common carbon grey, which is nothing that
     appears on screen. Seeding read it first, so a freshly imported protein in
-    four colours opened showing that one grey - looking exactly like a correct
+    four colors opened showing that one grey - looking exactly like a correct
     "mixed" answer while being an accident.
     """
     from proteinblender.operators import visual_edit as VE
@@ -661,7 +661,7 @@ def test_protein_seeding_ignores_the_molecule_object(scene, sm, multi_chain):
     appearance = VE.appearance_objects_for_row(bpy.context, row)
     assert parent not in appearance, (
         "the molecule object must not be read as the protein's appearance")
-    assert appearance, "a protein must have something to read its colour from"
+    assert appearance, "a protein must have something to read its color from"
 
     # And the grey it would have contributed is genuinely a different answer.
     assert _carbon_rgb(parent) not in {_carbon_rgb(obj) for obj in appearance}

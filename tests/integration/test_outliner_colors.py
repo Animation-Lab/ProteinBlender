@@ -1,11 +1,11 @@
-"""The colour swatches on the Protein Outliner's rows.
+"""The color swatches on the Protein Outliner's rows.
 
 Every protein, chain and domain row carries a ``row_color`` swatch: it shows
-the colour the item currently renders with, and editing it recolours the item
+the color the item currently renders with, and editing it recolors the item
 on the spot. These tests pin both directions of that binding.
 
 Ground truth is kept independent of the code under test (see CLAUDE.md): the
-colour an object "renders with" is read straight off its geometry-node graph -
+color an object "renders with" is read straight off its geometry-node graph -
 whichever node feeds the Set Color group's Color input - never through the
 addon's own ``get_object_color`` / ``seed_from_objects`` helpers, which are
 exactly the code the swatches go through.
@@ -22,14 +22,14 @@ from proteinblender.core import domain_layout
 
 
 # --------------------------------------------------------------------------
-# Independent colour read
+# Independent color read
 # --------------------------------------------------------------------------
 
 def _rendered_rgb(obj):
     """The RGB an object's node graph feeds into Set Color.
 
     Handles both wirings: the import path drives it from the "Color Common"
-    group (RGBA "Carbon" socket), a recolour relinks it to a "Custom Combine
+    group (RGBA "Carbon" socket), a recolor relinks it to a "Custom Combine
     Color" node (three float channels). Read raw, not via the addon helpers.
     """
     tree = next(m.node_group for m in obj.modifiers
@@ -81,7 +81,7 @@ def _split_first_chain(mid, pieces=2):
 
 @pytest.mark.integration
 def test_chain_swatches_seed_from_what_each_chain_renders_with(scene):
-    """Each chain row's swatch matches its own objects' node-graph colour."""
+    """Each chain row's swatch matches its own objects' node-graph color."""
     mid = H.import_local("4hhb.pdb", "4hhb")
     _build_outliner()
     mol = H.sm().molecules[mid]
@@ -96,7 +96,7 @@ def test_chain_swatches_seed_from_what_each_chain_renders_with(scene):
             continue
         expected = _rendered_rgb(objects[0])
         assert tuple(row.row_color)[:3] == pytest.approx(expected, abs=1e-3), (
-            f"chain {row.name}'s swatch does not show the chain's colour")
+            f"chain {row.name}'s swatch does not show the chain's color")
         seeded += 1
     assert seeded >= 2, "no chain swatch was actually checked"
 
@@ -123,7 +123,7 @@ def test_protein_swatch_shows_its_actual_chain_colors(scene):
 
 
 # --------------------------------------------------------------------------
-# Applying: editing a swatch recolours the item
+# Applying: editing a swatch recolors the item
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -141,10 +141,10 @@ def test_editing_a_chain_swatch_recolors_every_object_of_the_chain(scene):
 
     for obj in _chain_objects(mol, target):
         assert _rendered_rgb(obj) == pytest.approx(picked[:3], abs=1e-4), (
-            f"{obj.name} did not take the colour picked on its chain row")
+            f"{obj.name} did not take the color picked on its chain row")
     assert _rendered_rgb(_chain_objects(mol, other)[0]) == pytest.approx(
         other_before, abs=1e-4), (
-        "recolouring one chain repainted a different chain")
+        "recoloring one chain repainted a different chain")
     # The swatch keeps showing what was picked (the re-seed agrees with it).
     target = next(it for it in bpy.context.scene.outliner_items
                   if it.item_id == target.item_id)
@@ -170,13 +170,13 @@ def test_editing_the_protein_swatch_recolors_the_whole_protein(scene):
         if domain.object:
             assert _rendered_rgb(domain.object) == pytest.approx(
                 picked[:3], abs=1e-4), (
-                f"{domain.name} did not take the protein-wide colour")
+                f"{domain.name} did not take the protein-wide color")
 
     protein_row = next(it for it in bpy.context.scene.outliner_items
                        if it.item_type == "PROTEIN" and it.item_id == mid)
     assert tuple(protein_row.row_color)[:3] == pytest.approx(
         picked[:3], abs=1e-3), (
-        "after resolving the mix the swatch should show the picked colour, "
+        "after resolving the mix the swatch should show the picked color, "
         "not the grey placeholder")
     assert len(json.loads(protein_row.row_palette_json)) == 1
 
@@ -248,10 +248,10 @@ def test_editing_a_domain_swatch_recolors_only_that_domain(scene):
     target.row_color = picked
 
     assert _rendered_rgb(bpy.data.objects[target.object_name]) == pytest.approx(
-        picked[:3], abs=1e-4), "the domain did not take its picked colour"
+        picked[:3], abs=1e-4), "the domain did not take its picked color"
     assert _rendered_rgb(sibling_obj) == pytest.approx(sibling_before,
                                                        abs=1e-4), (
-        "recolouring one domain repainted its sibling")
+        "recoloring one domain repainted its sibling")
 
 
 @pytest.mark.integration

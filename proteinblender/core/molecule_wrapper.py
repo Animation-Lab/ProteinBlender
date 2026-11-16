@@ -1731,7 +1731,7 @@ class MoleculeWrapper:
             domain.end = end
 
             # Retarget the domain's own residue-range selection. This reuses the
-            # existing nodes (and so preserves the domain's colour and style)
+            # existing nodes (and so preserves the domain's color and style)
             # rather than rebuilding the tree from scratch.
             self._setup_domain_network(domain, domain.chain_id, start, end)
 
@@ -2230,11 +2230,11 @@ class MoleculeWrapper:
             color_emit = None
             set_color = None
             
-            # The colour node is matched by tree-name *prefix*: the first
+            # The color node is matched by tree-name *prefix*: the first
             # setup renames its tree to "Color Common_<domain_id>" to make it
             # unique, so an exact match finds nothing on a later re-range -
-            # which then created a second colour node with a fresh random
-            # colour, silently repainting the domain every time its range was
+            # which then created a second color node with a fresh random
+            # color, silently repainting the domain every time its range was
             # edited.
             for node in domain.node_group.nodes:
                 if (node.bl_idname == 'GeometryNodeGroup' and
@@ -2665,9 +2665,9 @@ class MoleculeWrapper:
             # Update the stored color in the domain object for consistency
             domain.color = color
 
-            # Write the colour where the tree actually reads it.
+            # Write the color where the tree actually reads it.
             #
-            # There are two colour paths into a domain and they use different
+            # There are two color paths into a domain and they use different
             # nodes. Import wires "Set Color".Color from the "Color Common"
             # group, which is what the loop below drives. But the Visual Set-up
             # picker (core/visual_style.apply_color_to_object) builds a
@@ -2679,9 +2679,9 @@ class MoleculeWrapper:
                 return True
 
             # Matched by prefix, not equality: a range update rebuilds the
-            # domain's selection nodes and the re-added colour node comes back
+            # domain's selection nodes and the re-added color node comes back
             # name-collided as "Color Common.001". An exact match then finds
-            # nothing and the colour write silently does nothing.
+            # nothing and the color write silently does nothing.
             for node in domain.node_group.nodes:
                 if node.name.startswith("Color Common"):
                     # Check if this Color Common node has a unique node tree for this domain
@@ -2770,7 +2770,7 @@ class MoleculeWrapper:
         new_domain.copy_group_id = group_id
         new_domain.copy_group_name = group_name
 
-        # Copy the colour and style from the original - the style it is drawn
+        # Copy the color and style from the original - the style it is drawn
         # in, which is not always the one it remembers: a local file comes in
         # as spheres under a wrapper that says surface.
         from .visual_style import get_object_style
@@ -2903,7 +2903,7 @@ class MoleculeWrapper:
         """Copy a whole chain, however many domains it has been split into.
 
         A split chain is still one chain: every domain is duplicated - each
-        keeping its own residue range, colour and style - and the copies share
+        keeping its own residue range, color and style - and the copies share
         a ``copy_group_id`` so the outliner shows them under a single chain
         row instead of scattering them through the chain they came from.
         Copying an unsplit chain is the same operation over a group of one.

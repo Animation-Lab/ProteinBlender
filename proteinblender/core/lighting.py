@@ -1,7 +1,7 @@
 """Scene-sized, neutral lighting for molecular illustrations.
 
 Broad key/fill lighting follows the approach described by ChimeraX's lighting
-guide. Presets vary shadow softness and fill rather than recolouring materials.
+guide. Presets vary shadow softness and fill rather than recoloring materials.
 See docs/lighting.md for sources and the intended use of each preset.
 """
 

@@ -560,7 +560,7 @@ def row_objects(context, row):
     has no single backing object and its row leaves that field empty. A
     PROTEIN row owns the molecule mesh *and* every domain hanging off it.
 
-    This is the set a colour or a style has to reach. It is **not** the set a
+    This is the set a color or a style has to reach. It is **not** the set a
     pivot may be written to - see :func:`row_pivot_objects`.
 
     Ordering is stable and duplicate-free (keyed by name, because a ``bpy``

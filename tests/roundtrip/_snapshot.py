@@ -81,7 +81,7 @@ SCENE_PROPS = (
     "pb_symmetry_strands", "pb_symmetry_stagger", "pb_symmetry_strand_twist",
     # And how much has been taken off its ends.
     "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
-    # The Subunits panel's colour: the first selected subunit's, else the
+    # The Subunits panel's color: the first selected subunit's, else the
     # last given.
     "pb_subunit_color",
     "pb_cutaway_normal", "pb_cutaway_offset",
@@ -530,7 +530,7 @@ def _serialize_object_data(obj):
                 name: [v.value for v in attributes[name].data]
                 for name in ('pb_cartoon_reference_turn', 'pb_cartoon_helix_turn')
                 if name in attributes}
-            # A filament's point cloud: which copy each point is, the colour
+            # A filament's point cloud: which copy each point is, the color
             # a painted subunit is drawn with, and which are hidden.
             entry['assembly_point_values'] = {
                 name: _digest([_round(v) for item in attributes[name].data
@@ -717,7 +717,7 @@ def _serialize_registry():
     """The live ``ProteinBlenderScene.molecules`` registry.
 
     An empty registry after a reopen is the single most user-visible save/load
-    failure: the outliner still lists the proteins, but colour / split / centre
+    failure: the outliner still lists the proteins, but color / split / centre
     / duplicate / pose all fail with "Molecule not found".
     """
     import sys

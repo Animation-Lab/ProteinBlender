@@ -197,7 +197,7 @@ def kept_sites(count: int, strands: int = 1, shrink_plus: int = 0,
 
     Indices into :func:`lattice_sites`, so a subunit keeps its number however
     much is taken off around it - which is what lets anything kept about one
-    subunit, such as its colour, stay with it.
+    subunit, such as its color, stay with it.
 
     Shrinking takes whole steps off every strand: ``shrink_minus`` from the
     start, where the original subunit is, and ``shrink_plus`` from the far

@@ -117,9 +117,9 @@ def test_splitting_a_chain_repartitions_it_without_moving_the_picture(
     protein shifting or thickening. None of it shows up in the domain ranges,
     which is all the headless test can inspect, so those stay green throughout.
 
-    The assertion is on the alpha silhouette rather than on colour, because a
-    split legitimately introduces a second domain colour. Where the atoms are
-    must not change; what colour they are may.
+    The assertion is on the alpha silhouette rather than on color, because a
+    split legitimately introduces a second domain color. Where the atoms are
+    must not change; what color they are may.
     """
     domains = _domains(blender, single_chain)
     assert len(domains) == 1, f"1ubq should import as one domain, got {domains}"

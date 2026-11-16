@@ -284,7 +284,7 @@ class PROTEINBLENDER_OT_edit_keyframe(bpy.types.Operator):
 
 class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
     """Delete every ProteinBlender keyframe at this frame — across all puppets
-    and DNA/RNA molecules, including puppet domain pose/colour keyframes"""
+    and DNA/RNA molecules, including puppet domain pose/color keyframes"""
     bl_idname = "proteinblender.delete_keyframe"
     bl_label = "Delete Keyframe"
     bl_options = {'REGISTER', 'UNDO'}

@@ -364,7 +364,7 @@ GN_TREE_VERSION = 39
 
 def _ensure_material(name: str, color: Tuple[float, float, float, float],
                      roughness: float = 0.4) -> bpy.types.Material:
-    """Get-or-create a Principled BSDF material with the given diffuse colour."""
+    """Get-or-create a Principled BSDF material with the given diffuse color."""
     mat = bpy.data.materials.get(name)
     if mat is None:
         mat = bpy.data.materials.new(name)
@@ -388,8 +388,8 @@ def set_membrane_colors(membrane_obj: bpy.types.Object,
     """Re-color the shared lipid materials.
 
     Head/tail are used by the STYLIZED and BALL_AND_STICK styles. The
-    optional surface colour drives the SURFACE style's single material.
-    All three live as shared datablocks — re-colouring updates every
+    optional surface color drives the SURFACE style's single material.
+    All three live as shared datablocks — re-coloring updates every
     membrane in the scene at once, by design.
     """
     _ensure_material(HEAD_MATERIAL_NAME, color_head, roughness=0.35)

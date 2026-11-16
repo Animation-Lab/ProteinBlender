@@ -1,19 +1,19 @@
-"""Reading and writing a molecular object's colour and representation.
+"""Reading and writing a molecular object's color and representation.
 
-Every colour and style ProteinBlender applies lands on a geometry-nodes tree:
-the colour on a "Custom Combine Color" node feeding Set Color, the style by
+Every color and style ProteinBlender applies lands on a geometry-nodes tree:
+the color on a "Custom Combine Color" node feeding Set Color, the style by
 swapping MolecularNodes' Style group node. This module owns that plumbing, and
-the per-item Visual Set-up dialogs, the pose library, the frame-change colour
+the per-item Visual Set-up dialogs, the pose library, the frame-change color
 handler and the domain-layout code all go through it.
 
 It used to be ``panels/visual_setup_panel.py``, home of the selection-driven
-Visual Set-up panel. That panel is gone - colour, style, force field and pivot
+Visual Set-up panel. That panel is gone - color, style, force field and pivot
 are now edited per item, from the pencil button on the item's own outliner row -
 but nothing about the geometry-nodes plumbing changed, so it moved here whole.
 
 ``Scene.visual_setup_color`` / ``Scene.visual_setup_style`` survive it as the
 selection-scoped *scripted* path: no UI writes them any more, and the live
-render lane drives them as its independent control when checking that a colour
+render lane drives them as its independent control when checking that a color
 change actually reaches pixels.
 """
 

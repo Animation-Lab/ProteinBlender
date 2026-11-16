@@ -1013,11 +1013,11 @@ def _shader_shape(material):
 
 
 def _domain_color(obj):
-    """The domain's colour, read from the node graph rather than the model.
+    """The domain's color, read from the node graph rather than the model.
 
     Resolved through the link that actually feeds Set Color's Color input, so
-    it keeps reading truth after a range update renames the colour node
-    ("Color Common.001") or a recolour relinks it to "Custom Combine Color".
+    it keeps reading truth after a range update renames the color node
+    ("Color Common.001") or a recolor relinks it to "Custom Combine Color".
     """
     tree = _domain_tree(obj)
     set_color = next(n for n in tree.nodes if n.type == 'GROUP' and n.node_tree
@@ -1144,7 +1144,7 @@ def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
     """The edited domain is picked out of its chain, and both revert on close.
 
     Context is only useful if the subject still reads as the subject, so the
-    domain under the cursor stays solid - its own material, its own colour -
+    domain under the cursor stays solid - its own material, its own color -
     while its neighbours drop to the ghost material. The ghost is borrowed,
     not owned: the neighbours' real material has to come back, or the dialog
     silently repaints the user's molecule.
@@ -1159,7 +1159,7 @@ def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
                        for o in (first_obj, second_obj)}
     before_color = {o.name: _domain_color(o) for o in (first_obj, second_obj)}
     assert before_color[first_obj.name] != before_color[second_obj.name], (
-        "the fixture gave both domains the same colour, so a colour that "
+        "the fixture gave both domains the same color, so a color that "
         "leaked to the neighbour would go unnoticed")
 
     ds.preview_layout(bpy.context, mol, token,
@@ -1174,7 +1174,7 @@ def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
     for obj in (first_obj, second_obj):
         assert _domain_color(obj) == pytest.approx(before_color[obj.name],
                                                    abs=1e-4), (
-            f"previewing repainted {obj.name}; with no colour chosen every "
+            f"previewing repainted {obj.name}; with no color chosen every "
             "domain keeps its own")
 
     # Sizing the other domain swaps which one is the subject, both ways round.
@@ -1192,7 +1192,7 @@ def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
             f"{obj.name} was left wearing the preview's material")
         assert _domain_color(obj) == pytest.approx(before_color[obj.name],
                                                    abs=1e-4), (
-            f"{obj.name} was left wearing the preview's colour")
+            f"{obj.name} was left wearing the preview's color")
     assert [m.name for m in bpy.data.materials
             if m.name.endswith(ds._GHOST_SUFFIX)] == [], (
         "the preview left its ghost materials in the file")
@@ -1200,11 +1200,11 @@ def test_preview_ghosts_the_chain_and_keeps_the_sized_domain_solid(scene):
 
 @pytest.mark.integration
 def test_preview_paints_row_colors_and_restores_the_real_ones(scene):
-    """A colour handed to the preview shows on its domain, and reverts on close.
+    """A color handed to the preview shows on its domain, and reverts on close.
 
-    This is the path the dialog's per-row swatches ride: picking a colour on a
+    This is the path the dialog's per-row swatches ride: picking a color on a
     row previews it on that row's domain immediately, and the domain's real
-    colour comes back when the dialog closes - committing the pick is a
+    color comes back when the dialog closes - committing the pick is a
     separate, explicit step.
     """
     mid = H.import_local("4hhb.pdb", "4hhb")
@@ -1222,17 +1222,17 @@ def test_preview_paints_row_colors_and_restores_the_real_ones(scene):
                       colors=[picked, None])
 
     assert _domain_color(first_obj) == pytest.approx(picked, abs=1e-4), (
-        "the picked colour did not reach the domain being sized")
+        "the picked color did not reach the domain being sized")
     assert _domain_color(second_obj) == pytest.approx(
         before_color[second_obj.name], abs=1e-4), (
-        "a colour picked for one row repainted its neighbour")
+        "a color picked for one row repainted its neighbour")
 
     ds.restore_preview(bpy.context)
 
     for obj in (first_obj, second_obj):
         assert _domain_color(obj) == pytest.approx(before_color[obj.name],
                                                    abs=1e-4), (
-            f"{obj.name} was left wearing the previewed colour")
+            f"{obj.name} was left wearing the previewed color")
 
 
 @pytest.mark.integration
@@ -1272,7 +1272,7 @@ def test_a_chain_that_was_never_split_still_gets_ghosted_context(scene):
              for i, (start, end) in enumerate(thirds)]
 
     # Size the middle row - the one with no object of its own - previewing a
-    # colour picked on it, the way the dialog's swatch does.
+    # color picked on it, the way the dialog's swatch does.
     picked = (0.15, 0.5, 0.9, 1.0)
     ds.preview_layout(bpy.context, mol, token, specs, 1,
                       colors=[None, picked, None])
@@ -1296,11 +1296,11 @@ def test_a_chain_that_was_never_split_still_gets_ghosted_context(scene):
     assert _shown_range(solid[0]) == (specs[1].start, specs[1].end), (
         "the solid domain is not the one being sized")
     assert _domain_color(solid[0]) == pytest.approx(picked, abs=1e-4), (
-        "the picked colour never reached the stand-in for the new domain - "
-        "its colour group is probably still shared with the object it was "
+        "the picked color never reached the stand-in for the new domain - "
+        "its color group is probably still shared with the object it was "
         "copied from")
     assert _domain_color(real) == pytest.approx(real_color, abs=1e-4), (
-        "colouring the stand-in repainted the real domain it was copied from")
+        "coloring the stand-in repainted the real domain it was copied from")
 
     ds.restore_preview(bpy.context)
 
@@ -1317,11 +1317,11 @@ def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
 
     This is the shape of the feature, not an implementation detail. A ghost
     built from scratch - a plain Attribute node into a fresh Principled BSDF -
-    reproduces the domain's colours and so looks correct in a node graph, but
+    reproduces the domain's colors and so looks correct in a node graph, but
     MolecularNodes shades through its own group reading the *instancer*, and
     the stand-in renders effectively opaque in the Material Preview viewport
     however low its alpha is set. That failure is invisible to any assertion
-    about colour or about which material is assigned; only "the ghost shades
+    about color or about which material is assigned; only "the ghost shades
     the same way the real material does" catches it.
     """
     mid = H.import_local("4hhb.pdb", "4hhb")
@@ -1351,7 +1351,7 @@ def test_the_ghost_is_a_copy_of_the_domains_own_material(scene):
     # stacks ~20 sphere surfaces per view ray; with the far side drawn, each
     # blends again and the chain returns to near-opaque however low the alpha
     # is set - measured at 68% of opaque brightness versus 25% with it off.
-    # Nothing about the assignment, the colour or the alpha value catches this.
+    # Nothing about the assignment, the color or the alpha value catches this.
     assert ghost.show_transparent_back is False, (
         "the ghost draws its far side, so alpha compounds back to near-opaque")
     # The domain being sized is untouched: its material must still be the real
@@ -1484,17 +1484,17 @@ def test_chain_rename_through_the_splitter_persists(scene):
 
 
 # --------------------------------------------------------------------------
-# Per-domain colours chosen in the dialog
+# Per-domain colors chosen in the dialog
 # --------------------------------------------------------------------------
 
 @pytest.mark.integration
 def test_committing_the_dialog_recolors_domains_with_their_chosen_colors(scene):
-    """A colour carried by the layout lands on its domain when OK is pressed.
+    """A color carried by the layout lands on its domain when OK is pressed.
 
     Driven through layout_json's optional "color" field, the scripted
     counterpart of the dialog rows' swatches - both feed the same apply path.
-    Ground truth is the colour node the renderer actually reads, not the
-    domain model's stored colour.
+    Ground truth is the color node the renderer actually reads, not the
+    domain model's stored color.
     """
     mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
     mol = H.sm().molecules[mid]
@@ -1517,14 +1517,14 @@ def test_committing_the_dialog_recolors_domains_with_their_chosen_colors(scene):
     head = next(d for d in domains.values() if d.name == "Head")
     tail = next(d for d in domains.values() if d.name == "Tail")
     assert _domain_color(head.object)[:3] == pytest.approx(red[:3], abs=1e-4), (
-        "the Head domain never received its chosen colour")
+        "the Head domain never received its chosen color")
     assert _domain_color(tail.object)[:3] == pytest.approx(green[:3], abs=1e-4), (
-        "the Tail domain never received its chosen colour")
+        "the Tail domain never received its chosen color")
 
 
 @pytest.mark.integration
 def test_a_layout_without_colors_leaves_the_domains_colors_alone(scene):
-    """Re-committing a layout with no colour choices must not repaint anything."""
+    """Re-committing a layout with no color choices must not repaint anything."""
     mid, chain_row, (pdb_min, pdb_max), letter = _single_chain_setup()
     mol = H.sm().molecules[mid]
     low = max(1, pdb_min)
@@ -1535,7 +1535,7 @@ def test_a_layout_without_colors_leaves_the_domains_colors_alone(scene):
     domains = _domains_on_chain(mol, letter)
     before = {did: _domain_color(d.object) for did, d in domains.items()}
 
-    # Nudge the boundary, colour-free, and check every colour survives.
+    # Nudge the boundary, color-free, and check every color survives.
     chain_row = _row_by_id(chain_row.item_id)
     by_start = sorted(domains.items(), key=lambda kv: kv[1].start)
     _apply(chain_row, [("Head", low, midpoint - 5, by_start[0][0]),
@@ -1544,4 +1544,4 @@ def test_a_layout_without_colors_leaves_the_domains_colors_alone(scene):
     for did, domain in _domains_on_chain(mol, letter).items():
         assert _domain_color(domain.object) == pytest.approx(before[did],
                                                              abs=1e-4), (
-            f"a colour-free layout edit repainted {domain.name}")
+            f"a color-free layout edit repainted {domain.name}")

@@ -155,7 +155,7 @@ def register() -> None:
     register_protein_props()
     register_molecule_props()
     register_pose_props()  # Register pose properties
-    register_visual_style_props()  # Scene colour/style properties
+    register_visual_style_props()  # Scene color/style properties
     register_panels()  # Register panel properties
     
     # Register domain expanded property if not already registered

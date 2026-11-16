@@ -72,7 +72,7 @@ Like colors, the style reaches everything the row covers, immediately.
 
 The dialog opens showing what the item currently looks like. If its parts
 disagree - say a chain whose domains are half cartoon and half surface - the
-dropdown reads **Multiple**, and the colour swatch shows a neutral grey with a
+dropdown reads **Multiple**, and the color swatch shows a neutral grey with a
 note saying so, since a swatch has no way to draw "mixed". Picking a real value
 resolves them all; leaving it alone changes nothing. **Multiple** is only in the
 list while the parts disagree; it is not a style you can choose.

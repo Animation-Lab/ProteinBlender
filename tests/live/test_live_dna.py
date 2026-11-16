@@ -4,8 +4,8 @@ DNA and RNA are never rendered anywhere else in the suite. ``tests/integration/
 test_dna.py`` proves the operators run and that the strand carries the right
 ``pb_*`` bookkeeping, but every one of its geometry checks bottoms out in
 "``obj.data.vertices`` is non-empty" - which stays true for a strand that is
-built inside-out, drawn in one flat colour, or not drawn at all. A style that
-silently fails to bind, a base-colour map that never reaches a material, and a
+built inside-out, drawn in one flat color, or not drawn at all. A style that
+silently fails to bind, a base-color map that never reaches a material, and a
 bend rig that deforms nothing all pass the headless lane today.
 
 This module renders the strand and asserts on what comes back.
@@ -13,13 +13,13 @@ This module renders the strand and asserts on what comes back.
 The assertions here are deliberately relational rather than absolute:
 
   * Two styles of the same strand must not produce the same image.
-  * A blue-coloured strand must read bluer than the same strand coloured red.
+  * A blue-colored strand must read bluer than the same strand colored red.
   * A 40-mer must be about twice as long as a 20-mer, because B-form rise per
     base is constant - a fact about the molecule, not about our code.
 
 Nothing in this file computes its expected value with the helper it is testing.
 Sequence complements are derived from the base-pairing rules in plain Python on
-the runner side; lengths come from mesh coordinates; colours come from pixels.
+the runner side; lengths come from mesh coordinates; colors come from pixels.
 """
 
 from __future__ import annotations
@@ -101,8 +101,8 @@ return obj.get("pb_style")
 """
 
 # Selecting the strand first is load-bearing: making it active fires the msgbus
-# sync that copies the object's stored colours *into* the panel props. Setting
-# our colours before that would be silently clobbered.
+# sync that copies the object's stored colors *into* the panel props. Setting
+# our colors before that would be silently clobbered.
 APPLY_COLORS = """
 obj = bpy.data.objects[name]
 with R.view3d_override():
@@ -453,11 +453,11 @@ def test_swap_to_complement_pairs_adenine_with_uracil_in_rna(blender):
 
 
 # ---------------------------------------------------------------------------
-# Colour
+# Color
 #
 # This is the lane's reason for existing. The headless suite asserts that
 # update_dna_colors writes pb_color_a onto the object, which stays true for a
-# colour that never reaches a material. These tests look at the pixels.
+# color that never reaches a material. These tests look at the pixels.
 # ---------------------------------------------------------------------------
 
 BASE_COLOR_PROPS = ["color_a", "color_t", "color_g", "color_c",
@@ -469,7 +469,7 @@ GREY = [0.5, 0.5, 0.5, 1.0]
 
 
 def _all_bases(color, nucleic_type="DNA"):
-    """Every base plus the backbone painted one colour."""
+    """Every base plus the backbone painted one color."""
     keys = ["color_a", "color_g", "color_c", "color_backbone"]
     keys.append("color_u" if nucleic_type == "RNA" else "color_t")
     return {key: list(color) for key in keys}
@@ -477,14 +477,14 @@ def _all_bases(color, nucleic_type="DNA"):
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_base_colours_reach_the_rendered_strand(blender):
+def test_base_colors_reach_the_rendered_strand(blender):
     """A strand painted blue must read bluer than the same strand painted red.
 
     The comparison is between two renders of one strand, so lighting, framing
-    and style are held constant and the only variable is the colour the user
+    and style are held constant and the only variable is the color the user
     asked for. Absolute channel values are never asserted - only that the
     ordering of the red and blue channels follows the request, which is the
-    invariant a colour that never binds cannot satisfy.
+    invariant a color that never binds cannot satisfy.
     """
     blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
     name = build_strand(blender, seq="ATCGATCGATCG", prefix="DNA_COLOR",
@@ -507,15 +507,15 @@ def test_base_colours_reach_the_rendered_strand(blender):
 
     diff = blender.call('return R.compare("red", "blue")')
     assert diff["rgb_delta"] > 0.0, (
-        "recolouring the strand from red to blue left the render "
-        "byte-identical; the colours never reached the viewport")
+        "recoloring the strand from red to blue left the render "
+        "byte-identical; the colors never reached the viewport")
 
 
 @pytest.mark.live
 @pytest.mark.visual
 @pytest.mark.parametrize("prop", BASE_COLOR_PROPS)
-def test_each_dna_base_colour_changes_the_render(blender, prop):
-    """Every individual colour swatch must be wired to something on screen.
+def test_each_dna_base_color_changes_the_render(blender, prop):
+    """Every individual color swatch must be wired to something on screen.
 
     Painted one at a time against a grey strand, so a swatch that is wired to
     the wrong base, or to nothing, shows up as an unchanged image. The sequence
@@ -541,7 +541,7 @@ def test_each_dna_base_colour_changes_the_render(blender, prop):
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_uracil_colour_changes_the_rendered_rna(blender):
+def test_uracil_color_changes_the_rendered_rna(blender):
     """color_u only applies to RNA, so it needs an RNA strand to be provable."""
     blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
     name = build_strand(blender, seq="AUGCAUGC", prefix="RNA_COLOR", nt="RNA",
@@ -556,7 +556,7 @@ def test_uracil_colour_changes_the_rendered_rna(blender):
 
     diff = blender.call('return R.compare("grey", "uracil")')
     assert diff["rgb_delta"] > 0.0, (
-        "recolouring uracil left the rendered RNA unchanged")
+        "recoloring uracil left the rendered RNA unchanged")
 
 
 # ---------------------------------------------------------------------------

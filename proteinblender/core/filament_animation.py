@@ -69,7 +69,7 @@ class PBFilamentParameters(PropertyGroup):
                              max=symmetry_builder.MAX_COUNT, default=0)
     shrink_minus: IntProperty(name="Shrink Minus End", min=0,
                               max=symmetry_builder.MAX_COUNT, default=0)
-    #: Monomers with a colour of their own (``core.subunit_colors``).
+    #: Monomers with a color of their own (``core.subunit_colors``).
     colors: CollectionProperty(type=subunit_colors.PBSubunitColor)
     #: Monomers taken out of the drawing, by the eye on their row.
     hidden: CollectionProperty(type=subunit_colors.PBSubunitHidden)
@@ -116,7 +116,7 @@ def write_parameters(molecule) -> bool:
 
 def keyframe_parameters(molecule, frame: int) -> int:
     """Key every number the filament is built from at ``frame``, and every
-    subunit's own colour. Returns how many properties were keyed."""
+    subunit's own color. Returns how many properties were keyed."""
     obj = _owner(molecule)
     if obj is None or not write_parameters(molecule):
         return 0

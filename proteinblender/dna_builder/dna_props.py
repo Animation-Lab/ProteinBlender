@@ -181,7 +181,7 @@ class DNABuilderProperties(PropertyGroup):
             "Share one set of backbone + base-ring atom positions across "
             "every residue and collapse the purine N7/C8/N9 extension "
             "onto the 6-ring so every rung renders with the same outline. "
-            "Per-base colours still apply. Best paired with the Ball & "
+            "Per-base colors still apply. Best paired with the Ball & "
             "Stick style — Cartoon style still draws purine vs pyrimidine "
             "blocks at MN's hardcoded sizes. Only applies in Ladder mode."
         ),
@@ -206,7 +206,7 @@ class DNABuilderProperties(PropertyGroup):
         default="DNA",
     )
 
-    # Per-base colours (RGBA, size=4)
+    # Per-base colors (RGBA, size=4)
     color_a: FloatVectorProperty(
         name="Adenine",
         subtype="COLOR",

@@ -5,7 +5,7 @@ Membranes are never rendered anywhere else in the suite. The headless lane
 emits *instances*, so an evaluated ``to_mesh`` contains zero vertices and every
 assertion there falls back to the root's flat base patch. That patch is created
 before a single lipid is placed. It survives a lipid collection that never
-loads, a render style that never binds, a colour that never reaches a material,
+loads, a render style that never binds, a color that never reaches a material,
 a hole that carves nothing, and a force field that pushes nothing aside.
 
 This module measures the lipids themselves, two ways, both independent of the
@@ -696,7 +696,7 @@ def test_reset_deform_returns_the_membrane_to_its_rest_shape(blender):
 
 
 # ---------------------------------------------------------------------------
-# Colour
+# Color
 #
 # The headless lane cannot check any of this: it reduces every render to an
 # alpha mask and throws the RGB channels away.
@@ -704,11 +704,11 @@ def test_reset_deform_returns_the_membrane_to_its_rest_shape(blender):
 
 @pytest.mark.live
 @pytest.mark.visual
-def test_the_lipid_surface_colour_reaches_the_render(blender):
+def test_the_lipid_surface_color_reaches_the_render(blender):
     """A red membrane must read redder than a blue one.
 
     Two membranes built in turn at the same place with the same framing, so the
-    only difference is the colour that was asked for. Only the ordering of the
+    only difference is the color that was asked for. Only the ordering of the
     channels is asserted, never their values, so viewport lighting cannot make
     or break it.
     """
@@ -730,17 +730,17 @@ def test_the_lipid_surface_colour_reaches_the_render(blender):
 
     diff = blender.call('return R.compare("red", "blue")')
     assert diff["rgb_delta"] > 0.0, (
-        "the lipid colour never reached the rendered membrane")
+        "the lipid color never reached the rendered membrane")
 
 
 @pytest.mark.live
 @pytest.mark.visual
 @pytest.mark.slow
-def test_head_and_tail_colours_each_reach_the_render(blender):
-    """Head and tail are separately coloured in the stylized style.
+def test_head_and_tail_colors_each_reach_the_render(blender):
+    """Head and tail are separately colored in the stylized style.
 
     Each swatch is varied on its own against a dark constant for the other, so a
-    head colour wired to the tail material, or to nothing, cannot hide behind
+    head color wired to the tail material, or to nothing, cannot hide behind
     the other swatch changing at the same time.
     """
     blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
@@ -762,7 +762,7 @@ def test_head_and_tail_colours_each_reach_the_render(blender):
         diff = blender.call("return R.compare(left, right)",
                             left=f"{part}-red", right=f"{part}-blue")
         assert diff["rgb_delta"] > 0.0, (
-            f"changing only the lipid {part} colour from red to blue left the "
+            f"changing only the lipid {part} color from red to blue left the "
             "render unchanged; that swatch is not connected to a material")
 
 
@@ -1137,7 +1137,7 @@ def test_wider_force_field_spacing_opens_a_wider_gap(blender, single_chain):
 #
 # These exist because the suite once had 16 of 18 membrane tests green over
 # geometry that was obviously wrong to the eye. Every assertion above this point
-# asks whether lipids *exist*, whether shapes *differ*, whether colour *reaches*
+# asks whether lipids *exist*, whether shapes *differ*, whether color *reaches*
 # the render. None of them asked which way a lipid points, so a bilayer whose
 # every lipid lay on the (1,1,1) diagonal, with the two leaflets sheared apart
 # and no membrane to speak of, passed them all.
@@ -1324,17 +1324,17 @@ return {"visible_nm": float((np.median(upper_hi) - np.median(lower_lo))
 
 
 # ---------------------------------------------------------------------------
-# Colour
+# Color
 # ---------------------------------------------------------------------------
 
 @pytest.mark.live
 @pytest.mark.visual
 def test_the_surface_style_renders_close_to_its_configured_near_white(blender):
-    """SURFACE is one near-white colour for the whole lipid, and must stay so.
+    """SURFACE is one near-white color for the whole lipid, and must stay so.
 
     The default is a deliberate off-white (0.92): light enough to read as a
-    pale membrane behind a coloured protein. A style that silently fell back to
-    an unlit grey, or to the pink head colour, would still render and still
+    pale membrane behind a colored protein. A style that silently fell back to
+    an unlit grey, or to the pink head color, would still render and still
     pass every other test in this module.
     """
     blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
@@ -1349,29 +1349,29 @@ def test_the_surface_style_renders_close_to_its_configured_near_white(blender):
         "the near-white this style configures")
     assert max(red, green, blue) - min(red, green, blue) < 0.12, (
         f"the SURFACE lipids rendered tinted ({metrics['mean_rgb']}); this "
-        "style is a single neutral colour")
+        "style is a single neutral color")
 
 
 @pytest.mark.live
 @pytest.mark.visual
 @pytest.mark.parametrize("style", ["STYLIZED", "BALL_AND_STICK"])
-def test_head_and_tail_colours_reach_the_render(blender, style):
-    """Changing the head colour must change what is on screen, in that channel.
+def test_head_and_tail_colors_reach_the_render(blender, style):
+    """Changing the head color must change what is on screen, in that channel.
 
     The two-material styles are the only place head and tail can be told apart,
     and the property write reaching the material is not the same thing as the
-    material reaching a pixel. This is the assertion the domain-colour bug
+    material reaching a pixel. This is the assertion the domain-color bug
     taught us to write: drive the user-facing property, then look.
 
-    The tail is pinned to a dark neutral both times so the head colour is the
+    The tail is pinned to a dark neutral both times so the head color is the
     only thing that moves between the two builds.
     """
     blender.call("return R.set_shading(kind='MATERIAL', color_type='MATERIAL')")
 
-    def build_and_measure(head_colour):
+    def build_and_measure(head_color):
         blender.call(BUILD, overrides={"shape": "FLAT", "width": 12,
                                        "height": 12, "render_style": style,
-                                       "color_head": head_colour,
+                                       "color_head": head_color,
                                        "color_tail": DARK_GREY})
         blender.call("return R.frame_all()")
         return blender.call("return R.viewport_metrics(resolution=300)")

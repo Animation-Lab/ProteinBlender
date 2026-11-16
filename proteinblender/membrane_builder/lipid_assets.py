@@ -52,7 +52,7 @@ STYLE_BALL_AND_STICK = "BALL_AND_STICK"
 
 RENDER_STYLE_ITEMS = (
     (STYLE_SURFACE, "Surface",
-     "Smooth fused-atom surface (metaball-evaluated); single colour covers "
+     "Smooth fused-atom surface (metaball-evaluated); single color covers "
      "head + tail uniformly"),
     (STYLE_STYLIZED, "Stylized",
      "Abstract head sphere + two tail chains that follow each PDB pose"),
@@ -189,7 +189,7 @@ _SURFACE_RENDER_RESOLUTION_BU = 0.006
 _SURFACE_THRESHOLD = 0.6
 
 # Atoms treated as "head group" (slot 0) vs tail (slot 1) for ball-and-
-# stick colouring. Element-based — matches standard B&S convention.
+# stick coloring. Element-based — matches standard B&S convention.
 _HEAD_ELEMENTS = frozenset({"P", "N", "O"})
 
 
@@ -400,8 +400,8 @@ HEAD_MATERIAL_NAME = "PB_Membrane_Head"
 TAIL_MATERIAL_NAME = "PB_Membrane_Tail"
 SURFACE_MATERIAL_NAME = "PB_Membrane_Surface"
 
-# Default colour for the SURFACE style — soft off-white, matches the
-# reference render. Operator overrides this once the user picks a colour.
+# Default color for the SURFACE style — soft off-white, matches the
+# reference render. Operator overrides this once the user picks a color.
 SURFACE_DEFAULT_COLOR = (0.92, 0.92, 0.92, 1.0)
 
 
@@ -432,8 +432,8 @@ def _attach_head_tail_materials(mesh):
 
 
 def _ensure_surface_material():
-    """Single shared material for the SURFACE style — re-coloured by the
-    operator whenever the user changes the surface colour prop."""
+    """Single shared material for the SURFACE style — re-colored by the
+    operator whenever the user changes the surface color prop."""
     return _ensure_material(SURFACE_MATERIAL_NAME, SURFACE_DEFAULT_COLOR, 0.35)
 
 
@@ -581,7 +581,7 @@ def _build_surface(pdb_path: Path, name: str) -> bpy.types.Object:
     ``new_from_object`` and drop both the metaball object and its data.
 
     A single material (``PB_Membrane_Surface``, white by default) covers
-    the whole mesh — head and tail are intentionally the same colour.
+    the whole mesh — head and tail are intentionally the same color.
     Hydrogens are skipped: at this resolution they only add noise.
     """
     atoms = _orient_to_zaxis(_parse_pdb(pdb_path))
@@ -854,7 +854,7 @@ def outer_extent_for_style(style: str) -> float:
 
 def set_surface_color(color) -> None:
     """Re-tint the shared SURFACE-style material. Called by the operator
-    whenever the user changes the surface colour prop."""
+    whenever the user changes the surface color prop."""
     _ensure_material(SURFACE_MATERIAL_NAME, tuple(color), roughness=0.35)
 
 

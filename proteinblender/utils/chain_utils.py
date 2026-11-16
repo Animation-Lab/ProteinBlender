@@ -595,7 +595,7 @@ def get_chain_objects(molecule: Any, chain_item: Any) -> List[bpy.types.Object]:
     """Return every live Blender object a chain outliner row maps to.
 
     This is the single source of truth for "what objects does this chain
-    refer to", shared by selection sync, colouring and splitting so they all
+    refer to", shared by selection sync, coloring and splitting so they all
     agree. Resolution order:
 
       1. If the row is backed by a single object — the common "one object per

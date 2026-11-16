@@ -36,7 +36,7 @@ A keyframeable assemble/disassemble factor, so a capsid can form on the timeline
 Optional per-copy stagger so subunits arrive in sequence rather than all at once.
 Composable with the Brownian motion we already ship, so subunits jitter in from solution and lock into the lattice.
 
-Supporting these, a **realize copies** operator that converts instances into real geometry, mirroring ChimeraX's `copies true`, for when a user needs to select, colour or simulate subunits individually.
+Supporting these, a **realize copies** operator that converts instances into real geometry, mirroring ChimeraX's `copies true`, for when a user needs to select, color or simulate subunits individually.
 
 ## Non-goals
 
@@ -130,7 +130,7 @@ The most complete model, and the one worth borrowing from.
 
 ### Mol\* / RCSB - the presentation layer
 
-The "Assembly Symmetry" panel colours subunits by **symmetry cluster** and draws the **symmetry axes and a polyhedral cage** over the assembly.
+The "Assembly Symmetry" panel colors subunits by **symmetry cluster** and draws the **symmetry axes and a polyhedral cage** over the assembly.
 RCSB annotates every entry with global symmetry, local symmetry and pseudosymmetry, giving a point group symbol (`C2`, `D7`, `I`) plus subunit stoichiometry.
 That annotation is a ready-made source for a human-readable label in our UI.
 
@@ -244,17 +244,17 @@ If we implement icosahedral generation, follow ChimeraX and make the orientation
 ### Tier 4 - visualisation
 
 - **Symmetry axes as real objects** (Mol\* style) - the C5/C3/C2 axes of an icosahedron. Excellent for figures and teaching, and trivially renderable once they are Blender objects.
-- **Colour by symmetry cluster / transform id.**
+- **Color by symmetry cluster / transform id.**
 - **Contact and range filtering**, per ChimeraX - show only the subunits touching a chosen one.
 - **Capsid cutaway** - hide a hemisphere to reveal the interior. This is *the* canonical virus figure and is natural in Blender.
 
 ## 5. Integration risks worth deciding early
 
 - **Instances are not real geometry.**
-  Per-copy selection, per-copy colour and physics will not work on them.
+  Per-copy selection, per-copy color and physics will not work on them.
   Mirror ChimeraX's `copies true` with a "Realize copies" operator for when a user needs to treat subunits individually.
 - **Domain edits propagate to every copy.**
-  The assembly node is inserted last, so upstream domain masks and colours flow into all instances - almost certainly the behaviour we want, but it means a domain pivot moves that chain in all 60 copies.
+  The assembly node is inserted last, so upstream domain masks and colors flow into all instances - almost certainly the behaviour we want, but it means a domain pivot moves that chain in all 60 copies.
   Worth confirming that is the intended semantics before building UI on top of it.
 - **The transforms data object is an extra `bpy` object** that `scene_manager` does not currently know about.
   It needs to be tracked for delete and undo/redo alongside the molecule.
