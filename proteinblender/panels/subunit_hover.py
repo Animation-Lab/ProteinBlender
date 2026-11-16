@@ -13,7 +13,7 @@ swatch for as long as its color picker is open, so a lit swatch hid every
 color picked in it until the picker closed.
 
 While the panel is on screen a light timer reads that and lays a highlight
-over the subunit (``subunit_colors.LIST_LAYER``). The panel's draw starts the
+over the subunit (``subunit_colors.set_overlay``). The panel's draw starts the
 timer, and it stops itself a little while after the mouse has left the list,
 clearing the highlight as it goes, so nothing runs while the panel is unused.
 """
@@ -87,10 +87,9 @@ def _light(found) -> None:
     if previous is not None and (lit is None or previous[0] != lit[0]):
         molecule = _molecule(previous[0])
         if molecule is not None:
-            subunit_colors.set_overlay(molecule, {}, subunit_colors.LIST_LAYER)
+            subunit_colors.set_overlay(molecule, {})
     if lit is not None:
-        subunit_colors.set_overlay(found[0], {lit[1]: subunit_colors.HOVER_TINT},
-                                   subunit_colors.LIST_LAYER)
+        subunit_colors.set_overlay(found[0], {lit[1]: subunit_colors.HOVER_TINT})
     for _window, area, _region in _viewports():
         area.tag_redraw()
 

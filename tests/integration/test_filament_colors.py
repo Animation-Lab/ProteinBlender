@@ -594,22 +594,6 @@ def test_select_all_of_one_tubulin_selects_only_that_tubulin():
         assert not any(row.select for row in rows if row.chain == chains[other])
 
 
-def test_a_ray_at_a_subunit_picks_that_subunit():
-    """Aimed in from outside the filament at the fourth subunit from the pointed end."""
-    molecule = _build("ACTIN", 27.5)
-    ordered = _from_the_pointed_end(molecule) * WORLD_SCALE
-    axis = _path_axis(molecule)
-    middle = ordered.mean(axis=0)
-    for index in (0, 3, 9):
-        target = ordered[index]
-        radial = (target - middle) - ((target - middle) @ axis) * axis
-        radial /= np.linalg.norm(radial)
-        origin = target + radial * 5.0
-        assert _colors().subunit_on_ray(molecule, origin, -radial) == f"{index}:A"
-    # And one that misses the filament altogether.
-    assert _colors().subunit_on_ray(molecule, middle + axis * 50.0, axis) is None
-
-
 # --------------------------------------------------------------------------
 # Hiding a subunit: the eye on its row
 # Reported 2026-11-03 (Dillon's notes): "make it so you can hide individual
@@ -698,18 +682,6 @@ def test_hiding_one_tubulin_leaves_its_partner():
     _row(molecule, f"5:{chains['beta']}").hide = True
     assert len(_drawn(molecule, chains["beta"])[0]) == 12
     assert len(_drawn(molecule, chains["alpha"])[0]) == 13
-
-
-def test_a_ray_at_a_hidden_subunit_does_not_pick_it():
-    molecule = _build("ACTIN", 27.5)
-    ordered = _from_the_pointed_end(molecule) * WORLD_SCALE
-    axis = _path_axis(molecule)
-    target = ordered[3]
-    radial = (target - ordered.mean(axis=0))
-    radial -= (radial @ axis) * axis
-    radial /= np.linalg.norm(radial)
-    _row(molecule, "3:A").hide = True
-    assert _colors().subunit_on_ray(molecule, target + radial * 5.0, -radial) != "3:A"
 
 
 def _drawn_anywhere(chain="A"):
@@ -941,22 +913,65 @@ def _tint_rows(molecule):
     return found
 
 
-def test_the_picker_is_drawn_over_the_lists_highlight():
+def test_a_highlight_lights_one_subunit_until_it_is_cleared():
+    """The list's hover highlight is the only overlay: one subunit, then none."""
     colors = _colors()
     molecule = _build("ACTIN", 27.5)
-    colors.set_overlay(molecule, {"4:A": colors.HOVER_TINT}, colors.LIST_LAYER)
-    colors.set_overlay(molecule, {"4:A": colors.SELECTED_TINT, "6:A": colors.SELECTED_TINT})
-    instances, painted = _drawn(molecule)
-    assert (len(instances), len(painted)) == (8, 2)
-    assert colors.overlay(molecule)["4:A"] == colors.SELECTED_TINT
-
-    # Finishing the picker leaves the list's highlight as it was.
-    colors.set_overlay(molecule, {})
+    colors.set_overlay(molecule, {"4:A": colors.HOVER_TINT})
     _instances, painted = _drawn(molecule)
     assert len(painted) == 1
     assert np.allclose(painted[0][1], colors.HOVER_TINT[:3], atol=1e-3)
-    colors.set_overlay(molecule, {}, colors.LIST_LAYER)
+    assert colors.overlay(molecule) == {"4:A": colors.HOVER_TINT}
+
+    colors.set_overlay(molecule, {})
     assert len(_drawn(molecule)[1]) == 0
+    assert colors.overlay(molecule) == {}
+
+
+def test_picking_subunits_in_the_viewport_is_gone():
+    """Dillon (2026-11-10): "Remove 'Pick in Viewport' ... the colorwheel picker
+    is great". The operator is unregistered, not just undrawn."""
+    assert not hasattr(bpy.types, "MOLECULE_PB_OT_pick_subunits")
+    assert "pick_subunits" not in dir(bpy.ops.molecule)
+
+
+class _DrawnLayout:
+    """Stands in for the panel's layout and keeps every button it is asked for.
+
+    ``UILayout.introspect`` reports a button's text but not its icon, so the
+    icon is read here, from what the panel hands Blender to draw.
+    """
+
+    def __init__(self):
+        self.buttons = []
+
+    def operator(self, identifier, **kwargs):
+        self.buttons.append((identifier, kwargs))
+        return type("Props", (), {})()
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: self
+
+
+def test_the_select_buttons_carry_no_checkbox_icons():
+    """Dillon (2026-11-10): the select buttons "should not look like
+    checkboxes". Select All, None, Invert and each tubulin's button are drawn
+    with text alone."""
+    from proteinblender.panels.subunit_panel import PROTEINBLENDER_PT_subunits
+
+    molecule = _build("MICROTUBULE", 17.0)
+    _untick_all()
+    _tick(molecule.identifier)
+    # The panel fills the list from a timer; the next redraw draws it filled.
+    _colors().sync_roster(molecule)
+    panel = type("Panel", (), {"layout": _DrawnLayout()})()
+    PROTEINBLENDER_PT_subunits.draw(panel, bpy.context)
+
+    selects = [kwargs for identifier, kwargs in panel.layout.buttons
+               if identifier == "molecule.select_subunits"]
+    assert sorted(kwargs["text"] for kwargs in selects) == [
+        "All Alpha Tubulin", "All Beta Tubulin", "Invert", "None", "Select All"]
+    assert all(kwargs.get("icon", "NONE") == "NONE" for kwargs in selects), selects
 
 
 def test_a_highlight_is_never_saved(tmp_path):
@@ -964,7 +979,7 @@ def test_a_highlight_is_never_saved(tmp_path):
     colors = _colors()
     molecule = _build("ACTIN", 27.5)
     _paint(molecule, ["2:A"])
-    colors.set_overlay(molecule, {"5:A": colors.HOVER_TINT}, colors.LIST_LAYER)
+    colors.set_overlay(molecule, {"5:A": colors.HOVER_TINT})
     assert set(_tint_rows(molecule)) == {2, 5}
 
     written = {}
@@ -990,7 +1005,7 @@ def test_a_highlight_does_not_pass_to_a_new_filament_of_the_same_name():
     colors = _colors()
     first = _build("ACTIN", 27.5)
     name = first.object.name
-    colors.set_overlay(first, {"5:A": colors.HOVER_TINT}, colors.LIST_LAYER)
+    colors.set_overlay(first, {"5:A": colors.HOVER_TINT})
     assert bpy.ops.molecule.delete('EXEC_DEFAULT', molecule_id=first.identifier) == {'FINISHED'}
 
     second = _build("ACTIN", 27.5)

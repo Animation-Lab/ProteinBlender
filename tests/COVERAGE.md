@@ -1764,6 +1764,8 @@ on a membrane whose typical gap was 0.28 nm.
   The protein object draws every atom no domain covers, and deleting a domain removed its mask; the user's delete (`molecule.delete_domain`, and `molecule.delete_chain`) now keeps the mask under a `Removed_` name (`MoleculeWrapper.remove_domain_from_scene`), so the atoms go and stay gone in a duplicate and after reopening, while a re-layout still hands residues back.
   `test_deleting_a_piece_takes_its_atoms_off_the_screen[protein|assembly]` and `test_deleted_atoms_stay_gone_after_reopening_and_in_a_duplicate` were red with the deleted piece still drawn.
   The `assembly-split` UI lane (`tests/ui/run_assembly_split_scenarios.py`) walks Ann's whole path in a real window: split and re-cut chain B, paint it, press the protein pencil on mixed styles, Realize Copies, press a copy's pencil and open the Domain Splitter on the copy's chain B.
+- **Pick in Viewport and the checkbox icons on the subunit select buttons are gone** (2026-11-10, Dillon's list).
+  `molecule.pick_subunits`, `subunit_spheres`, `subunit_on_ray` and the overlay's picker layer were removed; the list's hover highlight is the one overlay. `test_picking_subunits_in_the_viewport_is_gone` checks the operator is unregistered; the filament UI lane checks the panel draws no Pick in Viewport and no checkbox icon on Select All, None, Invert or the per-tubulin buttons.
 
 ## Crash regressions (guard against reintroduction)
 
@@ -2344,7 +2346,7 @@ The color and Strength fields below the list show the first selected subunit (it
 
 - `test_filament_subunits.py`, `test_filament_ends.py` and `test_filament_colors.py`, as in the integration table.
 - `tests/roundtrip` `bent_filament`: a subunit painted at strength 0.6 and selected in the list; the snapshot digests the point clouds' `site` and `pb_tint` values as well as their attribute names, and `Scene.pb_subunit_color` is snapshotted.
-- `--scenario filament`: the Alpha Tubulin and Beta Tubulin chain rows, Shrink's end names and 143 left after one off the minus end, then the Cytoskeleton Subunits panel not drawn while the microtubule is unticked in the PB Outliner and drawn with 312 rows once it is ticked, Select All, All Alpha Tubulin and All Beta Tubulin drawn above the list, three subunits colored by changing the color field alone, Pick in Viewport lighting the subunit under the mouse yellow, a click selecting it and Esc taking the highlight off; then the mouse walked down the Properties editor onto a list row (found by the button Blender says is hovered), that row's subunit lit and nothing else, and the highlight gone once the mouse is in the viewport; finally All Alpha Tubulin selecting the 143 alpha monomers left and no beta. Passes on Blender 5.2.
+- `--scenario filament`: the Alpha Tubulin and Beta Tubulin chain rows, Shrink's end names and 143 left after one off the minus end, then the Cytoskeleton Subunits panel not drawn while the microtubule is unticked in the PB Outliner and drawn with 312 rows once it is ticked, Select All, All Alpha Tubulin and All Beta Tubulin drawn above the list, three subunits colored by changing the color field alone; then the mouse walked down the Properties editor onto a list row (found by the button Blender says is hovered), that row's subunit lit and nothing else, and the highlight gone once the mouse is in the viewport; finally All Alpha Tubulin selecting the 143 alpha monomers left and no beta. Passes on Blender 5.2.
 
 ## Keyframing a filament (2026-10-19)
 

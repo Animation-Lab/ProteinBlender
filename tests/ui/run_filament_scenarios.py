@@ -361,18 +361,46 @@ def verify_hidden_and_tick():
     return 'hidden until ticked'
 
 
+def _buttons_labelled(layout, labels):
+    """Every introspected button whose text is one of ``labels``; all must be found."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get('draw_string') in labels:
+                found.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(layout)
+    assert {b.get('draw_string') for b in found} == set(labels), (sorted(labels), found[:6])
+    return found
+
+
 def inspect_subunits_panel():
     text = str(data.get('PROTEINBLENDER_PT_subunits_layout', ''))
     assert 'Cytoskeleton Subunits' in text, 'the Subunits panel was not drawn'
-    for label in ('Pick in Viewport', 'Clear', 'Nothing selected'):
+    for label in ('Clear', 'Nothing selected'):
         assert label in text, (label, text[:400])
+    # Dillon, 2026-11-10: picking in the viewport is gone (the color wheel
+    # does the job). The select buttons are all drawn as buttons; that they
+    # carry no icon is checked in test_filament_colors.py, since introspect
+    # reports no icons.
+    assert 'Pick in Viewport' not in text, text[:600]
+    for button in _buttons_labelled(data['PROTEINBLENDER_PT_subunits_layout'],
+                                    ('Select All', 'None', 'Invert',
+                                     'All Alpha Tubulin', 'All Beta Tubulin')):
+        assert 'select_subunits' in button.get('operator', ''), button
     # Dillon, 2026-11-03: "Take strength out but make sure color of individual
     # actin (etc.) are keyframable". The color is keyed on its own.
     assert 'pb_subunit_strength' not in text and 'Strength' not in text, (
         'the Subunits panel still draws the Strength slider', text[:600])
     # The select buttons sit above the list, a microtubule's tubulins below Select All.
     order = [text.find(label) for label in (
-        'Select All', 'All Alpha Tubulin', 'All Beta Tubulin', 'Pick in Viewport')]
+        'Select All', 'All Alpha Tubulin', 'All Beta Tubulin', 'Clear')]
     assert -1 not in order and order == sorted(order), (order, text[:600])
     mol = filament()
     rows = mol.object.pb_filament.subunits
@@ -426,69 +454,6 @@ def verify_all_alpha():
     assert f'{len(chosen)} selected' in text, text[:400]
     capture('subunits-all-alpha.png')
     return f'{len(chosen)} alpha'
-
-
-def aim_at_a_subunit():
-    """Park the mouse over the subunit nearest the viewer, then start picking."""
-    from bpy_extras import view3d_utils
-    mol = filament()
-    area, region = viewport()
-    view = area.spaces.active.region_3d
-    eye = np.array(view.view_matrix.inverted().translation)
-    best = None
-    for name, centre, _radius in SC.subunit_spheres(mol):
-        if name in data['colored']:
-            continue
-        where = view3d_utils.location_3d_to_region_2d(region, view, centre.tolist())
-        if where is None or not (40 < where.x < region.width - 40
-                                 and 40 < where.y < region.height - 40):
-            continue
-        depth = float(np.linalg.norm(centre - eye))
-        if best is None or depth < best[0]:
-            best = (depth, name, where)
-    assert best is not None, 'no subunit in view to pick'
-    _depth, name, where = best
-    data['target'] = name
-    data['target_xy'] = (region.x + where.x, region.y + where.y)
-    move(*data['target_xy'])
-    with bpy.context.temp_override(window=g['active_window'](), area=area, region=region):
-        assert bpy.ops.molecule.pick_subunits(
-            'INVOKE_DEFAULT', molecule_id=mol.identifier) == {'RUNNING_MODAL'}
-    return name
-
-
-def hover():
-    move(*data['target_xy'])
-
-
-def verify_hover():
-    mol = filament()
-    tints = SC.overlay(mol)
-    assert tints.get(data['target']) == SC.HOVER_TINT, (data['target'], sorted(tints)[:6])
-    for name in data['colored']:
-        assert tints.get(name) == SC.SELECTED_TINT, name
-    capture('pick-hover.png')
-    return data['target']
-
-
-def click(value):
-    x, y = data['target_xy']
-    g['active_window']().event_simulate(type='LEFTMOUSE', value=value, x=int(x), y=int(y))
-
-
-def verify_picked_and_finish():
-    mol = filament()
-    row = mol.object.pb_filament.subunits[data['target']]
-    assert row.select, f"the click did not select {data['target']}"
-    key('ESC')
-
-
-def verify_picking_finished():
-    mol = filament()
-    assert SC.overlay(mol) == {}, 'Esc left the pick highlight on the filament'
-    assert sorted(SC.selected_keys(mol)) == sorted(data['colored'] + [data['target']])
-    capture('pick-finished.png')
-    return 'four selected'
 
 
 def properties_region():
@@ -546,7 +511,7 @@ def wait_for_the_watch():
 def verify_row_lit():
     mol = filament()
     row = mol.object.pb_filament.subunits[data['row']]
-    lit = SC.overlay(mol, SC.LIST_LAYER)
+    lit = SC.overlay(mol)
     assert lit == {row.name: SC.HOVER_TINT}, (row.name, lit)
     capture('subunits-hover.png')
     return row.label
@@ -559,7 +524,7 @@ def leave_the_list():
 
 def verify_row_dark():
     mol = filament()
-    assert SC.overlay(mol, SC.LIST_LAYER) == {}, 'the highlight stayed after the mouse left'
+    assert SC.overlay(mol) == {}, 'the highlight stayed after the mouse left'
     return 'cleared'
 
 
@@ -938,7 +903,7 @@ def check_the_drag(label):
         assert chosen != data['drag_start'], (
             f'{label}: the picker has not changed the color yet ({chosen})')
         drawn = drawn_tint(data['eye_name'])
-        lit = SC.overlay(mol, SC.LIST_LAYER)
+        lit = SC.overlay(mol)
         capture(f"drag-{label.replace(' ', '-')}.png")
         assert drawn is not None and np.allclose(drawn[:3], chosen, atol=1e-3), (
             f'{label}: the picker chose {chosen} but the subunit is drawn {drawn} '
@@ -1018,13 +983,6 @@ g['steps'][:] = [
     ('inspect the Subunits panel', inspect_subunits_panel), ('settle', idle),
     ('color three subunits', color_three), ('settle', idle), ('settle', idle),
     ('verify the colors', verify_colored), ('settle', idle),
-    ('aim at a subunit and start picking', aim_at_a_subunit), ('settle', idle),
-    ('hover the subunit', hover), ('settle', idle), ('settle', idle),
-    ('verify the hover highlight', verify_hover), ('settle', idle),
-    ('press', lambda: click('PRESS')), ('settle', idle),
-    ('release', lambda: click('RELEASE')), ('settle', idle),
-    ('verify the pick and press Esc', verify_picked_and_finish), ('settle', idle),
-    ('verify picking finished', verify_picking_finished), ('settle', idle),
     ('find a Subunits row', find_a_row),
     ('point at the row again', wait_for_the_watch), ('settle', idle), ('settle', idle),
     ('verify the row is lit', verify_row_lit), ('settle', idle),

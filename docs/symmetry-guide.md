@@ -117,7 +117,6 @@ Untick the filament and the panel goes away.
 - Point at a row to find its subunit: it lights up yellow in the 3D Viewport while the mouse is on the row.
 - Tick rows to select subunits, or use **Select All**, **None** and **Invert** above the list.
 - On a microtubule, **All Alpha Tubulin** and **All Beta Tubulin** select every subunit of that tubulin and deselect the rest.
-- **Pick in Viewport** lets you choose them in the 3D Viewport instead: the subunit under the mouse lights up yellow, a click selects or deselects it (selected ones show blue), and right-click, Enter or Esc finishes.
 - Each row ends with the subunit's color swatch and an eye, as PB Outliner rows do.
   Change a row's swatch to paint that subunit alone.
   Click its eye to hide that subunit in the viewport and in renders, and again to show it; it comes back where it was.

@@ -19,8 +19,7 @@ keys of those after it (:func:`clear`).
 attribute (``assembly.write_tints``), whenever a color changes, whenever the
 copies are re-placed, and on every frame for colors that are keyframed. A
 transient overlay sits on top to highlight a subunit without touching anyone's
-colors: one layer for the row the mouse is over in the Subunits list, one for
-the viewport picker, which is drawn over it.
+colors: the one whose row the mouse is over in the Subunits list.
 
 **Hiding** a monomer lists it in ``Object.pb_filament.hidden``, by the same
 name, and marks its copy's point ``pb_hidden`` (``assembly.write_hidden``),
@@ -52,14 +51,8 @@ COLORS_PATH = "pb_filament.colors"
 #: The action group color keys are filed under in the Graph Editor.
 GROUP = "Subunit Colors"
 
-#: What the picker paints the subunit under the mouse, and the ones selected.
+#: What the subunit under the mouse in the Cytoskeleton Subunits list is lit.
 HOVER_TINT = (1.0, 0.85, 0.1, 1.0)
-SELECTED_TINT = (0.15, 0.75, 1.0, 0.85)
-
-#: The overlay layers, bottom first: the list's hovered row, then the picker.
-LIST_LAYER = "list"
-PICK_LAYER = "pick"
-_LAYERS = (LIST_LAYER, PICK_LAYER)
 
 
 def key(site: int, chain: str) -> str:
@@ -233,39 +226,29 @@ def chain_labels(molecule) -> Dict[str, str]:
 # What is drawn
 # ---------------------------------------------------------------------------
 
-#: Highlights laid over the colors, per molecule object and layer:
-#: ``{object session uid: {layer: {key: rgba}}}``. Never saved; never keyed.
+#: Highlights laid over the colors, per molecule object:
+#: ``{object session uid: {key: rgba}}``. Never saved; never keyed.
 #: Keyed by the object's session uid, not its name: a filament deleted while
 #: lit must not light the next one built under the same name.
-_OVERLAY: Dict[int, Dict[str, Dict[str, Tuple[float, float, float, float]]]] = {}
+_OVERLAY: Dict[int, Dict[str, Tuple[float, float, float, float]]] = {}
 
 
-def set_overlay(molecule, tints: Dict[str, Tuple[float, float, float, float]],
-                layer: str = PICK_LAYER) -> None:
+def set_overlay(molecule, tints: Dict[str, Tuple[float, float, float, float]]) -> None:
     """Lay ``{key: rgba}`` over the filament's colors until cleared, and draw it."""
     obj = owner(molecule)
     if obj is None:
         return
-    layers = _OVERLAY.setdefault(obj.session_uid, {})
     if tints:
-        layers[layer] = dict(tints)
+        _OVERLAY[obj.session_uid] = dict(tints)
     else:
-        layers.pop(layer, None)
-    if not layers:
         _OVERLAY.pop(obj.session_uid, None)
     refresh(molecule)
 
 
-def overlay(molecule, layer: Optional[str] = None) -> Dict[str, Tuple[float, float, float, float]]:
-    """The highlights drawn over the filament: one layer, or all of them merged."""
+def overlay(molecule) -> Dict[str, Tuple[float, float, float, float]]:
+    """The highlights drawn over the filament."""
     obj = owner(molecule)
-    layers = _OVERLAY.get(obj.session_uid, {}) if obj is not None else {}
-    if layer is not None:
-        return dict(layers.get(layer, {}))
-    merged = {}
-    for name in _LAYERS:
-        merged.update(layers.get(name, {}))
-    return merged
+    return dict(_OVERLAY.get(obj.session_uid, {})) if obj is not None else {}
 
 
 def clear_overlays() -> None:
@@ -275,7 +258,7 @@ def clear_overlays() -> None:
 
 
 #: Highlights taken off while a file is written, to put back afterwards.
-_SET_ASIDE: Dict[int, Dict[str, Dict[str, Tuple[float, float, float, float]]]] = {}
+_SET_ASIDE: Dict[int, Dict[str, Tuple[float, float, float, float]]] = {}
 
 
 def _molecules_drawn_by(uids):
@@ -716,87 +699,3 @@ def selected_keys(molecule) -> List[str]:
     present = present_sites(molecule)
     return [row.name for row in params.subunits
             if row.select and row.site in present]
-
-
-# ---------------------------------------------------------------------------
-# Where the subunits are, for picking
-# ---------------------------------------------------------------------------
-
-def subunit_spheres(molecule) -> List[Tuple[str, np.ndarray, float]]:
-    """``(key, world centre, radius)`` for every monomer the filament draws,
-    the hidden ones left out.
-
-    Each monomer as a sphere about the centre of its chain's atoms, sized to
-    them, carried to where each copy stands. Enough to tell which one a ray
-    from the mouse meets first.
-    """
-    from mathutils import Vector
-
-    from . import assembly, domain_space
-
-    obj_mol = owner(molecule)
-    if obj_mol is None or obj_mol.data is None:
-        return []
-    mesh = obj_mol.data
-    count = len(mesh.vertices)
-    chain_attr = mesh.attributes.get("chain_id")
-    if not count or chain_attr is None:
-        return []
-    co = np.zeros(count * 3)
-    mesh.vertices.foreach_get("co", co)
-    co = co.reshape(-1, 3)
-    chains = np.zeros(count, dtype=np.int32)
-    chain_attr.data.foreach_get("value", chains)
-    letters = getattr(molecule, "auth_chain_id_map", None) or {}
-
-    bpy.context.view_layer.update()
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    hidden = hidden_keys(molecule)
-    spheres = []
-    for obj, points in assembly.point_clouds_of(molecule):
-        chain = chain_of(molecule, obj)
-        if chain is None:
-            continue
-        index = next((i for i, letter in letters.items() if letter == chain), None)
-        mask = chains == index if index is not None else np.zeros(count, bool)
-        if not mask.any():
-            continue
-        atoms = co[mask]
-        centre = atoms.mean(axis=0)
-        radius = float(np.sqrt(((atoms - centre) ** 2).sum(axis=1).mean())) * 1.25
-        world = obj.evaluated_get(depsgraph).matrix_world
-        local_centre = domain_space.local_to_world(obj, Vector(centre))
-        scale = float(np.mean(world.to_scale()))
-        node = next((n for n in assembly._existing_assembly_nodes(
-            assembly._node_group_of(obj))), None)
-        factor = float(node.inputs[assembly.FACTOR_SOCKET].default_value) if node else 1.0
-        stagger = float(node.inputs[assembly.STAGGER_SOCKET].default_value) if node else 0.0
-        placements = assembly._operators_from_points(points, factor, stagger)
-        sites = assembly.point_sites(points.data)
-        for site, (rotation, offset) in zip(sites, placements):
-            if key(int(site), chain) in hidden:
-                continue    # not drawn, so not there to be clicked
-            matrix = assembly.placement_matrix(rotation, offset)
-            spheres.append((key(int(site), chain),
-                            np.array(matrix @ local_centre), radius * scale))
-    return spheres
-
-
-def subunit_on_ray(molecule, origin, direction, spheres=None) -> Optional[str]:
-    """The monomer a ray meets first, or None."""
-    if spheres is None:
-        spheres = subunit_spheres(molecule)
-    origin = np.asarray(origin, dtype=float)
-    direction = np.asarray(direction, dtype=float)
-    direction = direction / max(float(np.linalg.norm(direction)), 1e-12)
-    best, nearest = None, float("inf")
-    for name, centre, radius in spheres:
-        to_centre = centre - origin
-        along = float(to_centre @ direction)
-        miss = float(to_centre @ to_centre) - along * along
-        if miss > radius * radius:
-            continue
-        enter = along - float(np.sqrt(radius * radius - miss))
-        if 0.0 < enter < nearest:
-            best, nearest = name, enter
-    return best

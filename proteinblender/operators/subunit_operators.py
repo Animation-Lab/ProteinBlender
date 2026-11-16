@@ -1,14 +1,12 @@
 """Choosing a filament's subunits and coloring them.
 
 The Subunits list (``panels.subunit_panel``) shows every monomer of a filament.
-These are its buttons: select rows, pick subunits by clicking them in the 3D
-Viewport, and color or clear the selected ones. What a color *is* and how it
+These are its buttons: select rows, and color or clear the selected ones. What a color *is* and how it
 is drawn lives in ``core.subunit_colors``.
 """
 
 import logging
 
-import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import Operator
 
@@ -178,119 +176,7 @@ class MOLECULE_PB_OT_select_subunits(Operator):
         return {"FINISHED"}
 
 
-class MOLECULE_PB_OT_pick_subunits(Operator):
-    """Click subunits in the 3D Viewport to select them"""
-
-    bl_idname = "molecule.pick_subunits"
-    bl_label = "Pick in Viewport"
-    bl_description = (
-        "Point at the filament in the 3D Viewport: the subunit under the mouse "
-        "lights up, and a click selects or deselects it. Right-click or Esc "
-        "to finish")
-    bl_options = {"REGISTER", "UNDO"}
-
-    molecule_id: StringProperty(options={"SKIP_SAVE"})
-
-    _HEADER = ("Pick subunits: click to select or deselect - "
-               "Right-click, Enter or Esc to finish")
-
-    def invoke(self, context, event):
-        molecule = subunit_filament(context, self.molecule_id)
-        if molecule is None:
-            self.report({"ERROR"}, "No cytoskeleton filament to pick from")
-            return {"CANCELLED"}
-        subunit_colors.sync_roster(molecule)
-        self._molecule_id = molecule.identifier
-        self._spheres = subunit_colors.subunit_spheres(molecule)
-        if not self._spheres:
-            self.report({"WARNING"}, "The filament has no subunits to pick")
-            return {"CANCELLED"}
-        self._hover = None
-        context.window_manager.modal_handler_add(self)
-        for area in self._viewports(context):
-            area.header_text_set(self._HEADER)
-        self._show(context)
-        return {"RUNNING_MODAL"}
-
-    def _molecule(self):
-        from ..utils.scene_manager import ProteinBlenderScene
-        return ProteinBlenderScene.get_instance().molecules.get(self._molecule_id)
-
-    @staticmethod
-    def _viewports(context):
-        return [area for area in context.window.screen.areas
-                if area.type == "VIEW_3D"]
-
-    def _hit(self, context, event):
-        """The subunit under the mouse, if the mouse is over a 3D Viewport."""
-        from bpy_extras import view3d_utils
-
-        x, y = event.mouse_x, event.mouse_y
-        for area in self._viewports(context):
-            for region in area.regions:
-                if region.type != "WINDOW":
-                    continue
-                if not (region.x <= x < region.x + region.width
-                        and region.y <= y < region.y + region.height):
-                    continue
-                view = area.spaces.active.region_3d
-                where = (x - region.x, y - region.y)
-                origin = view3d_utils.region_2d_to_origin_3d(region, view, where)
-                direction = view3d_utils.region_2d_to_vector_3d(region, view, where)
-                molecule = self._molecule()
-                if molecule is None:
-                    return None, True
-                return subunit_colors.subunit_on_ray(
-                    molecule, origin, direction, self._spheres), True
-        return None, False
-
-    def _show(self, context):
-        molecule = self._molecule()
-        if molecule is None:
-            return
-        tints = {row.name: subunit_colors.SELECTED_TINT
-                 for row in molecule.object.pb_filament.subunits if row.select}
-        if self._hover is not None:
-            tints[self._hover] = subunit_colors.HOVER_TINT
-        subunit_colors.set_overlay(molecule, tints)
-        _redraw(context)
-
-    def _finish(self, context):
-        molecule = self._molecule()
-        if molecule is not None:
-            subunit_colors.set_overlay(molecule, {})
-        for area in self._viewports(context):
-            area.header_text_set(None)
-        _redraw(context)
-
-    def modal(self, context, event):
-        if self._molecule() is None:
-            self._finish(context)
-            return {"CANCELLED"}
-        if event.type in {"ESC", "RIGHTMOUSE", "RET", "NUMPAD_ENTER"} and event.value == "PRESS":
-            self._finish(context)
-            return {"FINISHED"}
-        if event.type == "MOUSEMOVE":
-            hit, inside = self._hit(context, event)
-            if hit != self._hover:
-                self._hover = hit
-                self._show(context)
-            return {"PASS_THROUGH"}
-        if event.type == "LEFTMOUSE" and event.value == "PRESS":
-            hit, inside = self._hit(context, event)
-            if not inside:
-                return {"PASS_THROUGH"}
-            if hit is not None:
-                row = self._molecule().object.pb_filament.subunits.get(hit)
-                if row is not None:
-                    row.select = not row.select
-                    self._show(context)
-            return {"RUNNING_MODAL"}
-        return {"PASS_THROUGH"}
-
-
 CLASSES = (
     MOLECULE_PB_OT_color_subunits,
     MOLECULE_PB_OT_select_subunits,
-    MOLECULE_PB_OT_pick_subunits,
 )

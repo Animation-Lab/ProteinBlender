@@ -1,4 +1,4 @@
-"""Cytoskeleton Subunits panel: every monomer of a filament, to pick and color.
+"""Cytoskeleton Subunits panel: every monomer of a filament, to select and color.
 
 Shown only while a filament's own row is ticked in the PB Outliner, and
 showing that filament; with several ticked, a picker chooses between them.
@@ -8,9 +8,8 @@ at its right, an eye to hide it and its color, which paints it alone.
 Pointing at a row lights its subunit up yellow in the viewport
 (``subunit_hover``). Above the list: select all, none or the rest, and on
 a filament of more than one chain - a microtubule's alpha and beta tubulin -
-every subunit of one chain. Below it: pick subunits by clicking them in the 3D
-Viewport; a color that applies to the selected subunits as soon as it
-changes, and Clear. Colors are keyed with the filament's row in Create
+every subunit of one chain. Below it: a color that applies to the selected
+subunits as soon as it changes, and Clear. Colors are keyed with the filament's row in Create
 Keyframe, or with I over a painted subunit's swatch.
 """
 
@@ -99,7 +98,7 @@ def _chains_in_list_order(params):
 
 
 class PROTEINBLENDER_PT_subunits(Panel):
-    """Every monomer of a filament, to select, pick and color."""
+    """Every monomer of a filament, to select and color."""
 
     bl_label = "Cytoskeleton Subunits"
     bl_idname = "PROTEINBLENDER_PT_subunits"
@@ -132,11 +131,12 @@ class PROTEINBLENDER_PT_subunits(Panel):
         if subunit_colors.roster_stale(molecule):
             _sync_later(molecule.identifier)
 
+        # Plain buttons, no icons: checkbox icons made them read as the rows'
+        # own checkboxes rather than actions on them.
         picks = box.row(align=True)
-        for action, icon, text in (("ALL", "CHECKBOX_HLT", "Select All"),
-                                   ("NONE", "CHECKBOX_DEHLT", "None"),
-                                   ("INVERT", "ARROW_LEFTRIGHT", "Invert")):
-            op = picks.operator("molecule.select_subunits", text=text, icon=icon)
+        for action, text in (("ALL", "Select All"), ("NONE", "None"),
+                             ("INVERT", "Invert")):
+            op = picks.operator("molecule.select_subunits", text=text)
             op.action = action
             op.molecule_id = molecule.identifier
         chains = _chains_in_list_order(params)
@@ -145,8 +145,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
             by_chain = box.row(align=True)
             for chain in chains:
                 op = by_chain.operator("molecule.select_subunits",
-                                       text=f"All {names.get(chain, f'Chain {chain}')}",
-                                       icon="CHECKBOX_HLT")
+                                       text=f"All {names.get(chain, f'Chain {chain}')}")
                 op.action = "CHAIN"
                 op.chain = chain
                 op.molecule_id = molecule.identifier
@@ -155,10 +154,6 @@ class PROTEINBLENDER_PT_subunits(Panel):
                           params, "subunit_index", rows=8)
         # Drawn because the mouse may be on its way to the list.
         subunit_hover.watch()
-
-        pick = box.row()
-        pick.operator("molecule.pick_subunits", icon="EYEDROPPER").molecule_id = (
-            molecule.identifier)
 
         selected = len(subunit_colors.selected_keys(molecule))
         # The field shows the first selected subunit and, changed, paints
