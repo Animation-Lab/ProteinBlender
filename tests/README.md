@@ -61,6 +61,9 @@ python tests/run_ui_tests.py --scenario morph-linkers --blender "<path-to-blende
 # Create New Assembly on an empty scene: type a PDB ID, press OK, get the import and its assembly
 python tests/run_ui_tests.py --scenario assembly-from-id --blender "<path-to-blender>"
 
+# Ann's 1STM capsid: split and re-cut chain B, color it, press the pencils, Realize Copies, split a copy
+python tests/run_ui_tests.py --scenario assembly-split --blender "<path-to-blender>"
+
 # Reopen the example produced by the model-morphsets scenario and edit its keys
 python tests/run_ui_tests.py --normal-profile --scenario saved-model-morphsets --blend "<artifact-dir>/1d3z-model-keyframes.blend" --blender "<path-to-blender>"
 

@@ -22,6 +22,11 @@ from ..core.domain import ensure_domain_properties_registered
 from . import domain_space
 from ..utils.blender_utils import is_object_valid
 
+#: Start of the name a deleted domain's mask on the protein object is kept
+#: under (see ``MoleculeWrapper.remove_domain_from_scene``).
+REMOVED_MASK_PREFIX = "Removed_"
+
+
 def _remembers_domain(method):
     """Before a domain object goes, remember what its chain's new pieces keep.
 
@@ -1730,10 +1735,14 @@ class MoleculeWrapper:
             domain.start = start
             domain.end = end
 
-            # Retarget the domain's own residue-range selection. This reuses the
-            # existing nodes (and so preserves the domain's color and style)
-            # rather than rebuilding the tree from scratch.
-            self._setup_domain_network(domain, domain.chain_id, start, end)
+            # Retarget the domain's own residue-range selection, touching
+            # nothing else in its tree. Rebuilding the tree instead (as
+            # _setup_domain_network does) clears every link and rewires only
+            # the base chain, so any stage inserted since - the assembly that
+            # draws its copies, a hide or tint stage - was orphaned and then
+            # deleted, and moving a cut left one copy of the chain on screen.
+            if not self._retarget_domain_range(domain, start, end):
+                self._setup_domain_network(domain, domain.chain_id, start, end)
 
             # Re-punch the matching hole in the parent molecule. Same domain_id
             # in and out, so `domain_mask_nodes` stays keyed consistently.
@@ -1748,6 +1757,26 @@ class MoleculeWrapper:
             import traceback
             traceback.print_exc()
             return False
+
+    @staticmethod
+    def _retarget_domain_range(domain, start: int, end: int) -> bool:
+        """Point a built domain's residue selection at ``start``-``end``.
+
+        Only the values of its wired "Select Res ID Range" node change.
+        Returns False when the domain has no such wired node, for the caller
+        to build its network instead.
+        """
+        group = domain.node_group if domain.object else None
+        if group is None:
+            return False
+        node = next((n for n in group.nodes
+                     if n.bl_idname == 'GeometryNodeGroup' and n.node_tree
+                     and n.node_tree.name == "Select Res ID Range"), None)
+        if node is None or not any(link.from_node == node for link in group.links):
+            return False
+        node.inputs["Min"].default_value = start
+        node.inputs["Max"].default_value = end
+        return True
 
     def _delete_domain_mask_nodes(self, domain_id: str):
         """Delete mask nodes for a domain in the parent molecule's node group"""
@@ -1774,7 +1803,8 @@ class MoleculeWrapper:
         # when all domains are deleted. They will persist for future domain creations.
 
     @_restructures
-    def delete_domain(self, domain_id: str, is_cleanup_call: bool = False) -> Optional[str]:
+    def delete_domain(self, domain_id: str, is_cleanup_call: bool = False,
+                      leave_scene: bool = False) -> Optional[str]:
         """Delete a domain and its object.
 
         If the domain is the last one on its chain, returns "DELETE_CHAIN" to signal
@@ -1784,6 +1814,9 @@ class MoleculeWrapper:
         Args:
             domain_id (str): The ID of the domain to delete.
             is_cleanup_call (bool): True if called during full molecule cleanup, to suppress UI messages.
+            leave_scene (bool): The user deleted it, so its atoms go too
+                (``remove_domain_from_scene``). Off for a re-layout, whose new
+                domains cover the residues again.
 
         Returns:
             Optional[str]: "DELETE_CHAIN" if this was the last domain on the chain, None otherwise.
@@ -1814,7 +1847,7 @@ class MoleculeWrapper:
         if len(domains_on_this_chain) <= 1 and domain_id in [d[0] for d in domains_on_this_chain]:
             print(f"Last domain on chain {chain_id}. Signaling chain deletion.")
             # Delete the domain first
-            self._delete_domain_direct(domain_id)
+            self._delete_domain_for(domain_id, leave_scene)
             # Return special flag to signal chain deletion
             return "DELETE_CHAIN"
 
@@ -1826,7 +1859,7 @@ class MoleculeWrapper:
 
         # Delete the domain directly without merging or modifying adjacent domains
         print(f"Deleting domain {deleted_domain_name} ({domain_id}).")
-        self._delete_domain_direct(domain_id)
+        self._delete_domain_for(domain_id, leave_scene)
 
         # Reparent child domains to the original parent
         if children_to_reparent:
@@ -2773,13 +2806,24 @@ class MoleculeWrapper:
         # Copy the color and style from the original - the style it is drawn
         # in, which is not always the one it remembers: a local file comes in
         # as spheres under a wrapper that says surface.
-        from .visual_style import get_object_style
-        style = get_object_style(original_domain.object) or original_domain.style
+        from . import visual_style
+        style = visual_style.get_object_style(original_domain.object) or original_domain.style
         new_domain.color = original_domain.color
         new_domain.style = style
         if new_domain.object:
             new_domain.object.domain_color = original_domain.color
             new_domain.object.domain_style = style
+            if original_domain.object is not None:
+                # Turning about the original's pivot: a split piece has one of
+                # its own that a new domain does not start with, and Realize
+                # Copies places a copy by the move read off its original,
+                # which only lands it right with the same pivot.
+                domain_space.adopt_pivot(original_domain.object, new_domain.object)
+                # In the color the original is drawn in, which a color set
+                # from its outliner swatch keeps on its nodes alone.
+                drawn = visual_style.drawn_color(original_domain.object)
+                if drawn is not None:
+                    self.update_domain_color(new_domain_id, tuple(drawn))
             # And its motion: a new object starts from the molecule object's.
             if original_domain.object is not None:
                 from . import thermal_motion
@@ -2976,6 +3020,42 @@ class MoleculeWrapper:
         if is_default_domain_name(domain.name):
             return default_domain_name(domain.chain_id, domain.start, domain.end)
         return domain.name
+
+    def _delete_domain_for(self, domain_id: str, leave_scene: bool):
+        if leave_scene:
+            self.remove_domain_from_scene(domain_id)
+        else:
+            self._delete_domain_direct(domain_id)
+
+    def remove_domain_from_scene(self, domain_id: str):
+        """Delete a domain the user deleted: its object, and its atoms with it.
+
+        The protein's own object draws every atom no domain covers, so
+        deleting a domain the way a re-layout does (``_delete_domain_direct``,
+        which hands its residues back to the protein) left its atoms on screen
+        with no row in the PB Outliner to select or delete them by. Its mask
+        on the protein object is kept instead, under a name no later domain
+        can claim, so the atoms stay gone - in a duplicate and after a save
+        too, since the mask lives in the protein's node tree.
+        """
+        self._retire_domain_mask_nodes(domain_id)
+        self.domains[domain_id].cleanup()
+        del self.domains[domain_id]
+        self._mirror_domains_to_property_group()
+
+    def _retire_domain_mask_nodes(self, domain_id: str):
+        """Keep a deleted domain's mask, renamed out of the domain namespace."""
+        names = self.domain_mask_nodes.pop(domain_id, None)
+        if not names or not all(isinstance(name, str) for name in names):
+            names = (f"Domain_Chain_Select_{domain_id}", f"Domain_Res_Select_{domain_id}")
+        obj = self.molecule.object
+        modifier = obj.modifiers.get("MolecularNodes") if obj is not None else None
+        if modifier is None or modifier.node_group is None:
+            return
+        for name in names:
+            node = modifier.node_group.nodes.get(name)
+            if node is not None and name.startswith("Domain_"):
+                node.name = REMOVED_MASK_PREFIX + name[len("Domain_"):]
 
     @_remembers_domain
     def _delete_domain_direct(self, domain_id: str):

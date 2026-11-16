@@ -1,4 +1,3 @@
-import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, FloatVectorProperty
 from ..utils.scene_manager import (ProteinBlenderScene, build_outliner_hierarchy,
@@ -14,7 +13,6 @@ from ..utils.animation import (
 
 # Ensure domain properties are registered
 from ..core.domain import ensure_domain_properties_registered
-from ..core import domain_space
 ensure_domain_properties_registered()
 
 class MOLECULE_PB_OT_create_domain(Operator):
@@ -129,7 +127,7 @@ class MOLECULE_PB_OT_copy_domain(Operator):
         new_domain_id = molecule.copy_domain(self.domain_id)
         
         if new_domain_id:
-            self.report({'INFO'}, f"Domain copied successfully")
+            self.report({'INFO'}, "Domain copied successfully")
             # Rebuild outliner to show the new copy
             build_outliner_hierarchy(context)
             return {'FINISHED'}
@@ -240,7 +238,9 @@ class MOLECULE_PB_OT_delete_domain(Operator):
         scene_manager.refresh_domain_refs_before_destructive_op(mol_id)
 
         # Delete the domain and check if chain should be removed
-        result = molecule.delete_domain(self.domain_id)
+        # The user deleted it: its atoms leave the scene with it, rather than
+        # falling back to the protein's own object with no row to show them.
+        result = molecule.delete_domain(self.domain_id, leave_scene=True)
 
         # Nothing may keep pointing at what was just deleted.
         self._strip_from_puppets(context, molecule, mol_id, chain_id,

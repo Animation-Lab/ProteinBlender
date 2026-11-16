@@ -331,6 +331,18 @@ def local_to_world_many(obj, coords):
     return rotated + matrix[:3, 3]
 
 
+def adopt_pivot(src_obj, dst_obj) -> bool:
+    """Give *dst_obj* the same pivot as *src_obj* without moving its atoms.
+
+    :func:`copy_pivot` moves the geometry by the difference, which is right
+    when the transform is copied too. A copy that keeps its own placement (a
+    chain copy) takes the pivot this way instead: same pivot in mesh space,
+    so it turns about the same atoms, and a world move read off the source
+    (as Realize Copies reads one) carries it exactly onto the copy it made.
+    """
+    return set_pivot_world(dst_obj, local_to_world(dst_obj, get_pivot(src_obj)))
+
+
 def copy_pivot(src_obj, dst_obj) -> bool:
     """Give *dst_obj* the same pivot as *src_obj*.
 

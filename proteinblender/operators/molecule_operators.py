@@ -202,51 +202,30 @@ def _strip_inherited_domain_masks(node_group):
             node_group.nodes.remove(node)
 
 
-def _copy_domain_color(source_obj, target_obj):
-    """Copy color from source domain's geometry nodes to target domain"""
+def _copy_domain_color(source_obj, target_molecule, target_domain_id):
+    """Draw a copied domain in the color its source is drawn in.
+
+    The color is read from whatever feeds the source's Set Color node and
+    written the way every color edit is (``update_domain_color``). Copying
+    only a "Custom Combine Color" node, as this used to, missed every color
+    set from an outliner swatch, which lives on the "Color Common" node:
+    duplicating a protein, or realizing an assembly, drew each copy in a
+    fresh default color.
+    """
+    from ..core.visual_style import drawn_color
+
+    target_obj = target_molecule.domains[target_domain_id].object
     try:
-        # Find source geometry nodes modifier
-        source_mod = None
-        for mod in source_obj.modifiers:
-            if mod.type == 'NODES' and mod.node_group:
-                source_mod = mod
-                break
+        color = drawn_color(source_obj)
+        if color is not None:
+            target_molecule.update_domain_color(target_domain_id, tuple(color))
 
-        # Find target geometry nodes modifier
-        target_mod = None
-        for mod in target_obj.modifiers:
-            if mod.type == 'NODES' and mod.node_group:
-                target_mod = mod
-                break
-
-        if not source_mod or not target_mod:
-            return
-
-        source_tree = source_mod.node_group
-        target_tree = target_mod.node_group
-
-        # Look for Custom Combine Color node in source
-        source_color_node = None
-        for node in source_tree.nodes:
-            if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-                source_color_node = node
-                break
-
-        # Look for or create Custom Combine Color node in target
-        target_color_node = None
-        for node in target_tree.nodes:
-            if node.name == "Custom Combine Color" and node.type == 'COMBINE_COLOR':
-                target_color_node = node
-                break
-
-        if source_color_node and target_color_node:
-            # Copy RGB values
-            target_color_node.inputs['Red'].default_value = source_color_node.inputs['Red'].default_value
-            target_color_node.inputs['Green'].default_value = source_color_node.inputs['Green'].default_value
-            target_color_node.inputs['Blue'].default_value = source_color_node.inputs['Blue'].default_value
-
-        # Also copy alpha from material if present
-        _copy_material_alpha(source_obj, target_obj, source_tree, target_tree)
+        source_tree = next((m.node_group for m in source_obj.modifiers
+                            if m.type == 'NODES' and m.node_group), None)
+        target_tree = next((m.node_group for m in target_obj.modifiers
+                            if m.type == 'NODES' and m.node_group), None)
+        if source_tree is not None and target_tree is not None:
+            _copy_material_alpha(source_obj, target_obj, source_tree, target_tree)
 
     except Exception as e:
         print(f"Warning: Could not copy domain color: {e}")
@@ -509,8 +488,14 @@ def duplicate_molecule(context, source_molecule, base_name=None):
         new_domain.color = domain_data['color']
         new_domain.style = domain_data['style']
 
-        # 9. Copy LOCAL transforms from source domain
-        # Since both parent proteins are at the same location, local transforms should match
+        # 9. Copy the pivot and LOCAL transforms from source domain.
+        # Since both parent proteins are at the same location, local transforms should match.
+        # The pivot goes with them: a domain is drawn at
+        # matrix_world @ (co - pivot), and a split gives each piece a pivot of
+        # its own, so a copied piece left on the default pivot stood off its
+        # source by the difference - and Realize Copies, which duplicates,
+        # scattered a split chain across the assembly.
+        domain_space.copy_pivot(source_domain.object, new_domain.object)
         new_domain.object.location = domain_data['local_location']
         new_domain.object.rotation_euler = domain_data['local_rotation']
         new_domain.object.scale = domain_data['local_scale']
@@ -518,8 +503,8 @@ def duplicate_molecule(context, source_molecule, base_name=None):
         # Also copy the matrix_parent_inverse to ensure exact transform preservation
         new_domain.object.matrix_parent_inverse = domain_data['matrix_parent_inverse']
 
-        # 10. Copy color from geometry nodes (RGB values and alpha)
-        _copy_domain_color(source_domain.object, new_domain.object)
+        # 10. Draw it in the color its source is drawn in (and its alpha).
+        _copy_domain_color(source_domain.object, new_molecule, new_domain_id)
 
         # 11. Apply style to the domain's node group, unless it is already
         # drawn that way.
@@ -690,13 +675,9 @@ class MOLECULE_PB_OT_delete_chain(Operator):
             self.report({'WARNING'}, f"No domains found for {label}")
             return {'CANCELLED'}
 
-        # Delete each domain using cleanup (reuse existing cleanup method)
+        # Each domain goes with its atoms, as a deleted domain does.
         for domain_id in domains_to_delete:
-            domain = molecule.domains[domain_id]
-            # Call cleanup to remove object and node groups
-            domain.cleanup()
-            # Remove from molecule's domains dictionary
-            del molecule.domains[domain_id]
+            molecule.remove_domain_from_scene(domain_id)
 
         # Remove chain from puppet memberships
         self._remove_chain_from_puppets(context, self.molecule_id, self.chain_id,

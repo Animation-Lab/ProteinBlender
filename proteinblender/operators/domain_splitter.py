@@ -59,6 +59,8 @@ from ..core import domain_layout
 from ..utils.chain_utils import (chain_author_id, chain_token_from_item,
                                  default_domain_name, is_default_domain_name)
 from ..utils.scene_manager import ProteinBlenderScene
+from ..core.visual_style import color_sockets as _color_sockets
+from ..core.visual_style import drawn_color as _read_color
 from .visual_edit import VisualEditMixin
 
 # Blender caps how tall a dialog can usefully get; past this the row list stops
@@ -242,63 +244,6 @@ def _style_material_socket(obj):
                     and "Style" in node.node_tree.name):
                 return node.inputs.get("Material")
     return None
-
-
-def _color_sockets(obj):
-    """The sockets holding a domain's color, on whichever node drives it.
-
-    Two node layouts reach "Set Color", and they store the color differently.
-    Import wires it from a per-domain copy of the "Color Common" group, which
-    holds an RGBA "Carbon" socket. The Visual Set-up color picker instead
-    relinks it to a "Custom Combine Color" node holding three float channels.
-    Both are handled, so a domain the user has already recolored still
-    highlights - and, more importantly, still gets its color back afterwards.
-
-    Links are compared with ``==``: Blender hands back a fresh wrapper on every
-    access, so ``is`` would never match.
-    """
-    tree = next((m.node_group for m in obj.modifiers
-                 if m.type == 'NODES' and m.node_group), None)
-    if tree is None:
-        return None
-
-    set_color = tree.nodes.get("Set Color")
-    if set_color is None:
-        return None
-    color_input = next((s for s in set_color.inputs if "Color" in s.name), None)
-    if color_input is None:
-        return None
-    driver = next((link.from_node for link in tree.links
-                   if link.to_socket == color_input), None)
-    if driver is None:
-        return None
-
-    if driver.name == "Custom Combine Color":
-        return [driver.inputs[channel]
-                for channel in ("Red", "Green", "Blue")
-                if channel in driver.inputs]
-    # Prefix match: a range update rebuilds the selection nodes and the
-    # re-added color node comes back name-collided as "Color Common.001".
-    if driver.name.startswith("Color Common"):
-        # Import gives every domain its own copy of this group. Should one ever
-        # be shared, highlighting through it would recolor the domain's
-        # neighbours too, so leave that domain uncolored rather than repaint
-        # the wrong thing.
-        if driver.node_tree is None or driver.node_tree.users > 1:
-            return None
-        carbon = driver.inputs.get("Carbon")
-        return [carbon] if carbon is not None else None
-    return None
-
-
-def _read_color(obj):
-    """The domain's current color as RGBA, or None if nothing drives it."""
-    sockets = _color_sockets(obj)
-    if not sockets:
-        return None
-    if len(sockets) == 1:
-        return list(sockets[0].default_value)
-    return [s.default_value for s in sockets] + [1.0]
 
 
 def _write_color(obj, color):

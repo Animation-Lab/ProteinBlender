@@ -1750,6 +1750,21 @@ on a membrane whose typical gap was 0.28 nm.
   A row's swatch no longer lights the highlight (its name, checkbox and eye still do).
   The filament UI lane opens a painted subunit's picker, finds the color wheel in the screenshot, drags to two hues and checks the subunit's drawn tint matches each color mid-drag, then that Esc restores it; it was red with the yellow highlight drawn over the picked color.
 
+- **Moving a split chain's cut dropped every copy of the assembly but one** (2026-11-10, Ann, 1STM capsid).
+  `update_domain_range` re-ran `_setup_domain_network`, which clears every link in the domain's tree and rewires only the base chain, so the assembly node (and any hide or tint stage) was orphaned and deleted; it now retargets the wired "Select Res ID Range" node in place.
+  `test_assembly_chain_split.py::test_moving_the_cut_keeps_every_copy_of_both_pieces` counts every drawn chain B C-alpha against the mmCIF (each of residues 17-157 exactly 12 times, at 12 places); it was red with each residue drawn once.
+- **Duplicate and Realize Copies drew every copied domain in a default color** (2026-11-10, Ann: "I also lost the colors I applied").
+  `_copy_domain_color` copied only a "Custom Combine Color" node, the Visual Set-up picker's; a color set from an outliner swatch lives on "Color Common". The copy now reads whatever feeds the source's Set Color (`visual_style.drawn_color`, moved from the Domain Splitter) and writes it with `update_domain_color`; chain copies do the same.
+  `test_realizing_a_split_chain_keeps_both_pieces_and_their_colors` reads the drawn `Color` of every copy; it was red with the pieces back on their default colors.
+- **Copies of a split chain stood ~30 A off their source** (2026-11-16, found by the assembly-split UI screenshot).
+  A split gives each piece its own pivot; `duplicate_molecule` copied the transform but not the pivot, and `_create_domain_copy` left the default one, so Duplicate, Realize Copies as proteins and Realize Copies as chain copies all scattered a split chain.
+  Duplicate now copies the pivot with the transform; a chain copy adopts its source's pivot without moving (`domain_space.adopt_pivot`).
+  `test_a_duplicate_of_a_split_protein_stands_exactly_on_it` (34.4 A before), the realize tests' no-atom-moves check, and `test_realizing_part_of_a_protein_keeps_a_split_chain_in_place_and_color` (1STM assembly 4) were red, green after.
+- **Deleting a domain left its atoms on screen with no row** (2026-11-10, Ann: "entire Chain B will be removed from the list, although they still appear in the viewport").
+  The protein object draws every atom no domain covers, and deleting a domain removed its mask; the user's delete (`molecule.delete_domain`, and `molecule.delete_chain`) now keeps the mask under a `Removed_` name (`MoleculeWrapper.remove_domain_from_scene`), so the atoms go and stay gone in a duplicate and after reopening, while a re-layout still hands residues back.
+  `test_deleting_a_piece_takes_its_atoms_off_the_screen[protein|assembly]` and `test_deleted_atoms_stay_gone_after_reopening_and_in_a_duplicate` were red with the deleted piece still drawn.
+  The `assembly-split` UI lane (`tests/ui/run_assembly_split_scenarios.py`) walks Ann's whole path in a real window: split and re-cut chain B, paint it, press the protein pencil on mixed styles, Realize Copies, press a copy's pencil and open the Domain Splitter on the copy's chain B.
+
 ## Crash regressions (guard against reintroduction)
 
 - **Split domain after duplicate → delete → crash.** Splitting a domain after
