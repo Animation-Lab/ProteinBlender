@@ -260,12 +260,18 @@ def reset_scene():
 # Import helpers
 # --------------------------------------------------------------------------
 
-def import_local(filename: str, identifier: str | None = None) -> str:
+def import_local(filename: str, identifier: str | None = None,
+                 style: str | None = "spheres") -> str:
     """Import a bundled local structure (offline). Returns the molecule id.
 
     Executes the public local-import operator used by the file browser. When a
     test needs a stable custom identifier, it then uses the public rename
     operator instead of calling the scene manager directly.
+
+    Drawn as Spheres by default: most tests measure the atoms Blender draws,
+    and only Spheres draws one point per atom. A local file's own first style
+    is Cartoon (``test_local_file_import.py`` pins that); pass ``style=None``
+    to keep it, or name another style.
     """
     import bpy
 
@@ -276,7 +282,8 @@ def import_local(filename: str, identifier: str | None = None) -> str:
     before = set(mgr.molecules.keys())
     requested_id = identifier or os.path.splitext(os.path.basename(filename))[0]
     result = bpy.ops.molecule.import_local(
-        "EXEC_DEFAULT", filepath=path, identifier_override=requested_id)
+        "EXEC_DEFAULT", filepath=path, identifier_override=requested_id,
+        style_override=style or "")
     if result != {"FINISHED"}:
         raise RuntimeError(f"molecule.import_local failed for {path}")
     new = sorted(set(mgr.molecules.keys()) - before)
@@ -449,6 +456,32 @@ def evaluated_atom_positions(objects):
     if not chunks:
         return np.zeros((0, 3))
     return np.concatenate(chunks)
+
+
+def drawn_geometry(objects):
+    """``(atom points, mesh faces)`` Blender draws for ``objects`` (objects or names).
+
+    Read off the evaluated depsgraph, not the node tree: Spheres puts a point
+    per atom in a point cloud; Cartoon and Surface draw a mesh and no atom
+    points. Pass a molecule object *and* its domains, as for
+    :func:`evaluated_atom_positions`.
+    """
+    import bpy
+
+    names = {getattr(o, "name", o) for o in objects}
+    bpy.context.view_layer.update()
+    points = faces = 0
+    for instance in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = (instance.parent.original if instance.is_instance
+                 else instance.object.original)
+        if owner.name not in names:
+            continue
+        data = instance.object.data
+        if instance.object.type == "POINTCLOUD" and "res_id" in data.attributes:
+            points += len(data.points)
+        elif instance.object.type == "MESH":
+            faces += len(data.polygons)
+    return points, faces
 
 
 def eval_positions(obj):

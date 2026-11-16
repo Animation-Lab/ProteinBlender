@@ -56,11 +56,11 @@ The color applies as you pick it, to everything that row covers:
 
 ProteinBlender supports multiple molecular representations:
 
-- **Cartoon**: Classic ribbon/cartoon representation (default)
-- **Surface**: Molecular surface (good for visualizing shape)
+- **Cartoon**: Classic ribbon/cartoon representation (how a local file comes in)
+- **Surface**: Molecular surface (good for visualizing shape; how a downloaded structure comes in)
 - **Ribbon**: Simplified backbone ribbon
 - **Ball and Stick**: Atomic detail with bonds
-- **Spheres**: Space-filling representation
+- **Spheres**: Space-filling representation (how a local file with no protein or nucleic acid chain, such as a lone ligand, comes in)
 - **And more**: Additional styles from MolecularNodes
 
 ### Apply a Style

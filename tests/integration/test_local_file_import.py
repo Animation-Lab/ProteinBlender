@@ -344,6 +344,9 @@ def test_a_dropped_file_loads_every_chain_the_file_contains(tmp_path, scene, sm)
     molecule = sm.molecules["4hhb"]
     assert len(molecule.domains) == len(chains)
     assert len(H.list_item("4hhb").domains) == len(chains)
+    # Counted as balls: a drop comes in as Cartoon, which draws no atoms.
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id="4hhb", vs_style="spheres") == {"FINISHED"}
     drawn = H.evaluated_atom_positions(
         [molecule.object, *(d.object for d in molecule.domains.values())])
     assert len(drawn) > 4000, "a four-chain hemoglobin draws thousands of atoms"
@@ -419,3 +422,58 @@ def test_file_import_menu_offers_structure_files_exactly_once_across_reloads():
     proteinblender._test_register()
     proteinblender._test_register()
     assert len(_structure_menu_entries()) == 1, "re-registering duplicated the File > Import entry"
+
+
+# --------------------------------------------------------------------------
+# What a local file is drawn as
+# --------------------------------------------------------------------------
+
+def _heme_only(tmp_path):
+    """One heme of 4HHB on its own: a structure with no chain to draw as cartoon."""
+    with open(H.data_path("4hhb.pdb")) as handle:
+        lines = [line for line in handle
+                 if line.startswith("HETATM") and line[17:20] == "HEM" and line[21] == "A"]
+    target = tmp_path / "heme.pdb"
+    target.write_text("".join(lines) + "END\n")
+    return target, len(lines)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fixture,name", [("1ubq.pdb", None), ("1atn.cif.gz", "1atn.cif"),
+                                          ("morph", None)])
+def test_a_local_structure_is_drawn_as_cartoon(tmp_path, scene, sm, fixture, name):
+    """Dillon (2026-11-10): "Default import PDB (morph.pdb) as cartoon style".
+
+    A downloaded structure comes in as Surface; a local one came in as
+    Spheres - every atom a ball - under a model that said Surface.
+    """
+    path = (_morph_file(tmp_path, "pdb")[0] if fixture == "morph"
+            else _copy(tmp_path, fixture, name))
+    before = set(sm.molecules)
+    assert _import(path) == {"FINISHED"}
+    (molecule_id,) = set(sm.molecules) - before
+    molecule = sm.molecules[molecule_id]
+    names = {molecule.object.name} | {d.object.name for d in molecule.domains.values() if d.object}
+
+    points, faces = H.drawn_geometry(names)
+    assert points == 0, f"{points} atoms drawn as balls"
+    assert faces > 1000, f"no ribbon drawn ({faces} faces)"
+    # What the protein's pencil and the outliner report agrees with the screen.
+    from proteinblender.core.visual_style import get_object_style
+    assert molecule.style == "cartoon"
+    assert {d.style for d in molecule.domains.values()} == {"cartoon"}
+    assert {get_object_style(d.object) for d in molecule.domains.values()} == {"cartoon"}
+
+
+@pytest.mark.integration
+def test_a_local_file_with_nothing_for_a_cartoon_is_drawn_as_spheres(tmp_path, scene, sm):
+    """A cartoon draws chains only: a lone ligand drawn as one would be invisible."""
+    path, atoms = _heme_only(tmp_path)
+    before = set(sm.molecules)
+    assert _import(path) == {"FINISHED"}
+    (molecule_id,) = set(sm.molecules) - before
+    molecule = sm.molecules[molecule_id]
+    names = {molecule.object.name} | {d.object.name for d in molecule.domains.values() if d.object}
+    points, _faces = H.drawn_geometry(names)
+    assert points == atoms, (points, atoms)
+    assert molecule.style == "spheres"

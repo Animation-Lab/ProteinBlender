@@ -77,6 +77,11 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         options={'HIDDEN'},
         description="Optional stable identifier for scripted public imports",
     )
+    style_override: StringProperty(
+        options={'HIDDEN', 'SKIP_SAVE'},
+        description="Optional style for scripted imports to draw the protein in, "
+                    "instead of Cartoon (or Spheres for a file with no chain)",
+    )
 
     def draw(self, context):
         # The file browser's side panel is narrow: split beside its value,
@@ -135,6 +140,10 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
         if self.identifier_override and len(paths) > 1:
             self.report({'ERROR'}, "identifier_override names one protein, but several files were given")
             return {'CANCELLED'}
+        from ..core.visual_style import REAL_STYLE_ITEMS
+        if self.style_override and self.style_override not in {k for k, *_ in REAL_STYLE_ITEMS}:
+            self.report({'ERROR'}, f"Unknown style '{self.style_override}'")
+            return {'CANCELLED'}
         manager = ProteinBlenderScene.get_instance()
         imported: List[str] = []
         problems: List[str] = []
@@ -164,7 +173,8 @@ class MOLECULE_OT_import_local(Operator, ImportHelper):
                 interpretation = 'CONFORMATIONS'
             try:
                 success = manager.import_molecule_from_file(
-                    filepath, identifier, interpretation)
+                    filepath, identifier, interpretation,
+                    style=self.style_override or None)
             except Exception as e:
                 logger.error(f"Error importing file {filepath}: {e}")
                 problems.append(f"{filename}: {e}")

@@ -590,7 +590,7 @@ def build_morph_linkers():
         Path(tempfile.mkdtemp(prefix='pb-morph-ab-')) / 'morph_ab.pdb')
     assert bpy.ops.molecule.import_local(
         filepath=str(path), model_interpretation='CONFORMATIONS',
-        identifier_override='saved_morph_ab') == {'FINISHED'}
+        identifier_override='saved_morph_ab', style_override='spheres') == {'FINISHED'}
     # Where each source chain is drawn before it joins anything: Blender's own
     # evaluated atoms. The verifier reveals the sources again after reopening
     # (by deleting the Morphset) and checks they come back exactly here,

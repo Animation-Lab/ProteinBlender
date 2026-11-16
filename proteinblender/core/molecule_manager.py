@@ -11,6 +11,21 @@ from ..utils.molecularnodes.entities import fetch, load_local
 from .molecule_wrapper import MoleculeWrapper
 
 
+def local_import_style(array) -> str:
+    """The style a local structure file is first drawn in.
+
+    Cartoon (asked for 2026-11-10: a morph read as a cloud of balls), unless
+    the file has no protein or nucleic acid chain for a cartoon to draw - a
+    lone ligand would come in invisible - when it is Spheres.
+    """
+    import biotite.structure as struc
+
+    atoms = array[0] if isinstance(array, struc.AtomArrayStack) else array
+    if struc.filter_amino_acids(atoms).any() or struc.filter_nucleotides(atoms).any():
+        return "cartoon"
+    return "spheres"
+
+
 class MoleculeManager:
     """Manages all molecules in the scene"""
     def __init__(self):
@@ -54,21 +69,28 @@ class MoleculeManager:
             raise
             
     def import_from_file(self, filepath: str, name: Optional[str] = None,
-                         model_interpretation='AUTO') -> MoleculeWrapper:
-        """Import a molecule from a local file"""
+                         model_interpretation='AUTO',
+                         style: Optional[str] = None) -> MoleculeWrapper:
+        """Import a molecule from a local file.
+
+        Drawn in ``style``, else as :func:`local_import_style` chooses.
+        """
         try:
             from ..utils.molecularnodes.entities import parse
             from .conformation_library import prepare_import
             mol = parse(filepath)
             prepare_import(mol, model_interpretation)
+            style = style or local_import_style(mol.array)
             mol.create_object(
                 name=name or Path(filepath).stem,
-                style="spheres",
+                style=style,
                 del_solvent=True
             )
-            
+
             identifier = name or Path(filepath).stem
             wrapper = MoleculeWrapper(mol, identifier)
+            # Recorded as drawn, so its chains and the pencil say the same.
+            wrapper.style = style
             self.molecules[identifier] = wrapper
             
             return wrapper

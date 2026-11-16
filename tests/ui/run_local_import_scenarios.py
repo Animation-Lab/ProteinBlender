@@ -265,10 +265,13 @@ def expect_first_import():
     chains = pdb_chains(data['folder'] / '4hhb.pdb')
     assert len(molecule.domains) == len(chains) == 4
     assert [i.identifier for i in bpy.context.scene.molecule_list_items] == ['4hhb']
-    drawn = H.evaluated_atom_positions(
-        [molecule.object, *(d.object for d in molecule.domains.values())])
-    assert len(drawn) > 4000
-    return f'{len(drawn)} atoms drawn in {len(chains)} chains'
+    # A local file comes in as Cartoon: a ribbon for every chain, no atom balls.
+    objects = [molecule.object, *(d.object for d in molecule.domains.values())]
+    points, faces = H.drawn_geometry(objects)
+    assert points == 0, f'{points} atoms drawn as balls'
+    assert faces > 1000, f'no ribbon drawn ({faces} faces)'
+    assert {d.style for d in molecule.domains.values()} == {'cartoon'}
+    return f'{len(chains)} chains drawn as a cartoon ({faces} faces)'
 
 
 def expect_ensemble_read_as_assembly():

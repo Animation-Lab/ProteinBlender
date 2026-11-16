@@ -451,15 +451,17 @@ class ProteinBlenderScene:
         return f"{base}_{number:03d}"
 
     def import_molecule_from_file(self, filepath: str, identifier: str,
-                                  model_interpretation='AUTO') -> bool:
-        """Import a molecule from a local file"""
+                                  model_interpretation='AUTO',
+                                  style: Optional[str] = None) -> bool:
+        """Import a molecule from a local file, drawn in ``style`` when given."""
         # Only an identifier this call registers may be rolled back; a caller
         # that reused a loaded identifier must not lose the existing molecule.
         was_loaded = identifier in self.molecules
         try:
             ensure_object_mode()
             # Import the molecule using MoleculeManager
-            molecule = self.molecule_manager.import_from_file(filepath, identifier, model_interpretation)
+            molecule = self.molecule_manager.import_from_file(
+                filepath, identifier, model_interpretation, style=style)
             if not molecule:
                 return False
             # Finalize import (domains, UI, etc.)
