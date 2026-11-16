@@ -103,7 +103,7 @@ def morph_ab(scene, tmp_path):
                 controller=puppet.controller_object_name)
 
 
-def _add_morph_linker(case):
+def _add_morph_linker(case, length_residues=100):
     scene = bpy.context.scene
     a, b = case['members']
     res_a, ca_a = _moving_residue(case['path'], case['chain_of'][a])
@@ -113,7 +113,7 @@ def _add_morph_linker(case):
         'EXEC_DEFAULT', puppet_selector=case['puppet_id'],
         endpoint_a_item=f"A_{a}", endpoint_a_residue=res_a,
         endpoint_b_item=f"B_{b}", endpoint_b_residue=res_b,
-        length_residues=100, linker_name='A to B')
+        length_residues=length_residues, linker_name='A to B')
     assert result == {'FINISHED'}, result
     assert len(scene.pb2_linkers) == before + 1
     return scene.pb2_linkers[-1], ca_a, ca_b
@@ -217,6 +217,119 @@ def test_a_linker_made_before_the_morph_is_keyed_follows_it_once_keyed(scene, tm
         np.testing.assert_allclose(
             end, _visible_ca(names[b], linker.endpoint_b_residue), atol=1e-4,
             err_msg=f"frame {frame}: end B is off chain B's CA")
+
+
+def _fresh_morph_with_puppet(scene, tmp_path):
+    """Dillon's path on 2026-11-10: the morph imported with nothing chosen
+    (Detect from file makes its Morphset), puppeted, nothing keyed yet."""
+    path = _chimera_like_morph(tmp_path)
+    before = set(H.sm().molecules)
+    assert bpy.ops.molecule.import_local(
+        filepath=str(path), identifier_override='morph_ab') == {'FINISHED'}
+    assert len(set(H.sm().molecules) - before) == 1
+    (root,) = C.sets(scene)
+    (morph,) = C.morphs(scene, root)
+    # Plain values: creating the puppet rebuilds the rows.
+    rows = [(r.item_id, r.name, r.object_name) for r in scene.outliner_items
+            if r.item_type == 'MORPH_MEMBER' and r.parent_id == root[C.TAG]]
+    for row in scene.outliner_items:
+        row.is_selected = row.item_id == root[C.TAG]
+    assert bpy.ops.proteinblender.create_puppet(
+        'EXEC_DEFAULT', puppet_name='Morph Puppet') == {'FINISHED'}
+    puppet = next(r for r in scene.outliner_items
+                  if r.item_type == 'PUPPET' and r.name == 'Morph Puppet')
+    for item_id, _name, _source in rows:
+        assert bpy.ops.proteinblender.edit_morph_member(
+            item_id=item_id, vs_style='spheres') == {'FINISHED'}
+    return dict(path=path, morph=morph, members=[i for i, _n, _s in rows],
+                sources={i: source for i, _n, source in rows},
+                chain_of={i: name.split()[-1] for i, name, _s in rows},
+                puppet_id=puppet.item_id)
+
+
+def test_a_linker_on_a_fresh_morphset_ends_on_the_chains_it_names(scene, tmp_path):
+    """Dillon (2026-11-10, Janet's morph.pdb): "Fix the linker in morphs issue
+    (linker not the right length), possibly trying to link with a weird state?"
+
+    Before the Morphset is keyed, each chain is drawn by a domain object that
+    shares the whole protein's mesh. A linker end on chain B residue 24 was
+    read off the first atom numbered 24 in that mesh - chain A's - so the
+    linker was built to the wrong chain and given the length of the wrong gap.
+    """
+    case = _fresh_morph_with_puppet(scene, tmp_path)
+    scene.frame_set(1)
+    a, b = case['members']
+    assert (case['chain_of'][a], case['chain_of'][b]) == ('A', 'B')
+    linker, ca_a, ca_b = _add_morph_linker(case, length_residues=3)
+
+    # The ends are on the atoms Blender draws for the chains named, read off
+    # the depsgraph (each source draws only its own chain).
+    start, end = _linker_ends(linker)
+    np.testing.assert_allclose(
+        start, H.visible_alpha_carbon([case['sources'][a]], linker.endpoint_a_residue),
+        atol=1e-4, err_msg="end A is off chain A's alpha carbon")
+    np.testing.assert_allclose(
+        end, H.visible_alpha_carbon([case['sources'][b]], linker.endpoint_b_residue),
+        atol=1e-4, err_msg="end B is off chain B's alpha carbon")
+    # And it is long enough for the widest the morph opens the gap, as the
+    # file's models give it: 3.5 A a residue, rounded up. A length for the
+    # first model alone left the end hanging short of chain B in the others.
+    gaps = np.linalg.norm(ca_b - ca_a, axis=1)
+    assert gaps.max() > gaps[0] + 5, f"the fixture's gap barely opens: {gaps}"
+    assert linker.length_residues == max(3, int(np.ceil(gaps.max() / 3.5))), (
+        linker.length_residues, gaps)
+
+    # Keyed through every model afterwards, it reaches both chains throughout.
+    for frame, model in ((1, 0), (25, 1), (50, 2)):
+        assert _key(case['morph'], frame, model) == {'FINISHED'}
+    names = {r.item_id: r.name for r in scene.outliner_items}
+    for frame in (1, 13, 25, 37, 50):
+        scene.frame_set(frame)
+        start, end = _linker_ends(linker)
+        np.testing.assert_allclose(
+            start, _visible_ca(names[a], linker.endpoint_a_residue), atol=1e-4,
+            err_msg=f"frame {frame}: end A is off chain A's CA")
+        np.testing.assert_allclose(
+            end, _visible_ca(names[b], linker.endpoint_b_residue), atol=1e-4,
+            err_msg=f"frame {frame}: end B is off chain B's CA")
+
+
+def test_the_linker_dialog_asks_for_the_morphs_widest_gap(scene, tmp_path):
+    """The Add/Edit Linker form raises the length to the widest state and says why."""
+    from proteinblender.linkers.linker_operators import _draw_linker_form
+
+    case = _fresh_morph_with_puppet(scene, tmp_path)
+    scene.frame_set(1)
+    a, b = case['members']
+    res_a, ca_a = _moving_residue(case['path'], 'A')
+    res_b, ca_b = _moving_residue(case['path'], 'B')
+    widest = int(np.ceil(np.linalg.norm(ca_b - ca_a, axis=1).max() / 3.5))
+
+    class Form:
+        puppet_selector = case['puppet_id']
+        endpoint_a_item, endpoint_a_residue = f"A_{a}", res_a
+        endpoint_b_item, endpoint_b_residue = f"B_{b}", res_b
+        length_residues = 3
+        style, behavior = 'TUBE', 'RANDOM_COIL'
+
+    class Layout:
+        def __init__(self):
+            self.labels = []
+
+        def label(self, text="", **_kwargs):
+            self.labels.append(text)
+
+        def operator(self, *_args, **_kwargs):
+            return type("Props", (), {})()
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+
+    form, layout = Form(), Layout()
+    _draw_linker_form(layout, form)
+    assert form.length_residues == widest
+    assert f"Minimum length: {widest} residues (widest state of the morph)" in layout.labels, \
+        layout.labels
 
 
 def test_morph_linker_moves_with_its_puppet(morph_ab):

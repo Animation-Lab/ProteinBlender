@@ -19,6 +19,7 @@ from .linker_geometry import (
     get_backbone_object_for_item,
     get_backbone_direction,
     compute_min_distance,
+    compute_morph_spread,
     _get_numeric_chain_id_from_item,
     BU_PER_RESIDUE,
     MN_SCALE,
@@ -332,8 +333,11 @@ def _draw_linker_form(layout, op):
 
     layout.separator()
 
-    # Length / distance info
+    # Length / distance info. Two chains of one morph must be spanned in its
+    # widest state too: the morph moves them where the reach handler cannot
+    # hold them back.
     min_residues = 3
+    spread_wider = False
     if (item_a and item_a != 'NONE'
             and item_b and item_b != 'NONE'):
         chain_a = get_chain_letter_for_item(item_a)
@@ -342,14 +346,19 @@ def _draw_linker_form(layout, op):
             item_a, chain_a, op.endpoint_a_residue,
             item_b, chain_b, op.endpoint_b_residue,
         )
-        if dist >= 0:
-            min_residues = max(min_residues, math.ceil(dist / BU_PER_RESIDUE))
+        spread = compute_morph_spread(
+            item_a, op.endpoint_a_residue, item_b, op.endpoint_b_residue)
+        spread_wider = spread > dist
+        reach = max(dist, spread)
+        if reach >= 0:
+            min_residues = max(min_residues, math.ceil(reach / BU_PER_RESIDUE))
             if op.length_residues < min_residues:
                 op.length_residues = min_residues
 
     layout.prop(op, "length_residues")
     if min_residues > 3:
-        layout.label(text=f"Minimum length: {min_residues} residues (current distance)")
+        why = "widest state of the morph" if spread_wider else "current distance"
+        layout.label(text=f"Minimum length: {min_residues} residues ({why})")
     max_reach = op.length_residues * BU_PER_RESIDUE
     max_reach_angstrom = op.length_residues * 3.5
     layout.label(text=f"Max reach: {max_reach:.3f} BU ({max_reach_angstrom:.1f} Å)")
@@ -641,9 +650,11 @@ class PB2_OT_add_linker(Operator):
 
         logger.info(f"Linker create: start_pos={start_pos} end_pos={end_pos}")
 
-        # Ensure length covers the current distance between endpoints
+        # Ensure length covers the current distance between endpoints, and the
+        # widest gap of a morph both are in.
         import math
-        current_dist = (end_pos - start_pos).length
+        current_dist = max((end_pos - start_pos).length, compute_morph_spread(
+            item_a, self.endpoint_a_residue, item_b, self.endpoint_b_residue))
         min_residues = max(3, math.ceil(current_dist / BU_PER_RESIDUE))
         if self.length_residues < min_residues:
             self.length_residues = min_residues

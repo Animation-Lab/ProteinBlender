@@ -183,6 +183,38 @@ def _get_numeric_chain_id_from_item(item_id: str) -> Optional[int]:
                         if parent_chain and parent_chain.isdigit():
                             return int(parent_chain)
                         break
+            if item.item_type == 'MORPH_MEMBER':
+                # Its row names its source, which before the Morphset is keyed
+                # is a domain object sharing the whole protein's mesh: without
+                # the domain's chain, a residue number found the first chain
+                # that has it (2026-11-10, a morph's linker built to chain A).
+                return _domain_chain_of_object(bpy.data.objects.get(item.object_name))
+            return None
+    return None
+
+
+def _domain_chain_of_object(obj) -> Optional[int]:
+    """The numeric chain a domain object draws, from the molecule model.
+
+    None when ``obj`` is no domain's object, or its chain cannot be told.
+    """
+    if obj is None:
+        return None
+    from ..utils.scene_manager import ProteinBlenderScene
+
+    for molecule in ProteinBlenderScene.get_instance().molecules.values():
+        for domain in getattr(molecule, 'domains', {}).values():
+            try:
+                if domain.object is None or domain.object != obj:
+                    continue
+            except ReferenceError:
+                continue
+            chain = str(domain.chain_id)
+            if chain.isdigit():
+                return int(chain)
+            for numeric, author in getattr(molecule, 'chain_mapping', {}).items():
+                if author == chain and str(numeric).isdigit():
+                    return int(numeric)
             return None
     return None
 
@@ -262,6 +294,31 @@ def _attribute_values(mesh, name, dtype):
     return values
 
 
+def _residue_vertex(mesh, residue_num: int, chain_numeric: Optional[int],
+                    res_ids=None, chains=None) -> Optional[int]:
+    """The vertex of a residue's alpha carbon in ``mesh``, else of its first atom.
+
+    Filtered to ``chain_numeric`` when given. None when the residue is absent.
+    ``res_ids`` and ``chains`` may be passed in when already read.
+    """
+    if res_ids is None:
+        res_ids = _attribute_values(mesh, "res_id", np.int32)
+        if res_ids is None:
+            return None
+    if chains is None:
+        chains = _attribute_values(mesh, "chain_id", np.int32)
+    match = res_ids == residue_num
+    if chains is not None and chain_numeric is not None:
+        match &= chains == chain_numeric
+    found = np.flatnonzero(match)
+    if not len(found):
+        return None
+    alphas = _attribute_values(mesh, "is_alpha_carbon", bool)
+    if alphas is not None and alphas[found].any():
+        return int(found[alphas[found]][0])
+    return int(found[0])
+
+
 def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
                                        residue_num: int,
                                        numeric_chain_id: Optional[int] = None,
@@ -321,19 +378,9 @@ def _get_residue_position_from_object(obj: bpy.types.Object, chain_id: str,
         if len(unique_chains) == 1:
             chain_numeric = int(unique_chains[0])
 
-    match = res_ids == residue_num
-    if chains is not None and chain_numeric is not None:
-        match &= chains == chain_numeric
-    found = np.flatnonzero(match)
-    if not len(found):
+    index = _residue_vertex(mesh, residue_num, chain_numeric, res_ids, chains)
+    if index is None:
         return None
-
-    # Prefer the alpha carbon; otherwise the residue's first atom.
-    alphas = _attribute_values(mesh, "is_alpha_carbon", bool)
-    if alphas is not None and alphas[found].any():
-        index = int(found[alphas[found]][0])
-    else:
-        index = int(found[0])
 
     # Raw mesh coordinate: the object's pivot is applied inside geometry
     # nodes, so mapping with matrix_world alone would miss it and land the
@@ -405,6 +452,61 @@ def compute_min_distance(item_id_a: str, chain_a: str, res_a: int,
         return -1.0
 
     return (pos_b - pos_a).length
+
+
+def _morph_member(item_id: str):
+    """``(morph, slot)`` of a Morphset member row, else ``(None, None)``."""
+    scene = bpy.context.scene
+    item = next((it for it in getattr(scene, 'outliner_items', ())
+                 if it.item_id == item_id), None)
+    if item is None or item.item_type != 'MORPH_MEMBER':
+        return None, None
+    from ..core import morphsets
+    uid, slot = item_id.rsplit(':', 1)
+    morph = next((m for m in morphsets.morphs(scene) if m.get(morphsets.MORPH) == uid), None)
+    return (morph, int(slot)) if morph is not None and slot.isdigit() else (None, None)
+
+
+def compute_morph_spread(item_id_a: str, res_a: int,
+                         item_id_b: str, res_b: int) -> float:
+    """How far apart two binding points get across the morph both are in.
+
+    A Morphset moves its chains with shape keys, which the reach handler
+    cannot hold back the way it holds back a dragged chain, so a linker
+    between two chains of one morph has to span the widest gap of any of its
+    states, not only the one shown now. Every state keeps its own copy of each
+    member's atoms, all captured in one space, so each state's gap is read
+    from those copies - keyed or not - and mapped through the morph's
+    transform, which carries every member alike.
+
+    Returns:
+        The widest gap in Blender units, or -1 when the points are not on
+        two members of one morph.
+    """
+    from ..core import morphsets
+
+    morph, slot_a = _morph_member(item_id_a)
+    other, slot_b = _morph_member(item_id_b)
+    if morph is None or other is None or morph != other:
+        return -1.0
+    chain_a = _get_numeric_chain_id_from_item(item_id_a)
+    chain_b = _get_numeric_chain_id_from_item(item_id_b)
+    linear = morph.matrix_world.to_3x3()
+    widest = -1.0
+    for state in morphsets.states(morph):
+        members = list(state.get('members') or ())
+        if max(slot_a, slot_b) >= len(members):
+            continue
+        mesh_a, mesh_b = members[slot_a].get('mesh'), members[slot_b].get('mesh')
+        if mesh_a is None or mesh_b is None:
+            continue
+        index_a = _residue_vertex(mesh_a, res_a, chain_a)
+        index_b = _residue_vertex(mesh_b, res_b, chain_b)
+        if index_a is None or index_b is None:
+            continue
+        gap = Vector(mesh_b.vertices[index_b].co) - Vector(mesh_a.vertices[index_a].co)
+        widest = max(widest, (linear @ gap).length)
+    return widest
 
 
 # ---------------------------------------------------------------------------
