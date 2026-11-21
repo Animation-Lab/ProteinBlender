@@ -220,6 +220,23 @@ def reset_scene():
             except Exception:
                 pass
 
+    # Agent Brains: stop any running preview (it is runtime-only state) and
+    # restore the stored definition and its settings to their defaults.
+    try:
+        importlib.import_module(PKG + '.agents.agent_preview').stop_all()
+    except Exception:
+        pass
+    agents = getattr(scene, "pb_agents", None)
+    if agents is not None:
+        for prop in agents.bl_rna.properties:
+            if prop.identifier == "rna_type" or prop.is_readonly:
+                continue
+            try:
+                agents.property_unset(prop.identifier)
+            except Exception:
+                pass
+        agents.types.clear()
+
     for coll_name in ("molecule_list_items", "outliner_items", "pb2_linkers",
                       "pose_library", "chain_selections"):
         coll = getattr(scene, coll_name, None)

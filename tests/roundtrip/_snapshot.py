@@ -62,6 +62,8 @@ SCENE_PROPS = (
     "pb2_linkers", "pb2_linkers_index",
     # Feature-package property groups.
     "protein_props", "dna_builder_props", "membrane_builder_props",
+    # Agent Brains: the types, their states and rules, and the box settings.
+    "pb_agents",
     # Domain creation / editing state.
     "chain_selections", "domain_start", "domain_end",
     "new_domain_chain", "new_domain_start", "new_domain_end",

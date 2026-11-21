@@ -6,7 +6,7 @@ be verified from ``bpy.types``. This module is the cheap regression net that
 catches (a) a panel/UIList dropped from a module's registration list and (b) a
 ``poll`` classmethod that crashes on an empty scene.
 
-The seven registered Panel classes and two UIList classes are listed by their
+The registered Panel and UIList classes are listed by their
 registered names (which equal both the Python class name and the ``bl_idname``
 for every class here, so ``getattr(bpy.types, name)`` resolves them). Panels are
 parametrized so a single missing registration shows up as one clearly-named
@@ -17,7 +17,7 @@ import bpy
 import pytest
 
 
-# The 7 registered Panel classes (name == bl_idname for all of these).
+# The registered Panel classes (name == bl_idname for all of these).
 PANEL_NAMES = [
     "PROTEIN_PB_PT_import_protein",     # Importer            (panel_import_protein)
     "PROTEINBLENDER_PT_outliner",       # PB Outliner         (protein_outliner_panel)
@@ -26,12 +26,16 @@ PANEL_NAMES = [
     "PROTEINBLENDER_PT_animation",      # Animation           (animation_panel)
     "PB2_PT_linkers",                   # Flexible Linkers    (linkers/linker_panel)
     "PROTEINBLENDER_PT_builders",       # Builders            (dna_builder/dna_panel)
+    "PB_AGENTS_PT_brains",              # Agent Brains        (agents/agent_panel)
 ]
 
-# The 2 registered UIList classes.
+# The registered UIList classes.
 UILIST_NAMES = [
     "PROTEINBLENDER_UL_outliner",       # outliner rows
     "PROTEINBLENDER_UL_keyframes",      # animation keyframe rows
+    "PB_AGENTS_UL_types",               # agent types
+    "PB_AGENTS_UL_states",              # a brain's states
+    "PB_AGENTS_UL_rules",               # a brain's rules
 ]
 
 

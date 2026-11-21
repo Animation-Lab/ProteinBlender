@@ -155,17 +155,20 @@ def assert_load_lifecycle_clean(payload, name):
 @pytest.mark.parametrize("name", list(BUILDERS))
 def test_saveload_roundtrip(name, tmp_path):
     """Build → save → reopen in a fresh Blender → nothing changed."""
+    blank = scene_snapshot()
     BUILDERS[name]()
     settle()
     expected = scene_snapshot()
 
-    # Non-vacuity: only the deliberately-empty case may snapshot an empty
-    # scene. Without this a builder that silently failed would round-trip
-    # nothing, perfectly, and report a pass.
+    # Non-vacuity: only the deliberately-empty case may snapshot what an
+    # untouched scene does. Without this a builder that silently failed would
+    # round-trip nothing, perfectly, and report a pass. It is measured against
+    # a blank snapshot rather than by counting objects, because some state
+    # (agent brains) lives only in scene properties and makes no object.
     if name != "empty":
-        assert expected["objects"], (
-            f"builder {name!r} created no objects - the round trip would be "
-            "vacuous")
+        assert filtered_diff(blank, expected), (
+            f"builder {name!r} left the scene as it found it - the round trip "
+            "would be vacuous")
 
     blend = tmp_path / f"rt_{name}.blend"
     import bpy

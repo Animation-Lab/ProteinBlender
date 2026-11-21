@@ -89,7 +89,7 @@ changed. The lane is therefore built to answer three questions on its own:
 | `_diff.py` | path-precise structural diff (`scene.molecule_list_items[4hhb].chain_custom_names: '…' -> ''`) |
 | `_builders.py` | one builder per subsystem, each asserting it really created the state |
 | `_verify.py` | subprocess that reopens the .blend and runs the **real** file-load lifecycle |
-| `test_saveload.py` | the cases: 20 builders x round trip, 3 x second generation, 2 x render |
+| `test_saveload.py` | the cases: 28 builders x round trip, 3 x second generation, 2 x render |
 | `test_persistence_contract.py` | the contracts that keep all of the above exhaustive |
 
 **The comparison is whole-scene and generic.** Every property of every
@@ -148,17 +148,12 @@ Two checks stop the lane from being decorative:
 
 ### Cases
 
-18 builders: `empty`, `single_protein`, `multi_chain`, `domains`,
-`chain_rename`, `chain_copy`, `pivots`, `keyframes`, `poses`, `pose_library`,
-`puppets`, `linkers`, `dna`, `membrane`, `force_fields`, `brownian`,
-`visual_style`, `kitchen_sink`. Three of them also run a **second generation**
-(save → reopen → save → reopen, compared against the original expectation),
-which is the only shape that catches the original data-loss bug's real
-mechanism: the reload degraded state and the *next save* persisted it. Two run
-a **Cycles render after reload**, because state assertions cannot see a node
-tree that reloaded subtly rewired.
+28 builders: `puppet_morphsets`, `model_morphsets`, `morphsets`, `thermal_morphsets`, `empty`, `single_protein`, `multi_chain`, `biological_assembly`, `scoped_symmetry`, `bent_filament`, `domains`, `chain_rename`, `chain_copy`, `pivots`, `keyframes`, `poses`, `pose_library`, `puppets`, `linkers`, `morph_linkers`, `dna`, `membrane`, `force_fields`, `brownian`, `agents`, `visual_style`, `lighting`, `kitchen_sink`.
+Every builder but `empty` must leave the scene different from a blank snapshot, or the case fails as vacuous; this replaced an "it made objects" check, which `agents` could never meet because agent brains live only in scene properties.
+Three of them also run a **second generation** (save → reopen → save → reopen, compared against the original expectation), which is the only shape that catches the original data-loss bug's real mechanism: the reload degraded state and the *next save* persisted it.
+Two run a **Cycles render after reload**, because state assertions cannot see a node tree that reloaded subtly rewired.
 
-Whole lane: 34 tests, ~2m30s on Blender 5.2.
+Whole lane: 44 tests, ~3m30s on Blender 5.2.
 
 ### Known gaps
 
@@ -321,6 +316,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_canonical_geometry.py` | `build_canonical_template`, `get_canonical_templates`, purine/pyrimidine ring builders (atom counts, finite coords) |
 | `test_linker_geometry.py` | `compute_catenary_points`, `compute_zero_g_points`, `_arc_length`, `compute_random_coil_points`, `_solve_catenary_parameter`, `apply_rigid_binding_zones` |
 | `test_bend_rig.py` | the shared bend rig's geometry (`core/bend_rig.py`, behind both the DNA strand bender and the helical filament bend): sampling a path by *arc length* rather than by chord (checked on a right angle whose legs are summed in the test), carrying straight on past the end of a curve, a frame whose normal stays square to the tangent and - the load-bearing one - does not flip at an inflection the way a Frenet normal does; the straight path a rig starts as, at the origin it is given; and arc-length resampling keeping the ends, the length, even handle spacing and - on a curve shaped the way production shapes one, straight then hook-dragged - *the path* (every sample within 0.5% of the length) *and its opening tangent* (within 0.01 degrees), plus no-opping at the same count and clamping to a usable number; a curved path read as leaving exactly along its first handle and arriving along its last (a chord of the flattened copy is 0.8 degrees off, which turns a whole filament about its start) |
+| `test_agent_engine.py` | the Agent Brains engine (`agents/engine.py`, pure NumPy) against truth it does not compute: a timed rule's survival at one mean wait (e^-1), competing exits splitting 9:1 whatever the rule order, a two-state switch settling at its dwell ratio, free diffusion matching Stokes-Einstein computed in the test from kB, T and the viscosity of water, a touch binding in front of a pocket but not beside it (placed by hand), a docked pair staying on the pocket axis while it moves, a while-stuck rule letting go, no two agents clipping in a crowded run (bound partners included, so a partner swinging into its docked pose has to go around the agent it docks onto: a straight-line blend cut through it by 0.6-0.7 nm), walls holding, both sides of every bond agreeing, and seeded replay |
 
 ## Integration lane (subsystem → operators covered)
 
@@ -343,7 +339,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_membrane.py` | `build_membrane` (all shapes, a second build beside a first, a cancelled draft, width edited through the dialog), `resize_membrane`, hole `add/select/remove`, `reset_deform`, `delete_membrane`, per-protein force field (through the protein's edit dialog) |
 | `test_outliner.py` | `outliner_select` (including that it reaches the viewport when there is no UI area to redraw), `toggle_expand`, `toggle_visibility`, `outliner_item_info`, the protein row's force-field toggle, and chain rows listing their domains in residue order rather than creation order |
 | `test_visual_edit_dialogs.py` | the per-item Visual Set-up dialogs and Edit Pivot mode: color and style reaching every object a protein owns, a call that sets one field leaving the others alone, rename+recolor in one pass, a protein's pivot being one shared point that lands on PDB-derived termini, `item_id` not leaking into the selection, and the Edit Pivot session: the helper starting on the current pivot, the second click applying where it was left without moving the atoms, a protein sharing one hand-placed pivot, a preset abandoning an open session, a second row committing the first, a deleted helper ending the session, and the mode owning the viewport while it is open - the helper the only selectable object, a user's own selection lock left alone, and nothing selected in the viewport or ticked in the outliner once it closes; and what a dialog opens *showing*: the seed read across every object that draws the item (never the molecule object, whose untouched carbon grey is on no screen), grey plus a flag when the parts disagree on color, "Multiple" when they disagree on style, and the real value once they agree |
-| `test_panels.py` | all 8 Panels + 2 UILists registered; `poll()` safety |
+| `test_panels.py` | all 8 Panels + 5 UILists registered; `poll()` safety |
 | `test_delete_last_chain_deletes_protein.py` | deleting the last chain/domain of a protein deletes the protein itself, cascading to its puppets, poses and linkers; it does not fire while any chain or sibling domain survives |
 | `test_biological_assembly.py` | BIOMT/mmCIF assembly parsing: both parsers returning the one documented dict contract, PDB transforms matching the fixture's own `REMARK 350` text, a non-identity rotation surviving with its orientation intact, building the assembly end to end from either format, and mmCIF being the download default |
 | `test_symmetry_realize_cutaway.py` | realizing copies into real objects (one per extra copy per source, independently selectable, sharing their atom data, landing exactly where their instances were, and the instanced assembly cleared so nothing is drawn twice) with any number realized - fourteen copies through the operator exactly as the dialog's button calls it - and a warning above ChimeraX's twelve (`realize_warning` at 12 and 13, and `assembly.copy_count`, which the dialog's red note reads, against the drawn copies); and the cutaway (copies in front of the plane removed, the offset moving the plane, the original cut like any other copy, a degenerate normal keeping everything) |
@@ -364,6 +360,7 @@ on a membrane whose typical gap was 0.28 nm.
 | `test_copy_chain.py` | `molecule.copy_chain` from the outliner's chain row: a split chain copying every one of its domains (residue coverage against the PDB text, and a Cycles render proving the copy puts as much protein on screen as the chain it copied), the copy appearing as one expandable chain row rather than leaking into its source chain, an unsplit chain still copying as a single domain, copying a copy, and the copy's Delete removing all of it and nothing else |
 | `test_numeric_chain_ids.py` | a structure whose author chain ids are digits (1CD3: chains 1, 2, 3, 4, B, F, G), where a chain's index and another chain's id share a namespace: chains importing unsplit, each outliner row resolving to exactly its own chain's single domain and object, and a chain-level delete taking one chain (see below) |
 | `test_outliner_colors.py` | the PB Outliner's row color swatches: seeding from what each item renders with (node graph as ground truth), actual-color palettes for mixed proteins/chains with up to four visible bands, domain-count/overflow tooltips, rebuilding and returning to a solid swatch (including true grey), preview cleanup, and a pick on a protein/chain/domain row recoloring exactly what that row covers |
+| `test_agent_brains.py` | the Agent Brains demo panel (`agents/`): every example loading with every rule reference resolving to the names in its own data, and every one of its rules firing within ten seconds of preview; removing a state or type switching off the rules that used it; a renamed state keeping its rules; a new rule starting from the selected state; a percentage chance reaching the engine as a probability; edits reaching a running preview while a new count waits for Reset; bound counts equalling the bond list; the definition surviving save and reload; and the panel drawn into a recording layout for every rule kind, checking each property it asks for exists, each rule row reads as its sentence, and the live counts and events it shows are the simulation's |
 
 ## Behaviour regressions (guard against reintroduction)
 

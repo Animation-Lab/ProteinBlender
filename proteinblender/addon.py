@@ -23,6 +23,7 @@ from .properties.pose_props import register as register_pose_props, unregister a
 from .linkers import register as register_linkers, unregister as unregister_linkers
 from .dna_builder import register as register_dna_builder, unregister as unregister_dna_builder
 from .membrane_builder import register as register_membrane_builder, unregister as unregister_membrane_builder
+from .agents import register as register_agents, unregister as unregister_agents
 from .layout.workspace_setup import ProteinWorkspaceManager
 from .utils.molecularnodes import session
 from .utils.molecularnodes.props import MolecularNodesObjectProperties
@@ -229,6 +230,9 @@ def register() -> None:
     # Register Membrane builder module
     register_membrane_builder()
 
+    # Register Agent Brains (demo) module
+    register_agents()
+
 def unregister() -> None:
     """Unregister the ProteinBlender addon.
     
@@ -320,6 +324,12 @@ def unregister() -> None:
         operator_import_local.unregister_menu()
     except Exception as e:
         logger.debug(f"Failed to unregister File > Import entry: {e}")
+
+    # Unregister Agent Brains (demo) module
+    try:
+        unregister_agents()
+    except Exception as e:
+        logger.debug(f"Failed to unregister agents: {e}")
 
     # Unregister Membrane builder module
     try:

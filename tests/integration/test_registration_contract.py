@@ -15,6 +15,7 @@ def _declared_classes():
     from proteinblender.dna_builder import dna_operators, dna_panel, dna_props, bender
     from proteinblender.linkers import linker_geometry, linker_operators, linker_panel, linker_props
     from proteinblender.membrane_builder import membrane_operators, membrane_props
+    from proteinblender.agents import agent_operators, agent_panel, agent_props
 
     classes = []
     for group in addon.ALL_PB_CLASSES:
@@ -23,6 +24,7 @@ def _declared_classes():
         dna_operators, dna_panel, dna_props, bender,
         linker_geometry, linker_operators, linker_panel, linker_props,
         membrane_operators, membrane_props,
+        agent_operators, agent_panel, agent_props,
     ):
         classes.extend(getattr(module, "CLASSES", ()))
     # Preserve order while removing classes exposed by more than one inventory.

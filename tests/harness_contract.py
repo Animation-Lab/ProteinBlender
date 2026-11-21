@@ -35,8 +35,10 @@ def addon_objects():
 
 
 def assert_clean_scene() -> None:
+    import importlib
+
     import bpy
-    from helpers import sm
+    from helpers import PKG, sm
 
     scene = bpy.context.scene
     problems = []
@@ -66,6 +68,12 @@ def assert_clean_scene() -> None:
                 problems.append(
                     f"scene.protein_props.{prop.identifier}: {current!r} "
                     f"(default {default!r})")
+    agents = getattr(scene, "pb_agents", None)
+    if agents is not None and len(agents.types):
+        problems.append(f"scene.pb_agents.types: {len(agents.types)} row(s)")
+    preview = importlib.import_module(PKG + ".agents.agent_preview")
+    if preview.session_for(scene) is not None:
+        problems.append("agent preview session still running")
     leaked = addon_objects()
     if leaked:
         problems.append("addon objects: " + ", ".join(o.name for o in leaked))

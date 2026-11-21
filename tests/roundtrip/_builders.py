@@ -765,6 +765,33 @@ def build_brownian():
     assert jitter > 0, "no JITTER keyframes were baked"
 
 
+def build_agents():
+    """Agent brains edited off an example: a renamed state, a new rule, moved settings.
+
+    A rule names states and types through enum items numbered by stable uids,
+    so a state renamed before the save must come back still named by every
+    rule that points at it, and the rule's sentence must read the same.
+    """
+    assert bpy.ops.pb_agents.load_example(
+        "EXEC_DEFAULT", example="RECEPTOR_LIGAND") == {'FINISHED'}
+    world = bpy.context.scene.pb_agents
+    receptor = next(t for t in world.types if t.name == "Receptor")
+    next(s for s in receptor.states if s.name == "Empty").name = "Vacant"
+
+    world.active_type_index = next(
+        k for k, t in enumerate(world.types) if t.name == "Ligand")
+    ligand = world.types[world.active_type_index]
+    assert bpy.ops.pb_agents.add_rule(trigger="TIMER") == {'FINISHED'}
+    assert len(ligand.rules) == 3
+    touch = ligand.rules[0]
+    touch.chance = 35.0
+    world.box_nm, world.boundary, world.seed = 120.0, "WRAP", 11
+
+    from proteinblender.agents.agent_props import describe_rule
+    assert describe_rule(ligand, touch) == (
+        "Free \u2192 Bound: touches Receptor (Vacant), 35%, sticks")
+
+
 def build_visual_style():
     """Molecule-level style and color, which write through to node trees and
     materials rather than to a property the outliner shows."""
@@ -1009,6 +1036,7 @@ BUILDERS = {
     "membrane": build_membrane,
     "force_fields": build_force_fields,
     "brownian": build_brownian,
+    "agents": build_agents,
     "visual_style": build_visual_style,
     "lighting": build_lighting,
     "kitchen_sink": build_kitchen_sink,
@@ -1042,6 +1070,7 @@ BUILDER_SUBSYSTEMS = {
     "membrane": ("membrane_builder",),
     "force_fields": ("membrane_builder",),
     "brownian": ("utils", "operators"),
+    "agents": ("agents",),
     "visual_style": ("panels",),
     "lighting": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
