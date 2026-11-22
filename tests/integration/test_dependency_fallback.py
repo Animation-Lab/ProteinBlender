@@ -34,8 +34,17 @@ SOURCE = PACKAGE / "__init__.py"
 BROKEN = "biotite"
 
 
+#: Stands in for the real ``addon.py`` when a copy loads with healthy
+#: dependencies: the copy holds only the entry module and the fallback.
+_STUB_ADDON = (
+    "def register():\n    pass\n\n"
+    "def unregister():\n    pass\n\n"
+    "def _test_register():\n    pass\n"
+)
+
+
 def _load_broken_copy(tmp_path, monkeypatch, cache=None, system="Linux", pip_works=False,
-                      wheels=()):
+                      wheels=(), broken=BROKEN):
     """Import a copy of the add-on's entry module with ``biotite`` broken.
 
     Returns ``(module, pip_calls)``. ``cache`` is written as the package's
@@ -44,11 +53,13 @@ def _load_broken_copy(tmp_path, monkeypatch, cache=None, system="Linux", pip_wor
     ``platform.system()`` reports; ``pip_works`` makes the recorded pip
     succeed, so every command the installer would run is seen. ``wheels``
     names empty stand-ins put in the copy's ``wheels`` folder.
+    ``broken=None`` loads it with every dependency healthy instead.
     """
     package = tmp_path / "pb_broken_probe"
     package.mkdir()
     shutil.copy(SOURCE, package / "__init__.py")
     shutil.copy(PACKAGE / "dependency_fallback.py", package / "dependency_fallback.py")
+    (package / "addon.py").write_text(_STUB_ADDON)
     if cache is not None:
         (package / ".dependency_cache.json").write_text(json.dumps(cache))
     if wheels:
@@ -64,7 +75,8 @@ def _load_broken_copy(tmp_path, monkeypatch, cache=None, system="Linux", pip_wor
             raise subprocess.CalledProcessError(1, command)
         return 0
 
-    monkeypatch.setitem(sys.modules, BROKEN, None)
+    if broken:
+        monkeypatch.setitem(sys.modules, broken, None)
     monkeypatch.setattr(subprocess, "check_call", recorded_pip)
     monkeypatch.setattr(platform, "system", lambda: system)
     spec = importlib.util.spec_from_file_location(
@@ -73,6 +85,7 @@ def _load_broken_copy(tmp_path, monkeypatch, cache=None, system="Linux", pip_wor
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "pb_broken_probe", module)
     monkeypatch.delitem(sys.modules, "pb_broken_probe.dependency_fallback", raising=False)
+    monkeypatch.delitem(sys.modules, "pb_broken_probe.addon", raising=False)
     # The Windows path unloads scipy/pandas from sys.modules before installing;
     # put them back, or they are pulled out from under the rest of the session.
     loaded = dict(sys.modules)
@@ -224,3 +237,97 @@ def test_a_windows_repair_never_reinstalls_blenders_numpy(tmp_path, monkeypatch)
             assert pinned_by, f"may upgrade numpy while resolving dependencies: {args}"
             pins = Path(pinned_by).read_text().split()
             assert f"numpy=={numpy.__version__}" in pins, (args, pins)
+
+
+STRAY = "pb_stray_user_site_probe"
+
+
+def test_a_healthy_start_never_imports_from_the_shared_user_site(tmp_path, monkeypatch):
+    """Dependencies Blender already provides must not open the shared user site.
+
+    Reported 2026-11-18 (Janet, Windows, Blender 5.2.3): every file call in
+    Blender failed with "[WinError 6714] The current transaction context
+    associated with the thread is not a valid handle", so ProteinBlender could
+    neither load nor repair itself, and Blender's Add-ons list went blank.
+    Her bundled wheels were fine. The add-on had appended the shared Python
+    user site (%APPDATA%\\Python\\Python313\\site-packages, used by every
+    Python 3.13 on the machine), where some other tool had left pyarrow 24.0.0.
+    starfile imports pandas, pandas imports pyarrow when it can find it, and
+    pyarrow 24's allocator (mimalloc 3.2.7) writes its thread-local slot
+    straight into the thread block: past slot 63 that lands on other fields,
+    and at 103 on the thread's file-transaction handle.
+
+    A package that exists only in that user site stands in for pyarrow, and
+    the truth is Python's own import system: after a start whose dependencies
+    all import from Blender's paths, it must not be able to find the package.
+    """
+    import importlib.util
+    import site
+
+    user_site = tmp_path / "shared_user_site"
+    (user_site / STRAY).mkdir(parents=True)
+    (user_site / STRAY / "__init__.py").write_text("")
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(user_site))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    assert importlib.util.find_spec(STRAY) is None, "the stray package is reachable already"
+
+    module, pip_calls = _load_broken_copy(tmp_path, monkeypatch, broken=None)
+
+    assert module.dependencies_installed is True
+    assert not pip_calls
+    importlib.invalidate_caches()
+    assert importlib.util.find_spec(STRAY) is None, (
+        "a package only the shared user site has became importable, although "
+        "every dependency imported without it")
+
+
+_USER_SITE_ONLY_PROBE = r"""
+import importlib.util, json, os, site, sys
+package = sys.argv[sys.argv.index("--") + 1]
+user_site = site.getusersitepackages()
+result = {
+    "on_path_before": user_site in sys.path,
+    "biotite_reachable_before": importlib.util.find_spec("biotite") is not None,
+    "biotite_in_user_site": os.path.isdir(os.path.join(user_site, "biotite")),
+}
+spec = importlib.util.spec_from_file_location(
+    "pb_user_site_probe", os.path.join(package, "__init__.py"),
+    submodule_search_locations=[package])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+result.update(installed=module.dependencies_installed, problem=module._import_problem,
+              on_path_after=user_site in sys.path)
+print("PBRESULT " + json.dumps(result))
+"""
+
+
+def test_core_packages_only_in_the_user_site_still_load(tmp_path):
+    """Source and legacy installs keep working: their packages live in the user site.
+
+    dev/install_deps.sh installs with ``pip --user`` and the pip repair lands
+    there on Windows, so when Blender's own paths lack the core packages the
+    add-on must still find them there. This runs in a fresh Blender, which
+    leaves the user site off sys.path (this test session's runner adds it).
+    """
+    package = tmp_path / "pb_user_site_probe"
+    package.mkdir()
+    shutil.copy(SOURCE, package / "__init__.py")
+    shutil.copy(PACKAGE / "dependency_fallback.py", package / "dependency_fallback.py")
+    (package / "addon.py").write_text(_STUB_ADDON)
+    # A repair "just tried", so a failing check can never run a real pip here.
+    (package / ".dependency_cache.json").write_text(
+        json.dumps({"last_install_attempt": time.time()}))
+
+    proc = subprocess.run(
+        [bpy.app.binary_path, "-b", "--factory-startup", "--python-expr",
+         _USER_SITE_ONLY_PROBE, "--", str(package)],
+        capture_output=True, text=True, timeout=300)
+    lines = [line for line in proc.stdout.splitlines() if line.startswith("PBRESULT ")]
+    assert lines, f"probe printed nothing (rc={proc.returncode}):\n{proc.stderr[-3000:]}"
+    result = json.loads(lines[-1][len("PBRESULT "):])
+    if result["biotite_reachable_before"] or not result["biotite_in_user_site"]:
+        pytest.skip(f"this machine's packages are not only in the user site: {result}")
+    assert not result["on_path_before"], result
+    assert result["installed"] is True, result
+    assert result["on_path_after"], result

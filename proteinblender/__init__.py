@@ -28,11 +28,28 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
     logger.addHandler(handler)
 
-# Add user site-packages to sys.path if not already present
-user_site = site.getusersitepackages()
-if user_site not in sys.path and os.path.exists(user_site):
+
+def _add_user_site() -> bool:
+    """Append the shared Python user site-packages to sys.path, as a last resort.
+
+    Only for when the core packages do not import from Blender's own paths:
+    source and legacy installs whose packages were ``pip install --user``-ed,
+    and the pip repair, which lands there on Windows (Program Files is
+    read-only). Never by default: that folder belongs to every Python of this
+    version on the machine (%APPDATA%\\Python\\Python313\\site-packages), so it
+    can hold anything, and a dependency's optional import then picks it up.
+    pandas imports pyarrow whenever it can find one, and a stray pyarrow 24
+    there broke all file access in a tester's Blender (WinError 6714).
+
+    Returns True if this call added it.
+    """
+    user_site = site.getusersitepackages()
+    if user_site in sys.path or not os.path.isdir(user_site):
+        return False
     sys.path.append(user_site)
+    importlib.invalidate_caches()
     logger.info(f"Added user site-packages to sys.path: {user_site}")
+    return True
 
 
 def _unload_modules() -> None:
@@ -137,11 +154,14 @@ def _needs_reinstall(package_name: str, required_version: str) -> bool:
         return True  # Package not found or error checking, needs install
 
 
-def _can_import_core_packages():
+def _can_import_core_packages(warn: bool = True):
     """Quick check if all core packages can be imported without errors.
 
     This is used to skip pip installation attempts when packages are already
     working, which prevents permission errors during addon updates.
+
+    Args:
+        warn: Log a warning naming the package that failed.
 
     Returns:
         bool: True if all core packages can be imported successfully
@@ -162,7 +182,8 @@ def _can_import_core_packages():
             # from a missing DLL), and letting that escape kills the whole
             # add-on import with no explanation.
             _import_problem = f"{package}: {type(e).__name__}: {e}"
-            logger.warning(f"Core package cannot be imported - {_import_problem}")
+            if warn:
+                logger.warning(f"Core package cannot be imported - {_import_problem}")
             return False
 
     _import_problem = ""
@@ -265,6 +286,9 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
 
     import importlib.util
     import glob
+
+    # Where earlier repairs installed on Windows, so they are seen as installed.
+    _add_user_site()
 
     # Find the wheels directory relative to this file
     wheels_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "wheels"))
@@ -384,6 +408,9 @@ def ensure_packages(packages: Dict[str, str]) -> bool:
             logger.error(f"Unexpected error during installation of {package_name}: {e}")
             _show_error_popup(f"Error installing '{package_name}'. See Console.")
             return False
+
+    # pip may have just created the user site, installing into it.
+    _add_user_site()
 
     if restart_required:
         logger.error("Some packages could not be installed due to locked files.")
@@ -661,6 +688,41 @@ def _repair_partial_wheels() -> bool:
             pass
     return bool(repaired)
 
+
+def _repair_partial_wheels_safely() -> None:
+    """Run `_repair_partial_wheels`, never letting it block a load.
+
+    It repairs a partially-extracted bundled wheel (missing '<pkg>.libs' DLLs)
+    in the site-packages folders on sys.path, so it runs before each attempt
+    to import from them. It is offline and always safe, and unlike the pip
+    fallback below it is NOT rate-limited by the daily cache, because a broken
+    .libs never fixes itself and repairing it is cheap and deterministic.
+    """
+    try:
+        _repair_partial_wheels()
+    except Exception as exc:
+        logger.debug("Wheel repair pass failed: %s", exc)
+
+
+def _core_packages_importable() -> bool:
+    """Whether the core packages import: from Blender's own paths, else the user site.
+
+    Blender's paths (its bundled Python and the extension wheels it unpacks
+    into extensions/.local) come first, and the shared user site is added
+    only if they fall short - see `_add_user_site` for why it must not be
+    on sys.path when nothing needs it.
+    """
+    _repair_partial_wheels_safely()
+    if _can_import_core_packages(warn=False):
+        return True
+    if _add_user_site():
+        _repair_partial_wheels_safely()
+        if _can_import_core_packages(warn=False):
+            return True
+    logger.warning(f"Core package cannot be imported - {_import_problem}")
+    return False
+
+
 # Normal mode: avoid pip operations when the packages already work (running
 # pip during an addon update triggers Windows permission errors).
 #
@@ -671,16 +733,7 @@ def _repair_partial_wheels() -> bool:
 # dependencies_installed True and the addon carried on into
 # `from .addon import register`, which then died on ImportError with no
 # warning shown to the user.
-# Repair a partially-extracted bundled wheel (missing '<pkg>.libs' DLLs) before
-# importing anything - this is offline and always safe, and unlike the pip
-# fallback below it is NOT rate-limited by the daily cache, because a broken
-# .libs never fixes itself and repairing it is cheap and deterministic.
-try:
-    _repair_partial_wheels()
-except Exception as _repair_exc:  # never let repair block a load
-    logger.debug("Wheel repair pass failed: %s", _repair_exc)
-
-if _can_import_core_packages():
+if _core_packages_importable():
     logger.info("All core packages importable, skipping installation")
     dependencies_installed = True
     _clear_install_attempt()

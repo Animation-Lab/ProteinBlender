@@ -1775,6 +1775,11 @@ on a membrane whose typical gap was 0.28 nm.
   Tests that measure drawn atoms import their fixtures as Spheres through the operator's hidden `style_override` (`H.import_local(style="spheres")`, the default there).
 - **Pick in Viewport and the checkbox icons on the subunit select buttons are gone** (2026-11-10, Dillon's list).
   `molecule.pick_subunits`, `subunit_spheres`, `subunit_on_ray` and the overlay's picker layer were removed; the list's hover highlight is the one overlay. `test_picking_subunits_in_the_viewport_is_gone` checks the operator is unregistered; the filament UI lane checks the panel draws no Pick in Viewport and no checkbox icon on Select All, None, Invert or the per-tubulin buttons.
+- **A stray pyarrow in the shared Python user site broke every file call in Blender** (2026-11-18, Janet, Windows, Blender 5.2.3: WinError 6714, then "Error installing", "No module named '...dependency_fallback'" and a blank Add-ons list).
+  The add-on always appended `%APPDATA%\Python\Python313\site-packages`, which every Python 3.13 on the machine shares; starfile imports pandas, pandas imports any pyarrow it can find, and pyarrow 24.0.0 (mimalloc 3.2.7) writes its thread-local slot straight into the thread block, which past slot 63 overwrites other fields and at 103 the thread's file-transaction handle.
+  The user site is now added only when the core packages do not import from Blender's own paths (`__init__._core_packages_importable`), so source and `pip --user` installs still load.
+  `test_dependency_fallback.py::test_a_healthy_start_never_imports_from_the_shared_user_site` was red (a package only that folder had became importable); `::test_core_packages_only_in_the_user_site_still_load` keeps the user-site case working in a fresh Blender.
+  Reproduced end to end with the 1.2.6 alpha zip in an isolated 5.2 profile, pyarrow 24.0.0 in a separate user site and TLS slots used up before add-ons load: the shipped loader failed exactly as reported, the fixed one loaded with pyarrow never imported and imported 1ubq.pdb and 1atn.cif.gz.
 
 ## Crash regressions (guard against reintroduction)
 

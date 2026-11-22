@@ -91,6 +91,9 @@ The MolecularNodes session is attached as `bpy.types.Scene.MNSession` and object
 - Runtime dependencies: `databpy`, `MDAnalysis`, `biotite`, `mrcfile`, `starfile`, `PyYAML`, plus `numpy`, `scipy`, and `msgpack`.
 - MolecularNodes is embedded under `utils/molecularnodes/`, not a pip dependency.
 - On first load, `__init__.py` verifies the dependencies and, if needed, installs them from `wheels/` (falling back to PyPI), with Windows DLL-locking handled gracefully and a daily cache to avoid re-checking every startup.
+- The add-on puts the shared Python user site-packages on `sys.path` only when the core packages do not import from Blender's own paths (`_core_packages_importable`).
+  That folder is shared by every Python of that version on the machine, so it can hold packages we never ship: a stray pyarrow 24 there, imported by pandas, broke all file access in a tester's Blender (WinError 6714).
+  Do not add it back unconditionally.
 - Versions must stay consistent with the wheels pinned in `blender_manifest.toml`.
   The embedded MolecularNodes targets specific APIs (for example biotite 1.6.0; biotite 1.7 moved `connect_via_residue_names` out of `structure.bonds`, which broke every mmCIF import until the readers switched to the top-level `struc.connect_via_residue_names`), so installing "latest" can break the add-on at runtime.
   The biotite cap (`<1.7`) is now precautionary: the full suite passes on 1.7.1, but raising it changes what ships, so do it deliberately.
