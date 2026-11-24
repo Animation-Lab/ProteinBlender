@@ -1815,6 +1815,9 @@ on a membrane whose typical gap was 0.28 nm.
 - **Ligands / Ions / Water rows have a color swatch** (2026-11-24, Dillon: "the ligands and ions don't have a color swatch that can quickly be changed in the PB outliner").
   `HETERO` joins `outliner_colors.COLORABLE_TYPES`; a pick goes through `hetero_groups.set_color`, keeping by-element mode (only what was drawn in the carbon color changes), and the swatch reads the group's own color (`_sync_group_swatch`), following pencil edits too. `test_hetero_styles.py::*swatch*` were red (no swatch, no recolor, stale swatch); the protein-swatch check reads the domain's point cloud, which the helper first skipped and so passed vacuously.
 
+- **Ligands / Ions / Water import in their protein's style** (2026-11-24, Dillon: "all the styles should be the same on import (surface) rather than some ball and stick etc.").
+  `hetero_groups.import_style` gives a new group its protein's style; Cartoon and Ribbon trace a backbone the groups lack, so those fall back to Ball and Stick (ligands) and Spheres (ions, water). A probe showed every other style draws ions (a lone ion as a sphere), so all four are offered for every kind. `test_hetero_styles.py::test_groups_import_in_the_proteins_style` (surface, spheres, sticks, ball and stick) was red; the fallback cases guard Cartoon/Ribbon.
+
 - **Reopening a file dropped overflow domain masks** (2026-11-24, surfaced by the `chain_copy` save/load case once the hetero mask took a join slot).
   Past eight masks the protein's Boolean joins chain (`Domain_Boolean_Join` -> `_2` ...); `_rebind_domain_infrastructure` wired the *first* join to the final NOT on reopen, so masks in overflow joins stopped hiding their atoms on the protein object. It now wires the last join.
 

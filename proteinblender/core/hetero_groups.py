@@ -64,7 +64,9 @@ GATE_ATTR_NODE = "PB_Polymer_Gate_Attr"
 GATE_COMPARE_NODE = "PB_Polymer_Gate_Compare"
 GATE_AND_NODE = "PB_Polymer_Gate_And"
 
-# kind -> (key, outliner label, style node, carbon color, icon)
+# kind -> (key, outliner label, fallback style node, carbon color, icon).
+# A group starts in its protein's style (:func:`import_style`); the style here
+# is only used when the protein's style draws nothing for it.
 KINDS = {
     LIGAND: ("LIGAND", "Ligands", "Style Ball and Stick", (0.20, 0.78, 0.35, 1.0), 'PHYSICS'),
     ION:    ("ION", "Ions", "Style Spheres", (0.60, 0.40, 0.85, 1.0), 'SHADING_SOLID'),
@@ -361,11 +363,12 @@ def _parent_material(wrapper):
     return None
 
 
-def _build_group_tree(tree, kind, material):
+def _build_group_tree(tree, kind, material, style_name=None):
     from ..utils.molecularnodes.blender import nodes
     from . import domain_space
 
-    _key, label, style_name, carbon, _icon = KINDS[kind]
+    _key, label, fallback, carbon, _icon = KINDS[kind]
+    style_name = style_name or fallback
 
     for node in list(tree.nodes):
         if node.bl_idname not in ('NodeGroupInput', 'NodeGroupOutput'):
@@ -456,7 +459,7 @@ def _create_group_object(wrapper, kind, material):
     tree.name = f"{obj.name}_nodes"
     mod = obj.modifiers.new(name="DomainNodes", type='NODES')
     mod.node_group = tree
-    _build_group_tree(tree, kind, material)
+    _build_group_tree(tree, kind, material, import_style(wrapper, kind))
 
     obj.matrix_world = parent.matrix_world.copy()
     obj.parent = parent
@@ -483,13 +486,22 @@ SIZE_NODE = "PB Group Size"            # Value: 1.0 = the style's own size
 _SIZE_PREFIX = "PB Group Size x "
 
 # Which representations make sense for each kind. Cartoon and Ribbon follow a
-# protein backbone a ligand does not have, and draw nothing; a single-atom ion
-# has no bonds for Sticks to draw. Water is mostly single oxygens too.
-STYLES_FOR_KIND = {
-    LIGAND: ('ball_and_stick', 'sticks', 'spheres', 'surface'),
-    ION: ('spheres',),
-    WATER: ('spheres',),
-}
+# protein backbone a ligand or an ion does not have, and draw nothing; every
+# other style draws something for all of them (a lone ion as a sphere).
+_DRAWABLE = ('ball_and_stick', 'sticks', 'spheres', 'surface')
+STYLES_FOR_KIND = {LIGAND: _DRAWABLE, ION: _DRAWABLE, WATER: _DRAWABLE}
+
+
+def import_style(wrapper, kind) -> str:
+    """The style node a new group is drawn with: its protein's, so a protein
+    imported as Surface gets surface ligands too, unless that style draws
+    nothing for the group (Cartoon, Ribbon), when the kind's own default is
+    used."""
+    from .visual_style import STYLE_TREES
+    style = getattr(wrapper, "style", None)
+    if style in STYLES_FOR_KIND[kind]:
+        return STYLE_TREES[style]
+    return KINDS[kind][2]
 
 # The style inputs that set how big a style draws, scaled together by Size.
 _SIZE_SOCKETS = {

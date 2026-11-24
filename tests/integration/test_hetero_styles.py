@@ -165,10 +165,11 @@ def test_styles_offered_suit_each_group(scene, sirt3):
     from proteinblender.operators import hetero_edit
     ligand_styles = hetero_edit.styles_for(_row(scene, sirt3, "Ligands"))
     ion_styles = hetero_edit.styles_for(_row(scene, sirt3, "Ions"))
-    # Cartoon and Ribbon follow a backbone a ligand does not have; an ion has
-    # no bonds for sticks to draw.
-    assert set(ligand_styles) == {'ball_and_stick', 'sticks', 'spheres', 'surface'}
-    assert ion_styles == ['spheres']
+    # Cartoon and Ribbon follow a backbone a ligand or an ion does not have;
+    # every other style draws something for both (a lone ion as a sphere).
+    drawable = {'ball_and_stick', 'sticks', 'spheres', 'surface'}
+    assert set(ligand_styles) == drawable
+    assert set(ion_styles) == drawable
 
 
 @pytest.mark.integration
@@ -376,3 +377,51 @@ def test_protein_swatch_leaves_the_ligands_their_color(scene, sirt3):
     protein = next(it for it in scene.outliner_items if it.item_id == sirt3)
     protein.row_color = BLUE
     assert np.allclose(_carbon_color(ligands), before, atol=1e-4)
+
+
+
+# ---------------------------------------------------------------------------
+# Import: the groups start in the protein's style
+# ---------------------------------------------------------------------------
+
+def _group_styles(scene, mid):
+    from proteinblender.core.visual_style import get_object_style
+    return {label: get_object_style(bpy.data.objects[_row(scene, mid, label).object_name])
+            for label in ("Ligands", "Ions")}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("style", ["surface", "spheres", "sticks", "ball_and_stick"])
+def test_groups_import_in_the_proteins_style(scene, style):
+    """Dillon: "all the styles should be the same on import (surface) rather
+    than some ball and stick etc." """
+    mid = H.import_local(FIXTURE, "4bv3", style=style)
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    assert _group_styles(scene, mid) == {"Ligands": style, "Ions": style}
+    for label in ("Ligands", "Ions"):
+        obj = bpy.data.objects[_row(scene, mid, label).object_name]
+        assert _drawn_count(obj) > 0, (label, style)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("style", ["cartoon", "ribbon"])
+def test_groups_fall_back_when_the_protein_style_draws_nothing_for_them(scene, style):
+    """Cartoon and Ribbon trace a backbone; ligands and ions have none."""
+    mid = H.import_local(FIXTURE, "4bv3", style=style)
+    H.scene_manager_module().build_outliner_hierarchy(bpy.context)
+    assert _group_styles(scene, mid) == {"Ligands": "ball_and_stick", "Ions": "spheres"}
+    row = _row(scene, mid, "Ligands")
+    assert set(_drawn(bpy.data.objects[row.object_name])[0].tolist()) == _ligand_res_ids()
+
+
+def _drawn_count(obj):
+    """Vertices Blender draws for *obj*, whatever attributes the style keeps
+    (a surface carries no res_id)."""
+    bpy.context.view_layer.update()
+    count = 0
+    for instance in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = (instance.parent.original if instance.is_instance
+                 else instance.object.original)
+        if owner.name == obj.name and instance.object.type == "MESH":
+            count += len(instance.object.data.vertices)
+    return count
