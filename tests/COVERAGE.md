@@ -1793,6 +1793,14 @@ on a membrane whose typical gap was 0.28 nm.
 - **An eye for the selected subunits** (2026-11-24, Dillon: "Add an 'eye' to the filament selection menu (multiple selected)").
   Beside the color field and Clear, `Scene.pb_subunit_hide` hides every selected subunit at once and shows them again; it reads closed only while all of them are hidden.
   `test_filament_colors.py::test_the_eye_by_the_color_field_hides_every_selected_subunit_and_shows_them_again`, `::test_the_eye_hides_the_rest_when_only_some_selected_subunits_are_hidden`, `::test_the_eye_with_nothing_selected_hides_nothing` and `::test_the_panel_draws_the_eye_beside_the_color_field` count the copies drawn against the structure's own order; the filament UI lane finds the eye with the mouse and clicks it twice.
+- **A style for the selected subunits** (2026-11-24, Dillon: "For the filament, you have color, clear and the eye. Can you add style change too for the Cytoskeleton Subunits?").
+  `Scene.pb_subunit_style`, beneath the color field, draws every selected subunit in another style; the choice lives in `Object.pb_filament.styles`, each copy's point carries it as `pb_style`, and the assembly tree draws the chain's colored atoms in each style its subunits use and instances each copy in its own (`assembly.sync_style_stage`), ahead of the hide and tint stages.
+  `test_filament_colors.py::test_the_style_field_draws_the_selected_subunits_in_another_style` and the tests after it read what Blender draws - each copy's kind (mesh or point cloud), vertex count and place up the filament - for: putting a subunit back with the filament's own style, a Cartoon among Surfaces, the field showing the first selected subunit, nothing selected, painting and hiding a restyled subunit, growing the filament, restyling the filament from its pencil, one tubulin of a dimer, and Realize Copies.
+  The `bent_filament` save/reload case restyles a subunit to Cartoon among Spheres and checks it is the one mesh, where it stood, after reopening.
+  The filament UI lane finds the field with the mouse, opens its menu, turns it with Ctrl+wheel, checks the selected copies (and only they) turn to spheres, and undoes and redoes it.
+- **The first use of a style deselected every object** (2026-11-24, found by the filament UI lane while adding the style field).
+  A style's node group is appended from MolecularNodes the first time a file uses it, through `bpy.ops.wm.append`, which deselects every object; the Cytoskeleton Subunits panel follows a selected filament, so it went away from under the mouse after one change.
+  `visual_style.style_tree` now puts the selection and the active object back; `test_filament_colors.py::test_a_first_use_of_a_style_keeps_the_filament_selected` was red with the chain deselected.
 
 ## Crash regressions (guard against reintroduction)
 

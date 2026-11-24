@@ -777,6 +777,157 @@ def verify_the_selection_eye_showed_them():
     return f"{len(data['eye_chosen'])} shown again"
 
 
+# The style field under the color field: Dillon, 2026-11-24, "For the
+# filament, you have color, clear and the eye. Can you add style change too
+# for the Cytoskeleton Subunits?"
+
+STYLE_ORDER = [item[0] for item in __import__(
+    'proteinblender.core.visual_style', fromlist=['REAL_STYLE_ITEMS']).REAL_STYLE_ITEMS]
+
+
+def drawn_points(mol, chain):
+    """How many atoms Blender draws as spheres (point clouds) for one chain."""
+    domain = next(d.object for d in mol.domains.values() if str(d.chain_id) == chain)
+    bpy.context.view_layer.update()
+    total = 0
+    for entry in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = entry.parent.original if entry.is_instance else entry.object.original
+        if owner.name == domain.name and entry.object.type == 'POINTCLOUD':
+            total += len(entry.object.data.points)
+    return total
+
+
+def find_the_style_field():
+    """Walk the mouse down from the color field to the style field beneath it."""
+    assert 'paint_y' in data, 'the mouse never found the color field'
+    area, region = properties_region()
+    x = region.x + region.width // 2
+    steps = []
+    for y in range(int(data['paint_y']), region.y + 20, -3):
+        steps.append((f'point at y={y}', lambda y=y: move(x, y)))
+        steps.append(('settle', idle))
+        steps.append((f'check y={y}', lambda y=y: check_style_field(x, y)))
+    g['steps'][:0] = steps
+    return f'{len(steps) // 3} spots'
+
+
+def check_style_field(x, y):
+    if 'style_xy' in data:
+        return 'found already'
+    path = hovered_path()
+    if path == 'pb_subunit_style':
+        # Track the field's whole height; its edge pixels can miss a click.
+        span = data.setdefault('style_span', [y, y])
+        span[1] = y
+        return path
+    if 'style_span' not in data:
+        return path or None
+    data['style_xy'] = (x, sum(data['style_span']) // 2)
+    steps = g['steps']
+    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'point at the style field')
+    del steps[:rest]
+    return path or 'past the style field'
+
+
+def open_the_style_menu():
+    assert 'style_xy' in data, 'no style field under the color field'
+    # Straight under the color field's row: the next thing the walk met.
+    assert data['style_span'][0] < data['paint_y'], (data['style_span'], data['paint_y'])
+    mol = filament()
+    present = SC.present_sites(mol)
+    rows = mol.object.pb_filament.subunits
+    chosen = [row.name for row in rows if row.select and row.site in present]
+    assert len(chosen) > 1, f'the style is for several selected subunits: {chosen}'
+    data['style_chosen'] = chosen
+    data['style_before'] = {rows[name].chain: (drawn_vertices(mol, rows[name].chain),
+                                               drawn_points(mol, rows[name].chain))
+                            for name in chosen}
+    assert bpy.context.scene.pb_subunit_style == 'surface', bpy.context.scene.pb_subunit_style
+    assert hovered_path() == 'pb_subunit_style', f'not over the style field: {hovered_path()}'
+    click_at(data['style_xy'], 'PRESS')
+
+
+def see_the_style_menu():
+    path = capture('subunits-style-menu.png')
+    key('ESC')
+    return path
+
+
+def wheel_the_style(direction):
+    x, y = data['style_xy']
+    g['active_window']().event_simulate(type=direction, value='PRESS', x=x, y=y, ctrl=True)
+
+
+def turn_to(style):
+    """Ctrl+wheel over the field, one step at a time, until it reads ``style``."""
+    current = bpy.context.scene.pb_subunit_style
+    seen = data.setdefault('style_seen', [])
+    seen.append(current)
+    if current == style:
+        return ' -> '.join(seen)
+    assert len(seen) < 8, f'Ctrl+wheel never reached {style}: {seen}'
+    direction = ('WHEELUPMOUSE' if STYLE_ORDER.index(style) < STYLE_ORDER.index(current)
+                 else 'WHEELDOWNMOUSE')
+    g['steps'][:0] = [('ctrl+wheel', lambda: wheel_the_style(direction)),
+                      ('settle', idle), ('settle', idle),
+                      (f'turn to {style}', lambda: turn_to(style))]
+    return current
+
+
+def verify_drawn_as_spheres():
+    """The selected copies, and only they, are drawn as spheres."""
+    mol = filament()
+    rows = mol.object.pb_filament.subunits
+    chosen = data['style_chosen']
+    assert all(SC.style_of(mol, name) == 'spheres' for name in chosen), (
+        [(name, SC.style_of(mol, name)) for name in chosen])
+    for chain, ((total, per_copy), points) in data['style_before'].items():
+        gone = sum(1 for name in chosen if rows[name].chain == chain)
+        after = drawn_vertices(mol, chain)[0]
+        assert per_copy and after == total - gone * per_copy, (chain, total, per_copy, after)
+        assert drawn_points(mol, chain) > points, f'chain {chain}: no spheres drawn'
+    data['style_spheres_seen'] = list(data.pop('style_seen'))
+    return capture('subunits-style-spheres.png')
+
+
+def undo_the_style():
+    data['style_undo_from'] = data['style_spheres_seen'][-2]
+    key('Z', ctrl=True)
+
+
+def verify_style_undone():
+    mol = filament()
+    chosen = data['style_chosen']
+    back = data['style_undo_from']
+    assert bpy.context.scene.pb_subunit_style == back, (
+        bpy.context.scene.pb_subunit_style, back)
+    assert all(SC.style_of(mol, name) == back for name in chosen)
+    if back != 'spheres':
+        for chain in data['style_before']:
+            assert drawn_points(mol, chain) == data['style_before'][chain][1], chain
+    key('Z', ctrl=True, shift=True)
+    return f'undone to {back}'
+
+
+def verify_style_redone():
+    mol = filament()
+    assert bpy.context.scene.pb_subunit_style == 'spheres'
+    assert all(SC.style_of(mol, name) == 'spheres' for name in data['style_chosen'])
+    for chain in data['style_before']:
+        assert drawn_points(mol, chain) > data['style_before'][chain][1], chain
+    return 'redone'
+
+
+def verify_drawn_as_the_filament_again():
+    mol = filament()
+    for chain, ((total, _per_copy), points) in data['style_before'].items():
+        assert drawn_vertices(mol, chain)[0] == total, chain
+        assert drawn_points(mol, chain) == points, chain
+    assert not mol.object.pb_filament.styles, list(mol.object.pb_filament.styles.keys())
+    data.pop('style_seen', None)
+    return f"{len(data['style_chosen'])} back to the filament's surface"
+
+
 def unpaint_the_row():
     """Start the swatch checks from a subunit with no color of its own."""
     mol = filament()
@@ -1150,6 +1301,22 @@ g['steps'][:] = [
     ('settle', idle),
     ('release', lambda: click_at(data['paint_eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
     ('verify the selection eye showed them again', verify_the_selection_eye_showed_them),
+    ('settle', idle),
+    ('find the style field', find_the_style_field),
+    ('point at the style field', lambda: move(*data['style_xy'])),
+    ('settle', idle), ('settle', idle),
+    ('open the style menu', open_the_style_menu), ('settle', idle),
+    ('release', lambda: click_at(data['style_xy'], 'RELEASE')),
+    ('settle', idle), ('settle', idle), ('settle', idle),
+    ('see the style menu, and close it', see_the_style_menu), ('settle', idle), ('settle', idle),
+    ('turn to spheres', lambda: turn_to('spheres')),
+    ('verify the selected subunits are drawn as spheres', verify_drawn_as_spheres),
+    ('settle', idle),
+    ('ctrl+z', undo_the_style), ('settle', idle), ('settle', idle),
+    ('verify undone, and ctrl+shift+z', verify_style_undone), ('settle', idle), ('settle', idle),
+    ('verify redone', verify_style_redone), ('settle', idle),
+    ('turn back to surface', lambda: turn_to('surface')),
+    ('verify drawn as the filament again', verify_drawn_as_the_filament_again),
     ('settle', idle),
     ('take the row back to its own color', unpaint_the_row), ('settle', idle), ('settle', idle),
     ('verify the swatch reads through the row, and paint it', verify_the_swatch_reads_through_the_row),

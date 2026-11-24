@@ -337,6 +337,29 @@ def _set_subunit_hide(scene, value):
         subunit_colors.set_hidden(molecule, keys, bool(value))
 
 
+def _get_subunit_style(scene):
+    """The style field under the color field: the first selected subunit's
+    style, or with none selected the filament's own."""
+    from ..core import subunit_colors, visual_style
+    molecule, keys = _subunit_selection()
+    style = None
+    if keys:
+        style = subunit_colors.style_of(molecule, keys[0])
+    elif molecule is not None:
+        chains = sorted({str(d.chain_id) for d in molecule.domains.values()})
+        style = subunit_colors.own_style(molecule, chains[0]) if chains else None
+    return visual_style.style_number(style or 'surface')
+
+
+def _set_subunit_style(scene, value):
+    from ..core import subunit_colors, visual_style
+    molecule, keys = _subunit_selection()
+    style = next((ident for ident, _name, _desc, number
+                  in visual_style.NUMBERED_REAL_STYLE_ITEMS if number == value), None)
+    if keys and style is not None:
+        subunit_colors.set_style(molecule, keys, style)
+
+
 def _subunit_filament_items(self, context):
     from ..operators.subunit_operators import filament_items
     return filament_items(self, context)
@@ -477,6 +500,16 @@ def register():
         # Not keyable, for the same reason as the color field.
         options=set(),
     )
+    from ..core.visual_style import NUMBERED_REAL_STYLE_ITEMS
+    bpy.types.Scene.pb_subunit_style = EnumProperty(
+        name="Style of Selected Subunits",
+        description=("Draw every selected subunit in this style. Choose the "
+                     "filament's own style to have them follow it again"),
+        items=NUMBERED_REAL_STYLE_ITEMS,
+        get=_get_subunit_style, set=_set_subunit_style,
+        # Not keyable: a style is not something that can be in between.
+        options=set(),
+    )
     bpy.types.Scene.pb_subunit_filament = EnumProperty(
         name="Filament",
         description="Which filament's subunits the list shows",
@@ -521,7 +554,8 @@ def unregister():
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
-                 "pb_subunit_color", "pb_subunit_strength", "pb_subunit_hide", "pb_subunit_filament",
+                 "pb_subunit_color", "pb_subunit_strength", "pb_subunit_hide", "pb_subunit_style",
+                 "pb_subunit_filament",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

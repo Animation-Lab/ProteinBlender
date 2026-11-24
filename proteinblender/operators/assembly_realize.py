@@ -85,6 +85,9 @@ def realize_assembly(context, molecule):
     # And its hidden ones: realized, each is still made, and hidden as the PB
     # Outliner's eye hides a row, so it can be shown again.
     hidden = subunit_colors.hidden_keys(molecule)
+    # And the subunits drawn in a style of their own: realized, each protein
+    # is drawn in it.
+    styles = subunit_colors.style_overrides(molecule)
 
     # First, so that a copied protein does not inherit the assembly and draw
     # every copy over again.
@@ -92,10 +95,11 @@ def realize_assembly(context, molecule):
     result.done = True
 
     if whole is not None:
-        _realize_as_proteins(context, molecule, whole, world, result, painted, hidden)
+        _realize_as_proteins(context, molecule, whole, world, result, painted, hidden,
+                             styles)
     else:
         _realize_within_the_protein(context, molecule, drawn, groups, world,
-                                    own_atoms, result, hidden)
+                                    own_atoms, result, hidden, styles)
 
     _retire_what_followed_the_assembly(context, molecule, result)
     return result
@@ -236,6 +240,40 @@ def _paint(target, mapping, source, site, painted) -> None:
         target.update_domain_color(target_id, (*mixed, alpha))
 
 
+def _draw_in(obj, style) -> None:
+    """Draw ``obj`` in ``style``, leaving it selected or not as it was."""
+    from ..core import visual_style
+    selected = obj.select_get()
+    visual_style.apply_style_to_object(obj, style)
+    obj.select_set(selected)
+
+
+def _restyle(target, mapping, source, site, styles) -> None:
+    """Draw ``target``'s domains in the styles copy ``site``'s subunits had,
+    and the protein too when every one of them had the same."""
+    if not styles:
+        return
+    from ..core import subunit_colors
+
+    given, plain = set(), 0
+    for source_id, target_id in mapping.items():
+        domain = source.domains.get(source_id)
+        if domain is None or target_id not in target.domains:
+            continue
+        style = styles.get(subunit_colors.key(site, str(domain.chain_id)))
+        mine = target.domains[target_id]
+        if style is None or mine.object is None:
+            plain += 1
+            continue
+        _draw_in(mine.object, style)
+        mine.style = style
+        given.add(style)
+    if len(given) == 1 and not plain and target.object is not None:
+        style = given.pop()
+        _draw_in(target.object, style)
+        target.style = style
+
+
 def _conceal(target, mapping, source, site, hidden) -> None:
     """Hide ``target``'s domains that copy ``site`` drew hidden, and the
     protein too once nothing of it is left showing."""
@@ -261,7 +299,7 @@ def _conceal(target, mapping, source, site, hidden) -> None:
 
 
 def _realize_as_proteins(context, molecule, moves, world, result, painted=None,
-                         hidden=()) -> None:
+                         hidden=(), styles=None) -> None:
     from .molecule_operators import duplicate_molecule
 
     painted = painted or {}
@@ -287,6 +325,7 @@ def _realize_as_proteins(context, molecule, moves, world, result, painted=None,
         copy.object.animation_data_clear()
         _stand(context, molecule, copy, mapping, world, move)
         _paint(copy, mapping, molecule, move.site, painted)
+        _restyle(copy, mapping, molecule, move.site, styles)
         _conceal(copy, mapping, molecule, move.site, hidden)
         result.proteins.append(copy.identifier)
         result.copies += 1
@@ -294,6 +333,7 @@ def _realize_as_proteins(context, molecule, moves, world, result, painted=None,
     if first is not None:
         _stand(context, molecule, molecule, own, world, first)
     _paint(molecule, own, molecule, original_site, painted)
+    _restyle(molecule, own, molecule, original_site, styles)
     # Last, so no copy was made from an original already hidden.
     _conceal(molecule, own, molecule, original_site, hidden)
 
@@ -334,6 +374,23 @@ def _original_site(moves):
     return extras[0].site if extras else None
 
 
+def _restyle_domains(molecule, domain_ids, site, styles) -> None:
+    """Draw those of these domains whose subunit at ``site`` had a style of
+    its own in it."""
+    if not styles or site is None:
+        return
+    from ..core import subunit_colors
+
+    for domain_id in domain_ids:
+        domain = molecule.domains.get(domain_id)
+        if domain is None or domain.object is None:
+            continue
+        style = styles.get(subunit_colors.key(site, str(domain.chain_id)))
+        if style is not None:
+            _draw_in(domain.object, style)
+            domain.style = style
+
+
 def _conceal_hidden(molecule, domain_ids, site, hidden) -> None:
     """Hide those of these domains that copy ``site`` drew hidden."""
     if not hidden or site is None:
@@ -348,7 +405,7 @@ def _conceal_hidden(molecule, domain_ids, site, hidden) -> None:
 
 
 def _realize_within_the_protein(context, molecule, drawn, groups, world,
-                                own_atoms, result, hidden=()) -> None:
+                                own_atoms, result, hidden=(), styles=None) -> None:
     reached = {domain_id: drawn[domain.object.name]
                for domain_id, domain in molecule.domains.items()
                if domain.object is not None and domain.object.name in drawn}
@@ -379,9 +436,11 @@ def _realize_within_the_protein(context, molecule, drawn, groups, world,
             for original, new_id in zip(originals, new_ids):
                 molecule.domains[new_id].object.matrix_world = (
                     move.matrix @ world[original.name])
+            _restyle_domains(molecule, new_ids, move.site, styles)
             _conceal_hidden(molecule, new_ids, move.site, hidden)
             result.domains.extend(new_ids)
             result.copies += 1
+        _restyle_domains(molecule, piece_ids, original_site, styles)
         # Last, so no copy was made from an original already hidden.
         _conceal_hidden(molecule, piece_ids, original_site, hidden)
 
@@ -397,9 +456,11 @@ def _realize_within_the_protein(context, molecule, drawn, groups, world,
                                domain_id)
                 continue
             molecule.domains[new_id].object.matrix_world = move.matrix @ world[original.name]
+            _restyle_domains(molecule, [new_id], move.site, styles)
             _conceal_hidden(molecule, [new_id], move.site, hidden)
             result.domains.append(new_id)
             result.copies += 1
+        _restyle_domains(molecule, [domain_id], original_site, styles)
         _conceal_hidden(molecule, [domain_id], original_site, hidden)
 
     # Atoms the protein draws itself have no row to copy.

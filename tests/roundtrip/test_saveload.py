@@ -188,6 +188,7 @@ def test_saveload_roundtrip(name, tmp_path):
         assert payload.get("morph_linker_kept_on_chains"), payload.keys()
     if name == "bent_filament":
         assert payload.get("filament_hidden_checked"), payload.keys()
+        assert payload.get("filament_restyled_checked"), payload.keys()
 
 
 @pytest.mark.roundtrip
@@ -220,6 +221,7 @@ def test_a_builders_verifier_notes_do_not_reach_the_next_scene(tmp_path):
     payload = run_verifier(blend)
     assert_load_lifecycle_clean(payload, "domains after bent_filament")
     assert "filament_hidden_checked" not in payload, payload.keys()
+    assert "filament_restyled_checked" not in payload, payload.keys()
 
 
 @pytest.mark.roundtrip

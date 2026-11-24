@@ -125,10 +125,16 @@ Deselect the filament and the panel goes away.
 - **Clear** gives the selected subunits back the filament's own color.
 - The eye after **Clear** hides every selected subunit at once, and shows them all again.
   It is closed while all the selected subunits are hidden.
+- The style field beneath draws every selected subunit in another style: Spheres in a Surface filament, say.
+  It shows the first selected subunit's style.
+  Choose the filament's own style to have them follow the filament again, so a later change from the filament's pencil restyles them too.
+  A subunit in a style of its own can still be painted and hidden.
 
-**Realize Copies** keeps every subunit's color, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
+**Realize Copies** keeps every subunit's color and style, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
 
 A painted subunit keeps its color while the filament changes: grow it, shrink it or bend it and the color stays on the same subunit, and one shrunk away gets its color back when it returns.
+A subunit's own style stays with it the same way.
+Styles are not keyframed: a style has no in-between.
 Colors are keyframed with the filament in **Create Keyframe** (see [Keyframing a filament](#keyframing-a-filament)), or one at a time by pointing at a painted subunit's swatch and pressing **I**.
 
 ## Create New Assembly

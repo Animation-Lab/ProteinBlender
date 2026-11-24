@@ -45,12 +45,14 @@ def data_path(name: str) -> str:
     return str(DATA_DIR / name)
 
 
-def drawn_copy_centres(obj):
+def drawn_copy_centres(obj, kind=None):
     """World centre of every piece of geometry Blender draws through ``obj``.
 
     One entry per instance (an assembly's copy) and one for what ``obj``
     draws itself (a filament's realized painted copies), read off the
-    evaluated depsgraph with each entry's own matrix.
+    evaluated depsgraph with each entry's own matrix. ``kind`` keeps only
+    the pieces drawn as one kind of geometry: 'MESH' (a surface or a
+    cartoon) or 'POINTCLOUD' (spheres).
     """
     import bpy
     import numpy as np
@@ -62,6 +64,8 @@ def drawn_copy_centres(obj):
         data = entry.object.data
         count = len(getattr(data, 'points', ()) or getattr(data, 'vertices', ()))
         if owner.name != obj.name or not count or 'position' not in data.attributes:
+            continue
+        if kind is not None and entry.object.type != kind:
             continue
         position = np.empty(count * 3)
         data.attributes['position'].data.foreach_get('vector', position)

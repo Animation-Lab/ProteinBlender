@@ -210,6 +210,45 @@ def apply_material_transparency_to_style_node(obj, alpha_value):
     return True
 
 
+#: The MolecularNodes node group that draws each style.
+STYLE_TREES = {
+    'spheres': 'Style Spheres',
+    'cartoon': 'Style Cartoon',
+    'surface': 'Style Surface',
+    'ribbon': 'Style Ribbon',
+    'sticks': 'Style Sticks',
+    'ball_and_stick': 'Style Ball and Stick',
+}
+
+
+def style_tree(style):
+    """The node group that draws ``style``, appended from MolecularNodes if
+    this file has none yet.
+
+    The append goes through ``bpy.ops.wm.append``, which deselects every
+    object; the selection is put back as it was. The Cytoskeleton Subunits
+    panel follows a selected filament, and went away from under the mouse
+    the first time a subunit was given a style new to the file.
+    """
+    from ..utils.molecularnodes.blender import nodes
+    name = STYLE_TREES[style]
+    tree = bpy.data.node_groups.get(name)
+    if tree is not None:
+        return tree
+    view_layer = bpy.context.view_layer
+    chosen = [obj.name for obj in view_layer.objects if obj.select_get()]
+    active = view_layer.objects.active.name if view_layer.objects.active else None
+    try:
+        return nodes.append(name)
+    finally:
+        for obj_name in chosen:
+            obj = view_layer.objects.get(obj_name)
+            if obj is not None:
+                obj.select_set(True)
+        if active is not None and view_layer.objects.get(active) is not None:
+            view_layer.objects.active = view_layer.objects[active]
+
+
 def find_style_node(obj):
     """Find the representation, regardless of preceding motion modifiers."""
     if not obj:
@@ -597,17 +636,7 @@ def apply_style_to_object(obj, style, *, sync_morphsets=True):
     # Swap to the desired style node
     from ..utils.molecularnodes.blender import nodes
 
-    # Map our style names to MolecularNodes style node names
-    style_map = {
-        'spheres': 'Style Spheres',
-        'cartoon': 'Style Cartoon',
-        'surface': 'Style Surface',
-        'ribbon': 'Style Ribbon',
-        'sticks': 'Style Sticks',
-        'ball_and_stick': 'Style Ball and Stick'
-    }
-
-    target_style_name = style_map.get(style)
+    target_style_name = STYLE_TREES.get(style)
     if not target_style_name:
         return
     nodes.swap(style_node, target_style_name)

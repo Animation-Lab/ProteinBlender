@@ -130,6 +130,10 @@ EXCLUSIONS = {
         "rows in Object.pb_filament.hidden, and setting it only writes "
         "there. pb_filament is snapshotted, so there is nothing of its own "
         "to lose on reload."),
+    "Scene.pb_subunit_style": (
+        "Not stored at all: a getter reads the first selected subunit's "
+        "style off Object.pb_filament.styles (or its chain's own style), "
+        "and setting it only writes there. pb_filament is snapshotted."),
     "Scene.pb_subunit_filament": (
         "Transient UI choice - which filament the Subunits list shows when the "
         "scene has more than one. Its enum items are computed from the "

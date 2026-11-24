@@ -1290,6 +1290,288 @@ def test_the_same_color_again_paints_the_next_subunits():
 
 
 # --------------------------------------------------------------------------
+# A style for the selected subunits, under their color and eye
+# Dillon, 2026-11-24: "For the filament, you have color, clear and the eye.
+# Can you add style change too for the Cytoskeleton Subunits?"
+# --------------------------------------------------------------------------
+
+def _drawn_as(molecule, chain="A"):
+    """``{kind: [(centre, vertices, color)]}``: every copy of a chain Blender
+    draws, by what it is drawn as - "MESH" for a surface or a cartoon,
+    "POINTCLOUD" for spheres - with its centre in Angstrom, how many vertices
+    or points it has and its mean ``Color``.
+
+    Copies painted a color of their own are realized into one piece of
+    geometry the chain's object draws itself; a mesh of them is listed under
+    "PAINTED_MESH", whole. Blender lists a realized point cloud as one more
+    instance of the object, so painted spheres come under "POINTCLOUD".
+    """
+    obj = _object(molecule, chain)
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    found = {"MESH": [], "POINTCLOUD": [], "PAINTED_MESH": [], "PAINTED_POINTCLOUD": []}
+    for entry in depsgraph.object_instances:
+        is_copy = (entry.is_instance and entry.parent is not None
+                   and entry.parent.original.name == obj.name)
+        is_painted = not entry.is_instance and entry.object.original.name == obj.name
+        if not (is_copy or is_painted):
+            continue
+        data = entry.object.data
+        if isinstance(data, bpy.types.Mesh):
+            kind, count = "MESH", len(data.vertices)
+        elif isinstance(data, bpy.types.PointCloud):
+            kind, count = "POINTCLOUD", len(data.points)
+        else:
+            continue
+        if not count or "position" not in data.attributes:
+            continue
+        position = np.zeros(count * 3)
+        data.attributes["position"].data.foreach_get("vector", position)
+        matrix = np.array(entry.matrix_world)
+        world = position.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+        color = None
+        if "Color" in data.attributes:
+            values = np.zeros(count * 4)
+            data.attributes["Color"].data.foreach_get("color", values)
+            color = values.reshape(-1, 4)[:, :3].mean(axis=0)
+        found[kind if is_copy else f"PAINTED_{kind}"].append(
+            (world.mean(axis=0) / WORLD_SCALE, count, color))
+    return found
+
+
+def _which(copies, ordered, tolerance=5.0):
+    """Which subunits, counted from the pointed end, these copies stand at.
+
+    Actins sit 27.5 A apart along the filament, so 5 A tells them apart
+    whether a copy's centre is read off a surface's vertices or its atoms.
+    """
+    found = []
+    for centre, _count, _color in copies:
+        distances = np.linalg.norm(np.asarray(ordered) - centre, axis=1)
+        assert distances.min() < tolerance, f"a copy stands at no subunit: {centre}"
+        found.append(int(distances.argmin()))
+    return sorted(found)
+
+
+def test_the_style_field_draws_the_selected_subunits_in_another_style():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    scene = bpy.context.scene
+    _select(molecule, ["3:A", "6:A"])
+    assert scene.pb_subunit_style == "surface", "a new filament is drawn as Surface"
+
+    scene.pb_subunit_style = "spheres"
+
+    drawn = _drawn_as(molecule)
+    assert _which(drawn["POINTCLOUD"], ordered) == [3, 6]
+    assert _which(drawn["MESH"], ordered) == [0, 1, 2, 4, 5, 7, 8, 9]
+    assert scene.pb_subunit_style == "spheres"
+    # The others are as they were: one surface, the same for every copy.
+    assert len({count for _c, count, _color in drawn["MESH"]}) == 1
+
+
+def test_choosing_the_filaments_own_style_puts_a_subunit_back():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    scene = bpy.context.scene
+    _select(molecule, ["3:A", "6:A"])
+    scene.pb_subunit_style = "spheres"
+
+    _select(molecule, ["6:A"])
+    scene.pb_subunit_style = "surface"
+
+    drawn = _drawn_as(molecule)
+    assert _which(drawn["POINTCLOUD"], ordered) == [3]
+    assert len(drawn["MESH"]) == 9
+    # Nothing is kept for a subunit drawn as its filament is.
+    assert list(molecule.object.pb_filament.styles.keys()) == ["3:A"]
+
+
+def test_a_subunit_can_be_a_cartoon_in_a_surface_filament():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    _select(molecule, ["4:A"])
+    bpy.context.scene.pb_subunit_style = "cartoon"
+
+    drawn = _drawn_as(molecule)
+    assert drawn["POINTCLOUD"] == [] and len(drawn["MESH"]) == 10
+    counts = {index: count for index, (_c, count, _color) in
+              zip(_which(drawn["MESH"], ordered),
+                  sorted(drawn["MESH"], key=lambda copy: _which([copy], ordered)[0]))}
+    others = {count for index, count in counts.items() if index != 4}
+    assert len(others) == 1, f"the surfaces differ: {counts}"
+    assert counts[4] not in others, "the fourth actin is still drawn as the surface"
+
+
+def test_the_style_field_shows_the_first_selected_subunit():
+    molecule = _ticked_actin()
+    scene = bpy.context.scene
+    _select(molecule, ["3:A"])
+    scene.pb_subunit_style = "spheres"
+
+    _select(molecule, ["2:A", "3:A"])
+    assert scene.pb_subunit_style == "surface"
+    _select(molecule, ["3:A", "5:A"])
+    assert scene.pb_subunit_style == "spheres"
+
+
+def test_the_style_field_with_nothing_selected_restyles_nothing():
+    molecule = _ticked_actin()
+    _select(molecule, [])
+    bpy.context.scene.pb_subunit_style = "spheres"
+    drawn = _drawn_as(molecule)
+    assert (len(drawn["MESH"]), len(drawn["POINTCLOUD"])) == (10, 0)
+    assert len(molecule.object.pb_filament.styles) == 0
+
+
+def test_a_restyled_subunit_can_still_be_painted_and_hidden():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    scene = bpy.context.scene
+    _select(molecule, ["3:A"])
+    scene.pb_subunit_style = "spheres"
+    scene.pb_subunit_color = RED
+
+    drawn = _drawn_as(molecule)
+    assert len(drawn["MESH"]) == 9
+    (painted,) = drawn["POINTCLOUD"] + drawn["PAINTED_POINTCLOUD"]
+    assert _which([painted], ordered) == [3]
+    assert np.allclose(painted[2], RED, atol=1e-3), painted[2]
+    # Painted as one copy of spheres, not the whole chain over again.
+    _select(molecule, ["3:A", "4:A"])
+    bpy.context.scene.pb_subunit_style = "spheres"
+    _select(molecule, ["3:A"])
+    counts = {count for _c, count, _color in _drawn_as(molecule)["POINTCLOUD"]}
+    assert len(counts) == 1, f"a painted spheres copy is not one copy's atoms: {counts}"
+    _select(molecule, ["4:A"])
+    bpy.context.scene.pb_subunit_style = "surface"
+    _select(molecule, ["3:A"])
+
+    scene.pb_subunit_hide = True
+    drawn = _drawn_as(molecule)
+    assert drawn["POINTCLOUD"] == drawn["PAINTED_POINTCLOUD"] == []
+    assert _which(drawn["MESH"], ordered) == [0, 1, 2, 4, 5, 6, 7, 8, 9]
+
+
+def test_a_restyled_subunit_keeps_its_style_as_the_filament_grows():
+    molecule = _ticked_actin()
+    _select(molecule, ["5:A"])
+    bpy.context.scene.pb_subunit_style = "spheres"
+    ((before, _count, _color),) = _drawn_as(molecule)["POINTCLOUD"]
+
+    _edit(molecule, count=20)
+
+    drawn = _drawn_as(molecule)
+    assert (len(drawn["MESH"]), len(drawn["POINTCLOUD"])) == (19, 1)
+    assert _near(drawn["POINTCLOUD"][0][0], [before], tolerance=0.05)
+
+
+def test_restyling_the_filament_leaves_its_restyled_subunits_be():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    _select(molecule, ["3:A"])
+    bpy.context.scene.pb_subunit_style = "spheres"
+
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=molecule.identifier, vs_style='cartoon') == {'FINISHED'}
+    drawn = _drawn_as(molecule)
+    assert _which(drawn["POINTCLOUD"], ordered) == [3]
+    assert len(drawn["MESH"]) == 9
+
+    assert bpy.ops.proteinblender.edit_protein_visuals(
+        item_id=molecule.identifier, vs_style='spheres') == {'FINISHED'}
+    drawn = _drawn_as(molecule)
+    assert (len(drawn["MESH"]), len(drawn["POINTCLOUD"])) == (0, 10)
+
+
+def test_a_microtubule_restyles_one_monomer_of_a_dimer():
+    chains = F.tubulin_chains()
+    molecule = _build("MICROTUBULE", 9.0)
+    _colors().sync_roster(molecule)
+    _select(molecule, [f"5:{chains['beta']}"])
+    bpy.context.scene.pb_subunit_style = "spheres"
+
+    beta, alpha = _drawn_as(molecule, chains["beta"]), _drawn_as(molecule, chains["alpha"])
+    assert (len(beta["MESH"]), len(beta["POINTCLOUD"])) == (12, 1)
+    assert (len(alpha["MESH"]), len(alpha["POINTCLOUD"])) == (13, 0)
+
+
+def test_realizing_keeps_a_restyled_actin_in_its_style():
+    """Draw the fourth actin as spheres and realize: the protein that stands
+    there is drawn as spheres, and its PB Outliner row says so."""
+    from proteinblender.core import visual_style
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    _select(molecule, ["3:A"])
+    bpy.context.scene.pb_subunit_style = "spheres"
+
+    made = F.realize(molecule)
+    assert len(made) == 9
+    kinds = {}
+    for mid in [molecule.identifier, *made]:
+        obj = _object(H.sm().molecules[mid], "A")
+        centres = H.drawn_copy_centres(obj)
+        assert len(centres) == 1, (mid, len(centres))
+        index = int(np.linalg.norm(np.asarray(ordered) - centres[0] / WORLD_SCALE,
+                                   axis=1).argmin())
+        kinds[index] = (_drawn_kind(obj), visual_style.get_object_style(obj))
+    assert sorted(kinds) == list(range(10))
+    assert kinds[3] == ("POINTCLOUD", "spheres"), kinds[3]
+    assert all(kinds[i] == ("MESH", "surface") for i in kinds if i != 3), kinds
+
+
+def _drawn_kind(obj):
+    """What Blender draws ``obj`` as: "MESH" or "POINTCLOUD"."""
+    bpy.context.view_layer.update()
+    kinds = set()
+    for entry in bpy.context.evaluated_depsgraph_get().object_instances:
+        owner = entry.parent.original if entry.is_instance else entry.object.original
+        data = entry.object.data
+        if owner.name != obj.name:
+            continue
+        if isinstance(data, bpy.types.Mesh) and len(data.vertices):
+            kinds.add("MESH")
+        elif isinstance(data, bpy.types.PointCloud) and len(data.points):
+            kinds.add("POINTCLOUD")
+    assert len(kinds) == 1, (obj.name, kinds)
+    return kinds.pop()
+
+
+def test_a_first_use_of_a_style_keeps_the_filament_selected():
+    """The first time a file uses a style, its node group is appended, and
+    Blender's append deselects every object. The Subunits panel follows a
+    selected filament, so in a window it went away from under the mouse
+    after one change (found by the filament UI lane, 2026-11-24)."""
+    molecule = _build("ACTIN", 27.5)
+    _untick_all()
+    chain = _object(molecule, "A")
+    _select_in_viewport(chain)
+    assert _panel_shows()
+    _colors().sync_roster(molecule)
+    _select(molecule, ["3:A"])
+    assert bpy.data.node_groups.get("Style Spheres") is None, "Spheres is not new to this file"
+
+    bpy.context.scene.pb_subunit_style = "spheres"
+
+    assert chain.select_get(), "the filament was deselected"
+    assert bpy.context.view_layer.objects.active == chain
+    assert _panel_shows(), "the Subunits panel went away"
+    assert bpy.context.scene.pb_subunit_style == "spheres"
+
+
+def test_the_panel_draws_the_style_field_under_the_color_field():
+    from proteinblender.panels.subunit_panel import PROTEINBLENDER_PT_subunits
+
+    _ticked_actin()
+    panel = type("Panel", (), {"layout": _DrawnLayout()})()
+    PROTEINBLENDER_PT_subunits.draw(panel, bpy.context)
+    names = [name for name, _kwargs in panel.layout.props]
+    assert "pb_subunit_style" in names, names
+    # After the color field, Clear and the eye, which act on the same subunits.
+    assert names.index("pb_subunit_style") == names.index("pb_subunit_hide") + 1, names
+
+
+# --------------------------------------------------------------------------
 # Each row's own color, at its right-hand side
 # Reported 2026-11-03 (Dillon's notes): "make it so the color is on the
 # right-hand side where the actin filiment individual pieces are", and "make

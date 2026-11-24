@@ -73,6 +73,9 @@ class PBFilamentParameters(PropertyGroup):
     colors: CollectionProperty(type=subunit_colors.PBSubunitColor)
     #: Monomers taken out of the drawing, by the eye on their row.
     hidden: CollectionProperty(type=subunit_colors.PBSubunitHidden)
+    #: Monomers drawn in a style other than their chain's, by the style field
+    #: under the Subunits list.
+    styles: CollectionProperty(type=subunit_colors.PBSubunitStyle)
     #: Every monomer, as rows of the Subunits list, and what they were made
     #: from. Rebuilt whenever the lattice changes; never keyed.
     subunits: CollectionProperty(type=subunit_colors.PBSubunitRow)

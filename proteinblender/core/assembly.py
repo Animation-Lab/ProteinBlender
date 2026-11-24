@@ -457,7 +457,8 @@ _POINT_LAYOUT = (("axis", "FLOAT_VECTOR"), ("trans", "FLOAT_VECTOR"),
 SITE_ATTRIBUTE = "site"
 
 
-def _write_points(mesh, operators, pivot, sites=None, tints=None, hidden=None) -> None:
+def _write_points(mesh, operators, pivot, sites=None, tints=None, hidden=None,
+                  styles=None) -> None:
     """Make ``mesh`` one point per operator, carrying that operator.
 
     Resizes the mesh in place when the count has changed, so the object, its
@@ -466,8 +467,8 @@ def _write_points(mesh, operators, pivot, sites=None, tints=None, hidden=None) -
     Each point also carries its ``site``: which copy of the build it is. That
     is its place in the operator list unless ``sites`` says otherwise, as it
     does for a filament with its ends shrunk, whose first point may be its
-    tenth subunit. ``tints`` and ``hidden`` are written as
-    :func:`write_tints` and :func:`write_hidden` take them.
+    tenth subunit. ``tints``, ``hidden`` and ``styles`` are written as
+    :func:`write_tints`, :func:`write_hidden` and :func:`write_styles` take them.
     """
     axes, angles, translations, delays = _point_attributes(operators)
     count = len(operators)
@@ -498,7 +499,28 @@ def _write_points(mesh, operators, pivot, sites=None, tints=None, hidden=None) -
             np.ascontiguousarray(values[name], dtype=dtype).ravel())
     write_tints(mesh, tints)
     write_hidden(mesh, hidden)
+    write_styles(mesh, styles)
     mesh.update()
+
+
+def write_styles(mesh, styles) -> None:
+    """Give each point of a cloud the style its copy is drawn in: an int array
+    of style numbers, 0 for the chain's own, or None for none.
+
+    None leaves a cloud with no style attribute at all, or clears the one it
+    has, as :func:`write_tints` does. Does not call ``mesh.update()``.
+    """
+    attribute = mesh.attributes.get(STYLE_ATTRIBUTE)
+    if styles is None:
+        if attribute is None:
+            return
+        styles = np.zeros(len(mesh.vertices), dtype=np.int32)
+    if (attribute is None or attribute.domain != "POINT"
+            or attribute.data_type != "INT"):
+        if attribute is not None:
+            mesh.attributes.remove(attribute)
+        attribute = mesh.attributes.new(STYLE_ATTRIBUTE, "INT", "POINT")
+    attribute.data.foreach_set("value", np.ascontiguousarray(styles, dtype=np.int32))
 
 
 def write_hidden(mesh, hidden) -> None:
@@ -560,6 +582,11 @@ def _tints(molecule, obj, sites):
 def _hidden(molecule, obj, sites):
     from . import subunit_colors
     return subunit_colors.hidden_for(molecule, obj, sites)
+
+
+def _styles(molecule, obj, sites):
+    from . import subunit_colors
+    return subunit_colors.styles_for(molecule, obj, sites)
 
 
 def point_clouds_of(molecule):
@@ -630,7 +657,8 @@ def update_operator_points(molecule, operators, sites=None) -> bool:
     numbered = list(sites) if sites is not None else list(range(len(operators)))
     for obj, mesh in meshes:
         _write_points(mesh, operators, _cloud_pivot(mesh), sites,
-                      _tints(molecule, obj, numbered), _hidden(molecule, obj, numbered))
+                      _tints(molecule, obj, numbered), _hidden(molecule, obj, numbered),
+                      _styles(molecule, obj, numbered))
     return True
 
 
@@ -741,6 +769,7 @@ def restore_build(obj, molecule, state):
     for socket in node.inputs:
         if socket.identifier in state["inputs"]:
             socket.default_value = state["inputs"][socket.identifier]
+    _sync_styles_of(molecule, obj)
     if state["curves"]:
         from ..utils.animation import get_fcurves_from_action
         prefix = f'nodes["{node.name}"]'
@@ -824,6 +853,7 @@ def _wire_assembly_into(obj, group, molecule, assembly_id, operators,
         return False
 
     node[_ASSEMBLY_ID_KEY] = str(assembly_id)
+    _sync_styles_of(molecule, obj)
     return True
 
 
@@ -858,7 +888,7 @@ def _build_points_object(obj, molecule, assembly_id, operators, sites=None):
     mesh = bpy.data.meshes.new(name)
     numbered = list(sites) if sites is not None else list(range(len(operators)))
     _write_points(mesh, operators, pivot, sites, _tints(molecule, obj, numbered),
-                  _hidden(molecule, obj, numbered))
+                  _hidden(molecule, obj, numbered), _styles(molecule, obj, numbered))
 
     points = bpy.data.objects.new(name, mesh)
     points[_ASSEMBLY_OWNER_KEY] = molecule.object
@@ -1239,6 +1269,214 @@ def _tint_stage(tree, copies_from):
     link(tinted.outputs[0], store.inputs["Selection"])
     link(_socket(mix, "Result", "RGBA", outputs=True), _socket(store, "Value", "RGBA"))
     return store.outputs[0]
+
+
+#: The per-copy style each point carries: 0 for its chain's own style, else
+#: that style's number (``visual_style.NUMBERED_STYLE_ITEMS``).
+STYLE_ATTRIBUTE = "pb_style"
+
+#: The assembly tree's inputs that bring in the chain's colored atoms, and
+#: which of them its style draws, for its subunits' own styles to draw too.
+ATOMS_SOCKET = "Atoms"
+ATOMS_SELECTION_SOCKET = "Atoms Selection"
+
+#: Names of the nodes that put each copy in its own style.
+STYLE_JOIN_NAME = "PB Style Join"
+_STYLE_FLAG_NAME = "PB Style Flag"
+_OWN_STYLE_NAME = "PB Style Own"
+_STYLE_BRANCH = "PB Style "          # + style, then " Instance", " Test", " Copies"
+
+
+def has_style_stage(tree) -> bool:
+    """Whether an assembly tree can draw its copies in styles of their own."""
+    return any(n.name == STYLE_JOIN_NAME for n in tree.nodes)
+
+
+def sync_style_stage(molecule) -> None:
+    """Give each chain's assembly tree a way to draw every style its subunits
+    are set to, and no other.
+
+    A copy is an instance of the chain's one styled geometry. A subunit with
+    a style of its own is drawn from the chain's colored atoms passed through
+    that style, instanced on its point instead (:func:`_style_stage`); the
+    hide and tint stages after it treat it as any other copy. A style no
+    subunit of the chain uses any more is taken out, so it costs nothing.
+    """
+    from . import subunit_colors
+
+    overrides = subunit_colors.style_overrides(molecule)
+    for obj in _target_objects(molecule):
+        chain = subunit_colors.chain_of(molecule, obj)
+        if chain is None:
+            continue
+        group = _node_group_of(obj)
+        if group is None:
+            continue
+        wanted = sorted({style for name, style in overrides.items()
+                         if subunit_colors.parse_key(name)[1] == chain})
+        for node in _existing_assembly_nodes(group):
+            tree = node.node_tree
+            # A deposited assembly's per-chain tree has no subunits to style.
+            if tree is None or tree.get('pb_assembly_points') is None:
+                continue
+            if not wanted and not has_style_stage(tree):
+                continue
+            _style_stage(tree, wanted, obj)
+            _wire_atoms(group, node.name, obj)
+
+
+def _sync_styles_of(molecule, obj) -> None:
+    """:func:`sync_style_stage`, for a build just wired into ``obj``."""
+    from . import subunit_colors
+    try:
+        if subunit_colors.style_overrides(molecule):
+            sync_style_stage(molecule)
+    except ReferenceError:
+        pass
+
+
+def _style_stage(tree, wanted, obj) -> None:
+    """Make ``tree`` draw each copy in the style its point names.
+
+    The copies of the chain's own style keep their instance node, which now
+    takes only the points naming no style; each style in ``wanted`` gets a
+    branch that draws the atoms in it and instances that on its own points;
+    a join hands all of them on to the hide stage. Every node is made first
+    and wired by name afterwards: ``nodes.new()`` can reallocate the
+    collection under any pointer held across it.
+    """
+    from . import visual_style
+
+    interface = tree.interface
+    present = {item.name for item in interface.items_tree
+               if getattr(item, "in_out", None) == "INPUT"}
+    if ATOMS_SOCKET not in present:
+        interface.new_socket(ATOMS_SOCKET, in_out="INPUT", socket_type="NodeSocketGeometry")
+    if ATOMS_SELECTION_SOCKET not in present:
+        socket = interface.new_socket(ATOMS_SELECTION_SOCKET, in_out="INPUT",
+                                      socket_type="NodeSocketBool")
+        socket.default_value = True
+
+    if not has_style_stage(tree):
+        made = {}
+        for name, kind, location in (
+                (_STYLE_FLAG_NAME, "GeometryNodeInputNamedAttribute", (250, 400)),
+                (_OWN_STYLE_NAME, "FunctionNodeCompare", (400, 400)),
+                (STYLE_JOIN_NAME, "GeometryNodeJoinGeometry", (650, 120))):
+            created = tree.nodes.new(kind)
+            created.name = name
+            created.location = location
+            made[name] = created.name
+        flag = tree.nodes[made[_STYLE_FLAG_NAME]]
+        flag.data_type = "INT"
+        flag.inputs["Name"].default_value = STYLE_ATTRIBUTE
+        own = tree.nodes[made[_OWN_STYLE_NAME]]
+        own.data_type = "INT"
+        own.operation = "EQUAL"
+        first, second = [x for x in own.inputs if x.type == "INT" and x.enabled][:2]
+        tree.links.new(_socket(flag, "Attribute", outputs=True), first)
+        second.default_value = 0
+        copies = tree.nodes["PB Instance Copies"]
+        tree.links.new(own.outputs[0], copies.inputs["Selection"])
+        # Whatever took the copies now takes them all, joined.
+        onward = [link.to_socket for link in tree.links
+                  if link.from_node.name == "PB Instance Copies"]
+        join = tree.nodes[made[STYLE_JOIN_NAME]]
+        tree.links.new(tree.nodes["PB Instance Copies"].outputs[0], join.inputs[0])
+        for socket in onward:
+            tree.links.new(join.outputs[0], socket)
+
+    branches = {n.name[len(_STYLE_BRANCH):] for n in tree.nodes
+                if n.name.startswith(_STYLE_BRANCH) and n.type == "GROUP"}
+    for style in branches - set(wanted):
+        for suffix in ("", " Instance", " Test", " Copies"):
+            node = tree.nodes.get(f"{_STYLE_BRANCH}{style}{suffix}")
+            if node is not None:
+                tree.nodes.remove(node)
+
+    for offset, style in enumerate(wanted):
+        if style not in branches:
+            _style_branch(tree, style, offset)
+        _match_own_style(tree.nodes[f"{_STYLE_BRANCH}{style}"],
+                         visual_style.find_style_node(obj))
+
+
+def _style_branch(tree, style, offset) -> None:
+    """Draw the chain's atoms in ``style`` on the points that name it."""
+    from . import visual_style
+
+    y = -1000 - 300 * offset
+    made = {}
+    for suffix, kind, x in (("", "GeometryNodeGroup", -300),
+                            (" Instance", "GeometryNodeGeometryToInstance", -50),
+                            (" Test", "FunctionNodeCompare", 150),
+                            (" Copies", "GeometryNodeInstanceOnPoints", 400)):
+        created = tree.nodes.new(kind)
+        created.name = f"{_STYLE_BRANCH}{style}{suffix}"
+        created.location = (x, y)
+        made[suffix] = created.name
+    nodes = {suffix: tree.nodes[name] for suffix, name in made.items()}
+    link = tree.links.new
+    group_in = next(n for n in tree.nodes if n.type == "GROUP_INPUT")
+    copies = tree.nodes["PB Instance Copies"]
+
+    styled = nodes[""]
+    styled.node_tree = visual_style.style_tree(style)
+    link(group_in.outputs[ATOMS_SOCKET], styled.inputs["Atoms"])
+    link(group_in.outputs[ATOMS_SELECTION_SOCKET], styled.inputs["Selection"])
+    link(styled.outputs[0], nodes[" Instance"].inputs[0])
+
+    test = nodes[" Test"]
+    test.data_type = "INT"
+    test.operation = "EQUAL"
+    first, second = [x for x in test.inputs if x.type == "INT" and x.enabled][:2]
+    link(_socket(tree.nodes[_STYLE_FLAG_NAME], "Attribute", outputs=True), first)
+    second.default_value = visual_style.style_number(style)
+
+    placed = nodes[" Copies"]
+    for name in ("Points", "Rotation"):
+        source = copies.inputs[name].links
+        if source:
+            link(source[0].from_socket, placed.inputs[name])
+    link(nodes[" Instance"].outputs[0], placed.inputs["Instance"])
+    link(test.outputs[0], placed.inputs["Selection"])
+    link(placed.outputs[0], tree.nodes[STYLE_JOIN_NAME].inputs[0])
+
+
+def _match_own_style(branch, own) -> None:
+    """Give a subunit's style the chain's material and quality, so it is lit,
+    shaded and made as finely as the rest; its other settings are its own."""
+    if own is None:
+        return
+    for name, kind in (("Material", "MATERIAL"), ("Quality", "INT")):
+        mine = next((s for s in branch.inputs if s.name == name and s.type == kind), None)
+        theirs = next((s for s in own.inputs if s.name == name and s.type == kind), None)
+        # Only when it differs: this runs on every frame a color is keyed.
+        if (mine is None or theirs is None or theirs.is_linked
+                or mine.default_value == theirs.default_value):
+            continue
+        mine.default_value = theirs.default_value
+
+
+def _wire_atoms(group, node_name, obj) -> None:
+    """Feed an assembly node the atoms its chain's own style draws, and which."""
+    from . import visual_style
+
+    own = visual_style.find_style_node(obj)
+    node = group.nodes.get(node_name)
+    if own is None or node is None or own.id_data != group:
+        return
+    for theirs, mine in (("Atoms", ATOMS_SOCKET), ("Selection", ATOMS_SELECTION_SOCKET)):
+        source = own.inputs.get(theirs)
+        target = node.inputs.get(mine)
+        if source is None or target is None:
+            continue
+        if source.links:
+            if not (target.links and target.links[0].from_socket == source.links[0].from_socket):
+                group.links.new(source.links[0].from_socket, target)
+        elif (hasattr(source, "default_value")
+              and target.default_value != source.default_value):
+            target.default_value = source.default_value
 
 
 def has_tint_stage(tree) -> bool:

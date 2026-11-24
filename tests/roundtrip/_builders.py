@@ -168,7 +168,7 @@ def build_biological_assembly():
 
 
 def build_scoped_symmetry():
-    mid = H.import_local("4hhb.pdb", "4hhb")
+    H.import_local("4hhb.pdb", "4hhb")
     chain = next(r.item_id for r in bpy.context.scene.outliner_items
                  if r.item_type == 'CHAIN')
     bpy.context.scene.pb_symmetry_kind = 'C'
@@ -269,6 +269,21 @@ def build_bent_filament():
     scene["pb_rt_hidden_subunit"] = {
         "molecule": molecule.identifier, "key": target,
         "centre": [float(v) for v in gone[0]], "shown": len(shown)}
+
+    # And a third drawn as a Cartoon by the style field, where the rest are
+    # Spheres: a reload must draw it so, where it stood. Read off Blender as
+    # the one copy drawn as a mesh.
+    restyled = f"{min(subunit_colors.present_sites(molecule) - {2, int(target.split(':')[0])})}:A"
+    for row in molecule.object.pb_filament.subunits:
+        row.select = row.name == restyled
+    assert scene.pb_subunit_style == "spheres", scene.pb_subunit_style
+    assert not H.drawn_copy_centres(chain, kind="MESH")
+    scene.pb_subunit_style = "cartoon"
+    (cartoon,) = H.drawn_copy_centres(chain, kind="MESH")
+    assert len(H.drawn_copy_centres(chain)) == len(shown), "restyling changed how many are drawn"
+    scene["pb_rt_restyled_subunit"] = {
+        "molecule": molecule.identifier, "key": restyled,
+        "centre": [float(v) for v in cartoon]}
 
 
 def build_chain_rename():
@@ -595,7 +610,6 @@ def build_morph_linkers():
     # evaluated atoms. The verifier reveals the sources again after reopening
     # (by deleting the Morphset) and checks they come back exactly here,
     # carried by the puppet's move.
-    import numpy as np
     from mathutils import Matrix, Vector
     bpy.context.view_layer.update()
     sources = [d.object for d in H.sm().molecules['saved_morph_ab'].domains.values()

@@ -403,6 +403,28 @@ def main():
             row.hide = True
             out["filament_hidden_checked"] = record["key"]
 
+        restyled_subunit = bpy.context.scene.get("pb_rt_restyled_subunit")
+        if restyled_subunit is not None:
+            # The reopened filament must still draw its restyled subunit in
+            # its own style - the one mesh among spheres - where it stood.
+            import numpy as np
+            import helpers as H
+            record = restyled_subunit.to_dict()
+            filament = H.sm().molecules.get(record["molecule"])
+            assert filament is not None, (
+                f"pb_rt_restyled_subunit names {record['molecule']!r}, which this "
+                "file does not have")
+            styles = filament.object.pb_filament.styles
+            assert record["key"] in styles and styles[record["key"]].style == "cartoon", (
+                f"the filament came back with styles {[(s.name, s.style) for s in styles]}")
+            chain = next(d.object for d in filament.domains.values()
+                         if str(d.chain_id) == "A")
+            meshes = H.drawn_copy_centres(chain, kind="MESH")
+            assert len(meshes) == 1, f"{len(meshes)} copies drawn as meshes after reopening"
+            gap = float(np.linalg.norm(meshes[0] - np.array(record["centre"])))
+            assert gap < 1e-3, f"the restyled subunit is drawn {gap} off where it stood"
+            out["filament_restyled_checked"] = record["key"]
+
         if WANT_RENDER:
             try:
                 out["render_covered_pixels"] = _render_coverage()

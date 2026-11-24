@@ -26,6 +26,13 @@ name, and marks its copy's point ``pb_hidden`` (``assembly.write_hidden``),
 which the node tree drops before anything is realized
 (``assembly._hide_stage``). Its point stays, so it comes back where it was.
 
+**A style of its own** - spheres in a surface filament, say - lists a
+monomer in ``Object.pb_filament.styles``, by the same name, with the style.
+Its copy's point carries the style's number as ``pb_style``
+(``assembly.write_styles``), and the assembly's node tree draws the chain's
+atoms in each style its subunits use and puts each copy in its own
+(``assembly.sync_style_stage``). A monomer drawn as its chain is has no entry.
+
 **The roster** (``Object.pb_filament.subunits``) is every monomer of the
 filament as a row the Subunits list can show and select: disposable, rebuilt
 when the lattice changes, and never keyed.
@@ -101,6 +108,15 @@ class PBSubunitHidden(PropertyGroup):
     chain: StringProperty(name="Chain")
 
 
+class PBSubunitStyle(PropertyGroup):
+    """One monomer drawn in a style other than its chain's. Named by :func:`key`."""
+
+    site: IntProperty(name="Site", min=0)
+    chain: StringProperty(name="Chain")
+    #: A style's identifier, as ``visual_style.REAL_STYLE_ITEMS`` lists them.
+    style: StringProperty(name="Style")
+
+
 def _row_molecule(row):
     return molecule_of_object(row.id_data)
 
@@ -157,7 +173,7 @@ class PBSubunitRow(PropertyGroup):
         get=_get_row_color, set=_set_row_color, options=set())
 
 
-CLASSES = (PBSubunitColor, PBSubunitHidden, PBSubunitRow)
+CLASSES = (PBSubunitColor, PBSubunitHidden, PBSubunitStyle, PBSubunitRow)
 
 
 # ---------------------------------------------------------------------------
@@ -432,23 +448,97 @@ def refresh(molecule, frame=None) -> bool:
         return False
     values = color_values(molecule, frame)
     hidden = hidden_keys(molecule)
-    if values or hidden or overlay(molecule):
+    styles = style_overrides(molecule)
+    if values or hidden or styles or overlay(molecule):
         ensure_paintable(molecule)
+    # Before the points name a style, so no copy names one with nothing to draw it.
+    assembly.sync_style_stage(molecule)
     painted = False
     for obj, points in clouds:
         mesh = points.data
         sites = assembly.point_sites(mesh)
         tints = tints_for(molecule, obj, sites, values=values)
         flags = hidden_for(molecule, obj, sites, hidden)
-        if (tints is None and flags is None
+        numbers = styles_for(molecule, obj, sites, styles)
+        if (tints is None and flags is None and numbers is None
                 and mesh.attributes.get(assembly.TINT_ATTRIBUTE) is None
-                and mesh.attributes.get(assembly.HIDDEN_ATTRIBUTE) is None):
+                and mesh.attributes.get(assembly.HIDDEN_ATTRIBUTE) is None
+                and mesh.attributes.get(assembly.STYLE_ATTRIBUTE) is None):
             continue
         assembly.write_tints(mesh, tints)
         assembly.write_hidden(mesh, flags)
+        assembly.write_styles(mesh, numbers)
         mesh.update()
         painted = painted or tints is not None
     return painted
+
+
+def style_overrides(molecule) -> Dict[str, str]:
+    """``{key: style}`` for the monomers drawn in a style of their own."""
+    params = _params(molecule)
+    return {item.name: item.style for item in params.styles} if params is not None else {}
+
+
+def own_style(molecule, chain: str) -> Optional[str]:
+    """The style the filament draws a chain in: its chain object's."""
+    from .visual_style import get_object_style
+    for domain in molecule.domains.values():
+        if (str(domain.chain_id) == chain and domain.object is not None
+                and not getattr(domain, "is_copy", False)):
+            return get_object_style(domain.object)
+    return None
+
+
+def style_of(molecule, name: str) -> Optional[str]:
+    """The style a monomer is drawn in: its own, else its chain's."""
+    return style_overrides(molecule).get(name) or own_style(molecule, parse_key(name)[1])
+
+
+def styles_for(molecule, obj, sites, overrides=None):
+    """Which style each of the copies ``sites`` of ``obj`` is drawn in, as an
+    int array of style numbers with 0 for the chain's own, or None for none."""
+    chain = chain_of(molecule, obj)
+    if chain is None:
+        return None
+    if overrides is None:
+        overrides = style_overrides(molecule)
+    if not overrides:
+        return None
+    from .visual_style import style_number
+    numbers = np.fromiter(
+        (style_number(overrides[key(site, chain)]) if key(site, chain) in overrides else 0
+         for site in sites), dtype=np.int32, count=len(sites))
+    return numbers if numbers.any() else None
+
+
+def set_style(molecule, keys: Iterable[str], style: str) -> int:
+    """Draw these monomers in ``style``. Returns how many changed.
+
+    A monomer given its chain's own style keeps nothing of its own, so it
+    goes on following the filament when the filament is restyled.
+    """
+    params = _params(molecule)
+    if params is None:
+        return 0
+    changed = 0
+    for name in keys:
+        site, chain = parse_key(name)
+        index = params.styles.find(name)
+        if style == own_style(molecule, chain):
+            if index >= 0:
+                params.styles.remove(index)
+                changed += 1
+        elif index < 0:
+            item = params.styles.add()
+            item.name = name
+            item.site, item.chain, item.style = site, chain, style
+            changed += 1
+        elif params.styles[index].style != style:
+            params.styles[index].style = style
+            changed += 1
+    if changed:
+        refresh(molecule)
+    return changed
 
 
 def ensure_paintable(molecule) -> None:
@@ -541,10 +631,11 @@ def clear(molecule, keys: Iterable[str]) -> int:
 
 
 def forget(molecule) -> None:
-    """Drop every subunit color, its keys, and every hidden subunit.
+    """Drop every subunit color, its keys, every hidden subunit and every
+    subunit's own style.
 
     For a filament whose copies were realized: each realized protein now
-    carries its own color and visibility, and the subunit list they were
+    carries its own color, visibility and style, and the subunit list they were
     read from must not reach an assembly built later, whose copies would
     otherwise come up painted or missing with no Subunits list to undo it.
     """
@@ -554,6 +645,7 @@ def forget(molecule) -> None:
     _renumber_keys(owner(molecule), list(range(len(params.colors))))
     params.colors.clear()
     params.hidden.clear()
+    params.styles.clear()
     params.subunits.clear()
 
 
