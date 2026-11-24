@@ -1031,8 +1031,12 @@ def _ticked():
 
 
 def _untick_all():
+    """Nothing ticked and nothing selected. A build leaves the new filament
+    selected in the viewport, and in a window the PB Outliner's selection
+    watch ticks its row to match; no timer runs here, so both are cleared."""
     for molecule_id in _ticked():
         _tick(molecule_id)
+    _select_in_viewport()
     assert _ticked() == []
 
 
@@ -1076,6 +1080,64 @@ def test_the_subunits_list_shows_the_ticked_filament():
     assert subunit_filament(bpy.context).identifier == tube.identifier
     bpy.context.scene.pb_subunit_filament = actin.identifier
     assert subunit_filament(bpy.context).identifier == actin.identifier
+
+
+def _select_in_viewport(*objects):
+    """Select ``objects`` and nothing else, as a click in the 3D Viewport
+    does, and let the PB Outliner follow, as its selection watch does."""
+    from proteinblender.handlers.selection_sync import update_outliner_from_blender_selection
+    wanted = {obj.name for obj in objects}
+    for obj in bpy.context.view_layer.objects:
+        obj.select_set(obj.name in wanted)
+    if objects:
+        bpy.context.view_layer.objects.active = objects[0]
+    update_outliner_from_blender_selection()
+
+
+def test_clicking_a_filament_in_the_viewport_brings_its_subunits_back():
+    """Dillon (2026-11-24): "Make it so when you select the filament it brings
+    the menu back". A click on empty space takes the panel away; a click on
+    the filament did not bring it back, because a click selects the chain the
+    copies are instances of and ticks only that chain's row, never the
+    filament's own."""
+    from proteinblender.core import bend_rig, symmetry_bend
+    from proteinblender.operators.subunit_operators import subunit_filament
+
+    molecule = _build("ACTIN", 27.5)
+    _select_in_viewport()
+    assert _ticked() == [] and not _panel_shows()
+
+    _select_in_viewport(_object(molecule, "A"))
+    assert _ticked() == [], "the filament's own row was ticked after all"
+    assert _panel_shows(), "clicking the filament did not bring its subunits back"
+    assert subunit_filament(bpy.context).identifier == molecule.identifier
+
+    _select_in_viewport()
+    assert not _panel_shows()
+
+    # A bend node in the middle of the filament is where a click often lands.
+    nodes = bend_rig.get_nodes(symmetry_bend.SPEC, molecule.object)
+    assert nodes, "a new filament has no bend nodes to click"
+    _select_in_viewport(nodes[len(nodes) // 2])
+    assert _panel_shows(), "clicking the filament's bend node did not bring its subunits back"
+
+
+def test_the_subunits_list_shows_the_filament_selected_in_the_viewport():
+    from proteinblender.operators.subunit_operators import filament_items, subunit_filament
+
+    actin = _build("ACTIN", 27.5)
+    tube = _build("MICROTUBULE", 17.0)
+    beta = F.tubulin_chains()["beta"]
+
+    for chosen, chain in ((tube, beta), (actin, "A")):
+        _select_in_viewport(_object(chosen, chain))
+        assert subunit_filament(bpy.context).identifier == chosen.identifier
+        assert [item[0] for item in filament_items(None, bpy.context)] == [chosen.identifier]
+
+    # Both selected: the picker offers both.
+    _select_in_viewport(_object(actin, "A"), _object(tube, beta))
+    offered = sorted(item[0] for item in filament_items(None, bpy.context))
+    assert offered == sorted([actin.identifier, tube.identifier]), offered
 
 
 # --------------------------------------------------------------------------

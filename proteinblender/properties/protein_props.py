@@ -286,8 +286,8 @@ def _set_symmetry_length(self, nanometres):
 
 
 # The Subunits panel's color field shows the first selected subunit and,
-# edited, applies to every selected one at once. With no filament ticked or
-# nothing selected it keeps the last value given.
+# edited, applies to every selected one at once. With no filament selected or
+# no subunit selected it keeps the last value given.
 _SUBUNIT_COLOR_KEY = "pb_subunit_color_value"
 
 

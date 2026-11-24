@@ -1,7 +1,8 @@
 """Cytoskeleton Subunits panel: every monomer of a filament, to select and color.
 
-Shown only while a filament's own row is ticked in the PB Outliner, and
-showing that filament; with several ticked, a picker chooses between them.
+Shown only while a filament is selected - its own row ticked in the PB
+Outliner, or any part of it clicked in the viewport - and showing that
+filament; with several selected, a picker chooses between them.
 Its list has one row per monomer - "Actin 12", "Beta Tubulin 3 - Strand 5" -
 counted up each strand from the minus end, with a checkbox to select it and,
 at its right, an eye to hide it and its color, which paints it alone.
@@ -19,7 +20,7 @@ import bpy
 from bpy.types import Panel, UIList
 
 from ..core import subunit_colors
-from ..operators.subunit_operators import subunit_filament, ticked_filaments
+from ..operators.subunit_operators import selected_filaments, subunit_filament
 from . import subunit_hover
 
 
@@ -112,7 +113,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
 
     @classmethod
     def poll(cls, context):
-        return bool(ticked_filaments(context))
+        return bool(selected_filaments(context))
 
     def draw(self, context):
         layout = self.layout
@@ -124,7 +125,7 @@ class PROTEINBLENDER_PT_subunits(Panel):
         if molecule is None:
             box.label(text="No filament", icon="INFO")
             return
-        if len(ticked_filaments(context)) > 1:
+        if len(selected_filaments(context)) > 1:
             box.prop(scene, "pb_subunit_filament", text="")
 
         params = molecule.object.pb_filament

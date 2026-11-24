@@ -108,11 +108,11 @@ The structure has to be in the filament's own frame for the radius to be right: 
 
 ### Coloring single subunits
 
-Tick a filament's row in the PB Outliner and the **Cytoskeleton Subunits** panel appears below the outliner.
+Select a filament - tick its row in the PB Outliner, or click it in the 3D Viewport - and the **Cytoskeleton Subunits** panel appears below the outliner.
 It lists every monomer of that filament: "Actin 12", or "Beta Tubulin 3 - Strand 5" for a microtubule, where alpha and beta tubulin are listed apart.
 Each strand is counted up from its minus end, so "Actin 4" is the fourth actin from the pointed end.
-With more than one filament ticked, a picker at the top chooses which one it lists.
-Untick the filament and the panel goes away.
+With more than one filament selected, a picker at the top chooses which one it lists.
+Deselect the filament and the panel goes away.
 
 - Point at a row to find its subunit: it lights up yellow in the 3D Viewport while the mouse is on the row.
 - Tick rows to select subunits, or use **Select All**, **None** and **Invert** above the list.

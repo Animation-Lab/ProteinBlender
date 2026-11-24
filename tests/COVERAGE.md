@@ -1786,6 +1786,10 @@ on a membrane whose typical gap was 0.28 nm.
   The reach handler is now held off while a Morphset rebuilds (`linker_handlers.reach_paused` around `morphsets.compile_animation`); dragging a Morphset chain past reach is still held back.
   `test_morph_linkers.py::test_cycling_a_linked_morph_keeps_its_chains_where_the_file_puts_them` takes Dillon's path on a 21-model 2BBN with the Add Linker defaults and the chains in Cartoon, and checks the drawn gap between the linked alpha carbons against the file's model at five keyed frames; it was red at 55.9 A against 23.0 A (1101 A against 54.5 A on Janet's `morph.pdb`).
   The `morph-linkers` UI lane does the same through the Cycle through Conformations dialog and plays the animation; it was red the same way without the fix.
+- **Clicking a filament in the viewport did not bring its Cytoskeleton Subunits panel back** (2026-11-24, Dillon: "Make it so when you select the filament it brings the menu back").
+  The panel followed only the filament's own PB Outliner row, and a click on a filament selects the chain its copies are instances of (or a bend node) and ticks that chain's row at most.
+  It now shows for any filament with its row ticked or any part of it selected in the viewport (`subunit_operators.selected_filaments`).
+  `test_filament_colors.py::test_clicking_a_filament_in_the_viewport_brings_its_subunits_back` and `::test_the_subunits_list_shows_the_filament_selected_in_the_viewport` were red; the filament UI lane now brings the panel back with a real click on the microtubule instead of ticking its row.
 
 ## Crash regressions (guard against reintroduction)
 

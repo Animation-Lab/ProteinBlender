@@ -30,19 +30,63 @@ def filaments():
     return found
 
 
-def ticked_filaments(context):
-    """The filaments whose own row is ticked in the PB Outliner."""
-    ticked = {row.item_id for row in getattr(context.scene, "outliner_items", ())
+def _parts(molecule):
+    """Every object a filament is made of: itself, the chains its copies are
+    instances of, and its bend curve and nodes."""
+    from ..core import bend_rig, symmetry_bend
+
+    owner = molecule.object
+    parts = [owner]
+    for domain in molecule.domains.values():
+        try:
+            if domain.object is not None:
+                parts.append(domain.object)
+        except ReferenceError:
+            continue
+    curve = bend_rig.get_curve(symmetry_bend.SPEC, owner)
+    if curve is not None:
+        parts.append(curve)
+    parts.extend(bend_rig.get_nodes(symmetry_bend.SPEC, owner))
+    return parts
+
+
+def selected_filaments(context):
+    """The filaments that are selected: their own row ticked in the PB
+    Outliner, or any part of them selected in the 3D Viewport.
+
+    A click on a filament in the viewport selects the chain its copies are
+    instances of, or a bend node, and ticks that chain's row at most, never the
+    filament's own; it counts as selecting the filament all the same.
+    """
+    scene = context.scene
+    ticked = {row.item_id for row in getattr(scene, "outliner_items", ())
               if row.is_selected and row.item_type == 'PROTEIN'}
-    return [molecule for molecule in filaments() if molecule.identifier in ticked]
+    # The panel polls this on every redraw: ask for the selected objects,
+    # rather than look at every object, wherever the context has them.
+    chosen = getattr(context, "selected_objects", None)
+    if chosen is None:
+        view_layer = getattr(context, "view_layer", None)
+        chosen = ([obj for obj in view_layer.objects if obj.select_get()]
+                  if view_layer is not None else [])
+    picked = {obj.name for obj in chosen}
+    found = []
+    for molecule in filaments():
+        try:
+            if molecule.identifier in ticked or any(
+                    part.name in picked for part in _parts(molecule)):
+                found.append(molecule)
+        except ReferenceError:
+            continue
+    return found
 
 
 def subunit_filament(context, molecule_id: str = ""):
     """The filament the Subunits list is showing.
 
-    The one asked for by id, among every filament. Else, among the filaments
-    ticked in the PB Outliner: the one chosen in the list's picker, else the
-    active protein, else the first ticked. None when no filament is ticked.
+    The one asked for by id, among every filament. Else, among the selected
+    filaments (:func:`selected_filaments`): the one chosen in the list's
+    picker, else the active protein, else the first. None when no filament is
+    selected.
     """
     from ..utils.scene_manager import resolve_active_molecule_id
 
@@ -50,7 +94,7 @@ def subunit_filament(context, molecule_id: str = ""):
         for molecule in filaments():
             if molecule.identifier == molecule_id:
                 return molecule
-    found = ticked_filaments(context)
+    found = selected_filaments(context)
     by_id = {molecule.identifier: molecule for molecule in found}
     for wanted in (getattr(context.scene, "pb_subunit_filament", ""),
                    resolve_active_molecule_id(context)):
@@ -64,11 +108,11 @@ _ITEMS_CACHE = []
 
 
 def filament_items(self, context):
-    """The ticked filaments the Subunits list can show, for its picker."""
+    """The selected filaments the Subunits list can show, for its picker."""
     from ..core import filament_presets
 
     items = []
-    for molecule in ticked_filaments(context):
+    for molecule in selected_filaments(context):
         preset = filament_presets.of_molecule(molecule)
         label = molecule.identifier
         items.append((molecule.identifier, label,

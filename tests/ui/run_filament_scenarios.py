@@ -351,14 +351,46 @@ def untick_the_filament():
     return 'unticked'
 
 
-def verify_hidden_and_tick():
+def filament_xy():
+    """Where a copy of the filament is drawn in the 3D Viewport, away from the
+    bend nodes on its axis, in window coordinates."""
+    from bpy_extras import view3d_utils
+    area, region = viewport()
+    mol = filament()
+    domain = next(iter(mol.domains.values())).object
+    nodes = [np.array(o.matrix_world.translation) for o in bpy.data.objects
+             if 'Filament Node' in o.name]
+    centres = H.drawn_copy_centres(domain)
+    assert centres, 'no copy of the filament is drawn'
+    centre = max(centres, key=lambda c: min(
+        (np.linalg.norm(np.array(c) - n) for n in nodes), default=0.0))
+    point = view3d_utils.location_3d_to_region_2d(
+        region, area.spaces.active.region_3d, centre)
+    assert point is not None, 'the filament is not in view'
+    return region.x + point.x, region.y + point.y
+
+
+def verify_hidden_and_point_at_the_filament():
     assert Builders.__name__ + '_layout' in data, 'the Properties editor did not redraw'
     assert Subunits.__name__ + '_layout' not in data, (
         'the Subunits panel was drawn with its filament unticked')
     capture('subunits-hidden.png')
-    tick_in_outliner(filament().identifier)
-    g['protein_workspace_panel_area']().tag_redraw()
-    return 'hidden until ticked'
+    # Dillon, 2026-11-24: "when you select the filament it brings the menu
+    # back". Click it in the viewport, as he does, rather than tick its row.
+    data['filament_xy'] = filament_xy()
+    move(*data['filament_xy'])
+    return 'hidden until the filament is selected'
+
+
+def verify_the_click_brought_the_panel_back():
+    mol = filament()
+    picked = sorted(o.name for o in bpy.context.view_layer.objects if o.select_get())
+    assert picked, 'the click on the filament selected nothing'
+    row = next(r for r in bpy.context.scene.outliner_items if r.item_id == mol.identifier)
+    assert not row.is_selected, 'the click ticked the filament row after all; nothing is tested'
+    assert Subunits.__name__ + '_layout' in data, (
+        f'clicking the filament ({picked}) did not bring the Subunits panel back')
+    return f'clicked {picked}'
 
 
 def _buttons_labelled(layout, labels):
@@ -978,8 +1010,13 @@ g['steps'][:] = [
     *confirm('OK the keyframe'),
     ('verify the filament is keyed', verify_keyed), ('settle', idle),
     ('untick the filament in the PB Outliner', untick_the_filament), ('settle', idle), ('settle', idle),
-    ('verify the Subunits panel is hidden, and tick the filament', verify_hidden_and_tick),
-    ('settle', idle), ('settle', idle),
+    ('verify the Subunits panel is hidden, and point at the filament',
+     verify_hidden_and_point_at_the_filament), ('settle', idle),
+    ('click the filament', lambda: click_at(data['filament_xy'], 'PRESS')), ('settle', idle),
+    ('release', lambda: click_at(data['filament_xy'], 'RELEASE')),
+    ('settle', idle), ('settle', idle), ('settle', idle), ('settle', idle),
+    ('verify the click brought the Subunits panel back', verify_the_click_brought_the_panel_back),
+    ('settle', idle),
     ('inspect the Subunits panel', inspect_subunits_panel), ('settle', idle),
     ('color three subunits', color_three), ('settle', idle), ('settle', idle),
     ('verify the colors', verify_colored), ('settle', idle),
