@@ -366,6 +366,12 @@ class PROTEINBLENDER_UL_outliner(UIList):
             )
             if delete_op:
                 delete_op.molecule_id = molecule_id
+        elif item.item_type == 'HETERO':
+            # Edit - representation, color and size of the ligands, ions or
+            # water (operators/hetero_edit.py).
+            edit_op = action("proteinblender.edit_hetero_group", text="", icon='GREASEPENCIL', emboss=False)
+            if edit_op:
+                edit_op.item_id = item.item_id
         elif item.item_type == 'PUPPET':
             edit = action('proteinblender.edit_puppet', text='Edit' if menu else '',
                           icon='GREASEPENCIL', emboss=False)
@@ -468,6 +474,9 @@ class PROTEINBLENDER_UL_outliner(UIList):
         obj = bpy.data.objects.get(item.object_name)
         if not obj:
             return True
+        if item.item_type == 'HETERO':
+            from ..core.hetero_groups import is_visible
+            return is_visible(obj, context.view_layer)
 
         try:
             return not obj.hide_get(view_layer=context.view_layer)
@@ -803,6 +812,9 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
         obj = bpy.data.objects.get(item.object_name)
         if not obj:
             return True
+        if item.item_type == 'HETERO':
+            from ..core.hetero_groups import is_visible
+            return is_visible(obj, view_layer)
         try:
             return not obj.hide_get(view_layer=view_layer)
         except (ReferenceError, RuntimeError):
@@ -861,7 +873,15 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
             from ..core.morphsets import set_member_visible
             set_member_visible(context, item.item_id, visible)
 
-        elif item.item_type in ('DOMAIN', 'MORPHSET', 'HETERO'):
+        elif item.item_type == 'HETERO':
+            # hide_viewport as well as hide_set: it is the one Blender can
+            # keyframe, so a visibility key records what the eye shows.
+            obj = bpy.data.objects.get(item.object_name) if item.object_name else None
+            if obj:
+                from ..core.hetero_groups import set_visible
+                set_visible(obj, visible, view_layer)
+
+        elif item.item_type in ('DOMAIN', 'MORPHSET'):
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:

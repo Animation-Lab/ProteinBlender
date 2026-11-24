@@ -83,7 +83,9 @@ from .visual_edit import (
     PROTEINBLENDER_OT_edit_protein_visuals,
     CLASSES as VISUAL_EDIT_CLASSES,
 )
+from .hetero_edit import CLASSES as HETERO_EDIT_CLASSES
 from .keyframe_operators import (
+    PBHeteroKeyframeRow,
     PuppetKeyframeSettings,  # Must be imported and registered before operators that use it
     PROTEINBLENDER_OT_create_keyframe,
     PROTEINBLENDER_OT_keyframe_select_all_puppets,
@@ -109,6 +111,7 @@ CLASSES = (
     *MORPHSET_CLASSES,
     # PropertyGroups must be registered before operators that use them
     PuppetKeyframeSettings,
+    PBHeteroKeyframeRow,
     # Operators
     MOLECULE_PB_OT_delete,
     MOLECULE_PB_OT_delete_chain,
@@ -176,6 +179,7 @@ CLASSES = (
     *DOMAIN_SPLITTER_CLASSES,
     # Per-item Visual Set-up dialog (proteins)
     *VISUAL_EDIT_CLASSES,
+    *HETERO_EDIT_CLASSES,
     *OUTLINER_COLOR_CLASSES,
     *LIGHTING_CLASSES,
     *CONFORMATION_LIBRARY_CLASSES,

@@ -234,9 +234,29 @@ def get_keyframe_targets(context):
         seen.add(obj.name)
         targets.append((_protein_label(scene, molecule), obj, 'FILAMENT',
                         molecule.identifier))
+    for label, obj, item_id in _hetero_targets(scene):
+        if obj.name not in seen:
+            seen.add(obj.name)
+            targets.append((label, obj, 'HETERO', item_id))
     for morph in morphsets.morphs(scene):
         targets.append((morph.name, morph, 'MORPHSET', morph[morphsets.MORPH]))
     return targets
+
+
+def _hetero_targets(scene):
+    """``[(label, object, item_id)]`` for every Ligands / Ions / Water row,
+    labelled like "4BV3 Ligands"."""
+    names = {item.item_id: item.name for item in scene.outliner_items}
+    found = []
+    for item in scene.outliner_items:
+        if item.item_type != 'HETERO' or not item.object_name:
+            continue
+        obj = bpy.data.objects.get(item.object_name)
+        if obj is None:
+            continue
+        group = item.name.split(" (")[0]
+        found.append((f"{names.get(item.parent_id, '')} {group}".strip(), obj, item.item_id))
+    return found
 
 
 def _protein_label(scene, molecule):
@@ -461,6 +481,10 @@ def get_keyframe_frames(context, targets=None):
                     if kp.type == 'JITTER':
                         continue
                     frames.add(int(round(kp.co[0])))
+        if kind == 'HETERO':
+            # Color and size keys sit on the group's node tree, not the object.
+            from ..core.hetero_groups import keyed_frames
+            frames.update(keyed_frames(obj))
     return sorted(frames)
 
 
@@ -594,6 +618,30 @@ class PuppetKeyframeSettings(PropertyGroup):
     )
 
 
+class PBHeteroKeyframeRow(PropertyGroup):
+    """One Ligands / Ions / Water group in Create Keyframe.
+
+    A collection of its own rather than more columns on
+    :class:`PuppetKeyframeSettings`: Blender requires every field of a row
+    passed as a dict, so new fields there broke every script that already
+    builds puppet rows.
+    """
+    item_id: StringProperty(name="Row")
+    name: StringProperty(name="Name")
+    object_name: StringProperty(name="Object")
+    use_group: BoolProperty(
+        name="Keyframe",
+        description="Record this group at this frame; unchecked rows keep their existing animation",
+        default=False)
+    keyframe_visibility: BoolProperty(
+        name="Visibility", default=True,
+        description="Keyframe whether these atoms are shown, as the outliner eye has them now")
+    keyframe_color: BoolProperty(
+        name="Color", default=True, description="Keyframe their color")
+    keyframe_size: BoolProperty(
+        name="Size", default=True, description="Keyframe the size of their atoms and bonds")
+
+
 class PROTEINBLENDER_OT_create_keyframe(Operator):
     """Create keyframes for puppet animations"""
     bl_idname = "proteinblender.create_keyframe"
@@ -616,6 +664,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
     )
 
     morph_items: CollectionProperty(type=PBMorphKeyframeRow)
+    hetero_items: CollectionProperty(type=PBHeteroKeyframeRow)
 
     puppet_items: CollectionProperty(
         type=PuppetKeyframeSettings,
@@ -783,6 +832,11 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             fil_item.keyframe_color = False
             fil_item.brownian_enabled = False
 
+        self.hetero_items.clear()
+        for label, obj, item_id in _hetero_targets(scene):
+            row = self.hetero_items.add()
+            row.item_id, row.name, row.object_name = item_id, label, obj.name
+
         populate_keyframe_rows(self, context)
         self._morph_frame = self.frame_number
 
@@ -847,12 +901,25 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         if morphsets.sets(context.scene) and not self.morph_items:
             layout.label(text='Create a Morphset with protein chains/domains in Builders.', icon='INFO')
 
+        if self.hetero_items:
+            layout.label(text='Ligands, Ions & Water', icon='PHYSICS')
+            group_box = layout.box()
+            for item in self.hetero_items:
+                row = group_box.row(align=False)
+                row.prop(item, 'use_group', text='')
+                row.label(text=item.name)
+                channels = row.row(align=True)
+                channels.enabled = item.use_group
+                channels.prop(item, 'keyframe_visibility', text='', icon='HIDE_OFF')
+                channels.prop(item, 'keyframe_color', text='', icon='COLOR')
+                channels.prop(item, 'keyframe_size', text='', icon='FULLSCREEN_ENTER')
+
         # Puppet rows
         has_morphsets = bool(morphsets.sets(context.scene))
         box = layout.box() if self.puppet_items or not has_morphsets else layout
 
         if not self.puppet_items:
-            if not has_morphsets:
+            if not has_morphsets and not self.hetero_items:
                 box.label(text="Nothing to keyframe", icon='INFO')
                 box.label(text="Create a Morphset, puppet, DNA/RNA strand, membrane or filament first")
         else:
@@ -978,7 +1045,8 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         selected_puppets = [item for item in self.puppet_items if item.use_puppet]
 
         selected_morphs = [item for item in self.morph_items if item.use_morph]
-        if not selected_puppets and not selected_morphs:
+        selected_groups = [item for item in self.hetero_items if item.use_group]
+        if not selected_puppets and not selected_morphs and not selected_groups:
             self.report({'WARNING'}, "Nothing selected to keyframe")
             return {'CANCELLED'}
 
@@ -996,7 +1064,7 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             except ValueError as exc:
                 self.report({'WARNING'}, str(exc))
                 return {'CANCELLED'}
-            if not selected_puppets:
+            if not selected_puppets and not selected_groups:
                 morphsets.compile_animation(context, pending_keys)
                 return {'FINISHED'}
 
@@ -1013,7 +1081,8 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
         # edits across the frame change so we key what the user actually sees.
         if original_frame != self.frame_number:
             pending_edits = capture_unkeyed_edits(
-                self._keyframe_targets_of(context, selected_puppets),
+                self._keyframe_targets_of(context, selected_puppets)
+                + _hetero_datablocks(selected_groups),
                 original_frame,
             )
             # A filament's numbers are its build, not a property Blender
@@ -1276,6 +1345,26 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
                         save_brownian_metadata(controller_obj, self.frame_number, settings)
                         print(f"  Brownian motion disabled for frame {self.frame_number}")
 
+        # Ligands / Ions / Water: each channel keyed, or cleared when unticked.
+        if selected_groups:
+            from ..core import hetero_groups
+            for item in selected_groups:
+                obj = bpy.data.objects.get(item.object_name)
+                if obj is None:
+                    continue
+                hetero_groups.delete_keyframes(
+                    obj, self.frame_number,
+                    visibility=not item.keyframe_visibility,
+                    color=not item.keyframe_color,
+                    size=not item.keyframe_size)
+                if hetero_groups.keyframe(
+                        obj, self.frame_number,
+                        visibility=item.keyframe_visibility,
+                        color=item.keyframe_color,
+                        size=item.keyframe_size):
+                    keyframed_puppets.append(item.name)
+                    total_keyframed += 1
+
         # Restore original frame
         if original_frame != self.frame_number:
             scene.frame_set(original_frame)
@@ -1290,6 +1379,20 @@ class PROTEINBLENDER_OT_create_keyframe(Operator):
             self.report({'WARNING'}, "No objects were keyframed")
 
         return {'FINISHED'}
+
+
+def _hetero_datablocks(rows):
+    """The objects and node trees a group key is written to."""
+    found = []
+    for item in rows:
+        obj = bpy.data.objects.get(item.object_name)
+        if obj is None:
+            continue
+        found.append(obj)
+        mod = obj.modifiers.get("DomainNodes")
+        if mod is not None and mod.node_group is not None:
+            found.append(mod.node_group)
+    return found
 
 
 def _set_create_keyframe_selection(context, target_value: bool) -> bool:

@@ -1011,6 +1011,30 @@ def build_ligand_groups():
     assert sorted((d.start, d.end) for d in H.sm().molecules[mid].domains.values()) == \
         [(122, 250), (251, 391)]
     _build_outliner()
+    # Ions restyled: bigger, solid color, with visibility / color / size keys.
+    ion_row = next(it for it in bpy.context.scene.outliner_items
+                   if it.item_type == "HETERO" and it.name.startswith("Ions"))
+    ion_row_id, ions = ion_row.item_id, ion_row.object_name
+    assert bpy.ops.proteinblender.edit_hetero_group(
+        'EXEC_DEFAULT', item_id=ion_row_id, vs_size=1.6,
+        vs_color=(0.9, 0.6, 0.1, 1.0), vs_by_element=False) == {"FINISHED"}
+    for frame in (1, 30):
+        bpy.context.scene.frame_set(frame)
+        if frame == 30:
+            assert bpy.ops.proteinblender.edit_hetero_group(
+                'EXEC_DEFAULT', item_id=ion_row_id, vs_size=0.8) == {"FINISHED"}
+        assert bpy.ops.proteinblender.create_keyframe(
+            'EXEC_DEFAULT', frame_number=frame, hetero_items=[{
+                "item_id": ion_row_id, "name": "Ions", "object_name": ions,
+                "use_group": True, "keyframe_visibility": True,
+                "keyframe_color": True, "keyframe_size": True}]) == {"FINISHED"}
+    bpy.context.scene.frame_set(15)
+    # Ligands drawn as sticks, then hidden from the outliner eye.
+    _build_outliner()
+    ligand_row_id = next(it.item_id for it in bpy.context.scene.outliner_items
+                         if it.item_type == "HETERO" and it.name.startswith("Ligands"))
+    assert bpy.ops.proteinblender.edit_hetero_group(
+        'EXEC_DEFAULT', item_id=ligand_row_id, vs_style='sticks') == {"FINISHED"}
     assert bpy.ops.proteinblender.toggle_visibility(item_id=ligand_row_id) == {"FINISHED"}
     assert H.sm().molecules[mid].object.children  # sanity: groups are children
     _build_outliner()

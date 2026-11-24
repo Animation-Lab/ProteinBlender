@@ -414,18 +414,14 @@ def _build_group_tree(tree, kind, material):
 
     if material is not None and "Material" in style.inputs:
         style.inputs["Material"].default_value = material
-    # Point-cloud spheres render as faceted diamonds in EEVEE at the few
-    # atoms an ion group has; real mesh spheres cost nothing at that size.
-    if style_name == "Style Spheres":
-        if "Sphere As Mesh" in style.inputs:
-            style.inputs["Sphere As Mesh"].default_value = True
-        if "Sphere Subdivisions" in style.inputs:
-            style.inputs["Sphere Subdivisions"].default_value = 3
-    if kind == WATER:
-        for name in ("Sphere Radii", "Radii", "Scale Radii", "Radius"):
-            if name in style.inputs and style.inputs[name].type == 'VALUE':
-                style.inputs[name].default_value = _WATER_SPHERE_SCALE
-                break
+    _tune_style(style)
+
+    size = tree.nodes.new('ShaderNodeValue')
+    size.name = SIZE_NODE
+    size.label = "Size"
+    size.location = (-250, 260)
+    tree.nodes[SIZE_NODE].outputs[0].default_value = 1.0
+    _wire_size(tree, kind)
 
     domain_space.ensure_pivot_input(tree)
 
@@ -468,6 +464,371 @@ def _create_group_object(wrapper, kind, material):
     domain_space.copy_pivot(parent, obj)
     obj.select_set(False)
     return obj
+
+
+# ---------------------------------------------------------------------------
+# Appearance: representation, color, size
+#
+# Edited from the pencil on a group's outliner row (operators/hetero_edit.py)
+# and keyed from Create Keyframe. Everything lives on the group's own node
+# tree, under fixed node names, so a key's data path stays valid whatever
+# style is swapped in later.
+# ---------------------------------------------------------------------------
+
+STYLE_NODE = "PB Group Style"
+COLOR_NODE = "PB Group Color"          # Color Common: colors by element
+SET_COLOR_NODE = "PB Group Set Color"
+SOLID_NODE = "PB Group Solid"          # Combine Color: one color for all atoms
+SIZE_NODE = "PB Group Size"            # Value: 1.0 = the style's own size
+_SIZE_PREFIX = "PB Group Size x "
+
+# Which representations make sense for each kind. Cartoon and Ribbon follow a
+# protein backbone a ligand does not have, and draw nothing; a single-atom ion
+# has no bonds for Sticks to draw. Water is mostly single oxygens too.
+STYLES_FOR_KIND = {
+    LIGAND: ('ball_and_stick', 'sticks', 'spheres', 'surface'),
+    ION: ('spheres',),
+    WATER: ('spheres',),
+}
+
+# The style inputs that set how big a style draws, scaled together by Size.
+_SIZE_SOCKETS = {
+    "Style Spheres": ("Sphere Radii",),
+    "Style Ball and Stick": ("Sphere Radii", "Bond Radius"),
+    "Style Sticks": ("Radius",),
+    "Style Surface": ("Scale Radii",),
+}
+
+
+def kind_of(obj) -> Optional[int]:
+    """LIGAND / ION / WATER for a group object, None for anything else."""
+    if obj is None:
+        return None
+    return KIND_BY_KEY.get(obj.get(GROUP_PROP))
+
+
+def _tree(obj):
+    mod = obj.modifiers.get("DomainNodes") if obj is not None else None
+    return mod.node_group if mod is not None else None
+
+
+def _style_tree_name(style_node) -> Optional[str]:
+    tree = getattr(style_node, "node_tree", None)
+    if tree is None:
+        return None
+    return next((name for name in _SIZE_SOCKETS if name in tree.name), tree.name)
+
+
+def _tune_style(style_node):
+    """Settings every group style gets, whichever style was swapped in.
+
+    Point-cloud spheres render as faceted diamonds in EEVEE at the few atoms an
+    ion group has; real mesh spheres cost nothing at that size.
+    """
+    inputs = style_node.inputs
+    if "Sphere As Mesh" in inputs:
+        inputs["Sphere As Mesh"].default_value = True
+    if "Sphere Subdivisions" in inputs:
+        inputs["Sphere Subdivisions"].default_value = 3
+
+
+def _base_size(style_node, socket_name, kind) -> float:
+    """What a size socket would be at Size 1.0: the style's own default.
+
+    Water drawn at full van der Waals size buries the protein under a shell of
+    spheres, so its spheres start at a crystal-bead size instead.
+    """
+    if kind == WATER and socket_name == "Sphere Radii":
+        return _WATER_SPHERE_SCALE
+    for item in style_node.node_tree.interface.items_tree:
+        if (item.item_type == 'SOCKET' and item.in_out == 'INPUT'
+                and item.name == socket_name):
+            return float(item.default_value)
+    return 1.0
+
+
+def _wire_size(tree, kind):
+    """Feed the Size value, times each size input's default, into the style.
+
+    Rebuilt after every style swap: the inputs that set a style's size differ
+    from style to style, but the Size node (and any keys on it) stays put.
+    """
+    for node in [n for n in tree.nodes if n.name.startswith(_SIZE_PREFIX)]:
+        tree.nodes.remove(node)
+    style = tree.nodes.get(STYLE_NODE)
+    if style is None or tree.nodes.get(SIZE_NODE) is None:
+        return
+    names = [name for name in _SIZE_SOCKETS.get(_style_tree_name(style), ())
+             if name in style.inputs]
+    bases = {name: _base_size(style, name, kind) for name in names}
+    for index, name in enumerate(names):
+        node = tree.nodes.new('ShaderNodeMath')
+        node.name = _SIZE_PREFIX + name
+        node.operation = 'MULTIPLY'
+        node.location = (-80, 300 + 120 * index)
+    # nodes.new() can leave earlier node pointers stale: resolve by name.
+    style = tree.nodes[STYLE_NODE]
+    size = tree.nodes[SIZE_NODE]
+    for name in names:
+        node = tree.nodes[_SIZE_PREFIX + name]
+        node.inputs[0].default_value = bases[name]
+        tree.links.new(size.outputs[0], node.inputs[1])
+        tree.links.new(node.outputs[0], style.inputs[name])
+
+
+def get_style(obj) -> Optional[str]:
+    from .visual_style import get_object_style
+    return get_object_style(obj)
+
+
+def set_style(obj, style) -> bool:
+    """Draw a group object in ``style`` (one of :data:`STYLES_FOR_KIND`)."""
+    from . import visual_style
+    from ..utils.molecularnodes.blender import nodes
+
+    kind = kind_of(obj)
+    tree = _tree(obj)
+    if kind is None or tree is None or style not in STYLES_FOR_KIND[kind]:
+        return False
+    node = tree.nodes.get(STYLE_NODE)
+    if node is None:
+        return False
+    if get_style(obj) == style:
+        return True
+    material = (node.inputs["Material"].default_value
+                if "Material" in node.inputs else None)
+    visual_style.style_tree(style)
+    nodes.swap(node, visual_style.STYLE_TREES[style])
+
+    # swap() puts a new node in the old one's place, under a new name.
+    node = tree.nodes.get(STYLE_NODE) or next(
+        n for n in tree.nodes
+        if n.type == 'GROUP' and n.node_tree is not None
+        and n.node_tree.name.startswith("Style "))
+    node.name = STYLE_NODE
+    node = tree.nodes[STYLE_NODE]
+    select = tree.nodes.get("PB Group Select")
+    if select is not None and not node.inputs["Selection"].is_linked:
+        tree.links.new(select.outputs["Result"], node.inputs["Selection"])
+    if material is not None and "Material" in node.inputs:
+        node.inputs["Material"].default_value = material
+    _tune_style(node)
+    _wire_size(tree, kind)
+    obj.data.update_tag()
+    return True
+
+
+def _solid_node(tree, create=False):
+    node = tree.nodes.get(SOLID_NODE)
+    if node is None and create:
+        node = tree.nodes.new('FunctionNodeCombineColor')
+        node.name = SOLID_NODE
+        node.mode = 'RGB'
+        node.location = (-700, 120)
+        node = tree.nodes[SOLID_NODE]
+    return node
+
+
+def _set_color_input(tree):
+    set_color = tree.nodes.get(SET_COLOR_NODE)
+    if set_color is None:
+        return None
+    return next((s for s in set_color.inputs if s.name == "Color"), None)
+
+
+def by_element(obj) -> bool:
+    """True while the group is colored by element (carbon in its own color)."""
+    tree = _tree(obj)
+    socket = _set_color_input(tree) if tree is not None else None
+    if socket is None or not socket.is_linked:
+        return True
+    return socket.links[0].from_node.name != SOLID_NODE
+
+
+def get_color(obj):
+    """The group's color: its carbon color by element, or its solid color."""
+    tree = _tree(obj)
+    if tree is None:
+        return None
+    if by_element(obj):
+        node = tree.nodes.get(COLOR_NODE)
+        if node is None or "Carbon" not in node.inputs:
+            return None
+        return tuple(node.inputs["Carbon"].default_value)
+    solid = _solid_node(tree)
+    return tuple(solid.inputs[c].default_value for c in ("Red", "Green", "Blue")) + (1.0,)
+
+
+def color_sockets(obj):
+    """The sockets that hold the color the group is drawn in now - the ones a
+    color keyframe goes on."""
+    tree = _tree(obj)
+    if tree is None:
+        return []
+    if by_element(obj):
+        node = tree.nodes.get(COLOR_NODE)
+        return [node.inputs["Carbon"]] if node is not None and "Carbon" in node.inputs else []
+    solid = _solid_node(tree)
+    return [solid.inputs[c] for c in ("Red", "Green", "Blue")] if solid is not None else []
+
+
+def set_color(obj, color, element: Optional[bool] = None) -> bool:
+    """Color a group object.
+
+    By element, ``color`` becomes the carbon color and every other element keeps
+    its own (nitrogen blue, oxygen red, ...), the usual way to show a ligand.
+    Otherwise every atom is drawn in ``color``. ``element=None`` keeps the
+    current mode.
+    """
+    tree = _tree(obj)
+    if tree is None:
+        return False
+    if element is None:
+        element = by_element(obj)
+    socket = _set_color_input(tree)
+    if socket is None:
+        return False
+    rgba = tuple(color) + (1.0,) * (4 - len(color))
+    if element:
+        node = tree.nodes.get(COLOR_NODE)
+        if node is None:
+            return False
+        if "Carbon" in node.inputs:
+            node.inputs["Carbon"].default_value = rgba[:4]
+        source = node.outputs["Color"]
+    else:
+        solid = _solid_node(tree, create=True)
+        for channel, value in zip(("Red", "Green", "Blue"), rgba):
+            solid.inputs[channel].default_value = value
+        source = solid.outputs["Color"]
+    socket = _set_color_input(tree)
+    if not socket.is_linked or socket.links[0].from_socket != source:
+        for link in list(socket.links):
+            tree.links.remove(link)
+        tree.links.new(source, socket)
+    obj.data.update_tag()
+    return True
+
+
+def get_size(obj) -> float:
+    tree = _tree(obj)
+    node = tree.nodes.get(SIZE_NODE) if tree is not None else None
+    return float(node.outputs[0].default_value) if node is not None else 1.0
+
+
+def set_size(obj, factor) -> bool:
+    """Scale the group's spheres and bonds; 1.0 is the style's own size."""
+    tree = _tree(obj)
+    node = tree.nodes.get(SIZE_NODE) if tree is not None else None
+    if node is None:
+        return False
+    node.outputs[0].default_value = max(0.0, float(factor))
+    obj.data.update_tag()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Visibility and keyframes
+#
+# The outliner eye normally hides an object for the view layer (hide_set),
+# which Blender cannot animate. A group also sets ``hide_viewport`` and
+# ``hide_render``, which it can, so whatever the eye shows is what a
+# visibility key records. Keying hands the state over to hide_viewport alone,
+# so scrubbing back to a visible key shows the group again.
+# ---------------------------------------------------------------------------
+
+def is_visible(obj, view_layer=None) -> bool:
+    try:
+        hidden = obj.hide_get(view_layer=view_layer) if view_layer else obj.hide_get()
+    except RuntimeError:
+        hidden = False
+    return not (hidden or obj.hide_viewport)
+
+
+def set_visible(obj, visible, view_layer=None) -> None:
+    try:
+        if view_layer is not None:
+            obj.hide_set(not visible, view_layer=view_layer)
+        else:
+            obj.hide_set(not visible)
+    except RuntimeError:
+        pass
+    obj.hide_viewport = not visible
+    obj.hide_render = not visible
+
+
+def _size_socket(obj):
+    tree = _tree(obj)
+    node = tree.nodes.get(SIZE_NODE) if tree is not None else None
+    return node.outputs[0] if node is not None else None
+
+
+def keyframe(obj, frame, *, visibility=False, color=False, size=False) -> int:
+    """Key the chosen channels of a group object at ``frame``; returns how
+    many channels were keyed."""
+    keyed = 0
+    if visibility:
+        hidden = not is_visible(obj)
+        try:
+            obj.hide_set(False)
+        except RuntimeError:
+            pass
+        obj.hide_viewport = obj.hide_render = hidden
+        obj.keyframe_insert("hide_viewport", frame=frame)
+        obj.keyframe_insert("hide_render", frame=frame)
+        keyed += 1
+    if color:
+        sockets = color_sockets(obj)
+        for socket in sockets:
+            socket.keyframe_insert("default_value", frame=frame)
+        keyed += bool(sockets)
+    if size:
+        socket = _size_socket(obj)
+        if socket is not None:
+            socket.keyframe_insert("default_value", frame=frame)
+            keyed += 1
+    return keyed
+
+
+def delete_keyframes(obj, frame, *, visibility=True, color=True, size=True) -> None:
+    """Remove a group's visibility / color / size keys at ``frame``."""
+    targets = []
+    if visibility:
+        targets += [(obj, "hide_viewport"), (obj, "hide_render")]
+    tree = _tree(obj)
+    if color and tree is not None:
+        node = tree.nodes.get(COLOR_NODE)
+        if node is not None and "Carbon" in node.inputs:
+            targets.append((node.inputs["Carbon"], "default_value"))
+        solid = _solid_node(tree)
+        if solid is not None:
+            targets += [(solid.inputs[c], "default_value") for c in ("Red", "Green", "Blue")]
+    if size:
+        socket = _size_socket(obj)
+        if socket is not None:
+            targets.append((socket, "default_value"))
+    for owner, path in targets:
+        try:
+            owner.keyframe_delete(path, frame=frame)
+        except RuntimeError:
+            pass   # nothing keyed there
+
+
+def keyed_frames(obj) -> set:
+    """Frames with a visibility, color, size or transform key on the group."""
+    from ..utils.animation import get_fcurves_from_action
+    frames = set()
+    tree = _tree(obj)
+    for owner in (obj, tree):
+        ad = getattr(owner, "animation_data", None) if owner is not None else None
+        if not ad or not ad.action:
+            continue
+        for fcurve in get_fcurves_from_action(ad.action, ad):
+            if owner != obj and "PB Group" not in fcurve.data_path:
+                continue
+            frames.update(int(round(k.co[0])) for k in fcurve.keyframe_points
+                          if k.type != 'JITTER')
+    return frames
 
 
 def create(wrapper) -> List[bpy.types.Object]:

@@ -324,6 +324,10 @@ class PROTEINBLENDER_OT_delete_keyframe(bpy.types.Operator):
             if kind == 'FILAMENT':
                 from ..core.filament_animation import delete_parameter_keyframes
                 delete_parameter_keyframes(obj, self.frame)
+            # A ligand group's color and size keys sit on its node tree.
+            if kind == 'HETERO':
+                from ..core.hetero_groups import delete_keyframes
+                delete_keyframes(obj, self.frame)
             delete_keyframe_metadata(obj, self.frame)
 
         for area in context.screen.areas:
