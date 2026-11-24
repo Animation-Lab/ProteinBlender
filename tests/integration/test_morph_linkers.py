@@ -332,6 +332,68 @@ def test_the_linker_dialog_asks_for_the_morphs_widest_gap(scene, tmp_path):
         layout.labels
 
 
+def _first_ca(path, chain):
+    """A chain's first residue and its (models, 3) CA coordinates in angstroms."""
+    residues, coords = _ca_by_model(path, chain)
+    index = int(np.argmin(residues))
+    return int(residues[index]), coords[:, index]
+
+
+def test_cycling_a_linked_morph_keeps_its_chains_where_the_file_puts_them(scene, tmp_path):
+    """Dillon (2026-11-24, Janet's morph.pdb): "Linker animation (on
+    morphset) transposes the pieces": import the morph, make a puppet of its
+    Morphset, link its chains, then Cycle through Conformations over frames
+    1-250, and the chains split far apart.
+
+    Taken as Dillon takes it, with the Add Linker dialog's defaults (each
+    chain's first residue, the length raised to the morph's widest gap) and
+    the chains left in Cartoon. Ground truth is the file: in every state the
+    gap between the two linked alpha carbons Blender draws must be the gap
+    the file's model gives them.
+    """
+    path = H.chimera_like_ensemble(tmp_path / 'morph_ab.pdb', models=21)
+    _import_states(path)
+    (root,) = C.sets(scene)
+    (morph,) = C.morphs(scene, root)
+    rows = [(r.item_id, r.name) for r in scene.outliner_items
+            if r.item_type == 'MORPH_MEMBER' and r.parent_id == root[C.TAG]]
+    (a, name_a), (b, name_b) = rows
+    for row in scene.outliner_items:
+        row.is_selected = row.item_id == root[C.TAG]
+    assert bpy.ops.proteinblender.create_puppet(
+        'EXEC_DEFAULT', puppet_name='Morph Puppet') == {'FINISHED'}
+    puppet = next(r for r in scene.outliner_items
+                  if r.item_type == 'PUPPET' and r.name == 'Morph Puppet')
+    (res_a, ca_a), (res_b, ca_b) = _first_ca(path, 'A'), _first_ca(path, 'B')
+    assert bpy.ops.pb2.add_linker(
+        'EXEC_DEFAULT', puppet_selector=puppet.item_id,
+        endpoint_a_item=f"A_{a}", endpoint_a_residue=res_a,
+        endpoint_b_item=f"B_{b}", endpoint_b_residue=res_b,
+        length_residues=10, linker_name='A to B') == {'FINISHED'}
+
+    assert bpy.ops.proteinblender.cycle_conformations(
+        morph_id=morph[C.MORPH], start_frame=1, end_frame=250,
+        frame_step=5) == {'FINISHED'}
+
+    # Spheres only now, to read single atoms off what Blender draws: the
+    # cartoon is what the keys were made in.
+    for member in (a, b):
+        assert bpy.ops.proteinblender.edit_morph_member(
+            item_id=member, vs_style='spheres') == {'FINISHED'}
+    order = [s['uid'] for s in C.states(morph)]
+    keys = C.morph_keys(scene, morph[C.MORPH])
+    for frame in (1, 6, 51, 101, 246):
+        model = order.index(keys[str(frame)]['state'])
+        scene.frame_set(frame)
+        drawn = np.linalg.norm(
+            H.visible_alpha_carbon([H.morph_output_named(name_b)], res_b)
+            - H.visible_alpha_carbon([H.morph_output_named(name_a)], res_a))
+        truth = np.linalg.norm(ca_b[model] - ca_a[model]) * SCALE
+        assert drawn == pytest.approx(truth, abs=2e-4), (
+            f"frame {frame} (model {model + 1}): the linked alpha carbons are "
+            f"drawn {drawn / SCALE:.1f} A apart, the file has {truth / SCALE:.1f} A")
+
+
 def test_morph_linker_moves_with_its_puppet(morph_ab):
     scene = bpy.context.scene
     linker, _ca_a, _ca_b = _add_morph_linker(morph_ab)

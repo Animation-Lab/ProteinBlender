@@ -617,6 +617,14 @@ def validate(scene, keys, replacements=None):
 
 
 def compile_animation(context, keys):
+    # A rebuild moves no chain, so a linker's reach must not act on outputs
+    # it finds half built or just made.
+    from ..linkers.linker_handlers import reach_paused
+    with reach_paused():
+        _compile_animation(context, keys)
+
+
+def _compile_animation(context, keys):
     scene = context.scene
     groups = validate(scene, keys)  # Validate all changes before replacing any animation.
     from .morph_member_pivots import preserve_outputs, restore_output

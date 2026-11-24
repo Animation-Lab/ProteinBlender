@@ -1780,6 +1780,12 @@ on a membrane whose typical gap was 0.28 nm.
   The user site is now added only when the core packages do not import from Blender's own paths (`__init__._core_packages_importable`), so source and `pip --user` installs still load.
   `test_dependency_fallback.py::test_a_healthy_start_never_imports_from_the_shared_user_site` was red (a package only that folder had became importable); `::test_core_packages_only_in_the_user_site_still_load` keeps the user-site case working in a fresh Blender.
   Reproduced end to end with the 1.2.6 alpha zip in an isolated 5.2 profile, pyarrow 24.0.0 in a separate user site and TLS slots used up before add-ons load: the shipped loader failed exactly as reported, the fixed one loaded with pyarrow never imported and imported 1ubq.pdb and 1atn.cif.gz.
+- **Cycling a linked morph through its conformations split its chains far apart** (2026-11-24, Dillon: "Linker animation (on morphset) transposes the pieces": import the morph, puppet its Morphset, link its chains, Cycle through Conformations over 1-250).
+  Each Morphset output is built with every state's shape key at full strength, and the cartoon's orientation bake (`cartoon_motion._bake_turns`) evaluates the scene before the keys are set.
+  The linker reach handler counted the new outputs as moved, read the linked residue there - every state's offset added up, 8.8 BU off on Janet's morph - and moved both outputs to make up for it, for good: their location is not keyed and the next rebuild keeps it.
+  The reach handler is now held off while a Morphset rebuilds (`linker_handlers.reach_paused` around `morphsets.compile_animation`); dragging a Morphset chain past reach is still held back.
+  `test_morph_linkers.py::test_cycling_a_linked_morph_keeps_its_chains_where_the_file_puts_them` takes Dillon's path on a 21-model 2BBN with the Add Linker defaults and the chains in Cartoon, and checks the drawn gap between the linked alpha carbons against the file's model at five keyed frames; it was red at 55.9 A against 23.0 A (1101 A against 54.5 A on Janet's `morph.pdb`).
+  The `morph-linkers` UI lane does the same through the Cycle through Conformations dialog and plays the animation; it was red the same way without the fix.
 
 ## Crash regressions (guard against reintroduction)
 

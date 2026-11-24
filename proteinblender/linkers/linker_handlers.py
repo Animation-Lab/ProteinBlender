@@ -8,6 +8,8 @@ This module provides:
 - Puppet deletion cleanup: removes linkers when their puppet is deleted
 """
 
+from contextlib import contextmanager
+
 import bpy
 from bpy.app.handlers import persistent
 import logging
@@ -17,7 +19,6 @@ from .linker_geometry import (
     delete_linker_geometry,
     create_linker_curve,
     get_residue_position_from_item,
-    get_object_for_item,
     get_backbone_object_for_item,
     get_backbone_direction,
     _get_numeric_chain_id_from_item,
@@ -31,6 +32,31 @@ _handlers_registered = False
 
 # Re-entrancy guard for constraint handler
 _constraint_active = False
+
+# Held while a Morphset rebuilds its outputs (see reach_paused).
+_reach_paused = 0
+
+
+@contextmanager
+def reach_paused():
+    """Hold the reach constraint off while a Morphset rebuilds its outputs.
+
+    A rebuild drags no chain, yet every output it makes is new, so it counts
+    as moved. Worse, the cartoon's orientation bake evaluates the scene while
+    an output still has every state's shape key at full strength and none
+    keyed, so a residue read there is all the states' offsets added up. The
+    constraint took that for a chain pulled far out of reach and moved the
+    outputs to make up for it, for good: their location is not keyed, and the
+    next rebuild keeps it (2026-11-24, a linked morph cycled through its
+    conformations split its chains far apart). The frame change at the end of
+    the rebuild still puts each linker on the finished outputs.
+    """
+    global _reach_paused
+    _reach_paused += 1
+    try:
+        yield
+    finally:
+        _reach_paused -= 1
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +123,7 @@ def linker_constraint_and_update_handler(scene, depsgraph):
     """
     global _constraint_active
 
-    if _constraint_active:
+    if _constraint_active or _reach_paused:
         return
 
     if not hasattr(scene, 'pb2_linkers') or len(scene.pb2_linkers) == 0:
