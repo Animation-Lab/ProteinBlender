@@ -944,10 +944,14 @@ class _DrawnLayout:
 
     def __init__(self):
         self.buttons = []
+        self.props = []
 
     def operator(self, identifier, **kwargs):
         self.buttons.append((identifier, kwargs))
         return type("Props", (), {})()
+
+    def prop(self, data, name, **kwargs):
+        self.props.append((name, kwargs))
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: self
@@ -1177,6 +1181,84 @@ def test_changing_the_color_with_nothing_selected_paints_nothing():
     assert len(_drawn(molecule)[1]) == 0
     assert len(molecule.object.pb_filament.colors) == 0
     assert np.allclose(bpy.context.scene.pb_subunit_color, GREEN)
+
+
+def test_the_eye_by_the_color_field_hides_every_selected_subunit_and_shows_them_again():
+    """Dillon (2026-11-24): "Add an 'eye' to the filament selection menu
+    (multiple selected)". Beside the color field that paints the selected
+    subunits, one eye hides all of them at once, and shows them again."""
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    scene = bpy.context.scene
+    _select(molecule, ["2:A", "3:A", "7:A"])
+    assert not scene.pb_subunit_hide
+
+    scene.pb_subunit_hide = True
+    instances, painted = _drawn(molecule)
+    assert (len(instances), len(painted)) == (7, 0)
+    for index in range(10):
+        drawn = _near(ordered[index], _centres(instances))
+        assert drawn == (index not in (2, 3, 7)), f"actin {index + 1} drawn: {drawn}"
+    assert scene.pb_subunit_hide, "the eye does not show the selected subunits hidden"
+    # Each subunit's own eye says so too.
+    assert all(_row(molecule, name).hide for name in ("2:A", "3:A", "7:A"))
+
+    scene.pb_subunit_hide = False
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 10
+    assert all(_near(centre, _centres(instances)) for centre in ordered)
+    assert not scene.pb_subunit_hide
+
+
+def test_the_eye_hides_the_rest_when_only_some_selected_subunits_are_hidden():
+    molecule = _ticked_actin()
+    ordered = _from_the_pointed_end(molecule)
+    scene = bpy.context.scene
+    _row(molecule, "3:A").hide = True
+    _row(molecule, "8:A").hide = True            # hidden, but not selected
+    _select(molecule, ["3:A", "6:A"])
+    # One of the two is still drawn, so the eye is open, and a click closes it.
+    assert not scene.pb_subunit_hide
+
+    scene.pb_subunit_hide = True
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 7
+    assert not any(_near(ordered[i], _centres(instances)) for i in (3, 6, 8))
+
+    # Showing them again shows only the selected ones.
+    scene.pb_subunit_hide = False
+    instances, _painted = _drawn(molecule)
+    assert len(instances) == 9
+    assert not _near(ordered[8], _centres(instances)), "an unselected subunit came back"
+
+
+def test_the_eye_with_nothing_selected_hides_nothing():
+    molecule = _ticked_actin()
+    _select(molecule, [])
+    bpy.context.scene.pb_subunit_hide = True
+    assert len(_drawn(molecule)[0]) == 10
+    assert len(molecule.object.pb_filament.hidden) == 0
+    assert not bpy.context.scene.pb_subunit_hide
+
+
+def test_the_panel_draws_the_eye_beside_the_color_field():
+    from proteinblender.panels.subunit_panel import PROTEINBLENDER_PT_subunits
+
+    molecule = _ticked_actin()
+    panel = type("Panel", (), {"layout": _DrawnLayout()})()
+    PROTEINBLENDER_PT_subunits.draw(panel, bpy.context)
+    names = [name for name, _kwargs in panel.layout.props]
+    assert "pb_subunit_hide" in names, names
+    # Right after the color field and its Clear, as a row's eye follows its swatch.
+    assert names.index("pb_subunit_hide") == names.index("pb_subunit_color") + 1, names
+    eye = dict(panel.layout.props)["pb_subunit_hide"]
+    assert eye.get("icon") == "HIDE_OFF" and eye.get("text") == "", eye
+
+    _select(molecule, ["4:A"])
+    bpy.context.scene.pb_subunit_hide = True
+    panel = type("Panel", (), {"layout": _DrawnLayout()})()
+    PROTEINBLENDER_PT_subunits.draw(panel, bpy.context)
+    assert dict(panel.layout.props)["pb_subunit_hide"].get("icon") == "HIDE_ON"
 
 
 def test_the_color_field_shows_the_first_selected_subunit():

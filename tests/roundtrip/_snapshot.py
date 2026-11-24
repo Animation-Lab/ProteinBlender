@@ -125,6 +125,11 @@ EXCLUSIONS = {
         "pb_symmetry_rise by a getter, and setting it only sets the count. "
         "Both of those are snapshotted, so there is nothing of its own to "
         "lose on reload."),
+    "Scene.pb_subunit_hide": (
+        "Not stored at all: a getter reads it off the selected subunits' "
+        "rows in Object.pb_filament.hidden, and setting it only writes "
+        "there. pb_filament is snapshotted, so there is nothing of its own "
+        "to lose on reload."),
     "Scene.pb_subunit_filament": (
         "Transient UI choice - which filament the Subunits list shows when the "
         "scene has more than one. Its enum items are computed from the "
@@ -325,8 +330,6 @@ def _gn_input_value(mod, identifier):
 
 
 def _serialize_modifier(mod):
-    import bpy
-
     entry = {"name": mod.name, "type": mod.type,
              "show_viewport": bool(mod.show_viewport),
              "show_render": bool(mod.show_render)}

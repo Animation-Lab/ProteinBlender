@@ -123,6 +123,8 @@ Deselect the filament and the panel goes away.
 - The color field below the list shows the first selected subunit.
   Change it and every selected subunit takes it at once; there is no button to press.
 - **Clear** gives the selected subunits back the filament's own color.
+- The eye after **Clear** hides every selected subunit at once, and shows them all again.
+  It is closed while all the selected subunits are hidden.
 
 **Realize Copies** keeps every subunit's color, and a hidden subunit becomes a hidden protein that its PB Outliner eye shows again.
 

@@ -668,6 +668,115 @@ def verify_shown_by_the_eye():
     return f'{row.label} shown again'
 
 
+def find_the_color_field():
+    """Walk the mouse down from the list to the color field for the selected subunits."""
+    area, region = properties_region()
+    x = region.x + region.width * 0.2
+    steps = []
+    for y in range(int(data['row_xy'][1]), region.y + 20, -6):
+        steps.append((f'point at y={y}', lambda y=y: move(x, y)))
+        steps.append(('settle', idle))
+        steps.append((f'check y={y}', lambda y=y: check_color_field(y)))
+    g['steps'][:0] = steps
+    return f'{len(steps) // 3} spots'
+
+
+def check_color_field(y):
+    if 'paint_y' in data:
+        return 'found already'
+    path = hovered_path()
+    if path != 'pb_subunit_color':
+        return path or None
+    data['paint_y'] = y
+    steps = g['steps']
+    rest = next(i for i, (name, _f) in enumerate(steps)
+                if name == 'find the eye for the selected subunits')
+    del steps[:rest]
+    return f'y={y}'
+
+
+def find_the_selection_eye():
+    """Walk the mouse right to left along the color field's row to its eye."""
+    assert 'paint_y' in data, 'the mouse never found the color field'
+    area, region = properties_region()
+    y = data['paint_y']
+    data['paint_passed'] = []
+    steps = []
+    for x in range(region.x + region.width - 4, region.x + region.width // 2, -3):
+        steps.append((f'point at x={x}', lambda x=x: move(x, y)))
+        steps.append(('settle', idle))
+        steps.append((f'check x={x}', lambda x=x: check_selection_eye(x, y)))
+    g['steps'][:0] = steps
+    return f'{len(steps) // 3} spots'
+
+
+def check_selection_eye(x, y):
+    if 'paint_eye_xy' in data:
+        return 'found already'
+    path = hovered_path()
+    if path and (not data['paint_passed'] or data['paint_passed'][-1] != path):
+        data['paint_passed'].append(path)
+    if path == 'pb_subunit_hide':
+        # Track the eye's whole width; its edge pixels can miss a click.
+        span = data.setdefault('paint_eye_span', [x, x])
+        span[1] = x
+        return path
+    if 'paint_eye_span' not in data:
+        return path or None
+    data['paint_eye_xy'] = (sum(data['paint_eye_span']) // 2, y)
+    steps = g['steps']
+    rest = next(i for i, (name, _f) in enumerate(steps) if name == 'point at the selection eye')
+    del steps[:rest]
+    return path or 'past the eye'
+
+
+def click_the_selection_eye():
+    assert 'paint_eye_xy' in data, (
+        f"no eye beside the color field; passed over {data.get('paint_passed')}")
+    # At the row's right edge, as each list row's eye is.
+    assert data['paint_passed'][0] == 'pb_subunit_hide', data['paint_passed']
+    mol = filament()
+    present = SC.present_sites(mol)
+    rows = mol.object.pb_filament.subunits
+    chosen = [row.name for row in rows if row.select and row.site in present]
+    assert len(chosen) > 1, f'the eye is for several selected subunits: {chosen}'
+    assert not any(rows[name].hide for name in chosen)
+    data['eye_chosen'] = chosen
+    data['eye_before'] = {rows[name].chain: drawn_vertices(mol, rows[name].chain)
+                          for name in chosen}
+    assert hovered_path() == 'pb_subunit_hide', f'not over the eye: {hovered_path()}'
+    click_at(data['paint_eye_xy'], 'PRESS')
+
+
+def verify_the_selection_eye_hid_them():
+    mol = filament()
+    rows = mol.object.pb_filament.subunits
+    chosen = data['eye_chosen']
+    assert all(rows[name].hide for name in chosen), (
+        f"the eye did not hide every selected subunit: "
+        f"{[name for name in chosen if not rows[name].hide]}")
+    for chain, (total, per_copy) in data['eye_before'].items():
+        gone = sum(1 for name in chosen if rows[name].chain == chain)
+        after = drawn_vertices(mol, chain)[0]
+        assert per_copy and after == total - gone * per_copy, (chain, total, per_copy, after)
+    assert bpy.context.scene.pb_subunit_hide
+    capture('subunits-selection-hidden.png')
+    click_at(data['paint_eye_xy'], 'PRESS')
+    return f'{len(chosen)} hidden at once'
+
+
+def verify_the_selection_eye_showed_them():
+    mol = filament()
+    rows = mol.object.pb_filament.subunits
+    assert not any(rows[name].hide for name in data['eye_chosen']), (
+        'clicking the eye again did not show the selected subunits')
+    for chain, (total, _per_copy) in data['eye_before'].items():
+        assert drawn_vertices(mol, chain)[0] == total, chain
+    assert not bpy.context.scene.pb_subunit_hide
+    capture('subunits-selection-shown.png')
+    return f"{len(data['eye_chosen'])} shown again"
+
+
 def unpaint_the_row():
     """Start the swatch checks from a subunit with no color of its own."""
     mol = filament()
@@ -1031,6 +1140,17 @@ g['steps'][:] = [
     ('settle', idle),
     ('release', lambda: click_at(data['eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
     ('verify the eye showed it again', verify_shown_by_the_eye), ('settle', idle),
+    ('find the color field', find_the_color_field),
+    ('find the eye for the selected subunits', find_the_selection_eye),
+    ('point at the selection eye', lambda: move(*data['paint_eye_xy'])),
+    ('settle', idle), ('settle', idle),
+    ('click the selection eye', click_the_selection_eye), ('settle', idle),
+    ('release', lambda: click_at(data['paint_eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
+    ('verify the selection eye hid them all, and click it again', verify_the_selection_eye_hid_them),
+    ('settle', idle),
+    ('release', lambda: click_at(data['paint_eye_xy'], 'RELEASE')), ('settle', idle), ('settle', idle),
+    ('verify the selection eye showed them again', verify_the_selection_eye_showed_them),
+    ('settle', idle),
     ('take the row back to its own color', unpaint_the_row), ('settle', idle), ('settle', idle),
     ('verify the swatch reads through the row, and paint it', verify_the_swatch_reads_through_the_row),
     ('settle', idle), ('settle', idle),

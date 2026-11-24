@@ -1790,6 +1790,9 @@ on a membrane whose typical gap was 0.28 nm.
   The panel followed only the filament's own PB Outliner row, and a click on a filament selects the chain its copies are instances of (or a bend node) and ticks that chain's row at most.
   It now shows for any filament with its row ticked or any part of it selected in the viewport (`subunit_operators.selected_filaments`).
   `test_filament_colors.py::test_clicking_a_filament_in_the_viewport_brings_its_subunits_back` and `::test_the_subunits_list_shows_the_filament_selected_in_the_viewport` were red; the filament UI lane now brings the panel back with a real click on the microtubule instead of ticking its row.
+- **An eye for the selected subunits** (2026-11-24, Dillon: "Add an 'eye' to the filament selection menu (multiple selected)").
+  Beside the color field and Clear, `Scene.pb_subunit_hide` hides every selected subunit at once and shows them again; it reads closed only while all of them are hidden.
+  `test_filament_colors.py::test_the_eye_by_the_color_field_hides_every_selected_subunit_and_shows_them_again`, `::test_the_eye_hides_the_rest_when_only_some_selected_subunits_are_hidden`, `::test_the_eye_with_nothing_selected_hides_nothing` and `::test_the_panel_draws_the_eye_beside_the_color_field` count the copies drawn against the structure's own order; the filament UI lane finds the eye with the mouse and clicks it twice.
 
 ## Crash regressions (guard against reintroduction)
 

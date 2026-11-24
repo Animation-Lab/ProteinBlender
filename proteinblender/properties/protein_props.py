@@ -320,6 +320,23 @@ def _set_subunit_color(scene, value):
         subunit_colors.recolor(molecule, keys, value)
 
 
+def _get_subunit_hide(scene):
+    """The eye beside the color field: closed while every selected subunit is hidden."""
+    molecule, keys = _subunit_selection()
+    if not keys:
+        return False
+    from ..core import subunit_colors
+    hidden = subunit_colors.hidden_keys(molecule)
+    return all(key in hidden for key in keys)
+
+
+def _set_subunit_hide(scene, value):
+    molecule, keys = _subunit_selection()
+    if keys:
+        from ..core import subunit_colors
+        subunit_colors.set_hidden(molecule, keys, bool(value))
+
+
 def _subunit_filament_items(self, context):
     from ..operators.subunit_operators import filament_items
     return filament_items(self, context)
@@ -452,6 +469,14 @@ def register():
         # each frame. A subunit's color is keyed on the subunit itself.
         options=set(),
     )
+    bpy.types.Scene.pb_subunit_hide = BoolProperty(
+        name="Hide Selected Subunits",
+        description=("Hide every selected subunit in the viewport and renders, "
+                     "or show them all again"),
+        get=_get_subunit_hide, set=_set_subunit_hide,
+        # Not keyable, for the same reason as the color field.
+        options=set(),
+    )
     bpy.types.Scene.pb_subunit_filament = EnumProperty(
         name="Filament",
         description="Which filament's subunits the list shows",
@@ -496,7 +521,7 @@ def unregister():
     for name in ("pb_cutaway_offset", "pb_cutaway_normal", "pb_bend_nodes", "pb_symmetry_axis", "pb_symmetry_twist", "pb_symmetry_rise",
                  "pb_symmetry_strand_twist", "pb_symmetry_stagger", "pb_symmetry_strands", "pb_symmetry_length",
                  "pb_symmetry_shrink_plus", "pb_symmetry_shrink_minus",
-                 "pb_subunit_color", "pb_subunit_strength", "pb_subunit_filament",
+                 "pb_subunit_color", "pb_subunit_strength", "pb_subunit_hide", "pb_subunit_filament",
                  "pb_symmetry_count", "pb_symmetry_order", "pb_symmetry_kind",
                  "pb_assembly_id"):
         if hasattr(bpy.types.Scene, name):

@@ -10,7 +10,8 @@ Pointing at a row lights its subunit up yellow in the viewport
 (``subunit_hover``). Above the list: select all, none or the rest, and on
 a filament of more than one chain - a microtubule's alpha and beta tubulin -
 every subunit of one chain. Below it: a color that applies to the selected
-subunits as soon as it changes, and Clear. Colors are keyed with the filament's row in Create
+subunits as soon as it changes, Clear, and an eye that hides or shows every
+selected subunit at once. Colors are keyed with the filament's row in Create
 Keyframe, or with I over a painted subunit's swatch.
 """
 
@@ -167,6 +168,11 @@ class PROTEINBLENDER_PT_subunits(Panel):
         clear = paint.operator("molecule.color_subunits", text="Clear", icon="X")
         clear.molecule_id = molecule.identifier
         clear.clear = True
+        # Then the eye, as each row's eye follows its swatch: closed while
+        # every selected subunit is hidden.
+        paint.separator(factor=0.5)
+        paint.prop(scene, "pb_subunit_hide", text="", emboss=True,
+                   icon="HIDE_ON" if scene.pb_subunit_hide else "HIDE_OFF")
 
         note = box.column(align=True)
         note.enabled = False
