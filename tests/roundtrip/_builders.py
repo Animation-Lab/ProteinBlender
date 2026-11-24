@@ -998,6 +998,24 @@ def build_thermal_morphsets():
         background_color=(.12, .24, .48), preview=False) == {'FINISHED'}
 
 
+def build_ligand_groups():
+    """4BV3: ligands and ions on objects of their own, a split chain, and
+    the Ligands row hidden from the outliner eye."""
+    mid = H.import_local("4bv3.cif.gz", "4bv3")
+    _build_outliner()
+    rows = [it for it in bpy.context.scene.outliner_items
+            if it.item_type == "HETERO" and it.parent_id == mid]
+    assert [r.name.split(" (")[0] for r in rows] == ["Ligands", "Ions"], rows
+    ligand_row_id = rows[0].item_id
+    assert H.split_domain_from_outliner(mid, "A", 122, 250) == {"FINISHED"}
+    assert sorted((d.start, d.end) for d in H.sm().molecules[mid].domains.values()) == \
+        [(122, 250), (251, 391)]
+    _build_outliner()
+    assert bpy.ops.proteinblender.toggle_visibility(item_id=ligand_row_id) == {"FINISHED"}
+    assert H.sm().molecules[mid].object.children  # sanity: groups are children
+    _build_outliner()
+
+
 BUILDERS = {
     "puppet_morphsets": build_puppet_morphsets,
     "model_morphsets": build_model_morphsets,
@@ -1026,6 +1044,7 @@ BUILDERS = {
     "visual_style": build_visual_style,
     "lighting": build_lighting,
     "kitchen_sink": build_kitchen_sink,
+    "ligand_groups": build_ligand_groups,
 }
 
 # Subsystems each builder is the round-trip guard for. Asserted by
@@ -1060,4 +1079,5 @@ BUILDER_SUBSYSTEMS = {
     "lighting": ("core", "operators", "panels"),
     "kitchen_sink": ("core", "linkers", "dna_builder", "membrane_builder",
                      "operators", "properties", "panels"),
+    "ligand_groups": ("core", "panels", "handlers"),
 }

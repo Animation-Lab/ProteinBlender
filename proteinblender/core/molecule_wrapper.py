@@ -367,9 +367,18 @@ class MoleculeWrapper:
 
         # Re-establish join -> NOT -> style Selection through the canonical nodes
         # only (the duplicate layer we just removed may have been in between).
+        # The NOT reads the *last* join: past eight masks the joins chain
+        # (Domain_Boolean_Join -> _2 -> _3 ...), each feeding the next, and
+        # wiring the first one here dropped every mask in the overflow joins -
+        # their atoms were drawn twice after reopening the file.
+        last_join = join_node
+        i = 2
+        while parent_node_group.nodes.get(f"Domain_Boolean_Join_{i}") is not None:
+            last_join = parent_node_group.nodes[f"Domain_Boolean_Join_{i}"]
+            i += 1
         for link in list(final_not.inputs[0].links):
             parent_node_group.links.remove(link)
-        parent_node_group.links.new(join_node.outputs["Result"], final_not.inputs[0])
+        parent_node_group.links.new(last_join.outputs["Result"], final_not.inputs[0])
 
         main_style_node = self.get_main_style_node()
         if main_style_node:
@@ -1950,6 +1959,12 @@ class MoleculeWrapper:
 
     def cleanup(self):
         """Remove all domains and clean up resources"""
+        # The ligand / ion / water objects are the protein's children too.
+        try:
+            from .hetero_groups import remove as remove_hetero_groups
+            remove_hetero_groups(self)
+        except Exception as exc:
+            print(f"[ProteinBlender] could not remove ligand groups: {exc}")
         # First clean up all domains
         for domain_id in list(self.domains.keys()):
             self.delete_domain(domain_id, is_cleanup_call=True) # Pass True here
@@ -2089,6 +2104,17 @@ class MoleculeWrapper:
 
         unique_int_chain_keys = np.unique(int_chain_indices)
 
+        # A chain's range is its polymer residues only. Ligands, ions and water
+        # are usually numbered far past the polymer (4BV3: protein 122-391,
+        # ligands 1392+, waters 2001+, all in chain A), and counting them
+        # stretched the chain - and the domain covering its end - to 2124.
+        # They get objects of their own instead (core/hetero_groups.py). A
+        # structure with no polymer at all keeps the old all-atom ranges.
+        from .hetero_groups import polymer_mask
+        polymer = polymer_mask(working_array)
+        if not np.any(polymer):
+            polymer = np.ones(len(res_ids), dtype=bool)
+
         for int_chain_key in unique_int_chain_keys:
             # Convert integer chain key to label_asym_id for the ranges dictionary key
             label_asym_id_for_key = self.idx_to_label_asym_id_map.get(int(int_chain_key))
@@ -2099,7 +2125,7 @@ class MoleculeWrapper:
                 if not label_asym_id_for_key:
                     label_asym_id_for_key = str(int_chain_key) # Last resort, use the int as string
 
-            mask = (int_chain_indices == int_chain_key)
+            mask = (int_chain_indices == int_chain_key) & polymer
             if np.any(mask):
                 chain_res_ids = res_ids[mask]
                 if chain_res_ids.size > 0:
@@ -2389,8 +2415,26 @@ class MoleculeWrapper:
             domain.node_group.links.new(input_node.outputs["Atoms"], set_color.inputs["Atoms"])
             domain.node_group.links.new(color_emit.outputs["Color"], set_color.inputs["Color"])
             domain.node_group.links.new(set_color.outputs["Atoms"], style_node.inputs["Atoms"])
-            domain.node_group.links.new(chain_select.outputs["Selection"], select_res_id_range.inputs["And"])
-            
+            # Gate the chain selection to polymer atoms, so a domain never
+            # draws ligands, ions or water even when their residue numbers
+            # fall inside its range (they live on their own objects - see
+            # core/hetero_groups.py).
+            from .hetero_groups import add_polymer_gate
+            held = {key: node.name for key, node in (
+                ("chain_select", chain_select), ("range", select_res_id_range),
+                ("style", style_node), ("join", join_node), ("output", output_node))}
+            add_polymer_gate(domain.node_group, "Selection", held["chain_select"])
+            # add_polymer_gate may create nodes, which can reallocate the
+            # node collection; re-resolve every held pointer by name.
+            _tree_nodes = domain.node_group.nodes
+            chain_select = _tree_nodes[held["chain_select"]]
+            select_res_id_range = _tree_nodes[held["range"]]
+            style_node = _tree_nodes[held["style"]]
+            join_node = _tree_nodes[held["join"]]
+            output_node = _tree_nodes[held["output"]]
+            gated = _tree_nodes["PB_Polymer_Gate_And"].outputs["Boolean"]
+            domain.node_group.links.new(gated, select_res_id_range.inputs["And"])
+
             # Connect the residue selection to the style node's Selection input
             domain.node_group.links.new(select_res_id_range.outputs["Selection"], style_node.inputs["Selection"])
             
@@ -2418,8 +2462,8 @@ class MoleculeWrapper:
                 if main_style_node:
                     # Remove any direct connections between domain's chain selection and parent's style node
                     for link in list(parent_node_group.links):
-                        if (link.from_node.name == chain_select.name and 
-                            link.to_node == main_style_node and 
+                        if (link.from_node.name == held["chain_select"] and
+                            link.to_node == main_style_node and
                             link.to_socket.name == "Selection"):
                             parent_node_group.links.remove(link)
             

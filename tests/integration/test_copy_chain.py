@@ -29,14 +29,14 @@ def _pdb_chain_residue_range(filename, chain_letter):
     """(min, max) author residue number of a chain, read from the PDB text.
 
     Columns are the fixed PDB record layout: 22 is chainID, 23-26 resSeq.
-    Both ATOM and HETATM count - a chain's range in this add-on spans its
-    hetero residues too (4hhb chain A: 141 amino acids, HEM 142, waters to
-    198).
+    Only ATOM records count: a chain's range is its polymer residues, and its
+    hetero residues (4hhb chain A: HEM 142, waters to 198) belong to the
+    protein's Ligands / Water objects, not to the chain.
     """
     residues = set()
     with open(H.data_path(filename)) as handle:
         for line in handle:
-            if line.startswith(("ATOM", "HETATM")) and line[21] == chain_letter:
+            if line.startswith("ATOM") and line[21] == chain_letter:
                 residues.add(int(line[22:26]))
     if not residues:
         raise AssertionError(f"no chain {chain_letter} records in {filename}")

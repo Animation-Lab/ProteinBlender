@@ -56,17 +56,15 @@ def _pdb_chain_bounds(filename, chain_letter):
     Independent ground truth: biotite re-parses the fixture, so this cannot
     agree with a bug in the addon's own chain-range resolution.
 
-    Every residue in the chain counts, not just the amino acids. That is what
-    the addon's chain range means today, and it is deliberately what this
-    asserts - 1ubq's chain A runs to 134 because residues 77-134 are
-    crystallographic waters. (Offering solvent as a domain boundary is its own
-    UX question, tracked separately; pinning the current contract here keeps
-    this suite honest about what the code actually promises.)
+    A chain is its polymer residues - the file's ATOM records. Ligands, ions
+    and water (HETATM) are not chain residues and are never offered as a
+    domain boundary: 1ubq's chain A is 1-76, and its waters at 77-134 live on
+    the protein's Water object instead (core/hetero_groups.py).
     """
     import biotite.structure.io.pdb as pdb
 
     array = pdb.PDBFile.read(H.data_path(filename)).get_structure(model=1)
-    chain = array[array.chain_id == chain_letter]
+    chain = array[(array.chain_id == chain_letter) & ~array.hetero]
     assert len(chain), f"no atoms parsed for chain {chain_letter}"
     return int(chain.res_id.min()), int(chain.res_id.max())
 

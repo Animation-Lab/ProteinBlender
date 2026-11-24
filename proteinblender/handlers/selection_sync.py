@@ -213,7 +213,7 @@ def update_outliner_from_blender_selection():
         if item.item_type == 'PUPPET':
             continue
         # For domains and proteins with direct objects
-        elif item.item_type in ['DOMAIN', 'PROTEIN'] and item.object_name:
+        elif item.item_type in ['DOMAIN', 'PROTEIN', 'HETERO'] and item.object_name:
             # Check if the object is selected in the viewport
             if item.object_name in selected_names:
                 item.is_selected = True
@@ -325,8 +325,8 @@ def sync_outliner_to_blender_selection(context, item_id):
                 if item.is_selected:
                     context.view_layer.objects.active = molecule.object
                     
-        elif item.item_type == 'DOMAIN':
-            # Select/deselect just the domain
+        elif item.item_type in ('DOMAIN', 'HETERO'):
+            # Select/deselect just the domain (or ligand / ion / water group)
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:

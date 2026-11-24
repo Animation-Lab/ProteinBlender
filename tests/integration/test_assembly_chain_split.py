@@ -29,6 +29,9 @@ pytestmark = pytest.mark.integration
 
 #: Chain B's placements in 1STM assembly 1 (tests/data/assembly-fixtures.md).
 COPIES = 12
+# Chain B's amino acids run 17-157 in 1stm; its waters (66 of them, up to
+# 223) are not chain residues.
+CHAIN_B_END = 157
 FIRST_CUT = 100
 SECOND_CUT = 150
 
@@ -165,9 +168,9 @@ def test_splitting_chain_b_cuts_all_twelve_copies(scene):
     _as_spheres()
     _assert_every_residue_drawn_once_per_copy(molecule, residues)
 
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     _as_spheres()
-    assert [(d.start, d.end) for d in _pieces(molecule)] == [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]
+    assert [(d.start, d.end) for d in _pieces(molecule)] == [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]
     _assert_every_residue_drawn_once_per_copy(molecule, residues)
 
 
@@ -175,12 +178,12 @@ def test_moving_the_cut_keeps_every_copy_of_both_pieces(scene):
     """Ann's "don't update when I change the cutting point"."""
     molecule = _capsid()
     residues = _file_alpha_residues()
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     ids = _piece_ids(molecule)
 
-    assert _splitter(molecule, [(17, SECOND_CUT), (SECOND_CUT + 1, 223)], ids) == {"FINISHED"}
+    assert _splitter(molecule, [(17, SECOND_CUT), (SECOND_CUT + 1, CHAIN_B_END)], ids) == {"FINISHED"}
     pieces = _pieces(molecule)
-    assert [(d.start, d.end) for d in pieces] == [(17, SECOND_CUT), (SECOND_CUT + 1, 223)]
+    assert [(d.start, d.end) for d in pieces] == [(17, SECOND_CUT), (SECOND_CUT + 1, CHAIN_B_END)]
     assert _piece_ids(molecule) == ids, "re-cutting replaced the domains"
     _as_spheres()
     _assert_every_residue_drawn_once_per_copy(molecule, residues)
@@ -209,11 +212,11 @@ def test_realizing_a_split_chain_keeps_both_pieces_and_their_colors(scene, recut
     """Ann's "only the second domains were kept ... I also lost the colors"."""
     molecule = _capsid()
     residues = _file_alpha_residues()
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     cut = FIRST_CUT
     if recut:
         ids = _piece_ids(molecule)
-        assert _splitter(molecule, [(17, SECOND_CUT), (SECOND_CUT + 1, 223)], ids) == {"FINISHED"}
+        assert _splitter(molecule, [(17, SECOND_CUT), (SECOND_CUT + 1, CHAIN_B_END)], ids) == {"FINISHED"}
         cut = SECOND_CUT
     first, second = _piece_ids(molecule)
     _paint(molecule, first, RED)
@@ -243,7 +246,7 @@ def test_realizing_a_split_chain_keeps_both_pieces_and_their_colors(scene, recut
     assert np.allclose(high, BLUE[:3], atol=0.02), "a second piece lost its color"
     assert len(H.sm().molecules) == COPIES, "the capsid should realize as one protein per copy"
     for copy in H.sm().molecules.values():
-        assert [(d.start, d.end) for d in _pieces(copy)] == [(17, cut), (cut + 1, 223)], (
+        assert [(d.start, d.end) for d in _pieces(copy)] == [(17, cut), (cut + 1, CHAIN_B_END)], (
             f"{copy.identifier} does not have both pieces of chain B")
         # Ann: "the domain split options are only available for the first set
         # of chains". Each copy is a protein of its own, so every chain row is
@@ -273,7 +276,7 @@ def test_deleting_a_piece_takes_its_atoms_off_the_screen(scene, built):
     molecule = _capsid() if built else H.sm().molecules[H.import_local("1stm.cif.gz", "1STM")]
     copies = COPIES if built else 1
     residues = _file_alpha_residues()
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     first, second = _piece_ids(molecule)
 
     assert _delete(molecule, first) == {"FINISHED"}
@@ -295,7 +298,7 @@ def test_deleting_a_piece_takes_its_atoms_off_the_screen(scene, built):
 def test_deleted_atoms_stay_gone_after_reopening_and_in_a_duplicate(scene, tmp_path):
     molecule = H.sm().molecules[H.import_local("1stm.cif.gz", "1STM")]
     mid = molecule.identifier
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     assert _delete(molecule, _piece_ids(molecule)[0]) == {"FINISHED"}
 
     path = str(tmp_path / "deleted-piece.blend")
@@ -325,7 +328,7 @@ def test_a_duplicate_of_a_split_protein_stands_exactly_on_it(scene):
     also why Realize Copies scattered a split chain across the capsid.
     """
     molecule = H.sm().molecules[H.import_local("1stm.cif.gz", "1STM")]
-    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, 223)]) == {"FINISHED"}
+    assert _splitter(molecule, [(17, FIRST_CUT), (FIRST_CUT + 1, CHAIN_B_END)]) == {"FINISHED"}
     _as_spheres()
     source = {letter: _drawn_alpha_carbons(_chain_index(molecule, letter))[:, :4]
               for letter in "AB"}
@@ -354,7 +357,7 @@ def test_realizing_part_of_a_protein_keeps_a_split_chain_in_place_and_color(scen
     molecule = H.sm().molecules[mid]
     row = _chain_row(molecule, "Chain A")
     layout = json.dumps([{"name": "", "start": 17, "end": FIRST_CUT, "domain_id": ""},
-                         {"name": "", "start": FIRST_CUT + 1, "end": 223, "domain_id": ""}])
+                         {"name": "", "start": FIRST_CUT + 1, "end": CHAIN_B_END, "domain_id": ""}])
     assert bpy.ops.proteinblender.edit_chain_domains(
         "EXEC_DEFAULT", item_id=row.item_id, layout_json=layout,
         chain_name=row.name) == {"FINISHED"}

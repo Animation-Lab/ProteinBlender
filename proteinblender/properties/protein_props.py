@@ -45,6 +45,7 @@ class ProteinOutlinerItem(PropertyGroup):
             ('SYMMETRY', 'Assembly', 'Generated symmetry or deposited biological assembly'),
             ('MORPHSET', 'Morphset', 'A collection of independently keyframed morphs'),
             ('MORPH_MEMBER', 'Morphset member', 'A chain or domain owned by a Morphset'),
+            ('HETERO', 'Ligands / Ions / Water', 'Non-polymer atoms of a protein, kept out of its chains'),
         ],
         default='PROTEIN'
     )

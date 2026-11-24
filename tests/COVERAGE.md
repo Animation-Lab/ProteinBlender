@@ -1801,6 +1801,14 @@ on a membrane whose typical gap was 0.28 nm.
 - **The first use of a style deselected every object** (2026-11-24, found by the filament UI lane while adding the style field).
   A style's node group is appended from MolecularNodes the first time a file uses it, through `bpy.ops.wm.append`, which deselects every object; the Cytoskeleton Subunits panel follows a selected filament, so it went away from under the mouse after one change.
   `visual_style.style_tree` now puts the selection and the active object back; `test_filament_colors.py::test_a_first_use_of_a_style_keeps_the_filament_selected` was red with the chain deselected.
+  It now first-uses Sticks: an actin import brings Spheres in with its Ions object (below).
+- **Ligands, ions and water are not chain residues** (2026-11-24, Dillon: 4BV3 "imports with over 2000 bases ... it should be closer to 200"; "when splitting chain/domain we should only be concerned with amino acids ... make the non-amino acids as children of the protein").
+  4BV3 numbers its protein 122-391, ligands/ions 1392-1400 and waters 2001-2124, all in author chain A; the chain range spanned every residue, so chain A (and its auto domain) read 122-2124 and a split dragged every ligand into the last domain.
+  A chain's range is now its amino-acid/nucleotide residues; domains draw only `pb_group == 0` atoms (`hetero_groups.add_polymer_gate`); Ligands / Ions / Water are objects of their own parented to the protein, with `HETERO` outliner rows and eyes; assemblies, filaments, Realize Copies and Duplicate carry them.
+  `test_hetero_groups.py` reads the mmCIF text (ATOM vs HETATM) as ground truth and was red on the old code with `(122, 2124) != (122, 391)`; `::test_every_assembly_copy_carries_its_ions` (4INS assembly 3, three placements of its zincs) was red (`0 == 3`) without the assembly wiring. The `ligand_groups` save/load case covers a split chain with its Ligands row hidden.
+  Range expectations that pinned the old contract were corrected from the files' ATOM records: 1UBQ A 1-76 (not 134), 4HHB A 1-141 / B 1-146, 1ATN A to 372 (373 Ca, 375 ATP), 1STM B 17-157.
+- **Reopening a file dropped overflow domain masks** (2026-11-24, surfaced by the `chain_copy` save/load case once the hetero mask took a join slot).
+  Past eight masks the protein's Boolean joins chain (`Domain_Boolean_Join` -> `_2` ...); `_rebind_domain_infrastructure` wired the *first* join to the final NOT on reopen, so masks in overflow joins stopped hiding their atoms on the protein object. It now wires the last join.
 
 ## Crash regressions (guard against reintroduction)
 

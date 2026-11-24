@@ -309,7 +309,9 @@ def test_ui_split_1atn_chain_a_does_not_create_residue_zero_domain(scene, sm):
     runtime_ranges = sorted(
         (domain.start, domain.end) for domain in mol.domains.values()
         if domain.chain_id == "A")
-    assert runtime_ranges == [(1, 50), (51, 375)]
+    # Chain A's amino acids end at 372; 373 is its Ca(2+) and 375 its ATP,
+    # which are not chain residues.
+    assert runtime_ranges == [(1, 50), (51, 372)]
 
     persisted_ranges = sorted(
         (domain.start, domain.end) for domain in H.list_item(mid).domains

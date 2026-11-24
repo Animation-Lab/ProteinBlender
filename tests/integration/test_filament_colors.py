@@ -1549,14 +1549,16 @@ def test_a_first_use_of_a_style_keeps_the_filament_selected():
     assert _panel_shows()
     _colors().sync_roster(molecule)
     _select(molecule, ["3:A"])
-    assert bpy.data.node_groups.get("Style Spheres") is None, "Spheres is not new to this file"
+    # Sticks, not Spheres: actin binds Ca(2+), and its Ions object already
+    # brings Spheres into the file on import.
+    assert bpy.data.node_groups.get("Style Sticks") is None, "Sticks is not new to this file"
 
-    bpy.context.scene.pb_subunit_style = "spheres"
+    bpy.context.scene.pb_subunit_style = "sticks"
 
     assert chain.select_get(), "the filament was deselected"
     assert bpy.context.view_layer.objects.active == chain
     assert _panel_shows(), "the Subunits panel went away"
-    assert bpy.context.scene.pb_subunit_style == "spheres"
+    assert bpy.context.scene.pb_subunit_style == "sticks"
 
 
 def test_the_panel_draws_the_style_field_under_the_color_field():

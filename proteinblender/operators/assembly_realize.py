@@ -160,7 +160,17 @@ def _split_kept(moves):
 def _objects_of(molecule):
     objects = [molecule.object] if molecule.object is not None else []
     objects.extend(d.object for d in molecule.domains.values() if d.object is not None)
+    objects.extend(_hetero_objects(molecule))
     return objects
+
+
+def _hetero_objects(molecule):
+    """The protein's Ligands / Ions / Water objects (core/hetero_groups.py)."""
+    from ..core.hetero_groups import group_objects
+    try:
+        return list(group_objects(molecule).values())
+    except (AttributeError, ReferenceError):
+        return []
 
 
 def _draws_atoms(depsgraph, obj) -> bool:
@@ -474,6 +484,27 @@ def _realize_within_the_protein(context, molecule, drawn, groups, world,
             result.copies += 1
         if not kept:
             _hide(protein)
+
+    from ..core.hetero_groups import GROUP_PROP, OWNER_PROP
+
+    # Ligands, ions and water have no row to copy either: each copy of them
+    # becomes a plain object where it was drawn, like the protein's own atoms.
+    for obj in _hetero_objects(molecule):
+        if obj.name not in drawn or obj.name not in groups:
+            continue
+        extras, kept = _split(drawn[obj.name])
+        for index, move in enumerate(extras):
+            copy = assembly_core.realize_object_copy(
+                obj, groups[obj.name], move.matrix @ world[obj.name],
+                index, move.chain)
+            # A copy is not the protein's own group object.
+            for key in (GROUP_PROP, OWNER_PROP):
+                if key in copy:
+                    del copy[key]
+            result.objects.append(copy)
+            result.copies += 1
+        if not kept:
+            _hide(obj)
 
     context.view_layer.update()
 

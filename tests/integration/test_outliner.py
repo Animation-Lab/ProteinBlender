@@ -227,19 +227,24 @@ def test_chain_domain_rows_are_ordered_by_residue(scene, sm, multi_chain):
     build_outliner_hierarchy(bpy.context)
     chain_row = next(it for it in scene.outliner_items
                      if it.item_type == "CHAIN" and it.name == "Chain A")
+    # Keep plain values: the rebuild below reallocates outliner_items, and a
+    # row pointer held across it can read freed memory.
+    chain_row_id, chain_row_name = chain_row.item_id, chain_row.name
 
     payload = json.dumps([
-        {"name": "Third", "start": 130, "end": 198, "domain_id": ""},
+        # Chain A's amino acids end at 141 in 4hhb.pdb; 142 is its heme and
+        # 143-198 its waters, which are not chain residues.
+        {"name": "Third", "start": 130, "end": 141, "domain_id": ""},
         {"name": "First", "start": 1, "end": 60, "domain_id": ""},
         {"name": "Second", "start": 61, "end": 129, "domain_id": ""},
     ])
     assert bpy.ops.proteinblender.edit_chain_domains(
-        'EXEC_DEFAULT', item_id=chain_row.item_id, layout_json=payload,
-        chain_name=chain_row.name) == {'FINISHED'}
+        'EXEC_DEFAULT', item_id=chain_row_id, layout_json=payload,
+        chain_name=chain_row_name) == {'FINISHED'}
 
     build_outliner_hierarchy(bpy.context)
     rows = [it for it in scene.outliner_items
-            if it.item_type == "DOMAIN" and it.parent_id == chain_row.item_id]
+            if it.item_type == "DOMAIN" and it.parent_id == chain_row_id]
 
     assert [it.name for it in rows] == ["First", "Second", "Third"]
     assert [it.domain_start for it in rows] == [1, 61, 130]

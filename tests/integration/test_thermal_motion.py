@@ -90,7 +90,7 @@ def test_intensity_scales_atoms_and_survives_toggle_style_and_split(scene, sm, s
     chain = next(r for r in scene.outliner_items if r.item_type == 'CHAIN')
     assert bpy.ops.proteinblender.edit_chain_domains(item_id=chain.item_id,
         layout_json=json.dumps([dict(name='First', start=1, end=38),
-                                dict(name='Second', start=39, end=134)])) == {'FINISHED'}
+                                dict(name='Second', start=39, end=76)])) == {'FINISHED'}
     from proteinblender.utils.gn_compat import read_modifier_socket
     assert len(mol.domains) == 2
     for domain in mol.domains.values():

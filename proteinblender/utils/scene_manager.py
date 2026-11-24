@@ -218,6 +218,14 @@ class ProteinBlenderScene:
 
         # Create domains for each chain
         self._create_domains_for_each_chain(molecule.identifier)
+        # Ligands, ions and water get objects of their own, parented to the
+        # protein, instead of riding along inside a chain's domains.
+        try:
+            from ..core.hetero_groups import create as create_hetero_groups
+            create_hetero_groups(molecule)
+        except Exception:
+            import traceback
+            traceback.print_exc()
         # Add to UI list
         scene = bpy.context.scene
         item = scene.molecule_list_items.add()
@@ -1672,6 +1680,43 @@ def _add_symmetry_item(context, scene, molecule, molecule_id, mol_object,
     return item
 
 
+def _add_hetero_rows(scene, context, molecule, molecule_id, depth, selection_states):
+    """Add a protein's Ligands / Ions / Water rows (see core/hetero_groups)."""
+    try:
+        from ..core import hetero_groups
+        objects = hetero_groups.group_objects(molecule)
+        if not objects:
+            return
+        counts = hetero_groups.counts(molecule)
+    except Exception:
+        return
+    protein_name = getattr(molecule, 'name', molecule.identifier)
+    for kind in sorted(objects):
+        obj = objects[kind]
+        key, label, _style, _carbon, icon = hetero_groups.KINDS[kind]
+        count = counts.get(kind, 0)
+        row = scene.outliner_items.add()
+        row.item_type = 'HETERO'
+        row.item_id = f"{molecule_id}_hetero_{key.lower()}"
+        row.parent_id = molecule_id
+        row.name = f"{label} ({count})" if count else label
+        row.object_name = obj.name
+        row.indent_level = 1 + depth
+        row.icon = icon
+        try:
+            row.is_visible = not obj.hide_get(view_layer=context.view_layer)
+        except Exception:
+            row.is_visible = True
+        if row.item_id in selection_states:
+            row.is_selected = selection_states[row.item_id]
+        noun = "residue" if count == 1 else "residues"
+        row.tooltip = "\n".join([
+            f"Protein: {protein_name}",
+            f"{label}: {count} {noun}",
+            "Not part of any chain or domain",
+        ])
+
+
 def build_outliner_hierarchy(context=None):
     """Build or rebuild the outliner hierarchy from current molecule data"""
     if context is None:
@@ -1871,6 +1916,14 @@ def build_outliner_hierarchy(context=None):
                     _custom_chain_names = _json.loads(_mol_list_item.chain_custom_names)
                 except Exception:
                     _custom_chain_names = {}
+
+            # A chain made only of ligands / ions / water (older files often
+            # put waters in a chain of their own) has no residues to split;
+            # its atoms are listed under the protein's group rows instead.
+            from ..core.hetero_groups import polymer_chain_ids
+            _polymer_chains = polymer_chain_ids(mol_object)
+            if _polymer_chains:
+                chain_ids = [c for c in chain_ids if c in _polymer_chains]
 
             # Add chain items
             for chain_id in chain_ids:
@@ -2196,6 +2249,11 @@ def build_outliner_hierarchy(context=None):
                         f"Chain copy: {chain_copy_item.name}",
                         f"Domain Residues: {domain_item.domain_start}-{domain_item.domain_end}",
                     ])
+
+        # Ligands, ions and water: one row per kind, under the protein.
+        if not is_nucleic:
+            _add_hetero_rows(scene, context, molecule, molecule_id, depth,
+                             item_selection_states)
     
     # Insert each symmetry directly after its source. Its siblings keep their
     # existing hierarchy; collapsing any ancestor hides the symmetry as well.

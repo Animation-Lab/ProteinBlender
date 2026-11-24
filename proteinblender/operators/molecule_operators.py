@@ -550,6 +550,15 @@ def duplicate_molecule(context, source_molecule, base_name=None):
     # 15. Force final scene update
     context.view_layer.update()
 
+    # 15b. The copied tree still masks out its ligands, ions and water, so
+    # the copy needs group objects of its own to draw them.
+    try:
+        from ..core.hetero_groups import create as create_hetero_groups
+        create_hetero_groups(new_molecule)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
     # 16. Add to scene manager (directly to molecules dict since MoleculeManager doesn't have add_molecule)
     scene_manager.molecules[new_identifier] = new_molecule
     _list_copy(context, base_id, new_identifier, new_protein_obj)

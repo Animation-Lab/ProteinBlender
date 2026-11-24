@@ -244,6 +244,17 @@ def _target_objects(molecule) -> List[bpy.types.Object]:
         if obj is not None and obj not in targets:
             targets.append(obj)
 
+    # Ligands, ions and water are drawn by objects of their own (see
+    # core/hetero_groups.py); every copy of the protein carries them too, as
+    # it did when they rode inside the chain domains.
+    try:
+        from .hetero_groups import group_objects
+        for obj in group_objects(molecule).values():
+            if obj not in targets:
+                targets.append(obj)
+    except (AttributeError, ReferenceError):
+        pass
+
     return [o for o in targets if any(m.type == "NODES" for m in o.modifiers)]
 
 

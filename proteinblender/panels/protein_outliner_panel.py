@@ -861,7 +861,7 @@ class PROTEINBLENDER_OT_toggle_visibility(Operator):
             from ..core.morphsets import set_member_visible
             set_member_visible(context, item.item_id, visible)
 
-        elif item.item_type in ('DOMAIN', 'MORPHSET'):
+        elif item.item_type in ('DOMAIN', 'MORPHSET', 'HETERO'):
             if item.object_name:
                 obj = bpy.data.objects.get(item.object_name)
                 if obj:

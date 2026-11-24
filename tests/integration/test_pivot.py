@@ -335,8 +335,9 @@ def test_split_domains_first_center_last_respect_domain_residue_ranges(scene, sm
         ((domain_id, domain) for domain_id, domain in mol.domains.items()
          if domain.chain_id == "A"),
         key=lambda pair: pair[1].start)
+    # Chain A's amino acids end at 372 (373 Ca, 375 ATP are not residues of it).
     assert [(domain.start, domain.end) for _, domain in domains] == [
-        (1, 50), (51, 375)]
+        (1, 50), (51, 372)]
 
     for domain_id, domain in domains:
         row = next(item for item in scene.outliner_items
