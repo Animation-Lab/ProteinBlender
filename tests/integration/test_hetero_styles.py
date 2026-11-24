@@ -50,18 +50,19 @@ def _drawn(obj):
     for instance in bpy.context.evaluated_depsgraph_get().object_instances:
         owner = (instance.parent.original if instance.is_instance
                  else instance.object.original)
-        if owner.name != obj.name or instance.object.type != "MESH":
+        if owner.name != obj.name or instance.object.type not in ("MESH", "POINTCLOUD"):
             continue
         mesh = instance.object.data
-        n = len(mesh.vertices)
+        n = (len(mesh.vertices) if instance.object.type == "MESH"
+             else len(mesh.points))
         if not n:
-            break
+            continue   # an empty mesh beside the point cloud that draws
         res_id = np.zeros(n, dtype=np.int32)
         mesh.attributes["res_id"].data.foreach_get("value", res_id)
         atomic = np.zeros(n, dtype=np.int32)
         mesh.attributes["atomic_number"].data.foreach_get("value", atomic)
         position = np.zeros(n * 3, dtype=np.float32)
-        mesh.vertices.foreach_get("co", position)
+        mesh.attributes["position"].data.foreach_get("vector", position)
         color_attr = mesh.attributes["Color"]
         values = np.zeros(len(color_attr.data) * 4, dtype=np.float32)
         color_attr.data.foreach_get("color", values)
@@ -313,3 +314,65 @@ def test_keyframes_show_in_the_list_and_can_be_deleted(scene, sirt3):
     scene.frame_set(11)
     _res, atomic, color, _pos = _drawn(ligands)
     assert np.allclose(color[atomic == CARBON, :3].mean(axis=0), GREEN[:3], atol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# The outliner color swatch
+# ---------------------------------------------------------------------------
+
+def _carbon_color(obj):
+    _res, atomic, color, _pos = _drawn(obj)
+    assert (atomic == CARBON).any(), f"{obj.name} draws no carbons"
+    return color[atomic == CARBON, :3].mean(axis=0)
+
+
+@pytest.mark.integration
+def test_group_rows_have_a_swatch_showing_their_drawn_color(scene, sirt3):
+    from proteinblender.core.outliner_colors import row_has_swatch
+    for label in ("Ligands", "Ions"):
+        row = _row(scene, sirt3, label)
+        assert row_has_swatch(row), label
+    row = _row(scene, sirt3, "Ligands")
+    ligands = bpy.data.objects[row.object_name]
+    assert np.allclose(tuple(row.row_color)[:3], _carbon_color(ligands), atol=2e-3)
+
+
+@pytest.mark.integration
+def test_picking_the_swatch_recolors_the_group(scene, sirt3):
+    row = _row(scene, sirt3, "Ligands")
+    ligands = bpy.data.objects[row.object_name]
+    _res, atomic, before, _pos = _drawn(ligands)
+
+    row.row_color = BLUE
+
+    _res, atomic, after, _pos = _drawn(ligands)
+    carbons = atomic == CARBON
+    assert np.allclose(after[carbons, :3], BLUE[:3], atol=1e-3)
+    # Still by element: whatever was drawn in the old carbon color (the carbon
+    # atoms and their half of each bond) turns blue, and nothing else changes,
+    # so nitrogen, oxygen and phosphorus keep their colors.
+    old_carbon = before[carbons, :3].mean(axis=0)
+    was_carbon = np.isclose(before[:, :3], old_carbon, atol=1e-3).all(axis=1)
+    assert np.allclose(after[was_carbon, :3], BLUE[:3], atol=1e-3)
+    assert (~was_carbon).any()
+    assert np.allclose(after[~was_carbon], before[~was_carbon], atol=1e-4)
+    # The protein is not repainted with it.
+    domain = next(iter(H.sm().molecules[sirt3].domains.values())).object
+    assert not np.allclose(_carbon_color(domain), BLUE[:3], atol=1e-3)
+
+
+@pytest.mark.integration
+def test_swatch_follows_a_pencil_edit(scene, sirt3):
+    row = _row(scene, sirt3, "Ions")
+    assert _edit(row, vs_color=GREEN, vs_by_element=False) == {'FINISHED'}
+    assert np.allclose(tuple(_row(scene, sirt3, "Ions").row_color), GREEN, atol=1e-3)
+
+
+@pytest.mark.integration
+def test_protein_swatch_leaves_the_ligands_their_color(scene, sirt3):
+    row = _row(scene, sirt3, "Ligands")
+    ligands = bpy.data.objects[row.object_name]
+    before = _carbon_color(ligands)
+    protein = next(it for it in scene.outliner_items if it.item_id == sirt3)
+    protein.row_color = BLUE
+    assert np.allclose(_carbon_color(ligands), before, atol=1e-4)

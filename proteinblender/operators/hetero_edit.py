@@ -204,6 +204,7 @@ class PROTEINBLENDER_OT_edit_hetero_group(Operator):
                     hetero_groups.set_color(obj, color, element=element)
                 if props.is_property_set("vs_size"):
                     self.apply_size(context)
+                _redraw(context)
             return {'FINISHED'}
         finally:
             _ACTIVE["dialog"] = None
@@ -213,6 +214,9 @@ class PROTEINBLENDER_OT_edit_hetero_group(Operator):
 
 
 def _redraw(context):
+    # The row's swatch shows the group's color, so it follows the dialog.
+    from ..core.outliner_colors import sync_outliner_colors
+    sync_outliner_colors(context)
     for window in getattr(context.window_manager, "windows", []):
         for area in window.screen.areas:
             if area.type in ('VIEW_3D', 'PROPERTIES'):

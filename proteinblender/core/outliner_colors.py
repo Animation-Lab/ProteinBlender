@@ -35,8 +35,10 @@ _state = {
 }
 
 # Row types that carry a color swatch. DNA/RNA strands and membranes color
-# through their own builders; puppets have no color of their own.
-COLORABLE_TYPES = ('PROTEIN', 'CHAIN', 'DOMAIN', 'MORPH_MEMBER')
+# through their own builders; puppets have no color of their own. A HETERO row
+# (Ligands / Ions / Water) shows its carbon color, or its solid color when it
+# is not colored by element (core/hetero_groups.py).
+COLORABLE_TYPES = ('PROTEIN', 'CHAIN', 'DOMAIN', 'MORPH_MEMBER', 'HETERO')
 
 
 class _Suspend:
@@ -107,6 +109,12 @@ def apply_row_color(item, context):
         apply_chain_color_direct(scene_manager, item, color)
     elif item.item_type == 'DOMAIN':
         apply_domain_color_direct(scene_manager, item, color)
+    elif item.item_type == 'HETERO':
+        # Keeps the group's mode: by element, only its carbons take the color.
+        from .hetero_groups import set_color
+        obj = bpy.data.objects.get(item.object_name) if item.object_name else None
+        if obj is not None:
+            set_color(obj, color)
     elif item.item_type == 'MORPH_MEMBER':
         from .morphsets import row_member
         from .visual_style import apply_color_to_object
@@ -143,6 +151,9 @@ def sync_outliner_colors(context=None):
         for item in scene.outliner_items:
             if not row_has_swatch(item):
                 continue
+            if item.item_type == 'HETERO':
+                _sync_group_swatch(item)
+                continue
             objects = appearance_objects_for_row(context, item)
             if not objects:
                 continue
@@ -155,3 +166,21 @@ def sync_outliner_colors(context=None):
             wanted = tuple(round(float(c), 4) for c in color)
             if current != wanted:
                 item.row_color = color
+
+
+def _sync_group_swatch(item):
+    """A Ligands / Ions / Water swatch shows the one color the group is in.
+
+    Read from the group's own nodes: by element that is the carbon color, which
+    the generic reader would not find on a group tree. Call only while
+    suspended.
+    """
+    from .hetero_groups import get_color
+    obj = bpy.data.objects.get(item.object_name) if item.object_name else None
+    color = get_color(obj) if obj is not None else None
+    if color is None:
+        return
+    item.row_palette_json = json.dumps([[round(float(c), 4) for c in color]])
+    item.row_domain_count = 1
+    if tuple(round(float(c), 4) for c in item.row_color) != tuple(round(float(c), 4) for c in color):
+        item.row_color = color
