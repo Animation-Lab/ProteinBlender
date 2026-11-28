@@ -1,44 +1,44 @@
 {
   "repo": "Animation-Lab/ProteinBlender",
-  "generated_at": "2026-11-27T08:17:34+00:00",
+  "generated_at": "2026-11-28T07:39:21+00:00",
   "summary": {
-    "views": 47,
-    "visitors": 23,
-    "clones": 379,
-    "cloners": 131
+    "views": 48,
+    "visitors": 25,
+    "clones": 387,
+    "cloners": 132
   },
   "all_time": {
-    "views": 1411,
-    "visitors": 711,
-    "clones": 6291,
-    "cloners": 2605,
-    "days_tracked": 255
+    "views": 1415,
+    "visitors": 714,
+    "clones": 6315,
+    "cloners": 2615,
+    "days_tracked": 256
   },
   "current_day": {
+    "date": "2026-11-27",
+    "views": 4,
+    "visitors": 3,
+    "clones": 24,
+    "cloners": 10
+  },
+  "previous_day": {
     "date": "2026-11-26",
     "views": 14,
     "visitors": 1,
     "clones": 33,
     "cloners": 15
   },
-  "previous_day": {
-    "date": "2026-11-25",
-    "views": 3,
-    "visitors": 2,
-    "clones": 80,
-    "cloners": 30
-  },
   "delta_since_previous_day": {
-    "views": 11,
-    "visitors": -1,
-    "clones": -47,
-    "cloners": -15
+    "views": -10,
+    "visitors": 2,
+    "clones": -9,
+    "cloners": -5
   },
   "referrers": [
     {
       "referrer": "animation-lab.github.io",
-      "count": 19,
-      "uniques": 10
+      "count": 16,
+      "uniques": 9
     },
     {
       "referrer": "github.com",
@@ -49,20 +49,31 @@
       "referrer": "Google",
       "count": 1,
       "uniques": 1
+    },
+    {
+      "referrer": "cea.talkspirit.com",
+      "count": 1,
+      "uniques": 1
     }
   ],
   "popular_paths": [
     {
       "path": "/Animation-Lab/ProteinBlender",
       "title": "Overview",
-      "count": 27,
+      "count": 26,
       "uniques": 20
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases",
       "title": "/releases",
-      "count": 10,
+      "count": 9,
       "uniques": 4
+    },
+    {
+      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
+      "title": "/releases/tag/1.1.0",
+      "count": 4,
+      "uniques": 3
     },
     {
       "path": "/Animation-Lab/ProteinBlender/releases/tag/alpha-1.2.6",
@@ -91,12 +102,6 @@
     {
       "path": "/Animation-Lab/ProteinBlender/issues",
       "title": "/issues",
-      "count": 1,
-      "uniques": 1
-    },
-    {
-      "path": "/Animation-Lab/ProteinBlender/releases/tag/1.1.0",
-      "title": "/releases/tag/1.1.0",
       "count": 1,
       "uniques": 1
     },
